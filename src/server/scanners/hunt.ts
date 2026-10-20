@@ -8,12 +8,16 @@ import { runCommand } from "./runCommand";
 import { loadScanContext, logLine, type ScanContext } from "./context";
 import { runAuthBypass } from "./auth-bypass";
 import { runIdor } from "./idor";
+import { runXss } from "./xss";
+import { runSsrf } from "./ssrf";
 
 const MINUTE = 60_000;
 
 const FAMILIES: ReadonlyArray<readonly [string, (ctx: ScanContext) => Promise<void>]> = [
   ["auth-bypass", runAuthBypass],
   ["idor", runIdor],
+  ["xss", runXss],
+  ["ssrf", runSsrf],
 ];
 
 export async function runHunt(host: string, scanRunId: string): Promise<void> {

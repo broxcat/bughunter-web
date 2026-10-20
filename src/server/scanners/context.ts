@@ -7,7 +7,20 @@
 
 import { prisma } from "@/lib/prisma";
 import { publishScanLog } from "@/server/queue/logBus";
+import { triageFinding } from "@/server/brain";
 import type { Severity } from "@prisma/client";
+
+// Cap on inline LLM enrichment per finding. triageFinding uses the client's
+// default 120s×retries budget; a slow/unreachable provider must never stall the
+// scan, so we race it against this short timeout and persist regardless.
+const ENRICH_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
 
 export interface ScanContext {
   scanRunId: string;
@@ -72,14 +85,38 @@ export async function recordFinding(
   ctx: ScanContext,
   f: NewFinding,
 ): Promise<void> {
+  // Best-effort LLM enrichment before persist (the active provider, if any).
+  // Two hard rules, both preserved here:
+  //  - it NEVER changes the finding's severity — scanners pin it deliberately
+  //    for epistemic honesty (a triage model must not inflate an INFO candidate);
+  //    a differing suggestion is kept as an advisory note only.
+  //  - it NEVER touches gateStatus — findings always start UNVALIDATED and must
+  //    pass the manual 7-Question Gate.
+  // Bounded by ENRICH_TIMEOUT_MS so a slow/unreachable provider can't stall scans.
+  let description = f.description;
+  let vulnClass = f.vulnClass;
+  try {
+    const s = await withTimeout(triageFinding(ctx.userId, f), ENRICH_TIMEOUT_MS, {});
+    if (!vulnClass && s.vulnClass) vulnClass = s.vulnClass;
+    if (s.summary) {
+      const sevNote =
+        s.suggestedSeverity && s.suggestedSeverity !== f.severity
+          ? ` (AI-suggested severity: ${s.suggestedSeverity} — advisory; scanner severity ${f.severity} kept)`
+          : "";
+      description = `${f.description ? f.description + "\n\n" : ""}AI triage: ${s.summary}${sevNote}`;
+    }
+  } catch {
+    // Enrichment is strictly best-effort; never block a finding on it.
+  }
+
   await prisma.finding.create({
     data: {
       targetId: ctx.targetId,
       scanRunId: ctx.scanRunId,
       title: f.title,
-      vulnClass: f.vulnClass,
+      vulnClass,
       severity: f.severity,
-      description: f.description,
+      description,
       location: f.location,
       evidence: f.evidence,
       gateStatus: "UNVALIDATED",
