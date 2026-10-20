@@ -112,6 +112,23 @@ model Scope {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
+  // Bug bounty program policy (all optional, informational). Mirrors the standard
+  // program structure (HackerOne / YesWeHack / Bugcrowd). These are shown during
+  // the hunt as a reminder; they do NOT gate scanning — only `status` does.
+  platform            ReportPlatform?
+  scopeDetails        String?         @db.Text // in-scope assets beyond hostPattern
+  outOfScope          String?         @db.Text // excluded assets / vuln classes
+  rulesOfEngagement   String?         @db.Text
+  vendorResponseSla   String?         @db.Text
+  accessInfo          String?         @db.Text // how to get access (invites, test accounts)
+  eligibilityCriteria String?         @db.Text
+  disclosurePolicy    String?         @db.Text // responsible disclosure policy
+  reportingFormat     String?         @db.Text
+  rewardsTable        String?         @db.Text
+  safeHarbor          String?         @db.Text
+  legalTerms          String?         @db.Text
+  contactInfo         String?         @db.Text
+
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   targets Target[]
 
@@ -367,6 +384,7 @@ enum ReportPlatform {
   HACKERONE
   BUGCROWD
   INTIGRITI
+  YESWEHACK
   IMMUNEFI
   GENERIC
 }
