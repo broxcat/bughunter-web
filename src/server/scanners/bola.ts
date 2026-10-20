@@ -24,6 +24,7 @@
 // Findings stay UNVALIDATED (recordFinding); they never pass the gate here.
 
 import { probe, type ProbeResult } from "./http";
+import { discoverCorpus } from "./discovery";
 import { logLine, recordFinding, type ScanContext } from "./context";
 import { classifyBypassResponse } from "./auth-bypass";
 import {
@@ -79,28 +80,6 @@ function looksLikeError(p: ProbeResult): boolean {
 
 function contentType(p: ProbeResult): string {
   return (p.headers["content-type"] ?? "").toLowerCase();
-}
-
-/** Same-origin absolute URLs referenced by an HTML/JSON body. */
-function extractUrls(body: string, baseUrl: string, host: string): string[] {
-  const out = new Set<string>();
-  const add = (raw: string) => {
-    try {
-      const abs = new URL(raw, baseUrl);
-      if (abs.host === host && /^https?:$/.test(abs.protocol)) {
-        out.add(abs.toString());
-      }
-    } catch {
-      /* ignore malformed */
-    }
-  };
-  for (const m of body.matchAll(/(?:href|src|action)\s*=\s*["']([^"']+)["']/gi)) {
-    add(m[1]);
-  }
-  for (const m of body.matchAll(/https?:\/\/[^\s"'<>]+/gi)) {
-    add(m[0]);
-  }
-  return [...out];
 }
 
 /** True when the URL carries a direct object reference we can cross-test. */
@@ -189,17 +168,33 @@ export async function runBola(ctx: ScanContext): Promise<void> {
     `[bola] cross-account object access test on ${ctx.baseUrl} — account A="${a.label}" vs B="${b.label}"`,
   );
 
-  const host = new URL(ctx.baseUrl).host;
-
-  // 1) Discover candidate object URLs from A's view of the root page.
-  const root = await probe(ctx.baseUrl, { headers: headersA, timeoutMs: PROBE_TIMEOUT });
-  if (root.error) {
+  // 1) Discover candidate object URLs from A's AUTHENTICATED view — the same
+  //    shared crawl every other family consumes. discoverCorpus authenticates
+  //    with the first target credential (i.e. account A), so corpus.urls IS what
+  //    A can see. No private root-only anonymous fetch here any more.
+  const corpus = await discoverCorpus(ctx);
+  if (!corpus.html) {
     await logLine(
       ctx.scanRunId,
-      `[bola] could not fetch ${ctx.baseUrl} as A: ${root.error} — skipping`,
+      `[bola] could not crawl ${ctx.baseUrl} as A ("${a.label}") — skipping`,
       "STDERR",
     );
     return;
+  }
+  if (corpus.authenticated) {
+    await logLine(
+      ctx.scanRunId,
+      `[bola] crawled ${corpus.urls.length} URL(s) as authenticated account A ("${a.label}")`,
+    );
+  } else {
+    // If the shared crawl could not authenticate, A's cookie never took — this
+    // alone is cause (a) for the point-3 investigation and makes "A's view"
+    // only public pages.
+    await logLine(
+      ctx.scanRunId,
+      `[bola] WARNING: shared crawl ran WITHOUT authentication — account A's credential did not take; "A's view" is public pages only`,
+      "STDERR",
+    );
   }
 
   const discovered: string[] = [];
@@ -210,11 +205,11 @@ export async function runBola(ctx: ScanContext): Promise<void> {
       discovered.push(u);
     }
   };
-  for (const u of extractUrls(root.body, ctx.baseUrl, host)) {
+  for (const u of corpus.urls) {
     push(u);
     if (discovered.length >= MAX_DISCOVERY) break;
   }
-  // Top up with common id-bearing patterns if the page linked few objects.
+  // Top up with common id-bearing patterns if the crawl linked few objects.
   for (const p of COMMON_PATTERNS) {
     if (discovered.length >= MAX_DISCOVERY) break;
     push(new URL(p, ctx.baseUrl).toString());
@@ -222,7 +217,7 @@ export async function runBola(ctx: ScanContext): Promise<void> {
 
   await logLine(
     ctx.scanRunId,
-    `[bola] ${discovered.length} id-bearing candidate URL(s) to confirm as A`,
+    `[bola] ${discovered.length} id-bearing candidate URL(s) from ${corpus.urls.length} crawled URL(s) to confirm as A`,
   );
 
   // 2) Keep only URLs A can actually read (200 + non-trivial, non-error body),
@@ -231,6 +226,20 @@ export async function runBola(ctx: ScanContext): Promise<void> {
   for (const url of discovered) {
     if (objects.length >= MAX_BOLA_PAIRS) break;
     const aResp = await probe(url, { headers: headersA, timeoutMs: PROBE_TIMEOUT });
+    // TEMP DIAGNOSTIC (point 3): log exactly what account A sees for each candidate
+    // so a targeted run can tell apart (a) cookie not authenticating [redirect to
+    // /login, 401/403], (b) public / non-personal URL, (c) a request-construction
+    // bug. Credential VALUES are never logged — only status / content-type /
+    // a short body excerpt of the TARGET's own page.
+    const loc = aResp.headers["location"] ? ` -> ${aResp.headers["location"]}` : "";
+    const excerpt = aResp.error ? `ERROR ${aResp.error}` : norm(aResp.body).slice(0, 100);
+    await logLine(
+      ctx.scanRunId,
+      `[bola][diag] A GET ${pathOf(url)} -> ${aResp.error ? "err" : aResp.status}${loc} ` +
+        `ct=${contentType(aResp) || "?"} len=${aResp.bodyLen} ` +
+        `empty=${!aResp.error && looksEmpty(aResp.body)} errShell=${!aResp.error && looksLikeError(aResp)} ` +
+        `body="${excerpt}"`,
+    );
     if (aResp.error) continue;
     if (aResp.status === 200 && !looksEmpty(aResp.body) && !looksLikeError(aResp)) {
       objects.push({ url, aResp });
@@ -240,7 +249,10 @@ export async function runBola(ctx: ScanContext): Promise<void> {
   if (objects.length === 0) {
     await logLine(
       ctx.scanRunId,
-      "[bola] A could not read any id-bearing object on the root page — nothing to cross-test (run recon crawl for deeper coverage)",
+      `[bola] of ${discovered.length} id-bearing candidate(s) from ${corpus.urls.length} crawled URL(s), ` +
+        `account A ("${a.label}") could read 0 as a non-trivial 200 object (see the [bola][diag] lines above ` +
+        `for each candidate's status/body). No A-owned object means no cross-account test is possible — ` +
+        `recording nothing rather than forcing a result.`,
     );
     return;
   }
