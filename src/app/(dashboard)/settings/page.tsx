@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 
 // The 11 AiProvider enum values (kept in sync with prisma/schema.prisma).
 // OLLAMA runs locally and is keyless; every other provider needs an API key.
@@ -30,6 +33,9 @@ type ProviderConfig = {
   isActive: boolean;
   hasApiKey: boolean;
 };
+
+const FIELD_CLASS =
+  "mt-1 block w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle focus:border-brand";
 
 export default function SettingsPage() {
   const [configs, setConfigs] = useState<ProviderConfig[]>([]);
@@ -101,7 +107,7 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
       <h1 className="text-2xl font-semibold">AI Provider Settings</h1>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-muted">
         Configure the AI provider used for hunting. API keys are encrypted at
         rest and never returned to the browser. Only one provider is active at a
         time.
@@ -111,154 +117,158 @@ export default function SettingsPage() {
       <section className="mt-8">
         <h2 className="text-lg font-medium">Configured providers</h2>
         {loading ? (
-          <p className="mt-2 text-sm text-gray-500">Loading…</p>
+          <p className="mt-2 text-sm text-muted">Loading…</p>
         ) : configs.length === 0 ? (
-          <p className="mt-2 text-sm text-gray-500">
+          <p className="mt-2 text-sm text-muted">
             No providers configured yet.
           </p>
         ) : (
-          <ul className="mt-3 divide-y divide-gray-200 rounded-md border border-gray-200">
+          <Card className="mt-3 divide-y divide-border">
             {configs.map((c) => (
-              <li
+              <div
                 key={c.id}
                 className="flex items-center justify-between gap-4 px-4 py-3"
               >
                 <div>
-                  <span className="font-medium">{c.provider}</span>
-                  {c.isActive && (
-                    <span className="ml-2 rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">
-                      ACTIVE
-                    </span>
-                  )}
-                  <div className="mt-0.5 text-xs text-gray-500">
+                  <span className="flex items-center gap-2">
+                    <span className="font-mono font-medium">{c.provider}</span>
+                    {c.isActive && (
+                      <Badge tone="proven" mono>
+                        ACTIVE
+                      </Badge>
+                    )}
+                  </span>
+                  <div className="mt-1 font-mono text-xs text-subtle">
                     {c.model ? `model: ${c.model}` : "no model set"}
                     {c.baseUrl ? ` · ${c.baseUrl}` : ""}
                   </div>
                 </div>
-                <div className="text-right text-xs">
+                <div className="text-right">
                   {KEYLESS.has(c.provider) ? (
-                    <span className="text-gray-400">keyless (local)</span>
+                    <Badge tone="neutral">keyless (local)</Badge>
                   ) : c.hasApiKey ? (
-                    <span className="text-green-700">key configured</span>
+                    <Badge tone="proven">key configured</Badge>
                   ) : (
-                    <span className="text-amber-600">no key</span>
+                    <Badge tone="medium">no key</Badge>
                   )}
                 </div>
-              </li>
+              </div>
             ))}
-          </ul>
+          </Card>
         )}
       </section>
 
       {/* Add / update form */}
       <section className="mt-10">
         <h2 className="text-lg font-medium">Add or update a provider</h2>
-        <form onSubmit={onSubmit} className="mt-3 space-y-4">
-          <div>
-            <label
-              htmlFor="provider"
-              className="block text-sm font-medium text-gray-700"
-            >
-              Provider
-            </label>
-            <select
-              id="provider"
-              value={provider}
-              onChange={(e) => setProvider(e.target.value as Provider)}
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            >
-              {PROVIDERS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {!keyless && (
+        <Card className="mt-3 p-6">
+          <form onSubmit={onSubmit} className="space-y-4">
             <div>
               <label
-                htmlFor="apiKey"
-                className="block text-sm font-medium text-gray-700"
+                htmlFor="provider"
+                className="block text-sm font-medium text-foreground"
               >
-                API key
+                Provider
+              </label>
+              <select
+                id="provider"
+                value={provider}
+                onChange={(e) => setProvider(e.target.value as Provider)}
+                className={FIELD_CLASS}
+              >
+                {PROVIDERS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {!keyless && (
+              <div>
+                <label
+                  htmlFor="apiKey"
+                  className="block text-sm font-medium text-foreground"
+                >
+                  API key
+                </label>
+                <input
+                  id="apiKey"
+                  type="password"
+                  autoComplete="off"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Leave blank to keep the existing key"
+                  className={FIELD_CLASS}
+                />
+                <p className="mt-1 text-xs text-subtle">
+                  Stored encrypted. Leave blank when only changing the model or
+                  base URL.
+                </p>
+              </div>
+            )}
+
+            <div>
+              <label
+                htmlFor="model"
+                className="block text-sm font-medium text-foreground"
+              >
+                Model
               </label>
               <input
-                id="apiKey"
-                type="password"
-                autoComplete="off"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Leave blank to keep the existing key"
-                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                id="model"
+                type="text"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="e.g. claude-opus-4-8, llama3.1, gpt-4o"
+                className={FIELD_CLASS}
               />
-              <p className="mt-1 text-xs text-gray-500">
-                Stored encrypted. Leave blank when only changing the model or
-                base URL.
-              </p>
             </div>
-          )}
 
-          <div>
-            <label
-              htmlFor="model"
-              className="block text-sm font-medium text-gray-700"
-            >
-              Model
-            </label>
-            <input
-              id="model"
-              type="text"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="e.g. claude-opus-4-8, llama3.1, gpt-4o"
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
+            <div>
+              <label
+                htmlFor="baseUrl"
+                className="block text-sm font-medium text-foreground"
+              >
+                Base URL <span className="text-subtle">(optional)</span>
+              </label>
+              <input
+                id="baseUrl"
+                type="url"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder={
+                  keyless ? "http://localhost:11434" : "https://api.provider.com"
+                }
+                className={FIELD_CLASS}
+              />
+            </div>
 
-          <div>
-            <label
-              htmlFor="baseUrl"
-              className="block text-sm font-medium text-gray-700"
-            >
-              Base URL <span className="text-gray-400">(optional)</span>
-            </label>
-            <input
-              id="baseUrl"
-              type="url"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder={
-                keyless ? "http://localhost:11434" : "https://api.provider.com"
-              }
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
+            <div className="flex items-center gap-2">
+              <input
+                id="isActive"
+                type="checkbox"
+                checked={isActive}
+                onChange={(e) => setIsActive(e.target.checked)}
+                className="h-4 w-4 rounded border-border-strong accent-brand"
+              />
+              <label htmlFor="isActive" className="text-sm text-foreground">
+                Make this the active provider
+              </label>
+            </div>
 
-          <div className="flex items-center gap-2">
-            <input
-              id="isActive"
-              type="checkbox"
-              checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300"
-            />
-            <label htmlFor="isActive" className="text-sm text-gray-700">
-              Make this the active provider
-            </label>
-          </div>
+            {error && <p className="text-sm text-brand">{error}</p>}
+            {notice && (
+              <p className="text-sm">
+                <Badge tone="proven">{notice}</Badge>
+              </p>
+            )}
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          {notice && <p className="text-sm text-green-700">{notice}</p>}
-
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {saving ? "Saving…" : "Save provider"}
-          </button>
-        </form>
+            <Button type="submit" disabled={saving}>
+              {saving ? "Saving…" : "Save provider"}
+            </Button>
+          </form>
+        </Card>
       </section>
     </div>
   );

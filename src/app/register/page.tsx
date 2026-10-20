@@ -4,6 +4,8 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -58,65 +60,73 @@ export default function RegisterPage() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4">
-      <h1 className="mb-6 text-2xl font-semibold">Create an account</h1>
+      <div className="mb-6 flex items-center gap-2">
+        <span className="inline-block h-2.5 w-2.5 rounded-sm bg-brand" />
+        <span className="font-semibold tracking-tight">bughunter</span>
+      </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1 text-sm">
-          Name
-          <input
-            type="text"
-            required
-            autoComplete="name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="rounded border border-gray-300 px-3 py-2"
-          />
-        </label>
+      <Card className="p-6">
+        <h1 className="text-2xl font-semibold">Create an account</h1>
+        <p className="mt-1 text-sm text-muted">
+          Set up your account to start hunting.
+        </p>
 
-        <label className="flex flex-col gap-1 text-sm">
-          Email
-          <input
-            type="email"
-            required
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="rounded border border-gray-300 px-3 py-2"
-          />
-        </label>
+        <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
+          <label className="flex flex-col gap-1.5 text-sm font-medium">
+            Name
+            <input
+              type="text"
+              required
+              autoComplete="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm font-normal text-foreground placeholder:text-subtle focus:border-brand"
+            />
+          </label>
 
-        <label className="flex flex-col gap-1 text-sm">
-          Password
-          <input
-            type="password"
-            required
-            minLength={10}
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="rounded border border-gray-300 px-3 py-2"
-          />
-          <span className="text-xs text-gray-500">At least 10 characters.</span>
-        </label>
+          <label className="flex flex-col gap-1.5 text-sm font-medium">
+            Email
+            <input
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm font-normal text-foreground placeholder:text-subtle focus:border-brand"
+            />
+          </label>
 
-        {error && (
-          <p role="alert" className="text-sm text-red-600">
-            {error}
-          </p>
-        )}
+          <label className="flex flex-col gap-1.5 text-sm font-medium">
+            Password
+            <input
+              type="password"
+              required
+              minLength={10}
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm font-normal text-foreground placeholder:text-subtle focus:border-brand"
+            />
+            <span className="text-xs font-normal text-subtle">
+              At least 10 characters.
+            </span>
+          </label>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded bg-black px-3 py-2 text-white disabled:opacity-50"
-        >
-          {loading ? "Creating account…" : "Create account"}
-        </button>
-      </form>
+          {error && (
+            <p role="alert" className="text-sm text-brand">
+              {error}
+            </p>
+          )}
 
-      <p className="mt-4 text-sm text-gray-600">
+          <Button type="submit" disabled={loading} className="w-full">
+            {loading ? "Creating account…" : "Create account"}
+          </Button>
+        </form>
+      </Card>
+
+      <p className="mt-4 text-center text-sm text-muted">
         Already have an account?{" "}
-        <Link href="/login" className="underline">
+        <Link href="/login" className="font-medium text-brand hover:underline">
           Sign in
         </Link>
       </p>
