@@ -23,6 +23,7 @@
 // 7-Question Gate is never bypassed.
 
 import { probe } from "./http";
+import { isLikelyUserParam } from "./paramFilter";
 import { logLine, recordFinding, type ScanContext } from "./context";
 import type { Severity } from "@prisma/client";
 
@@ -129,6 +130,7 @@ function buildTargets(html: string, baseUrl: string, host: string): ParamTarget[
     } catch {
       return;
     }
+    if (!isLikelyUserParam(t.url, t.param)) return; // skip static-asset/hash noise
     const key = `${parsed.origin}${parsed.pathname}?${t.param}`;
     if (seen.has(key)) return;
     seen.add(key);

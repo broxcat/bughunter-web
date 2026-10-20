@@ -18,6 +18,7 @@
 // a logged skip or a CANDIDATE, never an abort of the run.
 
 import { probe } from "./http";
+import { isLikelyUserParam } from "./paramFilter";
 import { measureTimingDelta } from "./timingProbe";
 import { logLine, recordFinding, type ScanContext } from "./context";
 import type { Severity } from "@prisma/client";
@@ -140,6 +141,7 @@ function discoverTargets(html: string, baseUrl: string, host: string): ParamTarg
     }
     if (abs.host !== host || !/^https?:$/.test(abs.protocol)) return;
     if (!param) return;
+    if (!isLikelyUserParam(abs.toString(), param)) return; // skip static-asset/hash noise
     const key = `${abs.origin}${abs.pathname}?${param}`;
     if (seen.has(key)) return;
     seen.add(key);

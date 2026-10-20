@@ -23,6 +23,7 @@
 // gate. Severity is never inflated beyond what the response proves.
 
 import { probe, type ProbeResult } from "./http";
+import { isLikelyUserParam } from "./paramFilter";
 import { logLine, recordFinding, type ScanContext } from "./context";
 import { resolveActiveBrain } from "@/server/brain";
 import { generateOobToken, checkOobHit } from "@/server/oob";
@@ -116,7 +117,8 @@ function candidatesFromUrls(urls: string[]): Candidate[] {
       continue;
     }
     for (const key of parsed.searchParams.keys()) {
-      if (SSRF_PARAM_RE.test(key)) out.push({ url: u, param: key, via: "query" });
+      if (SSRF_PARAM_RE.test(key) && isLikelyUserParam(u, key))
+        out.push({ url: u, param: key, via: "query" });
     }
   }
   return out;
@@ -140,7 +142,8 @@ function candidatesFromForms(html: string, baseUrl: string, host: string): Candi
     if (action.host !== host || !/^https?:$/.test(action.protocol)) continue;
     for (const nm of inner.matchAll(/<(?:input|textarea|select)\b[^>]*\bname\s*=\s*["']([^"']+)["']/gi)) {
       const name = nm[1];
-      if (SSRF_PARAM_RE.test(name)) out.push({ url: action.toString(), param: name, via: "form" });
+      if (SSRF_PARAM_RE.test(name) && isLikelyUserParam(action.toString(), name))
+        out.push({ url: action.toString(), param: name, via: "form" });
     }
   }
   return out;

@@ -9,6 +9,7 @@
 // neighbor probe (id ±1) adds a weak signal only.
 
 import { probe } from "./http";
+import { isLikelyUserParam } from "./paramFilter";
 import { logLine, recordFinding, type ScanContext } from "./context";
 import { resolveActiveBrain } from "@/server/brain";
 
@@ -63,7 +64,7 @@ function classify(url: string): Candidate | null {
   }
   // V4/V3: an id-like query parameter.
   for (const key of parsed.searchParams.keys()) {
-    if (ID_PARAM_RE.test(key)) {
+    if (ID_PARAM_RE.test(key) && isLikelyUserParam(url, key)) {
       return {
         url,
         variant: "V4 parameter-based (?" + key + "=)",
