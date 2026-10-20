@@ -20,11 +20,16 @@ export const runtime = "nodejs"; // node:crypto in encryptSecret requires the No
 
 const createSchema = z.object({
   label: z.string().trim().min(1).max(200),
+  mode: z.enum(["COOKIES", "BEARER", "EMAIL_PASSWORD"]).optional(),
   // Either a cookie map or a raw "k=v; k2=v2" cookie string.
   cookies: z
     .union([z.record(z.string(), z.string()), z.string()])
     .optional(),
   bearerToken: z.string().optional(),
+  // EMAIL_PASSWORD mode: the app logs in via headless Chromium to mint cookies.
+  loginUrl: z.string().trim().url().optional(),
+  email: z.string().trim().min(1).optional(),
+  password: z.string().min(1).optional(),
 });
 
 /** Parse a raw "k=v; k2=v2" cookie string into a map. Skips malformed segments. */
@@ -40,6 +45,32 @@ function parseCookieString(raw: string): Record<string, string> {
     if (name) map[name] = value;
   }
   return map;
+}
+
+/** Client-safe view of a credential row — never ciphers or plaintext secrets. */
+function toSafe(r: {
+  id: string;
+  label: string;
+  mode: "COOKIES" | "BEARER" | "EMAIL_PASSWORD";
+  cookiesCipher: string | null;
+  headerCipher: string | null;
+  emailCipher: string | null;
+  loginUrl: string | null;
+  sessionRefreshedAt: Date | null;
+  createdAt: Date;
+}) {
+  return {
+    id: r.id,
+    label: r.label,
+    mode: r.mode,
+    createdAt: r.createdAt,
+    hasCookies: Boolean(r.cookiesCipher),
+    hasToken: Boolean(r.headerCipher),
+    // EMAIL_PASSWORD: configured (creds stored) + when the session was last minted.
+    hasAutoLogin: r.mode === "EMAIL_PASSWORD" && Boolean(r.emailCipher),
+    loginUrl: r.loginUrl, // a URL, not a secret
+    sessionRefreshedAt: r.sessionRefreshedAt,
+  };
 }
 
 /** Load a target owned by the session user, or null. */
@@ -75,13 +106,7 @@ export async function GET(
     orderBy: { createdAt: "desc" },
   });
 
-  const credentials = rows.map((r) => ({
-    id: r.id,
-    label: r.label,
-    createdAt: r.createdAt,
-    hasCookies: Boolean(r.cookiesCipher),
-    hasToken: Boolean(r.headerCipher),
-  }));
+  const credentials = rows.map(toSafe);
 
   return NextResponse.json({ credentials });
 }
@@ -121,7 +146,34 @@ export async function POST(
     );
   }
 
-  const { label, cookies, bearerToken } = parsed.data;
+  const { label, cookies, bearerToken, loginUrl, email, password } = parsed.data;
+
+  // EMAIL_PASSWORD: store encrypted email/password + loginUrl; cookies are minted
+  // later by headless auto-login. Requires all three.
+  const wantsEmailPassword =
+    parsed.data.mode === "EMAIL_PASSWORD" || Boolean(email || password);
+  if (wantsEmailPassword) {
+    if (!loginUrl || !email || !password) {
+      return NextResponse.json(
+        { error: "EMAIL_PASSWORD mode requires loginUrl, email and password" },
+        { status: 400 },
+      );
+    }
+    const created = await prisma.targetCredential.create({
+      data: {
+        targetId: id,
+        label,
+        mode: "EMAIL_PASSWORD",
+        loginUrl,
+        emailCipher: encryptSecret(email),
+        passwordCipher: encryptSecret(password),
+      },
+    });
+    return NextResponse.json(
+      { credential: toSafe(created) },
+      { status: 201 },
+    );
+  }
 
   // Normalize cookies into a map (parse a raw string), then encrypt its JSON.
   let cookieMap: Record<string, string> | undefined;
@@ -141,33 +193,23 @@ export async function POST(
   // layer (the DB allows both to be null).
   if (!cookieMap && !token) {
     return NextResponse.json(
-      { error: "Provide at least one of: cookies, bearerToken" },
+      { error: "Provide at least one of: cookies, bearerToken, or email+password (EMAIL_PASSWORD)" },
       { status: 400 },
     );
   }
 
-  const cookiesCipher = cookieMap
-    ? encryptSecret(JSON.stringify(cookieMap))
-    : null;
-  const headerCipher = token ? encryptSecret(token) : null;
-
   const created = await prisma.targetCredential.create({
-    data: { targetId: id, label, cookiesCipher, headerCipher },
+    data: {
+      targetId: id,
+      label,
+      mode: token && !cookieMap ? "BEARER" : "COOKIES",
+      cookiesCipher: cookieMap ? encryptSecret(JSON.stringify(cookieMap)) : null,
+      headerCipher: token ? encryptSecret(token) : null,
+    },
   });
 
   // Safe shape only — never the cipher or plaintext.
-  return NextResponse.json(
-    {
-      credential: {
-        id: created.id,
-        label: created.label,
-        createdAt: created.createdAt,
-        hasCookies: Boolean(created.cookiesCipher),
-        hasToken: Boolean(created.headerCipher),
-      },
-    },
-    { status: 201 },
-  );
+  return NextResponse.json({ credential: toSafe(created) }, { status: 201 });
 }
 
 /**

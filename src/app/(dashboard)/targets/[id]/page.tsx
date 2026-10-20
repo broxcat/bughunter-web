@@ -39,12 +39,18 @@ interface TargetDetail {
 
 // A saved TARGET credential as surfaced to the client: booleans only, NEVER the
 // decrypted cookies/token (same rule as hasApiKey on AI providers).
+type CredentialMode = "COOKIES" | "BEARER" | "EMAIL_PASSWORD";
+
 interface TargetCredential {
   id: string;
   label: string;
+  mode: CredentialMode;
   createdAt: string;
   hasCookies: boolean;
   hasToken: boolean;
+  hasAutoLogin: boolean;
+  loginUrl: string | null;
+  sessionRefreshedAt: string | null;
 }
 
 const STATUS_TONE: Record<string, BadgeTone> = {
@@ -71,11 +77,17 @@ export default function TargetDetailPage({
   // Target-credentials section state (cookies/bearer token FOR THE TARGET app).
   const [credentials, setCredentials] = useState<TargetCredential[]>([]);
   const [credLabel, setCredLabel] = useState("");
+  const [credMode, setCredMode] = useState<CredentialMode>("COOKIES");
   const [credCookies, setCredCookies] = useState("");
   const [credToken, setCredToken] = useState("");
+  const [credEmail, setCredEmail] = useState("");
+  const [credPassword, setCredPassword] = useState("");
+  const [credLoginUrl, setCredLoginUrl] = useState("");
   const [savingCred, setSavingCred] = useState(false);
   const [deletingCred, setDeletingCred] = useState<string | null>(null);
   const [credError, setCredError] = useState<string | null>(null);
+  const [testingCred, setTestingCred] = useState(false);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -109,36 +121,64 @@ export default function TargetDetailPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  async function saveCredential(e: React.FormEvent) {
-    e.preventDefault();
-    setCredError(null);
+  // Default the login URL to <scheme>://<host>/login when switching to the
+  // email+password mode (only if the field is still empty).
+  function selectMode(mode: CredentialMode) {
+    setCredMode(mode);
+    setTestMsg(null);
+    if (mode === "EMAIL_PASSWORD" && !credLoginUrl.trim() && target?.host) {
+      setCredLoginUrl(`https://${target.host}/login`);
+    }
+  }
 
+  function buildCredentialBody(): Record<string, unknown> | { _error: string } {
     const label = credLabel.trim();
+    if (!label) return { _error: "A label is required." };
+
+    if (credMode === "EMAIL_PASSWORD") {
+      const email = credEmail.trim();
+      const password = credPassword;
+      const loginUrl = credLoginUrl.trim();
+      if (!loginUrl || !email || !password) {
+        return { _error: "Email, password and a login URL are all required." };
+      }
+      return { label, mode: "EMAIL_PASSWORD", loginUrl, email, password };
+    }
+
     const cookies = credCookies.trim();
     const bearerToken = credToken.trim();
-    if (!label) {
-      setCredError("A label is required.");
-      return;
-    }
     if (!cookies && !bearerToken) {
-      setCredError("Provide session cookies and/or a bearer token.");
-      return;
+      return { _error: "Provide session cookies and/or a bearer token." };
     }
-
-    // Accept the cookies textarea as either JSON ({"k":"v"}) or a raw cookie
-    // string ("k=v; k2=v2"); the API parses a raw string into a map.
+    // Cookies textarea: JSON ({"k":"v"}) or a raw "k=v; k2=v2" string.
     let cookiesPayload: Record<string, string> | string | undefined;
     if (cookies) {
       if (cookies.startsWith("{")) {
         try {
           cookiesPayload = JSON.parse(cookies);
         } catch {
-          setCredError("Cookies look like JSON but failed to parse.");
-          return;
+          return { _error: "Cookies look like JSON but failed to parse." };
         }
       } else {
         cookiesPayload = cookies;
       }
+    }
+    return {
+      label,
+      ...(cookiesPayload !== undefined ? { cookies: cookiesPayload } : {}),
+      ...(bearerToken ? { bearerToken } : {}),
+    };
+  }
+
+  async function saveCredential(e: React.FormEvent) {
+    e.preventDefault();
+    setCredError(null);
+    setTestMsg(null);
+
+    const body = buildCredentialBody();
+    if ("_error" in body) {
+      setCredError(body._error as string);
+      return;
     }
 
     setSavingCred(true);
@@ -146,11 +186,7 @@ export default function TargetDetailPage({
       const res = await fetch(`/api/targets/${id}/credentials`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          label,
-          ...(cookiesPayload !== undefined ? { cookies: cookiesPayload } : {}),
-          ...(bearerToken ? { bearerToken } : {}),
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -159,6 +195,10 @@ export default function TargetDetailPage({
       setCredLabel("");
       setCredCookies("");
       setCredToken("");
+      setCredEmail("");
+      setCredPassword("");
+      setCredLoginUrl("");
+      setCredMode("COOKIES");
       await loadCredentials();
     } catch (e) {
       setCredError(
@@ -166,6 +206,39 @@ export default function TargetDetailPage({
       );
     } finally {
       setSavingCred(false);
+    }
+  }
+
+  // Ad-hoc "test the login" — runs the real headless auto-login without saving,
+  // so the entered credentials can be verified before a full hunt. The response
+  // reports only success + a cookie count (never the cookies/email/password).
+  async function testConnection() {
+    setCredError(null);
+    setTestMsg(null);
+    const email = credEmail.trim();
+    const password = credPassword;
+    const loginUrl = credLoginUrl.trim();
+    if (!loginUrl || !email || !password) {
+      setCredError("Email, password and a login URL are all required to test.");
+      return;
+    }
+    setTestingCred(true);
+    try {
+      const res = await fetch(`/api/targets/${id}/credentials/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ loginUrl, email, password }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && j.ok) {
+        setTestMsg(`✓ Login succeeded — ${j.cookieCount} cookie(s) obtained.`);
+      } else {
+        setTestMsg(`✗ Login failed: ${j.error ?? `HTTP ${res.status}`}`);
+      }
+    } catch (e) {
+      setTestMsg(`✗ ${e instanceof Error ? e.message : "Test failed"}`);
+    } finally {
+      setTestingCred(false);
     }
   }
 
@@ -404,42 +477,138 @@ export default function TargetDetailPage({
             </div>
             <div className="space-y-1">
               <label
-                htmlFor="cred-cookies"
+                htmlFor="cred-mode"
                 className="block text-xs font-medium text-foreground"
               >
-                Session cookies{" "}
-                <span className="text-subtle">
-                  (JSON {`{"name":"value"}`} or a cookie string k=v; k2=v2)
-                </span>
+                Mode
               </label>
-              <textarea
-                id="cred-cookies"
-                value={credCookies}
-                onChange={(e) => setCredCookies(e.target.value)}
-                rows={3}
-                placeholder={`{"session":"abc123"}  or  session=abc123; csrf=xyz`}
-                className="w-full rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs text-foreground placeholder:text-subtle"
-              />
-            </div>
-            <div className="space-y-1">
-              <label
-                htmlFor="cred-token"
-                className="block text-xs font-medium text-foreground"
+              <select
+                id="cred-mode"
+                value={credMode}
+                onChange={(e) => selectMode(e.target.value as CredentialMode)}
+                className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground"
               >
-                Bearer token{" "}
-                <span className="text-subtle">
-                  (optional; sent as Authorization: Bearer …)
-                </span>
-              </label>
-              <input
-                id="cred-token"
-                type="text"
-                value={credToken}
-                onChange={(e) => setCredToken(e.target.value)}
-                placeholder="eyJhbGciOi…"
-                className="w-full rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs text-foreground placeholder:text-subtle"
-              />
+                <option value="COOKIES">Session cookies (paste)</option>
+                <option value="BEARER">Bearer token</option>
+                <option value="EMAIL_PASSWORD">
+                  Email + password (headless auto-login)
+                </option>
+              </select>
             </div>
+
+            {credMode !== "EMAIL_PASSWORD" && (
+              <>
+                <div className="space-y-1">
+                  <label
+                    htmlFor="cred-cookies"
+                    className="block text-xs font-medium text-foreground"
+                  >
+                    Session cookies{" "}
+                    <span className="text-subtle">
+                      (JSON {`{"name":"value"}`} or a cookie string k=v; k2=v2)
+                    </span>
+                  </label>
+                  <textarea
+                    id="cred-cookies"
+                    value={credCookies}
+                    onChange={(e) => setCredCookies(e.target.value)}
+                    rows={3}
+                    placeholder={`{"session":"abc123"}  or  session=abc123; csrf=xyz`}
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs text-foreground placeholder:text-subtle"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label
+                    htmlFor="cred-token"
+                    className="block text-xs font-medium text-foreground"
+                  >
+                    Bearer token{" "}
+                    <span className="text-subtle">
+                      (optional; sent as Authorization: Bearer …)
+                    </span>
+                  </label>
+                  <input
+                    id="cred-token"
+                    type="text"
+                    value={credToken}
+                    onChange={(e) => setCredToken(e.target.value)}
+                    placeholder="eyJhbGciOi…"
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs text-foreground placeholder:text-subtle"
+                  />
+                </div>
+              </>
+            )}
+
+            {credMode === "EMAIL_PASSWORD" && (
+              <>
+                <p className="text-xs text-subtle">
+                  The app logs in to the target in a headless browser to mint and
+                  refresh session cookies automatically — no devtools copy-paste.
+                </p>
+                <div className="space-y-1">
+                  <label
+                    htmlFor="cred-loginurl"
+                    className="block text-xs font-medium text-foreground"
+                  >
+                    Login URL (on the target)
+                  </label>
+                  <input
+                    id="cred-loginurl"
+                    type="text"
+                    value={credLoginUrl}
+                    onChange={(e) => setCredLoginUrl(e.target.value)}
+                    placeholder="https://host/login"
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs text-foreground placeholder:text-subtle"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label
+                    htmlFor="cred-email"
+                    className="block text-xs font-medium text-foreground"
+                  >
+                    Email / username (on the target)
+                  </label>
+                  <input
+                    id="cred-email"
+                    type="text"
+                    autoComplete="off"
+                    value={credEmail}
+                    onChange={(e) => setCredEmail(e.target.value)}
+                    placeholder="pentest-a@example.invalid"
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label
+                    htmlFor="cred-password"
+                    className="block text-xs font-medium text-foreground"
+                  >
+                    Password (on the target)
+                  </label>
+                  <input
+                    id="cred-password"
+                    type="password"
+                    autoComplete="new-password"
+                    value={credPassword}
+                    onChange={(e) => setCredPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={testConnection}
+                    disabled={testingCred}
+                  >
+                    {testingCred ? "Testing…" : "Test connection"}
+                  </Button>
+                  {testMsg && <span className="text-xs text-muted">{testMsg}</span>}
+                </div>
+              </>
+            )}
+
             <Button type="submit" variant="primary" disabled={savingCred}>
               {savingCred ? "Saving…" : "Add credential"}
             </Button>
@@ -461,9 +630,19 @@ export default function TargetDetailPage({
                       </span>
                       {cred.hasCookies && <Badge tone="info">cookies</Badge>}
                       {cred.hasToken && <Badge tone="brand">token</Badge>}
+                      {cred.hasAutoLogin && (
+                        <Badge tone="proven">auto-login</Badge>
+                      )}
                       <span className="text-xs text-subtle">
                         {new Date(cred.createdAt).toLocaleString()}
                       </span>
+                      {cred.mode === "EMAIL_PASSWORD" && (
+                        <span className="text-xs text-subtle">
+                          {cred.sessionRefreshedAt
+                            ? `· session refreshed ${new Date(cred.sessionRefreshedAt).toLocaleString()}`
+                            : "· no session minted yet"}
+                        </span>
+                      )}
                     </div>
                     <Button
                       variant="danger"

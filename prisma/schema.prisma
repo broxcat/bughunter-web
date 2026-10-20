@@ -171,16 +171,30 @@ model Target {
 // in-process at request time. At least one of cookiesCipher/headerCipher must be
 // set per row (enforced in the API, not the DB).
 model TargetCredential {
-  id            String   @id @default(cuid())
+  id            String         @id @default(cuid())
   targetId      String
   label         String
-  cookiesCipher String?  @db.Text // AES-GCM of JSON.stringify(cookies map)
-  headerCipher  String?  @db.Text // AES-GCM of a bearer token (Authorization value)
-  createdAt     DateTime @default(now())
+  mode          CredentialMode @default(COOKIES)
+  cookiesCipher String?        @db.Text // AES-GCM of JSON.stringify(cookies map)
+  headerCipher  String?        @db.Text // AES-GCM of a bearer token (Authorization value)
+  // EMAIL_PASSWORD mode: the app logs in via headless Chromium to mint/refresh
+  // the session cookies automatically. Email/password encrypted like everything else.
+  loginUrl             String?   @db.Text
+  emailCipher          String?   @db.Text
+  passwordCipher       String?   @db.Text
+  sessionCookiesCipher String?   @db.Text // cached cookies obtained by auto-login
+  sessionRefreshedAt   DateTime? // when the cached session was last minted
+  createdAt            DateTime  @default(now())
 
   target Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
 
   @@index([targetId])
+}
+
+enum CredentialMode {
+  COOKIES
+  BEARER
+  EMAIL_PASSWORD
 }
 
 // ---------------------------------------------------------------------------

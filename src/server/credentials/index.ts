@@ -1,5 +1,85 @@
 import { prisma } from "@/lib/prisma";
-import { decryptSecret } from "@/lib/crypto";
+import { decryptSecret, encryptSecret } from "@/lib/crypto";
+
+// How long an auto-minted EMAIL_PASSWORD session is reused before re-logging in.
+const SESSION_TTL_MS =
+  (Number(process.env.TARGET_SESSION_TTL_MINUTES) || 20) * 60_000;
+
+function parseCookieJson(cipher: string): Record<string, string> | null {
+  try {
+    const parsed: unknown = JSON.parse(decryptSecret(cipher));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const cookies: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === "string") cookies[k] = v;
+    }
+    return Object.keys(cookies).length > 0 ? cookies : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve session cookies for an EMAIL_PASSWORD credential: reuse the cached
+ * session when it is fresh (< SESSION_TTL_MS), otherwise log in via headless
+ * Chromium, persist the refreshed cookies (encrypted) for next time, and return
+ * them. Returns null (never throws) when it cannot obtain a usable session, so
+ * the scanner simply sees one fewer credential.
+ */
+async function resolveEmailPasswordCookies(row: {
+  id: string;
+  loginUrl: string | null;
+  emailCipher: string | null;
+  passwordCipher: string | null;
+  sessionCookiesCipher: string | null;
+  sessionRefreshedAt: Date | null;
+}): Promise<Record<string, string> | null> {
+  // Fresh cache?
+  if (
+    row.sessionCookiesCipher &&
+    row.sessionRefreshedAt &&
+    Date.now() - row.sessionRefreshedAt.getTime() < SESSION_TTL_MS
+  ) {
+    const cached = parseCookieJson(row.sessionCookiesCipher);
+    if (cached) return cached;
+  }
+
+  // Need to (re-)login. Decrypt the stored email/password/loginUrl.
+  if (!row.loginUrl || !row.emailCipher || !row.passwordCipher) return null;
+  let email: string;
+  let password: string;
+  try {
+    email = decryptSecret(row.emailCipher);
+    password = decryptSecret(row.passwordCipher);
+  } catch {
+    return null;
+  }
+
+  try {
+    const { acquireSessionCookies } = await import("./autoLogin");
+    const result = await acquireSessionCookies({
+      loginUrl: row.loginUrl,
+      email,
+      password,
+    });
+    if (Object.keys(result.cookies).length === 0) return null;
+
+    // Cache the freshly minted session (encrypted) for subsequent runs.
+    await prisma.targetCredential
+      .update({
+        where: { id: row.id },
+        data: {
+          sessionCookiesCipher: encryptSecret(JSON.stringify(result.cookies)),
+          sessionRefreshedAt: new Date(),
+        },
+      })
+      .catch(() => {});
+
+    return result.cookies;
+  } catch {
+    return null;
+  }
+}
 
 // Server-side loader for TARGET credentials — session cookies / bearer token
 // FOR THE SCANNED TARGET (a bug-bounty program's app), NEVER the bughunter-web
@@ -44,6 +124,14 @@ export async function loadTargetCredentials(
   const out: DecryptedTargetCredential[] = [];
   for (const row of rows) {
     const cred: DecryptedTargetCredential = { id: row.id, label: row.label };
+
+    // EMAIL_PASSWORD: mint/refresh the session via headless login (cached).
+    if (row.mode === "EMAIL_PASSWORD") {
+      const cookies = await resolveEmailPasswordCookies(row);
+      if (cookies) cred.cookies = cookies;
+      if (cred.cookies || cred.bearerToken) out.push(cred);
+      continue;
+    }
 
     if (row.cookiesCipher) {
       try {
