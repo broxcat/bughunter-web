@@ -5,6 +5,9 @@ import { resolve } from "node:path";
 // policy, scanner decision paths, API route handlers) — no DOM required. The
 // `@` alias mirrors tsconfig.json paths so `@/lib/...` imports resolve the same
 // way in tests as in the app.
+//
+// This file is .mts (ESM) so Vite loads it natively without the CommonJS-interop
+// warning; `import.meta.dirname` replaces the CJS `__dirname` (Node >= 20.11).
 export default defineConfig({
   test: {
     environment: "node",
@@ -13,7 +16,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": resolve(__dirname, "./src"),
+      "@": resolve(import.meta.dirname, "./src"),
     },
   },
 });
