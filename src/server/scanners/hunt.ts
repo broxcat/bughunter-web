@@ -12,6 +12,9 @@ import { runXss } from "./xss";
 import { runSsrf } from "./ssrf";
 import { runBola } from "./bola";
 import { runCsrf } from "./csrf";
+import { runSqli } from "./sqli";
+import { runCommandInjection } from "./commandInjection";
+import { runSsti } from "./ssti";
 
 const MINUTE = 60_000;
 
@@ -22,6 +25,9 @@ const FAMILIES: ReadonlyArray<readonly [string, (ctx: ScanContext) => Promise<vo
   ["ssrf", runSsrf],
   ["bola", runBola],
   ["csrf", runCsrf],
+  ["sqli", runSqli],
+  ["command-injection", runCommandInjection],
+  ["ssti", runSsti],
 ];
 
 export async function runHunt(host: string, scanRunId: string): Promise<void> {
