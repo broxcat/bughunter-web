@@ -208,6 +208,9 @@ Omit any field you cannot ground in the finding.`;
       // recordFinding (a 27b model runs ~700 tokens past that cap).
       maxTokens: 250,
       temperature: 0.1,
+      // Reasoning models (e.g. Ollama qwen3.x) otherwise spend the whole budget
+      // on hidden thinking and return empty content; triage wants JSON directly.
+      think: false,
     });
     if (!reply) return {};
 

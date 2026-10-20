@@ -32,6 +32,12 @@ export interface ChatOptions {
   /** Transient-failure retries (network / 5xx / 429). Default 2. */
   retries?: number;
   signal?: AbortSignal;
+  /**
+   * Ollama only: forwarded as the top-level `think` field of /api/chat. Set
+   * false to make a reasoning model answer directly instead of spending the
+   * token budget on hidden thinking. Omitted = provider default (unchanged).
+   */
+  think?: boolean;
 }
 
 const DEFAULT_MAX_TOKENS = 4000;
@@ -257,6 +263,9 @@ export class BrainClient {
       {
         model,
         stream: false,
+        // `think` is a top-level /api/chat field (not an `options` key). Only
+        // sent when explicitly set, so default behavior is unchanged.
+        ...(opts.think !== undefined ? { think: opts.think } : {}),
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },
