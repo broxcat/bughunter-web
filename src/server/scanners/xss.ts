@@ -21,6 +21,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { probe } from "./http";
+import { discoverCorpus } from "./discovery";
 import { logLine, recordFinding, type ScanContext } from "./context";
 import { runCommand } from "./runCommand";
 import { confirmXssSink } from "./xssConfirm";
@@ -90,28 +91,6 @@ interface ParamUrl {
   param: string;
 }
 
-/** Collect same-origin absolute URLs referenced by an HTML document. */
-function extractUrls(html: string, baseUrl: string, host: string): string[] {
-  const out = new Set<string>();
-  const add = (raw: string) => {
-    try {
-      const abs = new URL(raw, baseUrl);
-      if (abs.host === host && /^https?:$/.test(abs.protocol)) {
-        out.add(abs.toString());
-      }
-    } catch {
-      /* ignore malformed */
-    }
-  };
-  for (const m of html.matchAll(/(?:href|src|action)\s*=\s*["']([^"']+)["']/gi)) {
-    add(m[1]);
-  }
-  for (const m of html.matchAll(/https?:\/\/[^\s"'<>]+/gi)) {
-    add(m[0]);
-  }
-  return [...out];
-}
-
 /** Same-origin .js URLs referenced by the page (for DOM-sink grepping). */
 function extractScripts(html: string, baseUrl: string, host: string): string[] {
   const out = new Set<string>();
@@ -169,22 +148,25 @@ function withParam(url: string, param: string, value: string): string {
 }
 
 async function runReflected(ctx: ScanContext): Promise<number> {
-  const host = new URL(ctx.baseUrl).host;
-  const root = await probe(ctx.baseUrl, { timeoutMs: 10_000 });
-  if (root.error) {
+  // Same shared, authenticated crawl every other family consumes — no private
+  // anonymous root-only fetch.
+  const corpus = await discoverCorpus(ctx);
+  if (!corpus.html) {
     await logLine(
       ctx.scanRunId,
-      `[xss] could not fetch ${ctx.baseUrl}: ${root.error}`,
+      `[xss] could not crawl ${ctx.baseUrl} — skipping reflected probe`,
       "STDERR",
     );
     return 0;
   }
+  if (corpus.authenticated) {
+    await logLine(ctx.scanRunId, `[xss] using authenticated crawl (${corpus.urls.length} URLs)`);
+  }
 
-  const urls = extractUrls(root.body, ctx.baseUrl, host);
-  const targets = buildReflectedTargets(urls, ctx.baseUrl);
+  const targets = buildReflectedTargets(corpus.urls, ctx.baseUrl);
   await logLine(
     ctx.scanRunId,
-    `[xss] reflected probe: ${targets.length} param target(s) from ${urls.length} same-origin URL(s)`,
+    `[xss] reflected probe: ${targets.length} param target(s) from ${corpus.urls.length} same-origin URL(s)`,
   );
 
   let found = 0;
@@ -302,13 +284,15 @@ async function runDalfox(ctx: ScanContext, targets: ParamUrl[]): Promise<number>
 
 async function runDomSinks(ctx: ScanContext): Promise<number> {
   const host = new URL(ctx.baseUrl).host;
-  const root = await probe(ctx.baseUrl, { timeoutMs: 10_000 });
-  if (root.error) return 0;
+  const corpus = await discoverCorpus(ctx);
+  if (!corpus.html) return 0;
 
+  // Grep the whole crawl corpus (all pages' inline markup/scripts), then pull in
+  // the referenced same-origin .js files.
   const docs: Array<{ src: string; body: string }> = [
-    { src: `${ctx.baseUrl} (inline)`, body: root.body },
+    { src: `${ctx.baseUrl} (crawl corpus)`, body: corpus.html },
   ];
-  for (const js of extractScripts(root.body, ctx.baseUrl, host).slice(0, MAX_JS_FILES)) {
+  for (const js of extractScripts(corpus.html, ctx.baseUrl, host).slice(0, MAX_JS_FILES)) {
     const r = await probe(js, { timeoutMs: 10_000 });
     if (!r.error && r.body) docs.push({ src: js, body: r.body });
   }
@@ -401,16 +385,13 @@ export async function runXss(ctx: ScanContext): Promise<void> {
     return 0;
   });
 
-  // Rebuild the target list for the optional dalfox pass (cheap, re-fetch root).
+  // Target list for the optional dalfox pass — reuses the shared crawl (cached
+  // per scan run, so this is not a second fetch).
   let dalfox = 0;
   try {
-    const host = new URL(ctx.baseUrl).host;
-    const root = await probe(ctx.baseUrl, { timeoutMs: 10_000 });
-    if (!root.error) {
-      const targets = buildReflectedTargets(
-        extractUrls(root.body, ctx.baseUrl, host),
-        ctx.baseUrl,
-      );
+    const corpus = await discoverCorpus(ctx);
+    if (corpus.html) {
+      const targets = buildReflectedTargets(corpus.urls, ctx.baseUrl);
       dalfox = await runDalfox(ctx, targets);
     }
   } catch (err) {
