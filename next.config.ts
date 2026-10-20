@@ -1,9 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  // BullMQ / ioredis are Node-only native-ish deps; keep them out of the bundle.
+  serverExternalPackages: ["bullmq", "ioredis"],
   turbopack: {
     rules: {
       "*.css": {

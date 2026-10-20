@@ -1,0 +1,300 @@
+// bughunter-web — shared data contract (FROZEN after Phase 0).
+// Phase 1 agents MUST NOT edit this file. If a field is missing, request it in
+// your final report; the lead adds it once at the end of Phase 1 and re-migrates.
+//
+// Security invariant encoded here: a Target references a Scope, and the whole
+// application refuses to scan unless that Scope.status === APPROVED. This is the
+// authorization attestation; it is re-checked in the worker just before any tool runs.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth.js (NextAuth v5) standard models
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  // Credentials provider: bcrypt hash. Null for OAuth-only users.
+  passwordHash  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts         Account[]
+  sessions         Session[]
+  aiProviderConfig AiProviderConfig[]
+  scopes           Scope[]
+  targets          Target[]
+  reports          Report[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// AI providers — per-user, multi-provider. API key stored encrypted only.
+// ---------------------------------------------------------------------------
+
+model AiProviderConfig {
+  id           String     @id @default(cuid())
+  userId       String
+  provider     AiProvider
+  // AES-256-GCM ciphertext of the API key. NEVER returned to the client.
+  apiKeyCipher String?    @db.Text
+  model        String?
+  baseUrl      String?
+  isActive     Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // One config per (user, provider).
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Authorization: no scan runs without an APPROVED Scope. Non-negotiable.
+// ---------------------------------------------------------------------------
+
+model Scope {
+  id            String      @id @default(cuid())
+  userId        String
+  // e.g. "*.example.com", "api.example.com". Free-form host pattern.
+  hostPattern   String
+  programName   String?
+  // Why the user is authorized to test this (bug bounty program URL, engagement ref...).
+  justification String?     @db.Text
+  status        ScopeStatus @default(PENDING)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targets Target[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Target {
+  id        String   @id @default(cuid())
+  userId    String
+  scopeId   String
+  host      String
+  label     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scope    Scope     @relation(fields: [scopeId], references: [id], onDelete: Restrict)
+  scanRuns ScanRun[]
+  findings Finding[]
+
+  @@index([userId])
+  @@index([scopeId])
+}
+
+// ---------------------------------------------------------------------------
+// Scan execution
+// ---------------------------------------------------------------------------
+
+model ScanRun {
+  id         String     @id @default(cuid())
+  targetId   String
+  type       ScanType
+  status     ScanStatus @default(QUEUED)
+  // BullMQ job id, set once enqueued.
+  jobId      String?
+  error      String?    @db.Text
+  createdAt  DateTime   @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  target   Target    @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  logs     ScanLog[]
+  findings Finding[]
+
+  @@index([targetId])
+  @@index([status])
+}
+
+// Append-only log lines streamed to the browser over SSE.
+model ScanLog {
+  id        String     @id @default(cuid())
+  scanRunId String
+  line      String     @db.Text
+  stream    ScanStream @default(STDOUT)
+  createdAt DateTime   @default(now())
+
+  scanRun ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+
+  @@index([scanRunId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Findings + triage gate
+// ---------------------------------------------------------------------------
+
+model Finding {
+  id           String     @id @default(cuid())
+  targetId     String
+  scanRunId    String?
+  title        String
+  vulnClass    String?
+  severity     Severity   @default(INFO)
+  description  String?    @db.Text
+  evidence     String?    @db.Text
+  gateStatus   GateStatus @default(UNVALIDATED)
+  // JSON: the 7-Question Gate answers.
+  gateAnswers  Json?
+  killedReason String?    @db.Text
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  target      Target       @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  scanRun     ScanRun?     @relation(fields: [scanRunId], references: [id], onDelete: SetNull)
+  reportItems ReportItem[]
+
+  @@index([targetId])
+  @@index([gateStatus])
+}
+
+// ---------------------------------------------------------------------------
+// Reports — may ONLY contain findings whose gateStatus === PASSED.
+// ---------------------------------------------------------------------------
+
+model Report {
+  id        String         @id @default(cuid())
+  userId    String
+  title     String
+  platform  ReportPlatform @default(GENERIC)
+  markdown  String?        @db.Text
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  user  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items ReportItem[]
+
+  @@index([userId])
+}
+
+// Join table report <-> finding (PASSED findings only; enforced in the API layer).
+model ReportItem {
+  id        String @id @default(cuid())
+  reportId  String
+  findingId String
+
+  report  Report  @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  finding Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, findingId])
+  @@index([reportId])
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum AiProvider {
+  OLLAMA
+  GROQ
+  DEEPSEEK
+  ANTHROPIC
+  OPENAI
+  XAI
+  OPENROUTER
+  ORCAROUTER
+  FLUXION
+  LITELLM
+  REQUESTY
+}
+
+enum ScopeStatus {
+  PENDING
+  APPROVED
+  REVOKED
+}
+
+enum ScanType {
+  RECON
+  HUNT
+  VALIDATE
+}
+
+enum ScanStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ScanStream {
+  STDOUT
+  STDERR
+}
+
+enum Severity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum GateStatus {
+  UNVALIDATED
+  PASSED
+  KILLED
+}
+
+enum ReportPlatform {
+  HACKERONE
+  BUGCROWD
+  INTIGRITI
+  IMMUNEFI
+  GENERIC
+}
