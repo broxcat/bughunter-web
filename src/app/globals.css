@@ -1,26 +1,212 @@
 @import "tailwindcss";
+@import "../styles/tokens.css";
 
+/* -----------------------------------------------------------------------------
+ * Manual dark mode. Rebind Tailwind's `dark:` variant to our `data-theme="dark"`
+ * attribute (set on <html>) instead of the default `prefers-color-scheme`, so
+ * the ThemeToggle controls every `dark:` utility across the app too.
+ * -------------------------------------------------------------------------- */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* -----------------------------------------------------------------------------
+ * Font stacks. The `--font-space-grotesk` / `--font-jetbrains-mono` vars are
+ * injected on <html> by next/font in layout.tsx; the rest is the graceful
+ * fallback used if a webfont fails to load.
+ * -------------------------------------------------------------------------- */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --font-sans-stack: var(--font-space-grotesk), ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono-stack: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular,
+    "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 
+/* -----------------------------------------------------------------------------
+ * Expose the NEUTRAL + BRAND palette and fonts to Tailwind as utilities
+ * (`bg-background`, `bg-surface`, `bg-surface-2`, `text-foreground`,
+ * `text-muted`, `border-border`, `bg-brand`, `text-brand`, `font-sans`,
+ * `font-mono`, `rounded-*`). The semantic severity/confidence/gate scale is
+ * intentionally NOT exposed here — use <Badge tone="..."> for those.
+ * -------------------------------------------------------------------------- */
 @theme inline {
-  --color-background: var(--background);
+  --color-background: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-contrast: var(--brand-contrast);
+
+  --font-sans: var(--font-sans-stack);
+  --font-mono: var(--font-mono-stack);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius-lg);
 }
 
 body {
-  background: var(--background);
+  background: var(--bg);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans-stack);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Consistent, brand-tinted focus outline for keyboard users across the app. */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* =============================================================================
+ * COMPONENT PRIMITIVES
+ * Styled from tokens so Button/Badge/Card stay theme-reactive without inline
+ * colors. Components attach these class names (+ data-* for variants).
+ * ========================================================================== */
+@layer components {
+  /* ---- Button ----------------------------------------------------------- */
+  .ui-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    font-family: var(--font-sans-stack);
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s ease, border-color 0.15s ease,
+      color 0.15s ease, opacity 0.15s ease;
+  }
+  .ui-btn:disabled,
+  .ui-btn[aria-disabled="true"] {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  /* sizes */
+  .ui-btn[data-size="sm"] {
+    height: 2rem;
+    padding: 0 0.75rem;
+    font-size: 0.8125rem;
+  }
+  .ui-btn[data-size="md"] {
+    height: 2.5rem;
+    padding: 0 1rem;
+    font-size: 0.875rem;
+  }
+
+  /* variants */
+  .ui-btn[data-variant="primary"] {
+    background: var(--brand);
+    color: var(--brand-contrast);
+  }
+  .ui-btn[data-variant="primary"]:hover:not(:disabled) {
+    background: var(--brand-hover);
+  }
+
+  .ui-btn[data-variant="secondary"] {
+    background: var(--surface);
+    color: var(--foreground);
+    border-color: var(--border-strong);
+  }
+  .ui-btn[data-variant="secondary"]:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
+
+  .ui-btn[data-variant="danger"] {
+    background: var(--danger);
+    color: var(--danger-contrast);
+  }
+  .ui-btn[data-variant="danger"]:hover:not(:disabled) {
+    background: var(--danger-hover);
+  }
+
+  .ui-btn[data-variant="ghost"] {
+    background: transparent;
+    color: var(--muted);
+  }
+  .ui-btn[data-variant="ghost"]:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--foreground);
+  }
+
+  /* ---- Card ------------------------------------------------------------- */
+  .ui-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* ---- Badge ------------------------------------------------------------ */
+  .ui-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3125rem;
+    padding: 0.125rem 0.5rem;
+    border: 1px solid transparent;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+  .ui-badge[data-mono="true"] {
+    font-family: var(--font-mono-stack);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  /* tones — bg / fg / border pulled from the semantic scale in tokens.css */
+  .ui-badge[data-tone="neutral"] {
+    background: var(--tone-neutral-bg); color: var(--tone-neutral-fg); border-color: var(--tone-neutral-bd);
+  }
+  .ui-badge[data-tone="brand"] {
+    background: var(--tone-brand-bg); color: var(--tone-brand-fg); border-color: var(--tone-brand-bd);
+  }
+  /* severity */
+  .ui-badge[data-tone="info"] {
+    background: var(--sev-info-bg); color: var(--sev-info-fg); border-color: var(--sev-info-bd);
+  }
+  .ui-badge[data-tone="low"] {
+    background: var(--sev-low-bg); color: var(--sev-low-fg); border-color: var(--sev-low-bd);
+  }
+  .ui-badge[data-tone="medium"] {
+    background: var(--sev-medium-bg); color: var(--sev-medium-fg); border-color: var(--sev-medium-bd);
+  }
+  .ui-badge[data-tone="high"] {
+    background: var(--sev-high-bg); color: var(--sev-high-fg); border-color: var(--sev-high-bd);
+  }
+  .ui-badge[data-tone="critical"] {
+    background: var(--sev-critical-bg); color: var(--sev-critical-fg); border-color: var(--sev-critical-bd);
+    font-weight: 600;
+  }
+  /* confidence */
+  .ui-badge[data-tone="proven"] {
+    background: var(--conf-proven-bg); color: var(--conf-proven-fg); border-color: var(--conf-proven-bd);
+  }
+  .ui-badge[data-tone="candidate"] {
+    background: var(--conf-candidate-bg); color: var(--conf-candidate-fg); border-color: var(--conf-candidate-bd);
+    border-style: dashed;
+  }
+  /* gate status */
+  .ui-badge[data-tone="passed"] {
+    background: var(--gate-passed-bg); color: var(--gate-passed-fg); border-color: var(--gate-passed-bd);
+  }
+  .ui-badge[data-tone="killed"] {
+    background: var(--gate-killed-bg); color: var(--gate-killed-fg); border-color: var(--gate-killed-bd);
+  }
+  .ui-badge[data-tone="unvalidated"] {
+    background: var(--gate-unvalidated-bg); color: var(--gate-unvalidated-fg); border-color: var(--gate-unvalidated-bd);
+  }
 }

@@ -1,0 +1,143 @@
+/* =============================================================================
+ * bughunter-web — Design Tokens (Phase 7 visual identity)
+ * -----------------------------------------------------------------------------
+ * Single source of truth for every color in the app. Two themes:
+ *   - Light  -> :root                     (near-white bg / near-black text)
+ *   - Dark   -> :root[data-theme="dark"]  (anthracite bg / off-white text)
+ *
+ * The dark theme is activated MANUALLY by a `data-theme="dark"` attribute on
+ * <html> (set by ThemeToggle, persisted in localStorage, initialized by the
+ * no-flash script in layout.tsx). It is NOT driven by `prefers-color-scheme`.
+ *
+ * ── How to use these (for anyone styling a page) ────────────────────────────
+ *   • Chrome / layout colors are exposed to Tailwind as utilities in
+ *     globals.css: `bg-background`, `bg-surface`, `bg-surface-2`,
+ *     `text-foreground`, `text-muted`, `border-border`, `text-brand`,
+ *     `bg-brand`. Use those instead of raw zinc/red classes.
+ *   • SEVERITY / CONFIDENCE / GATE colors are NOT Tailwind utilities on
+ *     purpose. Never hand-write them. Render a <Badge tone="..."> and let the
+ *     token scale below pick the color. This keeps the semantic palette
+ *     consistent and prevents ad-hoc reds leaking in.
+ *
+ * ── Rule of thumb: RED means BRAND, not "severity" ──────────────────────────
+ *   `--brand-*` is the one red accent (buttons, links, logo). The severity
+ *   scale is deliberately a RAINBOW (blue→teal→amber→orange→deep-red) so a
+ *   "critical" badge never reads as "just the brand color".
+ * ========================================================================== */
+
+:root {
+  /* ---- Surfaces & text (neutral chrome) ---------------------------------- */
+  --bg: #fafafa;            /* page background (near-white) */
+  --surface: #ffffff;       /* cards, panels, header */
+  --surface-2: #f4f4f5;     /* muted fills, hovered rows, insets */
+  --surface-3: #e9e9ec;     /* deeper inset / code wells */
+  --border: #e4e4e7;        /* default hairline */
+  --border-strong: #d4d4d8; /* emphasized divider / input border */
+  --foreground: #18181b;    /* primary text (near-black) */
+  --muted: #52525b;         /* secondary text / labels */
+  --subtle: #71717a;        /* tertiary text / placeholders */
+
+  /* ---- Brand (the ONE red) ----------------------------------------------- */
+  --brand: #dc2626;             /* accent fill: buttons, active nav, links */
+  --brand-hover: #b91c1c;       /* hover/pressed fill */
+  --brand-active: #991b1b;      /* active/pressed deeper */
+  --brand-contrast: #ffffff;    /* text/icon on a brand fill */
+  --brand-ring: rgba(220, 38, 38, 0.45); /* focus ring */
+
+  /* ---- Destructive action (deeper than brand, for "delete"/"kill") ------- */
+  --danger: #b91c1c;
+  --danger-hover: #991b1b;
+  --danger-contrast: #ffffff;
+
+  /* ---- Focus ring (generic) ---------------------------------------------- */
+  --ring: var(--brand);
+
+  /* =========================================================================
+   * SEMANTIC SCALE — consumed only via <Badge tone="...">.
+   * Each tone = bg (tint) / fg (label) / bd (border).
+   * ===================================================================== */
+
+  /* Severity (a rainbow, NOT shades of brand red) */
+  --sev-info-bg: #eff6ff;     --sev-info-fg: #1d4ed8;     --sev-info-bd: #bfdbfe;      /* info     = blue    */
+  --sev-low-bg: #ecfeff;      --sev-low-fg: #0e7490;      --sev-low-bd: #a5f3fc;       /* low      = teal    */
+  --sev-medium-bg: #fffbeb;   --sev-medium-fg: #b45309;   --sev-medium-bd: #fde68a;    /* medium   = amber   */
+  --sev-high-bg: #fff7ed;     --sev-high-fg: #c2410c;     --sev-high-bd: #fed7aa;      /* high     = orange  */
+  --sev-critical-bg: #fee2e2; --sev-critical-fg: #991b1b; --sev-critical-bd: #fecaca;  /* critical = deep red */
+
+  /* Confidence */
+  --conf-proven-bg: #ecfdf5;    --conf-proven-fg: #047857;    --conf-proven-bd: #a7f3d0;   /* proven    = green        */
+  --conf-candidate-bg: #f4f4f5; --conf-candidate-fg: #52525b; --conf-candidate-bd: #c4c4c9;/* candidate = gray, dashed */
+
+  /* Gate status */
+  --gate-passed-bg: #ecfdf5;      --gate-passed-fg: #047857;      --gate-passed-bd: #a7f3d0;    /* passed      = green   */
+  --gate-killed-bg: #fff1f2;      --gate-killed-fg: #be123c;      --gate-killed-bd: #fecdd3;    /* killed      = rose    */
+  --gate-unvalidated-bg: #f4f4f5; --gate-unvalidated-fg: #52525b; --gate-unvalidated-bd: #e4e4e7; /* unvalidated = neutral */
+
+  /* Generic tones */
+  --tone-neutral-bg: #f4f4f5; --tone-neutral-fg: #3f3f46; --tone-neutral-bd: #e4e4e7;  /* neutral */
+  --tone-brand-bg: #fef2f2;   --tone-brand-fg: #b91c1c;   --tone-brand-bd: #fecaca;    /* brand tint */
+
+  /* ---- Shape & elevation ------------------------------------------------- */
+  --radius-sm: 0.375rem;
+  --radius: 0.5rem;
+  --radius-lg: 0.75rem;
+  --shadow-sm: 0 1px 2px 0 rgba(24, 24, 27, 0.06);
+  --shadow: 0 1px 3px 0 rgba(24, 24, 27, 0.10), 0 1px 2px -1px rgba(24, 24, 27, 0.10);
+}
+
+/* =============================================================================
+ * DARK THEME — anthracite (NOT pure black). Fills become translucent tints so
+ * they sit naturally on the dark surface; labels get lighter for contrast.
+ * ========================================================================== */
+:root[data-theme="dark"] {
+  /* ---- Surfaces & text --------------------------------------------------- */
+  --bg: #18191c;            /* anthracite page background */
+  --surface: #202226;       /* cards, panels, header */
+  --surface-2: #26282d;     /* muted fills, hovered rows */
+  --surface-3: #2d2f35;     /* deeper inset / code wells */
+  --border: #33363c;        /* default hairline */
+  --border-strong: #41444b; /* emphasized divider / input border */
+  --foreground: #ededed;    /* primary text (off-white) */
+  --muted: #a1a1aa;         /* secondary text */
+  --subtle: #80848c;        /* tertiary text */
+
+  /* ---- Brand (lighter + slightly desaturated so it reads on anthracite).
+   * A lighter red means a brand button pairs with NEAR-BLACK text for
+   * contrast (brand-contrast), while the same red works as accent/link text. */
+  --brand: #ef5350;
+  --brand-hover: #f26a67;
+  --brand-active: #d94a40;
+  --brand-contrast: #1a0b0a;
+  --brand-ring: rgba(239, 83, 80, 0.50);
+
+  /* ---- Destructive action ------------------------------------------------ */
+  --danger: #f0564c;
+  --danger-hover: #f26a67;
+  --danger-contrast: #1a0b0a;
+
+  --ring: var(--brand);
+
+  /* Severity */
+  --sev-info-bg: rgba(59, 130, 246, 0.14);  --sev-info-fg: #93c5fd;  --sev-info-bd: rgba(59, 130, 246, 0.32);
+  --sev-low-bg: rgba(34, 211, 238, 0.12);   --sev-low-fg: #67e8f9;   --sev-low-bd: rgba(34, 211, 238, 0.30);
+  --sev-medium-bg: rgba(245, 158, 11, 0.14);--sev-medium-fg: #fcd34d;--sev-medium-bd: rgba(245, 158, 11, 0.32);
+  --sev-high-bg: rgba(249, 115, 22, 0.14);  --sev-high-fg: #fdba74;  --sev-high-bd: rgba(249, 115, 22, 0.32);
+  --sev-critical-bg: rgba(220, 38, 38, 0.20);--sev-critical-fg: #fca5a5;--sev-critical-bd: rgba(220, 38, 38, 0.42);
+
+  /* Confidence */
+  --conf-proven-bg: rgba(16, 185, 129, 0.14);  --conf-proven-fg: #6ee7b7;  --conf-proven-bd: rgba(16, 185, 129, 0.32);
+  --conf-candidate-bg: rgba(161, 161, 170, 0.12);--conf-candidate-fg: #a1a1aa;--conf-candidate-bd: rgba(161, 161, 170, 0.34);
+
+  /* Gate status */
+  --gate-passed-bg: rgba(16, 185, 129, 0.14);  --gate-passed-fg: #6ee7b7;  --gate-passed-bd: rgba(16, 185, 129, 0.32);
+  --gate-killed-bg: rgba(244, 63, 94, 0.15);   --gate-killed-fg: #fda4af;  --gate-killed-bd: rgba(244, 63, 94, 0.35);
+  --gate-unvalidated-bg: rgba(161, 161, 170, 0.10);--gate-unvalidated-fg: #a1a1aa;--gate-unvalidated-bd: rgba(161, 161, 170, 0.28);
+
+  /* Generic tones */
+  --tone-neutral-bg: rgba(161, 161, 170, 0.10);--tone-neutral-fg: #d4d4d8;--tone-neutral-bd: rgba(161, 161, 170, 0.26);
+  --tone-brand-bg: rgba(239, 83, 80, 0.15);  --tone-brand-fg: #fca5a5;  --tone-brand-bd: rgba(239, 83, 80, 0.38);
+
+  /* ---- Elevation (deeper shadows read better on dark) -------------------- */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.40);
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.50), 0 1px 2px -1px rgba(0, 0, 0, 0.50);
+}
