@@ -5,7 +5,7 @@
 // family is best-effort — one throwing must never abort the others or the run.
 
 import { runCommand } from "./runCommand";
-import { loadScanContext, logLine, type ScanContext } from "./context";
+import { loadScanContext, logLine, toBaseUrl, type ScanContext } from "./context";
 import { runAuthBypass } from "./auth-bypass";
 import { runIdor } from "./idor";
 import { runXss } from "./xss";
@@ -21,15 +21,18 @@ const FAMILIES: ReadonlyArray<readonly [string, (ctx: ScanContext) => Promise<vo
 ];
 
 export async function runHunt(host: string, scanRunId: string): Promise<void> {
+  const ctx = await loadScanContext(scanRunId);
+  // nuclei wants a full URL — rebuilt from the target's stored scheme.
+  const url = ctx?.baseUrl ?? toBaseUrl(host);
+
   // 1) nuclei sweep (argv array, shell:false — host never shell-interpreted).
   await runCommand(
     "nuclei",
-    ["-silent", "-no-color", "-duc", "-u", host],
+    ["-silent", "-no-color", "-duc", "-u", url],
     { scanRunId, timeoutMs: 15 * MINUTE },
   );
 
   // 2) Ported vuln-class families.
-  const ctx = await loadScanContext(scanRunId);
   if (!ctx) {
     await logLine(
       scanRunId,

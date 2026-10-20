@@ -9,6 +9,33 @@ const createTargetSchema = z.object({
   label: z.string().trim().min(1).optional(),
 });
 
+/**
+ * Accept either a full URL (https://host.tld/path) or a bare host, and normalize
+ * to the bare host the way subfinder expects, keeping the original scheme so the
+ * URL can be rebuilt correctly instead of assuming https.
+ *   "https://ex.com/a" -> { host: "ex.com", scheme: "https" }
+ *   "ex.com:8443"      -> { host: "ex.com:8443", scheme: null }
+ * The bare host keeps a :port if present (URL tools need it; subfinder/nmap strip
+ * it). Returns null host if nothing usable remains.
+ */
+function normalizeTargetInput(input: string): { host: string; scheme: string | null } {
+  const trimmed = input.trim();
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const u = new URL(trimmed);
+      return { host: u.host.toLowerCase(), scheme: u.protocol.replace(":", "").toLowerCase() };
+    } catch {
+      /* fall through to bare parsing */
+    }
+  }
+  const host = trimmed
+    .replace(/^\/+/, "") // stray leading slashes
+    .split(/[/?#]/)[0] // drop any path/query/fragment
+    .replace(/\/+$/, "")
+    .toLowerCase();
+  return { host, scheme: null };
+}
+
 // GET /api/targets — list the signed-in user's targets (with their scope).
 export async function GET() {
   const session = await auth();
@@ -59,11 +86,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const { host, scheme } = normalizeTargetInput(parsed.data.host);
+  if (!host) {
+    return NextResponse.json(
+      { error: "Could not parse a host from the input" },
+      { status: 400 },
+    );
+  }
+
   const target = await prisma.target.create({
     data: {
       userId: session.user.id,
       scopeId: scope.id,
-      host: parsed.data.host,
+      host,
+      scheme,
       label: parsed.data.label,
     },
   });

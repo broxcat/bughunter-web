@@ -123,7 +123,13 @@ model Target {
   id        String   @id @default(cuid())
   userId    String
   scopeId   String
+  // Bare host (no scheme, no path, no trailing slash); may include :port.
+  // Unique per user. subfinder/nmap take this (port stripped); httpx/katana/
+  // nuclei take scheme://host rebuilt from `scheme`.
   host      String
+  // Original scheme ("http"/"https") when the user entered a full URL; null
+  // means unspecified and the app falls back to https.
+  scheme    String?
   label     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
