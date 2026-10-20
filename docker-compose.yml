@@ -68,6 +68,17 @@ services:
     cap_add:
       - NET_RAW
       - NET_ADMIN
+    # The worker launches headless Chromium (via playwright-chromium) to confirm
+    # DOM-XSS. Chromium's own sandbox relies on unprivileged user namespaces,
+    # which aren't reliably available inside a container without granting broad
+    # caps (e.g. SYS_ADMIN) or shipping a custom seccomp profile — both of which
+    # would weaken this container more than the feature is worth. Instead the
+    # worker launches Chromium with --no-sandbox (passed in code), which is the
+    # standard trade-off for containerized headless Chromium: the container is
+    # already the isolation boundary, and NO extra caps/privileges are added
+    # here. A larger /dev/shm keeps the renderer from crashing on busy pages
+    # (the alternative is the --disable-dev-shm-usage Chromium flag in code).
+    shm_size: "1gb"
     restart: unless-stopped
 
 volumes:
