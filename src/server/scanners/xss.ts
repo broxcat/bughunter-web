@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { probe } from "./http";
 import { logLine, recordFinding, type ScanContext } from "./context";
 import { runCommand } from "./runCommand";
+import { confirmXssSink } from "./xssConfirm";
 import { resolveActiveBrain } from "@/server/brain";
 
 const MINUTE = 60_000;
@@ -32,6 +33,10 @@ const MAX_REFLECTED_URLS = 20;
 const MAX_DALFOX_URLS = 15;
 const MAX_JS_FILES = 8;
 const MAX_DOM_FINDINGS = 20;
+// Launching a headless browser per sink is expensive, so cap how many DOM-sink
+// candidates we attempt to confirm per run. Beyond this, candidates are still
+// recorded (as CANDIDATE/INFO) but with confirmation skipped.
+const MAX_DOM_CONFIRMATIONS = 5;
 
 // Common parameter names worth probing on the base URL when the page itself
 // exposes none. Reflected sinks most often hide behind search / message params.
@@ -309,6 +314,7 @@ async function runDomSinks(ctx: ScanContext): Promise<number> {
   }
 
   let found = 0;
+  let confirmAttempts = 0;
   const seen = new Set<string>();
   for (const doc of docs) {
     for (const { re, sink } of DOM_SINKS) {
@@ -318,18 +324,64 @@ async function runDomSinks(ctx: ScanContext): Promise<number> {
       if (seen.has(key)) continue;
       seen.add(key);
       found += 1;
-      await recordFinding(ctx, {
-        title: `DOM XSS sink present: ${sink}`,
-        vulnClass: "XSS",
-        severity: "INFO",
-        confidence: "CANDIDATE",
-        location: doc.src,
-        description:
-          `The DOM sink ${sink} appears in client-side code. This is a ` +
-          `candidate only: it is a real DOM XSS only if attacker-controlled ` +
-          `input (URL fragment, query param, or an unchecked postMessage) ` +
-          `reaches this sink. Trace source → sink by hand.\n\n${NOT_CONFIRMED_NOTE}`,
-      });
+
+      const candidateDesc =
+        `The DOM sink ${sink} appears in client-side code. This is a ` +
+        `candidate only: it is a real DOM XSS only if attacker-controlled ` +
+        `input (URL fragment, query param, or an unchecked postMessage) ` +
+        `reaches this sink. Trace source → sink by hand.`;
+
+      if (confirmAttempts < MAX_DOM_CONFIRMATIONS) {
+        confirmAttempts += 1;
+        // Attempt real browser confirmation. This is the only path that may
+        // escalate above INFO — PROVEN requires observed execution in
+        // headless Chromium, never a static match alone.
+        const result = await confirmXssSink(ctx.baseUrl, {
+          sink,
+          location: doc.src,
+        }).catch((err: unknown) => ({
+          confirmed: false as const,
+          reason: `headless confirmation threw: ${err instanceof Error ? err.message : String(err)}`,
+        }));
+
+        if (result.confirmed) {
+          await recordFinding(ctx, {
+            title: `DOM XSS confirmed: ${sink}`,
+            vulnClass: "XSS",
+            severity: "HIGH",
+            confidence: "PROVEN",
+            location: doc.src,
+            description:
+              `The DOM sink ${sink} executes attacker-controlled input in a ` +
+              `real browser. CONFIRMED in headless Chromium: ` +
+              `${result.evidence ?? "(no evidence string returned)"}`,
+            evidence: result.evidence,
+          });
+        } else {
+          await recordFinding(ctx, {
+            title: `DOM XSS sink present: ${sink}`,
+            vulnClass: "XSS",
+            severity: "INFO",
+            confidence: "CANDIDATE",
+            location: doc.src,
+            description:
+              `${candidateDesc}\n\nHeadless confirmation did not fire: ` +
+              `${result.reason ?? "(no reason returned)"}\n\n${NOT_CONFIRMED_NOTE}`,
+          });
+        }
+      } else {
+        await recordFinding(ctx, {
+          title: `DOM XSS sink present: ${sink}`,
+          vulnClass: "XSS",
+          severity: "INFO",
+          confidence: "CANDIDATE",
+          location: doc.src,
+          description:
+            `${candidateDesc}\n\nheadless confirmation skipped (per-run cap ` +
+            `reached)\n\n${NOT_CONFIRMED_NOTE}`,
+        });
+      }
+
       if (found >= MAX_DOM_FINDINGS) return found;
     }
   }
