@@ -127,13 +127,13 @@ export async function runIdor(ctx: ScanContext): Promise<void> {
 
   await logLine(
     ctx.scanRunId,
-    `[idor] ${urls.length} same-origin URLs, ${candidates.length} id-like candidate(s)`,
+    `[idor] examined ${urls.length} crawled URL(s), found ${candidates.length} id-like candidate(s)`,
   );
 
   if (candidates.length === 0) {
     await logLine(
       ctx.scanRunId,
-      "[idor] no id-like endpoints found on the root page — nothing to flag (crawl recon first for deeper coverage)",
+      `[idor] none of the ${urls.length} crawled URL(s) carry an id-like object reference — nothing to flag`,
     );
     return;
   }
