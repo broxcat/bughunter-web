@@ -81,6 +81,28 @@ services:
     shm_size: "1gb"
     restart: unless-stopped
 
+  # Out-of-band interaction catcher (Phase 5). Same image as web/worker, only
+  # the command differs (like worker). It logs every inbound /oob/<token>
+  # request to the shared Postgres OobHit table so the worker can CONFIRM blind
+  # SSRF by correlation (no worker->catcher HTTP).
+  #
+  # The "8089:8089" mapping PUBLISHES the catcher to the host. This is how the
+  # SCANNED TARGET reaches it: the scanner embeds a callback URL built from
+  # OOB_PUBLIC_BASE_URL (operator-set, e.g. http://100.121.43.68:8089 for the
+  # Tailscale host). The target connects to the host's 8089, Docker forwards it
+  # into this container, a row lands in OobHit. Needs no redis and no NET_* caps.
+  oob-catcher:
+    build: .
+    image: bughunter-web
+    command: npx tsx src/server/oob/server.ts
+    ports:
+      - "8089:8089"
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:
   redisdata:

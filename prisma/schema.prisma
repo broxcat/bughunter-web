@@ -205,6 +205,11 @@ model Finding {
   // JSON: the 7-Question Gate answers.
   gateAnswers  Json?
   killedReason String?    @db.Text
+  // Out-of-band correlation key (Phase 5). The SSRF scanner sets this to the
+  // per-attempt token it embedded in a self-hosted OOB callback URL; a matching
+  // OobHit.token row (written by the catcher when the target calls back) CONFIRMS
+  // blind SSRF. Nullable, no backfill — most findings never use OOB.
+  oobToken     String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -252,6 +257,26 @@ model ReportItem {
 
   @@unique([reportId, findingId])
   @@index([reportId])
+}
+
+// ---------------------------------------------------------------------------
+// Out-of-band interaction catcher (Phase 5)
+// ---------------------------------------------------------------------------
+
+// One row per inbound request the self-hosted OOB catcher receives. The SSRF
+// scanner embeds a unique `token` in a callback URL; when the scanned target
+// fetches that URL, the catcher inserts a row here. The worker CONFIRMS a blind
+// finding by reading this table (no worker->catcher HTTP needed — correlation
+// is purely via the shared Postgres row). Append-only; never updated.
+model OobHit {
+  id         String   @id @default(cuid())
+  token      String
+  receivedAt DateTime @default(now())
+  sourceIp   String?
+  method     String
+  rawHeaders Json?
+
+  @@index([token])
 }
 
 // ---------------------------------------------------------------------------
