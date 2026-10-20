@@ -90,6 +90,8 @@ export interface NewFinding {
   description?: string;
   location?: string;
   evidence?: string;
+  /** OOB correlation token (set by the SSRF scanner); matches OobHit.token. */
+  oobToken?: string;
 }
 
 /** Create an UNVALIDATED Finding on the context's target and log it. */
@@ -132,6 +134,7 @@ export async function recordFinding(
       description,
       location: f.location,
       evidence: f.evidence,
+      oobToken: f.oobToken,
       gateStatus: "UNVALIDATED",
     },
   });
