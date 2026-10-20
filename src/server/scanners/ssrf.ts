@@ -24,6 +24,7 @@
 
 import { probe, type ProbeResult } from "./http";
 import { isLikelyUserParam } from "./paramFilter";
+import { discoverCorpus } from "./discovery";
 import { logLine, recordFinding, type ScanContext } from "./context";
 import { resolveActiveBrain } from "@/server/brain";
 import { generateOobToken, checkOobHit } from "@/server/oob";
@@ -226,16 +227,19 @@ export async function runSsrf(ctx: ScanContext): Promise<void> {
     return;
   }
 
-  const root = await probe(ctx.baseUrl, { timeoutMs: PROBE_TIMEOUT });
-  if (root.error) {
-    await logLine(ctx.scanRunId, `[ssrf] could not fetch ${ctx.baseUrl}: ${root.error}`, "STDERR");
+  const corpus = await discoverCorpus(ctx);
+  if (!corpus.html) {
+    await logLine(ctx.scanRunId, `[ssrf] could not crawl ${ctx.baseUrl} — skipping`, "STDERR");
     return;
   }
+  if (corpus.authenticated) {
+    await logLine(ctx.scanRunId, `[ssrf] using authenticated crawl (${corpus.urls.length} URLs)`);
+  }
 
-  const urls = extractUrls(root.body, ctx.baseUrl, host);
+  const urls = extractUrls(corpus.html, ctx.baseUrl, host);
   const candidates = dedupe([
     ...candidatesFromUrls(urls),
-    ...candidatesFromForms(root.body, ctx.baseUrl, host),
+    ...candidatesFromForms(corpus.html, ctx.baseUrl, host),
   ]);
 
   await logLine(

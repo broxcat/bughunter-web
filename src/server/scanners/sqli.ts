@@ -17,8 +17,8 @@
 // cap of discovered GET params. Best-effort and NEVER throwing — any failure is
 // a logged skip or a CANDIDATE, never an abort of the run.
 
-import { probe } from "./http";
 import { isLikelyUserParam } from "./paramFilter";
+import { discoverCorpus } from "./discovery";
 import { measureTimingDelta } from "./timingProbe";
 import { logLine, recordFinding, type ScanContext } from "./context";
 import type { Severity } from "@prisma/client";
@@ -226,17 +226,16 @@ export async function runSqli(ctx: ScanContext): Promise<void> {
     return;
   }
 
-  const root = await probe(ctx.baseUrl, { timeoutMs: 10_000 });
-  if (root.error) {
-    await logLine(
-      ctx.scanRunId,
-      `[sqli] could not fetch ${ctx.baseUrl}: ${root.error} — skipping`,
-      "STDERR",
-    );
+  const corpus = await discoverCorpus(ctx);
+  if (!corpus.html) {
+    await logLine(ctx.scanRunId, `[sqli] could not crawl ${ctx.baseUrl} — skipping`, "STDERR");
     return;
   }
+  if (corpus.authenticated) {
+    await logLine(ctx.scanRunId, `[sqli] using authenticated crawl (${corpus.urls.length} URLs)`);
+  }
 
-  const targets = discoverTargets(root.body, ctx.baseUrl, host);
+  const targets = discoverTargets(corpus.html, ctx.baseUrl, host);
   if (targets.length === 0) {
     await logLine(ctx.scanRunId, `[sqli] no GET query params discovered — nothing to test`);
     return;

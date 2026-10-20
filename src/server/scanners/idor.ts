@@ -10,6 +10,7 @@
 
 import { probe } from "./http";
 import { isLikelyUserParam } from "./paramFilter";
+import { discoverCorpus } from "./discovery";
 import { logLine, recordFinding, type ScanContext } from "./context";
 import { resolveActiveBrain } from "@/server/brain";
 
@@ -103,13 +104,16 @@ export async function runIdor(ctx: ScanContext): Promise<void> {
   await logLine(ctx.scanRunId, `[idor] enumerating id-like endpoints on ${ctx.baseUrl}`);
 
   const host = new URL(ctx.baseUrl).host;
-  const root = await probe(ctx.baseUrl, { timeoutMs: 10_000 });
-  if (root.error) {
-    await logLine(ctx.scanRunId, `[idor] could not fetch ${ctx.baseUrl}: ${root.error}`, "STDERR");
+  const corpus = await discoverCorpus(ctx);
+  if (!corpus.html) {
+    await logLine(ctx.scanRunId, `[idor] could not crawl ${ctx.baseUrl} — skipping`, "STDERR");
     return;
   }
+  if (corpus.authenticated) {
+    await logLine(ctx.scanRunId, `[idor] using authenticated crawl (${corpus.urls.length} URLs)`);
+  }
 
-  const urls = extractUrls(root.body, ctx.baseUrl, host);
+  const urls = extractUrls(corpus.html, ctx.baseUrl, host);
   const candidates: Candidate[] = [];
   const seen = new Set<string>();
   for (const u of urls) {

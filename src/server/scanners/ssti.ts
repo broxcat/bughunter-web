@@ -24,6 +24,7 @@
 
 import { probe } from "./http";
 import { isLikelyUserParam } from "./paramFilter";
+import { discoverCorpus } from "./discovery";
 import { logLine, recordFinding, type ScanContext } from "./context";
 import type { Severity } from "@prisma/client";
 
@@ -265,13 +266,16 @@ export async function runSsti(ctx: ScanContext): Promise<void> {
     return;
   }
 
-  const root = await probe(ctx.baseUrl, { timeoutMs: 10_000 });
-  if (root.error) {
-    await logLine(ctx.scanRunId, `[ssti] could not fetch ${ctx.baseUrl}: ${root.error}`, "STDERR");
+  const corpus = await discoverCorpus(ctx);
+  if (!corpus.html) {
+    await logLine(ctx.scanRunId, `[ssti] could not crawl ${ctx.baseUrl} — skipping`, "STDERR");
     return;
   }
+  if (corpus.authenticated) {
+    await logLine(ctx.scanRunId, `[ssti] using authenticated crawl (${corpus.urls.length} URLs)`);
+  }
 
-  const targets = buildTargets(root.body, ctx.baseUrl, host);
+  const targets = buildTargets(corpus.html, ctx.baseUrl, host);
   await logLine(
     ctx.scanRunId,
     `[ssti] ${targets.length} candidate param target(s) (cap ${MAX_SSTI_PARAMS})`,
