@@ -1,0 +1,75 @@
+# bughunter-web — full local stack: web + worker + postgres + redis.
+#
+#   docker compose build          # build the shared app/scanner image
+#   docker compose up -d          # start all four services
+#   docker compose logs -f web    # follow web logs (or: worker / db / redis)
+#
+# First boot only — apply the Prisma migrations against the running db:
+#   docker compose exec web npx prisma migrate deploy
+#
+# `web` and `worker` share the SAME image (built from ./Dockerfile). They differ
+# only in command: web runs `next start`, worker runs the tsx scan worker.
+# Both get NET_RAW + NET_ADMIN so in-container nmap can do -sV / SYN scans.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  web:
+    build: .
+    image: bughunter-web
+    command: npm run start
+    ports:
+      - "3000:3000"
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    restart: unless-stopped
+
+  worker:
+    build: .
+    image: bughunter-web
+    command: npm run worker
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
