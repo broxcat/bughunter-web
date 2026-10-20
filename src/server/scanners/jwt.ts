@@ -129,18 +129,35 @@ function provesAuthBypass(forged: ProbeResult, anon: ProbeResult): { proven: boo
   if (isJson && JSON_ERROR_RE.test(forged.body.slice(0, 500))) {
     return { proven: false, reason: "forged response is a JSON error/login shell, not authenticated data" };
   }
-  // Distinct from the anonymous baseline (which should have been a challenge) AND
-  // a non-error body: the forged alg:none token was accepted.
-  const anonWasChallenge = anon.status === 401 || anon.status === 403 || (anon.status >= 300 && anon.status < 400);
-  if (anonWasChallenge || norm(anon.body) !== norm(forged.body)) {
+  // Strongest proof: a hard challenge anonymously (401/403/redirect) flipping to a
+  // 200 non-error body under the forged token — the signature went unchecked.
+  const anonWasChallenge =
+    anon.status === 401 || anon.status === 403 || (anon.status >= 300 && anon.status < 400);
+  if (anonWasChallenge) {
     return {
       proven: true,
       reason:
-        `anonymous request to this endpoint returned ${anon.status} (challenge) while the ` +
-        `alg:none-forged token returned 200 with distinct, non-error content`,
+        `anonymous request returned ${anon.status} (challenge) while the alg:none-forged ` +
+        `token returned 200 with non-error content`,
     };
   }
-  return { proven: false, reason: "could not establish the endpoint was protected; not confirming" };
+  // Soft auth (a 200 that is really a login/landing shell): confirm ONLY on a strong
+  // data signal — real JSON that differs from the anonymous view. A bare HTML body
+  // diff (personalization, CSRF tokens, timestamps) is NOT proof of a bypass.
+  if (isJson && norm(anon.body) !== norm(forged.body)) {
+    return {
+      proven: true,
+      reason:
+        `the anonymous JSON view differs from the forged-token response — the endpoint ` +
+        `gates data by token and accepted alg:none`,
+    };
+  }
+  return {
+    proven: false,
+    reason:
+      "endpoint did not challenge anonymously and no authenticated-data signal distinguished " +
+      "the forged response — not confirming (verify manually)",
+  };
 }
 
 /** Build the request headers that carry `token` over the given channel. */

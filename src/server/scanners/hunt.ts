@@ -15,6 +15,9 @@ import { runCsrf } from "./csrf";
 import { runSqli } from "./sqli";
 import { runCommandInjection } from "./commandInjection";
 import { runSsti } from "./ssti";
+import { runCors } from "./cors";
+import { runJwt } from "./jwt";
+import { runOauth } from "./oauth";
 
 const MINUTE = 60_000;
 
@@ -28,6 +31,9 @@ const FAMILIES: ReadonlyArray<readonly [string, (ctx: ScanContext) => Promise<vo
   ["sqli", runSqli],
   ["command-injection", runCommandInjection],
   ["ssti", runSsti],
+  ["cors", runCors],
+  ["jwt", runJwt],
+  ["oauth", runOauth],
 ];
 
 export async function runHunt(host: string, scanRunId: string): Promise<void> {
