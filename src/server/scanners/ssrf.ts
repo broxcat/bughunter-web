@@ -25,10 +25,19 @@
 import { probe, type ProbeResult } from "./http";
 import { logLine, recordFinding, type ScanContext } from "./context";
 import { resolveActiveBrain } from "@/server/brain";
+import { generateOobToken, checkOobHit } from "@/server/oob";
 import type { Severity } from "@prisma/client";
 
 const MAX_CANDIDATES = 8;
 const PROBE_TIMEOUT = 10_000;
+
+// OOB blind-SSRF confirmation via Agent N's catcher (@/server/oob). We inject a
+// per-candidate callback URL into every capped candidate FIRST, then do a
+// SINGLE wait, then correlate each token against the shared OobHit table — so
+// the total added time is bounded to ~OOB_WAIT_MS regardless of candidate
+// count, not OOB_WAIT_MS × N.
+const MAX_OOB_CONFIRMATIONS = 5;
+const OOB_WAIT_MS = 12_000;
 
 // SSRF-prone parameter names (SKILL §4 injection points + common synonyms).
 const SSRF_PARAM_RE =
@@ -254,6 +263,18 @@ export async function runSsrf(ctx: ScanContext): Promise<void> {
       .catch(() => "");
   }
 
+  // Blind candidates that reached the OOB path. We collect them (firing each
+  // injection as we go) so a SINGLE OOB_WAIT_MS wait covers all of them before
+  // we correlate — see MAX_OOB_CONFIRMATIONS / OOB_WAIT_MS above.
+  const pendingBlind: Array<{
+    c: Candidate;
+    baseDescription: string;
+    token: string | null; // minted+injected token, or null if not attempted
+    injectedAt: number | null; // Date.now() at injection, for the delay note
+    note: string; // extra note (cap-reached / inject error) appended to desc
+  }> = [];
+  let oobAttempts = 0;
+
   for (const c of candidates) {
     // --- Response-based escalation attempts (metadata = the one real proof). ---
     let escalated = false;
@@ -307,16 +328,108 @@ export async function runSsrf(ctx: ScanContext): Promise<void> {
       /* best-effort */
     }
 
+    const baseDescription =
+      `The "${c.param}" parameter (found in a ${c.via}) matches a known SSRF ` +
+      `injection point. ${MANUAL_NOTE}${errorSignal}\n\n${payloadMenu(c.url, c.param)}`;
+
+    // Beyond the per-run cap: record as a plain CANDIDATE (no OOB attempt).
+    if (oobAttempts >= MAX_OOB_CONFIRMATIONS) {
+      pendingBlind.push({
+        c,
+        baseDescription,
+        token: null,
+        injectedAt: null,
+        note: "\n\nOOB confirmation skipped (per-run cap reached).",
+      });
+      continue;
+    }
+
+    // Within the cap: mint a token, inject its callback URL into the suspect
+    // param, and fire the request now. Correlation happens after the loop.
+    // NEVER throw: a mint failure degrades this candidate to CANDIDATE.
+    let token: string | null = null;
+    let injectedAt: number | null = null;
+    let note = "";
+    try {
+      const minted = generateOobToken();
+      token = minted.token;
+      const oobTarget = withParam(c.url, c.param, minted.callbackUrl);
+      injectedAt = Date.now();
+      // A probe error here is non-fatal: the server-side fetch may still have
+      // fired a callback even if our own injection request errored/timed out,
+      // so we keep the token and correlate it later regardless.
+      await probe(oobTarget, { timeoutMs: PROBE_TIMEOUT });
+      oobAttempts += 1;
+    } catch (err) {
+      token = null;
+      injectedAt = null;
+      note =
+        `\n\nOOB confirmation unavailable (${err instanceof Error ? err.message : String(err)}) — ` +
+        `blind SSRF unconfirmed; verify manually.`;
+    }
+    pendingBlind.push({ c, baseDescription, token, injectedAt, note });
+  }
+
+  // --- Fire-all-then-wait-once: one wait covers every injected token. ---
+  if (pendingBlind.some((p) => p.token !== null)) {
+    await new Promise((resolve) => setTimeout(resolve, OOB_WAIT_MS));
+  }
+
+  for (const p of pendingBlind) {
+    const { c } = p;
+    let hit: { receivedAt: Date; sourceIp: string | null; method: string } | null = null;
+    let note = p.note;
+    if (p.token) {
+      try {
+        hit = await checkOobHit(p.token);
+      } catch (err) {
+        hit = null;
+        note +=
+          `\n\nOOB correlation failed (${err instanceof Error ? err.message : String(err)}) — ` +
+          `blind SSRF unconfirmed; verify manually.`;
+      }
+    }
+
+    if (hit) {
+      const delaySec =
+        p.injectedAt != null
+          ? ((hit.receivedAt.getTime() - p.injectedAt) / 1000).toFixed(1)
+          : "?";
+      // Confirmed SSRF: escalate to the same HIGH ssrf.ts uses for a confirmed
+      // SSRF (a blind OOB callback carries no cred/metadata proof, so never
+      // CRITICAL — that stays reserved for the metadata response path).
+      await recordFinding(ctx, {
+        title: `SSRF confirmed via OOB callback — ${c.param} (${c.via})`,
+        vulnClass: "SSRF",
+        severity: "HIGH",
+        confidence: "PROVEN",
+        location: withParam(c.url, c.param, OOB_MARKER),
+        description:
+          `${p.baseDescription}\n\nOOB callback received: method ${hit.method} from ` +
+          `${hit.sourceIp ?? "unknown"} at ${hit.receivedAt.toISOString()} (${delaySec}s after ` +
+          `injection). The scanned target performed a server-side request to the OOB catcher, ` +
+          `confirming blind SSRF.`,
+        evidence: aiHint ? `AI assessment of candidate params:\n${aiHint}` : undefined,
+        oobToken: p.token ?? undefined,
+      });
+      continue;
+    }
+
+    // No hit (or cap-skipped / error): stays a CANDIDATE at INFO as before.
+    const unconfirmed = p.token
+      ? `\n\nNo OOB callback received within ${Math.round(OOB_WAIT_MS / 1000)}s for token ` +
+        `${p.token} — blind SSRF unconfirmed (verify manually / target may lack egress to the ` +
+        `catcher).`
+      : "";
     await recordFinding(ctx, {
       title: `SSRF candidate — ${c.param} (${c.via})`,
       vulnClass: "SSRF",
       severity: "INFO",
       confidence: "CANDIDATE",
       location: withParam(c.url, c.param, OOB_MARKER),
-      description:
-        `The "${c.param}" parameter (found in a ${c.via}) matches a known SSRF ` +
-        `injection point. ${MANUAL_NOTE}${errorSignal}\n\n${payloadMenu(c.url, c.param)}`,
+      description: `${p.baseDescription}${note}${unconfirmed}`,
       evidence: aiHint ? `AI assessment of candidate params:\n${aiHint}` : undefined,
+      oobToken: p.token ?? undefined,
     });
   }
 
