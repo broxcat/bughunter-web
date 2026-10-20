@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import { GATE_QUESTIONS } from "@/lib/gate";
+import {
+  ClassificationChips,
+  FindingClassification,
+} from "@/components/FindingClassification";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -22,6 +26,11 @@ interface Finding {
   evidence: string | null;
   gateStatus: GateStatus;
   killedReason: string | null;
+  cwe: string | null;
+  cvssVector: string | null;
+  cvssScore: number | null;
+  impact: string | null;
+  remediation: string | null;
   oobToken?: string | null;
   oobHits?: { receivedAt: string; sourceIp: string | null; method: string }[];
 }
@@ -314,6 +323,7 @@ export default function FindingsPage({
                             {f.vulnClass}
                           </span>
                         )}
+                        <ClassificationChips f={f} />
                       </div>
                       {f.location && (
                         <p className="mt-1 font-mono text-xs text-muted">
@@ -361,6 +371,12 @@ export default function FindingsPage({
                   {f.gateStatus === "UNVALIDATED" && (
                     <GateForm findingId={f.id} onDone={load} />
                   )}
+
+                  <FindingClassification
+                    key={`${f.id}-${f.cvssVector}-${f.cwe}`}
+                    finding={f}
+                    onSaved={load}
+                  />
                 </Card>
               </li>
             ))}

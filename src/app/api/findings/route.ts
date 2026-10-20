@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { suggestCwe } from "@/lib/cwe";
+import {
+  cvssColumns,
+  cvssVectorField,
+  cweField,
+  reportTextField,
+} from "@/lib/findingClassification";
 
 const createFindingSchema = z.object({
   targetId: z.string().trim().min(1, "targetId is required"),
@@ -12,6 +19,10 @@ const createFindingSchema = z.object({
   description: z.string().trim().min(1).optional(),
   location: z.string().trim().min(1).optional(),
   evidence: z.string().trim().min(1).optional(),
+  cwe: cweField.optional(),
+  cvssVector: cvssVectorField.optional(),
+  impact: reportTextField.min(1).optional(),
+  remediation: reportTextField.min(1).optional(),
 });
 
 // GET /api/findings?targetId=... — list findings for one owned target.
@@ -125,6 +136,10 @@ export async function POST(req: NextRequest) {
       description: parsed.data.description,
       location: parsed.data.location,
       evidence: parsed.data.evidence,
+      cwe: parsed.data.cwe ?? suggestCwe(parsed.data.vulnClass) ?? undefined,
+      ...cvssColumns(parsed.data.cvssVector),
+      impact: parsed.data.impact,
+      remediation: parsed.data.remediation,
       gateStatus: "UNVALIDATED",
     },
   });

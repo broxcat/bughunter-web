@@ -249,6 +249,17 @@ model Finding {
   // OobHit.token row (written by the catcher when the target calls back) CONFIRMS
   // blind SSRF. Nullable, no backfill — most findings never use OOB.
   oobToken     String?
+  // Industry-standard classification, all optional and complementary to
+  // `severity` (which stays the source of truth for badges/filters).
+  // cwe: e.g. "CWE-79"; pre-filled from vulnClass at creation, editable.
+  cwe          String?
+  // CVSS v3.1 base vector, e.g. "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H".
+  // cvssScore is always recomputed server-side from the vector.
+  cvssVector   String?
+  cvssScore    Float?
+  // Manually written report sections; the report shows a placeholder when empty.
+  impact       String?    @db.Text
+  remediation  String?    @db.Text
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 

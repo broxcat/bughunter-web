@@ -6,6 +6,7 @@
 // scan run; log lines go to ScanLog + the live SSE bus.
 
 import { prisma } from "@/lib/prisma";
+import { suggestCwe } from "@/lib/cwe";
 import { publishScanLog } from "@/server/queue/logBus";
 import { triageFinding } from "@/server/brain";
 import type { Severity, FindingConfidence } from "@prisma/client";
@@ -135,6 +136,8 @@ export async function recordFinding(
       location: f.location,
       evidence: f.evidence,
       oobToken: f.oobToken,
+      // Suggested from the final vulnClass; editable afterwards.
+      cwe: suggestCwe(vulnClass) ?? undefined,
       gateStatus: "UNVALIDATED",
     },
   });
