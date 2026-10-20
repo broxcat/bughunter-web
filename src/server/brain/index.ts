@@ -16,6 +16,16 @@ export type { BrainConfig, ChatOptions } from "./client";
 export { PROVIDERS } from "./providers";
 export type { AiProviderName, ProviderKind } from "./providers";
 
+// High-level, DB-driven helpers (see ./triage). Additive — the exports above
+// are unchanged.
+export { triageFinding, interpretScan, writeReport } from "./triage";
+export type {
+  TriageFindingInput,
+  TriageSuggestion,
+  InterpretFinding,
+  WriteReportInput,
+} from "./triage";
+
 /**
  * Build a BrainClient for a user's active provider, or null if they have none.
  * OLLAMA is keyless, so a null cipher is fine there; any other provider with a
