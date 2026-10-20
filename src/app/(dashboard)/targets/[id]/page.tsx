@@ -32,6 +32,16 @@ interface TargetDetail {
   findings: { id: string }[];
 }
 
+// A saved TARGET credential as surfaced to the client: booleans only, NEVER the
+// decrypted cookies/token (same rule as hasApiKey on AI providers).
+interface TargetCredential {
+  id: string;
+  label: string;
+  createdAt: string;
+  hasCookies: boolean;
+  hasToken: boolean;
+}
+
 const STATUS_TONE: Record<string, BadgeTone> = {
   QUEUED: "neutral",
   RUNNING: "info",
@@ -53,6 +63,15 @@ export default function TargetDetailPage({
   const [starting, setStarting] = useState<ScanType | null>(null);
   const [openRun, setOpenRun] = useState<string | null>(null);
 
+  // Target-credentials section state (cookies/bearer token FOR THE TARGET app).
+  const [credentials, setCredentials] = useState<TargetCredential[]>([]);
+  const [credLabel, setCredLabel] = useState("");
+  const [credCookies, setCredCookies] = useState("");
+  const [credToken, setCredToken] = useState("");
+  const [savingCred, setSavingCred] = useState(false);
+  const [deletingCred, setDeletingCred] = useState<string | null>(null);
+  const [credError, setCredError] = useState<string | null>(null);
+
   async function load() {
     try {
       const res = await fetch(`/api/targets/${id}`);
@@ -66,10 +85,106 @@ export default function TargetDetailPage({
     }
   }
 
+  async function loadCredentials() {
+    try {
+      const res = await fetch(`/api/targets/${id}/credentials`);
+      if (!res.ok) throw new Error(`Failed to load credentials (${res.status})`);
+      const j = await res.json();
+      setCredentials(j.credentials ?? []);
+    } catch (e) {
+      setCredError(
+        e instanceof Error ? e.message : "Failed to load credentials",
+      );
+    }
+  }
+
   useEffect(() => {
     load();
+    loadCredentials();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  async function saveCredential(e: React.FormEvent) {
+    e.preventDefault();
+    setCredError(null);
+
+    const label = credLabel.trim();
+    const cookies = credCookies.trim();
+    const bearerToken = credToken.trim();
+    if (!label) {
+      setCredError("A label is required.");
+      return;
+    }
+    if (!cookies && !bearerToken) {
+      setCredError("Provide session cookies and/or a bearer token.");
+      return;
+    }
+
+    // Accept the cookies textarea as either JSON ({"k":"v"}) or a raw cookie
+    // string ("k=v; k2=v2"); the API parses a raw string into a map.
+    let cookiesPayload: Record<string, string> | string | undefined;
+    if (cookies) {
+      if (cookies.startsWith("{")) {
+        try {
+          cookiesPayload = JSON.parse(cookies);
+        } catch {
+          setCredError("Cookies look like JSON but failed to parse.");
+          return;
+        }
+      } else {
+        cookiesPayload = cookies;
+      }
+    }
+
+    setSavingCred(true);
+    try {
+      const res = await fetch(`/api/targets/${id}/credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label,
+          ...(cookiesPayload !== undefined ? { cookies: cookiesPayload } : {}),
+          ...(bearerToken ? { bearerToken } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error ?? `Failed to save credential (${res.status})`);
+      }
+      setCredLabel("");
+      setCredCookies("");
+      setCredToken("");
+      await loadCredentials();
+    } catch (e) {
+      setCredError(
+        e instanceof Error ? e.message : "Failed to save credential",
+      );
+    } finally {
+      setSavingCred(false);
+    }
+  }
+
+  async function deleteCredential(credentialId: string) {
+    setCredError(null);
+    setDeletingCred(credentialId);
+    try {
+      const res = await fetch(
+        `/api/targets/${id}/credentials?credentialId=${encodeURIComponent(credentialId)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error ?? `Failed to delete credential (${res.status})`);
+      }
+      await loadCredentials();
+    } catch (e) {
+      setCredError(
+        e instanceof Error ? e.message : "Failed to delete credential",
+      );
+    } finally {
+      setDeletingCred(null);
+    }
+  }
 
   async function startScan(type: ScanType) {
     setStarting(type);
@@ -211,6 +326,132 @@ export default function TargetDetailPage({
             ))}
           </ul>
         )}
+      </div>
+
+      {/*
+        Target credentials — cookies / bearer token FOR THE TARGET you are
+        testing (the bug-bounty program's app), NEVER your bughunter-web login.
+        Stored encrypted server-side; only presence booleans are ever returned.
+        Compliance caveat: the operator is responsible for ensuring these test
+        accounts and their use comply with that program's rules of engagement.
+      */}
+      <div className="space-y-3">
+        <h2 className="text-sm font-medium text-foreground">
+          Target credentials
+        </h2>
+        <Card className="space-y-5 p-4">
+          <div className="rounded-md border border-border-strong bg-surface-2 px-3 py-2 text-xs text-muted">
+            These are credentials for the <strong>TARGET</strong> you are
+            testing (the bug-bounty program&apos;s app) — never your
+            bughunter-web login. They let the authenticated scanners act as a
+            real test account. You are responsible for ensuring these test
+            accounts and their use comply with that program&apos;s rules.
+          </div>
+
+          {credError && (
+            <div
+              role="alert"
+              className="flex items-center gap-2 rounded-md border border-border-strong bg-surface-2 px-3 py-2 text-sm text-foreground"
+            >
+              <Badge tone="critical">Error</Badge>
+              <span>{credError}</span>
+            </div>
+          )}
+
+          <form onSubmit={saveCredential} className="space-y-3">
+            <div className="space-y-1">
+              <label
+                htmlFor="cred-label"
+                className="block text-xs font-medium text-foreground"
+              >
+                Label
+              </label>
+              <input
+                id="cred-label"
+                type="text"
+                value={credLabel}
+                onChange={(e) => setCredLabel(e.target.value)}
+                placeholder="e.g. test-user-A session"
+                className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
+              />
+            </div>
+            <div className="space-y-1">
+              <label
+                htmlFor="cred-cookies"
+                className="block text-xs font-medium text-foreground"
+              >
+                Session cookies{" "}
+                <span className="text-subtle">
+                  (JSON {`{"name":"value"}`} or a cookie string k=v; k2=v2)
+                </span>
+              </label>
+              <textarea
+                id="cred-cookies"
+                value={credCookies}
+                onChange={(e) => setCredCookies(e.target.value)}
+                rows={3}
+                placeholder={`{"session":"abc123"}  or  session=abc123; csrf=xyz`}
+                className="w-full rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs text-foreground placeholder:text-subtle"
+              />
+            </div>
+            <div className="space-y-1">
+              <label
+                htmlFor="cred-token"
+                className="block text-xs font-medium text-foreground"
+              >
+                Bearer token{" "}
+                <span className="text-subtle">
+                  (optional; sent as Authorization: Bearer …)
+                </span>
+              </label>
+              <input
+                id="cred-token"
+                type="text"
+                value={credToken}
+                onChange={(e) => setCredToken(e.target.value)}
+                placeholder="eyJhbGciOi…"
+                className="w-full rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs text-foreground placeholder:text-subtle"
+              />
+            </div>
+            <Button type="submit" variant="primary" disabled={savingCred}>
+              {savingCred ? "Saving…" : "Add credential"}
+            </Button>
+          </form>
+
+          <div className="space-y-2">
+            {credentials.length === 0 ? (
+              <p className="text-sm text-muted">No credentials saved yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {credentials.map((cred) => (
+                  <li
+                    key={cred.id}
+                    className="flex items-center justify-between gap-4 rounded-md border border-border bg-surface px-3 py-2"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium text-foreground">
+                        {cred.label}
+                      </span>
+                      {cred.hasCookies && <Badge tone="info">cookies</Badge>}
+                      {cred.hasToken && <Badge tone="brand">token</Badge>}
+                      <span className="text-xs text-subtle">
+                        {new Date(cred.createdAt).toLocaleString()}
+                      </span>
+                    </div>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => deleteCredential(cred.id)}
+                      disabled={deletingCred === cred.id}
+                    >
+                      {deletingCred === cred.id ? "Removing…" : "Delete"}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Card>
       </div>
     </div>
   );

@@ -134,14 +134,36 @@ model Target {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scope    Scope     @relation(fields: [scopeId], references: [id], onDelete: Restrict)
-  scanRuns ScanRun[]
-  findings Finding[]
-  reports  Report[]
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scope       Scope              @relation(fields: [scopeId], references: [id], onDelete: Restrict)
+  scanRuns    ScanRun[]
+  findings    Finding[]
+  reports     Report[]
+  credentials TargetCredential[]
 
   @@index([userId])
   @@index([scopeId])
+}
+
+// ---------------------------------------------------------------------------
+// Target credentials — session cookies / bearer token FOR THE SCANNED TARGET
+// (a bug-bounty program's app), NEVER the bughunter-web login. They let the
+// BOLA/CSRF scanners authenticate as real test accounts on the target. Stored
+// encrypted (AES-256-GCM) only, same invariant as AiProviderConfig.apiKeyCipher:
+// the cipher is NEVER returned to any client and decryption happens server-side
+// in-process at request time. At least one of cookiesCipher/headerCipher must be
+// set per row (enforced in the API, not the DB).
+model TargetCredential {
+  id            String   @id @default(cuid())
+  targetId      String
+  label         String
+  cookiesCipher String?  @db.Text // AES-GCM of JSON.stringify(cookies map)
+  headerCipher  String?  @db.Text // AES-GCM of a bearer token (Authorization value)
+  createdAt     DateTime @default(now())
+
+  target Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([targetId])
 }
 
 // ---------------------------------------------------------------------------
