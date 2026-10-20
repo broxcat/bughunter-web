@@ -50,13 +50,17 @@ let prisma: Mod["prisma"];
 let targetsPost: typeof import("@/app/api/targets/route").POST;
 let scanRunsPost: typeof import("@/app/api/scan-runs/route").POST;
 let reportsPost: typeof import("@/app/api/reports/route").POST;
+let scopesPost: typeof import("@/app/api/scopes/route").POST;
+let scopePatch: typeof import("@/app/api/scopes/[id]/route").PATCH;
+let findingsPost: typeof import("@/app/api/findings/route").POST;
+let findingPatch: typeof import("@/app/api/findings/[id]/route").PATCH;
 let NextRequest: typeof import("next/server").NextRequest;
 
 let userId: string;
 
-function req(url: string, body: unknown) {
+function req(url: string, body: unknown, method = "POST") {
   return new NextRequest(url, {
-    method: "POST",
+    method,
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -74,6 +78,10 @@ d("API route authorization (integration)", () => {
     ({ POST: targetsPost } = await import("@/app/api/targets/route"));
     ({ POST: scanRunsPost } = await import("@/app/api/scan-runs/route"));
     ({ POST: reportsPost } = await import("@/app/api/reports/route"));
+    ({ POST: scopesPost } = await import("@/app/api/scopes/route"));
+    ({ PATCH: scopePatch } = await import("@/app/api/scopes/[id]/route"));
+    ({ POST: findingsPost } = await import("@/app/api/findings/route"));
+    ({ PATCH: findingPatch } = await import("@/app/api/findings/[id]/route"));
     ({ NextRequest } = await import("next/server"));
 
     // Clean slate, FK-safe order.
@@ -186,5 +194,142 @@ d("API route authorization (integration)", () => {
     const t2 = await r2.json();
     expect(t2.host).toBe("ex.com");
     expect(t2.scheme).toBeNull();
+  });
+  it("POST /api/scopes stores the program policy but still creates the scope PENDING", async () => {
+    const res = await scopesPost(
+      req("http://localhost/api/scopes", {
+        hostPattern: "*.yeswehack-prog.com",
+        programName: "Prog",
+        platform: "YESWEHACK",
+        outOfScope: "staging.*, DoS",
+        rulesOfEngagement: "No automated scanning above 5 req/s",
+        status: "APPROVED", // must be ignored
+      }),
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.status).toBe("PENDING");
+    expect(body.platform).toBe("YESWEHACK");
+    expect(body.outOfScope).toBe("staging.*, DoS");
+    expect(body.contactInfo).toBeNull();
+  });
+
+  it("PATCH /api/scopes/[id] edits policy only and cannot approve or retarget a scope", async () => {
+    const scope = await prisma.scope.create({
+      data: { userId, hostPattern: "*.patch.com", status: "PENDING" },
+    });
+    const res = await scopePatch(
+      req(
+        `http://localhost/api/scopes/${scope.id}`,
+        { safeHarbor: "Good-faith research is protected", status: "APPROVED", hostPattern: "*.evil.com" },
+        "PATCH",
+      ),
+      { params: Promise.resolve({ id: scope.id }) },
+    );
+    expect(res.status).toBe(200);
+    const after = await prisma.scope.findUniqueOrThrow({ where: { id: scope.id } });
+    expect(after.safeHarbor).toBe("Good-faith research is protected");
+    expect(after.status).toBe("PENDING");
+    expect(after.hostPattern).toBe("*.patch.com");
+  });
+
+  it("POST /api/findings pre-fills the CWE from vulnClass and derives the CVSS score server-side", async () => {
+    const scope = await prisma.scope.create({
+      data: { userId, hostPattern: "*.cvss.com", status: "APPROVED" },
+    });
+    const target = await prisma.target.create({
+      data: { userId, scopeId: scope.id, host: "cvss.com" },
+    });
+    const res = await findingsPost(
+      req("http://localhost/api/findings", {
+        targetId: target.id,
+        title: "XSS",
+        vulnClass: "XSS",
+        cvssVector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+      }),
+    );
+    expect(res.status).toBe(201);
+    const f = await res.json();
+    expect(f.cwe).toBe("CWE-79");
+    expect(f.cvssScore).toBe(6.1);
+    expect(f.severity).toBe("INFO"); // CVSS never changes severity
+    expect(f.gateStatus).toBe("UNVALIDATED");
+  });
+
+  it("PATCH /api/findings/[id] validates input and never touches severity or gate status", async () => {
+    const scope = await prisma.scope.create({
+      data: { userId, hostPattern: "*.fpatch.com", status: "APPROVED" },
+    });
+    const target = await prisma.target.create({
+      data: { userId, scopeId: scope.id, host: "fpatch.com" },
+    });
+    const finding = await prisma.finding.create({
+      data: { targetId: target.id, title: "x", severity: "LOW", gateStatus: "UNVALIDATED" },
+    });
+    const patch = (body: unknown) =>
+      findingPatch(req(`http://localhost/api/findings/${finding.id}`, body, "PATCH"), {
+        params: Promise.resolve({ id: finding.id }),
+      });
+
+    expect((await patch({ cvssVector: "CVSS:3.1/AV:N" })).status).toBe(400);
+    expect((await patch({ cwe: "79" })).status).toBe(400);
+
+    const ok = await patch({
+      cwe: "CWE-352",
+      cvssVector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      impact: "Full compromise",
+      severity: "CRITICAL", // ignored
+      gateStatus: "PASSED", // ignored
+    });
+    expect(ok.status).toBe(200);
+    const after = await prisma.finding.findUniqueOrThrow({ where: { id: finding.id } });
+    expect(after.cvssScore).toBe(9.8);
+    expect(after.cwe).toBe("CWE-352");
+    expect(after.severity).toBe("LOW");
+    expect(after.gateStatus).toBe("UNVALIDATED");
+
+    // null clears both vector and derived score.
+    await patch({ cvssVector: null });
+    const cleared = await prisma.finding.findUniqueOrThrow({ where: { id: finding.id } });
+    expect(cleared.cvssVector).toBeNull();
+    expect(cleared.cvssScore).toBeNull();
+  });
+
+  it("POST /api/reports renders the standard skeleton with CWE, CVSS and OOB proof of concept", async () => {
+    const scope = await prisma.scope.create({
+      data: { userId, hostPattern: "*.skel.com", status: "APPROVED" },
+    });
+    const target = await prisma.target.create({
+      data: { userId, scopeId: scope.id, host: "skel.com" },
+    });
+    const token = `tok-${Date.now()}`;
+    await prisma.oobHit.create({ data: { token, method: "GET", sourceIp: "203.0.113.9" } });
+    const finding = await prisma.finding.create({
+      data: {
+        targetId: target.id,
+        title: "Blind SSRF",
+        vulnClass: "SSRF",
+        severity: "HIGH",
+        gateStatus: "PASSED",
+        oobToken: token,
+        cwe: "CWE-918",
+        cvssVector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N",
+        cvssScore: 8.6,
+      },
+    });
+    const res = await reportsPost(
+      req("http://localhost/api/reports", {
+        title: "SSRF report",
+        platform: "YESWEHACK",
+        findingIds: [finding.id],
+      }),
+    );
+    expect(res.status).toBe(201);
+    const { markdown } = await res.json();
+    expect(markdown).toContain("YesWeHack Report");
+    expect(markdown).toContain("CWE: CWE-918");
+    expect(markdown).toContain("CVSS 3.1 Score: 8.6 (High)");
+    expect(markdown).toContain("GET from 203.0.113.9");
+    expect(markdown).toContain("À compléter : impact business/technique démontré");
   });
 });

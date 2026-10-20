@@ -1,13 +1,34 @@
-// Report rendering — one markdown template per bounty platform. Impact-first:
-// the reader learns what an attacker can do before anything else, and the prose
-// states facts ("an attacker can…"), never "could potentially".
+// Report rendering — one markdown template per bounty platform. Every finding
+// follows the same industry-standard skeleton:
+//
+//   Title
+//   CWE / CVSS 3.1 lines
+//   Description
+//   Impact
+//   Proof of Concept
+//   Remediation
+//
+// Platforms differ only in their small formatting specifics (heading text and the
+// metadata line under the title). Sections that were never written are filled
+// with an explicit placeholder rather than invented prose, and the prose that is
+// present states facts, never "could potentially".
+
+import { cvssRating } from "@/lib/cvss";
+import { cweUrl } from "@/lib/cwe";
 
 export type ReportPlatform =
   | "HACKERONE"
   | "BUGCROWD"
   | "INTIGRITI"
+  | "YESWEHACK"
   | "IMMUNEFI"
   | "GENERIC";
+
+export interface ReportOobHit {
+  receivedAt: Date | string;
+  sourceIp?: string | null;
+  method: string;
+}
 
 export interface ReportFinding {
   title: string;
@@ -15,6 +36,14 @@ export interface ReportFinding {
   severity?: string | null;
   description?: string | null;
   evidence?: string | null;
+  location?: string | null;
+  cwe?: string | null;
+  cvssVector?: string | null;
+  cvssScore?: number | null;
+  impact?: string | null;
+  remediation?: string | null;
+  /** Correlated out-of-band callbacks (SSRF); part of the PoC when present. */
+  oobHits?: ReportOobHit[];
 }
 
 export interface ReportInput {
@@ -22,101 +51,141 @@ export interface ReportInput {
   findings: ReportFinding[];
 }
 
+export const IMPACT_PLACEHOLDER = "À compléter : impact business/technique démontré";
+export const REMEDIATION_PLACEHOLDER = "Remediation guidance not yet documented.";
+export const POC_PLACEHOLDER = "À compléter : étapes de reproduction (requêtes / réponses).";
+export const DESCRIPTION_PLACEHOLDER = "À compléter : description de la vulnérabilité.";
+
 function sev(f: ReportFinding): string {
   return (f.severity ?? "INFO").toUpperCase();
 }
 
-function section(label: string, body?: string | null): string {
-  const content = (body ?? "").trim();
-  return `**${label}:** ${content.length ? content : "_See evidence below._"}`;
+function text(v?: string | null): string {
+  return (v ?? "").trim();
 }
 
-// --- Per-finding bodies, shaped to each platform's expected report fields. ---
+function cweLine(f: ReportFinding): string {
+  const cwe = text(f.cwe);
+  if (!cwe) return "CWE: not yet assigned";
+  const url = cweUrl(cwe);
+  return url ? `CWE: ${cwe} — [${url.replace("https://", "")}](${url})` : `CWE: ${cwe}`;
+}
 
-function hackeroneFinding(f: ReportFinding, i: number): string {
+function cvssLine(f: ReportFinding): string {
+  const vector = text(f.cvssVector);
+  if (f.cvssScore === null || f.cvssScore === undefined || !vector) {
+    return "CVSS 3.1 Score: not yet scored";
+  }
+  return `CVSS 3.1 Score: ${f.cvssScore.toFixed(1)} (${cvssRating(f.cvssScore)}) — Vector: ${vector}`;
+}
+
+function oobLines(hits: ReportOobHit[]): string {
+  const lines = hits.map((h) => {
+    const at = h.receivedAt instanceof Date ? h.receivedAt : new Date(h.receivedAt);
+    return `- ${h.method} from ${h.sourceIp ?? "unknown"} at ${at.toISOString()}`;
+  });
   return [
-    `### ${i + 1}. ${f.title}`,
-    `**Severity:** ${sev(f)}${f.vulnClass ? `  ·  **Weakness:** ${f.vulnClass}` : ""}`,
+    `Out-of-band callback${hits.length === 1 ? "" : "s"} received by the self-hosted catcher (${hits.length}):`,
+    ...lines,
+  ].join("\n");
+}
+
+/**
+ * Proof of Concept = the confirmation data already stored on the finding: its
+ * location, its evidence (for XSS this is the confirmed sink evidence), and any
+ * correlated OOB callbacks (SSRF). Empty ⇒ explicit placeholder.
+ */
+function proofOfConcept(f: ReportFinding): string {
+  const parts: string[] = [];
+  if (text(f.location)) parts.push(`Affected location: \`${text(f.location)}\``);
+  if (text(f.evidence)) parts.push(text(f.evidence));
+  if (f.oobHits && f.oobHits.length > 0) parts.push(oobLines(f.oobHits));
+  return parts.length ? parts.join("\n\n") : POC_PLACEHOLDER;
+}
+
+/** The shared per-finding skeleton. `heading` and `meta` are the platform bits. */
+function renderFinding(
+  f: ReportFinding,
+  heading: string,
+  meta: string,
+): string {
+  return [
+    heading,
+    meta,
     "",
-    "#### Summary",
-    (f.description ?? "").trim() ||
-      "An attacker can abuse this issue against the target as described below.",
+    cweLine(f),
+    cvssLine(f),
     "",
-    "#### Steps To Reproduce",
-    (f.evidence ?? "").trim() || "_Reproduction steps / request captured in the evidence bundle._",
+    "#### Description",
+    "",
+    text(f.description) || DESCRIPTION_PLACEHOLDER,
     "",
     "#### Impact",
-    `This gives an attacker a concrete, ${sev(f).toLowerCase()}-severity foothold against the target and its users.`,
-  ].join("\n");
+    "",
+    text(f.impact) || IMPACT_PLACEHOLDER,
+    "",
+    "#### Proof of Concept",
+    "",
+    proofOfConcept(f),
+    "",
+    "#### Remediation",
+    "",
+    text(f.remediation) || REMEDIATION_PLACEHOLDER,
+  ]
+    .filter((line, i, all) => !(line === "" && all[i - 1] === ""))
+    .join("\n");
+}
+
+// --- Per-platform headings + metadata line (the platform-specific formatting). ---
+
+function hackeroneFinding(f: ReportFinding, i: number): string {
+  return renderFinding(
+    f,
+    `### ${i + 1}. ${f.title}`,
+    `**Severity:** ${sev(f)}${f.vulnClass ? `  ·  **Weakness:** ${f.vulnClass}` : ""}`,
+  );
 }
 
 function bugcrowdFinding(f: ReportFinding, i: number): string {
-  return [
+  return renderFinding(
+    f,
     `### ${i + 1}. ${f.title} (${sev(f)})`,
     f.vulnClass ? `VRT / Bug class: ${f.vulnClass}` : "",
-    "",
-    section("Description", f.description),
-    "",
-    section("Proof of Concept", f.evidence),
-    "",
-    section(
-      "Impact",
-      `An attacker can exploit this to achieve ${sev(f).toLowerCase()}-severity impact on the target.`,
-    ),
-  ]
-    .filter(Boolean)
-    .join("\n");
+  );
 }
 
 function intigritiFinding(f: ReportFinding, i: number): string {
-  return [
+  return renderFinding(
+    f,
     `### ${i + 1}. ${f.title}`,
     `Severity: ${sev(f)}${f.vulnClass ? ` — ${f.vulnClass}` : ""}`,
-    "",
-    "**Description of the vulnerability**",
-    (f.description ?? "").trim() || "The target is affected as detailed below.",
-    "",
-    "**Proof of concept**",
-    (f.evidence ?? "").trim() || "_Evidence attached._",
-    "",
-    "**Impact**",
-    `An attacker exploiting this achieves ${sev(f).toLowerCase()}-severity impact against the target.`,
-  ].join("\n");
+  );
+}
+
+function yeswehackFinding(f: ReportFinding, i: number): string {
+  return renderFinding(
+    f,
+    `### ${i + 1}. ${f.title}`,
+    `**Severity:** ${sev(f)}${f.vulnClass ? `  ·  **Bug type:** ${f.vulnClass}` : ""}`,
+  );
 }
 
 function immunefiFinding(f: ReportFinding, i: number): string {
-  return [
+  return renderFinding(
+    f,
     `### ${i + 1}. ${f.title}`,
     `**Severity:** ${sev(f)}${f.vulnClass ? `  ·  **Class:** ${f.vulnClass}` : ""}`,
-    "",
-    "#### Vulnerability Details",
-    (f.description ?? "").trim() || "See the proof of concept below.",
-    "",
-    "#### Proof of Concept",
-    (f.evidence ?? "").trim() || "_PoC provided in the evidence bundle._",
-    "",
-    "#### Impact in Production",
-    `An attacker exploiting this on-chain/in-production causes ${sev(f).toLowerCase()}-severity loss or compromise.`,
-  ].join("\n");
+  );
 }
 
 function genericFinding(f: ReportFinding, i: number): string {
-  return [
+  return renderFinding(
+    f,
     `### ${i + 1}. ${f.title}`,
-    `- Severity: ${sev(f)}`,
-    f.vulnClass ? `- Class: ${f.vulnClass}` : "",
-    "",
-    section("Description", f.description),
-    "",
-    section("Evidence", f.evidence),
-    "",
-    section(
-      "Impact",
-      `An attacker can exploit this for ${sev(f).toLowerCase()}-severity impact.`,
-    ),
-  ]
-    .filter(Boolean)
-    .join("\n");
+    [`- Severity: ${sev(f)}`, f.vulnClass ? `- Class: ${f.vulnClass}` : ""]
+      .filter(Boolean)
+      .join("\n"),
+  );
 }
 
 const RENDERERS: Record<
@@ -126,14 +195,15 @@ const RENDERERS: Record<
   HACKERONE: { heading: "HackerOne Report", finding: hackeroneFinding },
   BUGCROWD: { heading: "Bugcrowd Submission", finding: bugcrowdFinding },
   INTIGRITI: { heading: "Intigriti Submission", finding: intigritiFinding },
+  YESWEHACK: { heading: "YesWeHack Report", finding: yeswehackFinding },
   IMMUNEFI: { heading: "Immunefi Bug Report", finding: immunefiFinding },
   GENERIC: { heading: "Security Report", finding: genericFinding },
 };
 
 /**
- * Render a full markdown report for one platform. Impact-first, one section
- * per finding. Only findings that have passed the gate should ever reach here
- * (enforced by the API layer).
+ * Render a full markdown report for one platform, one section per finding. Only
+ * findings that have passed the gate should ever reach here (enforced by the API
+ * layer).
  */
 export function renderReport(platform: ReportPlatform, input: ReportInput): string {
   const r = RENDERERS[platform] ?? RENDERERS.GENERIC;

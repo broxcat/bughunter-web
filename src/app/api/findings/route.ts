@@ -3,6 +3,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { suggestCwe } from "@/lib/cwe";
+import { loadOobHitsByToken } from "@/lib/oobHits";
 import {
   cvssColumns,
   cvssVectorField,
@@ -57,27 +58,7 @@ export async function GET(req: NextRequest) {
     .map((f) => f.oobToken)
     .filter((t): t is string => t !== null && t !== undefined);
 
-  const hitsByToken = new Map<
-    string,
-    { receivedAt: Date; sourceIp: string | null; method: string }[]
-  >();
-
-  if (tokens.length > 0) {
-    const hits = await prisma.oobHit.findMany({
-      where: { token: { in: tokens } },
-      orderBy: { receivedAt: "asc" },
-      select: { token: true, receivedAt: true, sourceIp: true, method: true },
-    });
-    for (const h of hits) {
-      const list = hitsByToken.get(h.token) ?? [];
-      list.push({
-        receivedAt: h.receivedAt,
-        sourceIp: h.sourceIp,
-        method: h.method,
-      });
-      hitsByToken.set(h.token, list);
-    }
-  }
+  const hitsByToken = await loadOobHitsByToken(tokens);
 
   const withHits = findings.map((f) => ({
     ...f,

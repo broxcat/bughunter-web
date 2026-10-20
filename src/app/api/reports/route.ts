@@ -2,11 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { loadOobHitsByToken } from "@/lib/oobHits";
 import { renderReport, type ReportFinding } from "@/lib/reportTemplates";
 
 const createReportSchema = z.object({
   title: z.string().trim().min(1, "title is required"),
-  platform: z.enum(["HACKERONE", "BUGCROWD", "INTIGRITI", "IMMUNEFI", "GENERIC"]),
+  platform: z.enum([
+    "HACKERONE",
+    "BUGCROWD",
+    "INTIGRITI",
+    "YESWEHACK",
+    "IMMUNEFI",
+    "GENERIC",
+  ]),
   findingIds: z.array(z.string().trim().min(1)).min(1, "at least one finding is required"),
 });
 
@@ -70,6 +78,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // SSRF proof of concept includes the correlated out-of-band callbacks.
+  const hitsByToken = await loadOobHitsByToken(
+    findings.map((f) => f.oobToken).filter((t): t is string => !!t),
+  );
+
   // Render in the requested-id order for a stable report.
   const byId = new Map(findings.map((f) => [f.id, f]));
   const ordered: ReportFinding[] = requestedIds.map((fid) => {
@@ -80,6 +93,13 @@ export async function POST(req: NextRequest) {
       severity: f.severity,
       description: f.description,
       evidence: f.evidence,
+      location: f.location,
+      cwe: f.cwe,
+      cvssVector: f.cvssVector,
+      cvssScore: f.cvssScore,
+      impact: f.impact,
+      remediation: f.remediation,
+      oobHits: f.oobToken ? (hitsByToken.get(f.oobToken) ?? []) : [],
     };
   });
 

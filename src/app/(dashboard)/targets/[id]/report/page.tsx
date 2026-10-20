@@ -6,7 +6,13 @@ import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
-type Platform = "HACKERONE" | "BUGCROWD" | "INTIGRITI" | "IMMUNEFI" | "GENERIC";
+type Platform =
+  | "HACKERONE"
+  | "BUGCROWD"
+  | "INTIGRITI"
+  | "YESWEHACK"
+  | "IMMUNEFI"
+  | "GENERIC";
 
 interface Finding {
   id: string;
@@ -19,6 +25,7 @@ const PLATFORMS: Platform[] = [
   "HACKERONE",
   "BUGCROWD",
   "INTIGRITI",
+  "YESWEHACK",
   "IMMUNEFI",
   "GENERIC",
 ];
