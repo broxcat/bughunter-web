@@ -203,7 +203,10 @@ Respond with ONLY a single JSON object, no prose, no code fences:
 Omit any field you cannot ground in the finding.`;
 
     const reply = await chatWithActiveProvider(userId, BRAIN_SYSTEM, user, {
-      maxTokens: 700,
+      // Triage output (title/vulnClass/suggestedSeverity/summary) is short; 250
+      // tokens is plenty and keeps generation latency under the inline cap in
+      // recordFinding (a 27b model runs ~700 tokens past that cap).
+      maxTokens: 250,
       temperature: 0.1,
     });
     if (!reply) return {};

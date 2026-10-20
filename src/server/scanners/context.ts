@@ -12,8 +12,9 @@ import type { Severity, FindingConfidence } from "@prisma/client";
 
 // Cap on inline LLM enrichment per finding. triageFinding uses the client's
 // default 120s×retries budget; a slow/unreachable provider must never stall the
-// scan, so we race it against this short timeout and persist regardless.
-const ENRICH_TIMEOUT_MS = 12_000;
+// scan, so we race it against this timeout and persist regardless. 20s leaves
+// margin for a cold model while keeping a finding from ever blocking for long.
+const ENRICH_TIMEOUT_MS = 20_000;
 
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
   return Promise.race([
