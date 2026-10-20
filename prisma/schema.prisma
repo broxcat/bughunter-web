@@ -132,6 +132,7 @@ model Target {
   scope    Scope     @relation(fields: [scopeId], references: [id], onDelete: Restrict)
   scanRuns ScanRun[]
   findings Finding[]
+  reports  Report[]
 
   @@index([userId])
   @@index([scopeId])
@@ -186,6 +187,9 @@ model Finding {
   vulnClass    String?
   severity     Severity   @default(INFO)
   description  String?    @db.Text
+  // Where the finding was observed: URL, endpoint, or parameter
+  // (e.g. "/api/users/{id}", "?redirect="). Optional.
+  location     String?
   evidence     String?    @db.Text
   gateStatus   GateStatus @default(UNVALIDATED)
   // JSON: the 7-Question Gate answers.
@@ -209,16 +213,22 @@ model Finding {
 model Report {
   id        String         @id @default(cuid())
   userId    String
+  // Optional direct link to the target the report is about. Reports also reach
+  // their target via items -> finding -> target; this denormalized FK makes
+  // "all reports for this target" a one-hop query.
+  targetId  String?
   title     String
   platform  ReportPlatform @default(GENERIC)
   markdown  String?        @db.Text
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
-  user  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items ReportItem[]
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  target Target?      @relation(fields: [targetId], references: [id], onDelete: SetNull)
+  items  ReportItem[]
 
   @@index([userId])
+  @@index([targetId])
 }
 
 // Join table report <-> finding (PASSED findings only; enforced in the API layer).

@@ -88,9 +88,16 @@ export async function POST(req: NextRequest) {
     findings: ordered,
   });
 
+  // Denormalized link to the report's target. The findings are all owned by the
+  // user and, in the per-target report flow, all share one target — so link it
+  // when unambiguous, otherwise leave null.
+  const targetIds = new Set(findings.map((f) => f.targetId));
+  const targetId = targetIds.size === 1 ? findings[0].targetId : null;
+
   const report = await prisma.report.create({
     data: {
       userId: session.user.id,
+      targetId,
       title: parsed.data.title,
       platform: parsed.data.platform,
       markdown,

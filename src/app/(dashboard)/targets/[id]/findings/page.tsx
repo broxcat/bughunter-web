@@ -13,6 +13,7 @@ interface Finding {
   vulnClass: string | null;
   severity: Severity;
   description: string | null;
+  location: string | null;
   evidence: string | null;
   gateStatus: GateStatus;
   killedReason: string | null;
@@ -104,6 +105,7 @@ export default function FindingsPage({
   const [vulnClass, setVulnClass] = useState("");
   const [severity, setSeverity] = useState<Severity>("INFO");
   const [description, setDescription] = useState("");
+  const [location, setLocation] = useState("");
   const [evidence, setEvidence] = useState("");
 
   async function load() {
@@ -138,6 +140,7 @@ export default function FindingsPage({
           vulnClass: vulnClass || undefined,
           severity,
           description: description || undefined,
+          location: location || undefined,
           evidence: evidence || undefined,
         }),
       });
@@ -149,6 +152,7 @@ export default function FindingsPage({
       setVulnClass("");
       setSeverity("INFO");
       setDescription("");
+      setLocation("");
       setEvidence("");
       await load();
     } catch (e) {
@@ -217,6 +221,12 @@ export default function FindingsPage({
           rows={2}
           className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
         />
+        <input
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          placeholder="Location (URL, endpoint or parameter — e.g. /api/users/{id}, ?redirect=)"
+          className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+        />
         <textarea
           value={evidence}
           onChange={(e) => setEvidence(e.target.value)}
@@ -261,6 +271,11 @@ export default function FindingsPage({
                         </span>
                       )}
                     </div>
+                    {f.location && (
+                      <p className="mt-1 font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                        {f.location}
+                      </p>
+                    )}
                     {f.description && (
                       <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
                         {f.description}

@@ -10,6 +10,7 @@ const createFindingSchema = z.object({
   vulnClass: z.string().trim().min(1).optional(),
   severity: z.enum(["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
   description: z.string().trim().min(1).optional(),
+  location: z.string().trim().min(1).optional(),
   evidence: z.string().trim().min(1).optional(),
 });
 
@@ -88,6 +89,7 @@ export async function POST(req: NextRequest) {
       vulnClass: parsed.data.vulnClass,
       severity: parsed.data.severity ?? "INFO",
       description: parsed.data.description,
+      location: parsed.data.location,
       evidence: parsed.data.evidence,
       gateStatus: "UNVALIDATED",
     },
