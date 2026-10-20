@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Badge, type BadgeTone } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 
 interface Scope {
   id: string;
@@ -11,10 +14,10 @@ interface Scope {
   createdAt: string;
 }
 
-const STATUS_STYLE: Record<Scope["status"], string> = {
-  PENDING: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  APPROVED: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-  REVOKED: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300",
+const STATUS_TONE: Record<Scope["status"], BadgeTone> = {
+  PENDING: "unvalidated",
+  APPROVED: "passed",
+  REVOKED: "killed",
 };
 
 export default function ScopesPage() {
@@ -91,96 +94,92 @@ export default function ScopesPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Scopes</h1>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          Scopes
+        </h1>
+        <p className="mt-1 text-sm text-muted">
           A scope is your authorization to test. Nothing is scanned until you
           approve it yourself.
         </p>
       </div>
 
       {error && (
-        <div className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-300">
-          {error}
+        <div
+          role="alert"
+          className="flex items-center gap-2 rounded-md border border-border-strong bg-surface-2 px-3 py-2 text-sm text-foreground"
+        >
+          <Badge tone="critical">Error</Badge>
+          <span>{error}</span>
         </div>
       )}
 
-      <form
-        onSubmit={createScope}
-        className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
-      >
-        <h2 className="text-sm font-medium">Declare a scope</h2>
-        <input
-          required
-          value={hostPattern}
-          onChange={(e) => setHostPattern(e.target.value)}
-          placeholder="Host pattern — e.g. *.example.com"
-          className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-        />
-        <input
-          value={programName}
-          onChange={(e) => setProgramName(e.target.value)}
-          placeholder="Program name (optional)"
-          className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-        />
-        <textarea
-          value={justification}
-          onChange={(e) => setJustification(e.target.value)}
-          placeholder="Justification — bug bounty program URL or engagement reference (optional)"
-          rows={2}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-        />
-        <div>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-          >
-            {submitting ? "Declaring…" : "Declare scope"}
-          </button>
-        </div>
-      </form>
+      <Card className="p-4">
+        <form onSubmit={createScope} className="grid gap-3">
+          <h2 className="text-sm font-medium text-foreground">Declare a scope</h2>
+          <input
+            required
+            value={hostPattern}
+            onChange={(e) => setHostPattern(e.target.value)}
+            placeholder="Host pattern — e.g. *.example.com"
+            className="rounded-md border border-border-strong bg-surface px-3 py-2 font-mono text-sm text-foreground placeholder:text-subtle"
+          />
+          <input
+            value={programName}
+            onChange={(e) => setProgramName(e.target.value)}
+            placeholder="Program name (optional)"
+            className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
+          />
+          <textarea
+            value={justification}
+            onChange={(e) => setJustification(e.target.value)}
+            placeholder="Justification — bug bounty program URL or engagement reference (optional)"
+            rows={2}
+            className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
+          />
+          <div>
+            <Button type="submit" variant="primary" disabled={submitting}>
+              {submitting ? "Declaring…" : "Declare scope"}
+            </Button>
+          </div>
+        </form>
+      </Card>
 
       <div className="space-y-3">
-        <h2 className="text-sm font-medium">Your scopes</h2>
+        <h2 className="text-sm font-medium text-foreground">Your scopes</h2>
         {loading ? (
-          <p className="text-sm text-zinc-500">Loading…</p>
+          <p className="text-sm text-muted">Loading…</p>
         ) : scopes.length === 0 ? (
-          <p className="text-sm text-zinc-500">No scopes yet.</p>
+          <p className="text-sm text-muted">No scopes yet.</p>
         ) : (
           <ul className="space-y-2">
             {scopes.map((s) => (
-              <li
-                key={s.id}
-                className="flex items-start justify-between gap-4 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
-              >
-                <div className="min-w-0">
+              <li key={s.id}>
+                <Card className="flex items-start justify-between gap-4 p-4">
+                  <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm">{s.hostPattern}</span>
-                    <span
-                      className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[s.status]}`}
-                    >
-                      {s.status}
+                    <span className="font-mono text-sm text-foreground">
+                      {s.hostPattern}
                     </span>
+                    <Badge tone={STATUS_TONE[s.status]}>{s.status}</Badge>
                   </div>
                   {s.programName && (
-                    <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                      {s.programName}
-                    </p>
+                    <p className="mt-1 text-sm text-muted">{s.programName}</p>
                   )}
                   {s.justification && (
-                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-500">
-                      {s.justification}
-                    </p>
+                    <p className="mt-1 text-xs text-subtle">{s.justification}</p>
                   )}
-                </div>
-                {s.status === "PENDING" && (
-                  <button
-                    onClick={() => approve(s.id)}
-                    className="shrink-0 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500"
-                  >
-                    Approve
-                  </button>
-                )}
+                  </div>
+                  {s.status === "PENDING" && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() => approve(s.id)}
+                    >
+                      Approve
+                    </Button>
+                  )}
+                </Card>
               </li>
             ))}
           </ul>
