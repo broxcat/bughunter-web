@@ -205,6 +205,7 @@ async function runReflected(ctx: ScanContext): Promise<number> {
       title: `Reflected XSS candidate — param "${t.param}" reflected un-encoded`,
       vulnClass: "XSS",
       severity: "INFO",
+      confidence: "PROVEN",
       location: url,
       description:
         `The canary <${id}> injected into "${t.param}" came back in the ` +
@@ -279,6 +280,7 @@ async function runDalfox(ctx: ScanContext, targets: ParamUrl[]): Promise<number>
           title: `Possible XSS (dalfox) on ${slice[i].param}`,
           vulnClass: "XSS",
           severity: "INFO",
+          confidence: "CANDIDATE",
           location: slice[i].url,
           description:
             `dalfox reported a possible XSS hit. ${NOT_CONFIRMED_NOTE}`,
@@ -320,6 +322,7 @@ async function runDomSinks(ctx: ScanContext): Promise<number> {
         title: `DOM XSS sink present: ${sink}`,
         vulnClass: "XSS",
         severity: "INFO",
+        confidence: "CANDIDATE",
         location: doc.src,
         description:
           `The DOM sink ${sink} appears in client-side code. This is a ` +

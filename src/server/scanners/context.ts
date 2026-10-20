@@ -8,7 +8,7 @@
 import { prisma } from "@/lib/prisma";
 import { publishScanLog } from "@/server/queue/logBus";
 import { triageFinding } from "@/server/brain";
-import type { Severity } from "@prisma/client";
+import type { Severity, FindingConfidence } from "@prisma/client";
 
 // Cap on inline LLM enrichment per finding. triageFinding uses the client's
 // default 120s×retries budget; a slow/unreachable provider must never stall the
@@ -75,6 +75,12 @@ export interface NewFinding {
   title: string;
   vulnClass: string;
   severity: Severity;
+  /**
+   * Confidence axis, independent of severity. PROVEN = direct evidence in the
+   * response/behavior; CANDIDATE = needs manual/out-of-band confirmation. The
+   * scanner that creates the finding sets this; defaults to CANDIDATE if omitted.
+   */
+  confidence?: FindingConfidence;
   description?: string;
   location?: string;
   evidence?: string;
@@ -116,6 +122,7 @@ export async function recordFinding(
       title: f.title,
       vulnClass,
       severity: f.severity,
+      confidence: f.confidence ?? "CANDIDATE",
       description,
       location: f.location,
       evidence: f.evidence,

@@ -119,6 +119,7 @@ export async function runAuthBypass(ctx: ScanContext): Promise<void> {
           title: `Sensitive endpoint reachable without authentication: ${path}`,
           vulnClass: "Broken Access Control",
           severity: "MEDIUM",
+          confidence: "CANDIDATE",
           location: `${ctx.baseUrl}${path}`,
           description:
             `GET ${path} returned 200 anonymously. Per the sibling rule, a sensitive ` +
@@ -144,6 +145,7 @@ export async function runAuthBypass(ctx: ScanContext): Promise<void> {
             title: `403/401 bypass on ${path} via ${attempt.label}`,
             vulnClass: "Broken Access Control",
             severity: "HIGH",
+            confidence: "PROVEN",
             location: `${ctx.baseUrl}${path}`,
             description:
               `${path} returns ${base.status} normally but 200 when using the ` +

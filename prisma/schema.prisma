@@ -191,6 +191,10 @@ model Finding {
   // (e.g. "/api/users/{id}", "?redirect="). Optional.
   location     String?
   evidence     String?    @db.Text
+  // Confidence axis, INDEPENDENT of severity and gateStatus. PROVEN = direct
+  // evidence in the HTTP response/observed behavior; CANDIDATE = needs manual or
+  // out-of-band confirmation. A CANDIDATE may still carry a high severity.
+  confidence   FindingConfidence? @default(CANDIDATE)
   gateStatus   GateStatus @default(UNVALIDATED)
   // JSON: the 7-Question Gate answers.
   gateAnswers  Json?
@@ -299,6 +303,11 @@ enum GateStatus {
   UNVALIDATED
   PASSED
   KILLED
+}
+
+enum FindingConfidence {
+  CANDIDATE
+  PROVEN
 }
 
 enum ReportPlatform {

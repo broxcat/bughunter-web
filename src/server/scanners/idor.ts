@@ -163,6 +163,7 @@ export async function runIdor(ctx: ScanContext): Promise<void> {
       title: `IDOR candidate (${c.variant})`,
       vulnClass: "IDOR",
       severity: "INFO",
+      confidence: "CANDIDATE",
       location: c.url,
       description:
         `${c.note}${weakSignal}\n\n${TWO_SESSION_PLAN}\n\n` +

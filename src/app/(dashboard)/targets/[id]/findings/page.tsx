@@ -6,12 +6,14 @@ import { GATE_QUESTIONS } from "@/lib/gate";
 
 type Severity = "INFO" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 type GateStatus = "UNVALIDATED" | "PASSED" | "KILLED";
+type Confidence = "CANDIDATE" | "PROVEN";
 
 interface Finding {
   id: string;
   title: string;
   vulnClass: string | null;
   severity: Severity;
+  confidence: Confidence | null;
   description: string | null;
   location: string | null;
   evidence: string | null;
@@ -20,6 +22,11 @@ interface Finding {
 }
 
 const SEVERITIES: Severity[] = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
+
+const CONFIDENCE_STYLE: Record<Confidence, string> = {
+  PROVEN: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300",
+  CANDIDATE: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+};
 
 const GATE_STYLE: Record<GateStatus, string> = {
   UNVALIDATED: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
@@ -265,6 +272,18 @@ export default function FindingsPage({
                       <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800">
                         {f.severity}
                       </span>
+                      {f.confidence && (
+                        <span
+                          className={`rounded px-2 py-0.5 text-xs font-medium ${CONFIDENCE_STYLE[f.confidence]}`}
+                          title={
+                            f.confidence === "PROVEN"
+                              ? "Direct evidence in the response/behavior"
+                              : "Needs manual or out-of-band confirmation"
+                          }
+                        >
+                          {f.confidence}
+                        </span>
+                      )}
                       {f.vulnClass && (
                         <span className="text-xs text-zinc-500">
                           {f.vulnClass}

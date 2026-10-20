@@ -271,6 +271,7 @@ export async function runSsrf(ctx: ScanContext): Promise<void> {
           title: `SSRF confirmed via response content — ${c.param} (${mp.label})`,
           vulnClass: "SSRF",
           severity: verdict.sev,
+          confidence: "PROVEN",
           location: target,
           description:
             `The "${c.param}" parameter caused a server-side fetch whose RESPONSE ` +
@@ -310,6 +311,7 @@ export async function runSsrf(ctx: ScanContext): Promise<void> {
       title: `SSRF candidate — ${c.param} (${c.via})`,
       vulnClass: "SSRF",
       severity: "INFO",
+      confidence: "CANDIDATE",
       location: withParam(c.url, c.param, OOB_MARKER),
       description:
         `The "${c.param}" parameter (found in a ${c.via}) matches a known SSRF ` +
