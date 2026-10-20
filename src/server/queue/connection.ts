@@ -7,6 +7,7 @@
 // normal commands), so `createRedisConnection()` is exported as a factory.
 
 import { Redis, type RedisOptions } from "ioredis";
+import { logger } from "@/lib/logger";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 
@@ -31,7 +32,7 @@ const baseOptions: RedisOptions = {
 export function createRedisConnection(options: RedisOptions = {}): Redis {
   const client = new Redis(REDIS_URL, { ...baseOptions, ...options });
   client.on("error", (err) => {
-    console.error("[redis] connection error:", err);
+    logger.error({ err }, "redis connection error");
   });
   return client;
 }

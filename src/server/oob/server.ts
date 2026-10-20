@@ -26,9 +26,17 @@
 
 import http from "node:http";
 import { prisma } from "@/lib/prisma";
+import { logger } from "@/lib/logger";
 
 const PORT = 8089;
 const HOST = "0.0.0.0";
+
+// An OOB token is a secret capability: anyone who knows it can forge a hit. Never
+// log it in full — show only a prefix so a line is still correlatable without
+// leaking the token.
+function maskToken(token: string): string {
+  return token.length <= 8 ? token : `${token.slice(0, 8)}…`;
+}
 
 // Matches "/oob/<token>" (optionally with a trailing path/query the target may
 // append). Group 1 is the token — url-safe, as minted by generateOobToken().
@@ -68,8 +76,14 @@ async function recordHit(
     },
   });
 
-  console.log(
-    `[oob-catcher] HIT token=${token} method=${method} src=${sourceIp ?? "?"} host=${req.headers.host ?? "?"}`,
+  logger.info(
+    {
+      token: maskToken(token),
+      method,
+      src: sourceIp ?? "?",
+      host: req.headers.host ?? "?",
+    },
+    "oob-catcher HIT",
   );
 }
 
@@ -98,9 +112,12 @@ const server = http.createServer((req, res) => {
       // Fire-and-forget the DB write; respond immediately either way so a slow
       // DB can't hold the target's connection open. Errors are logged only.
       void recordHit(token, req).catch((err) => {
-        console.error(
-          `[oob-catcher] failed to record hit for token=${token}:`,
-          err instanceof Error ? err.message : String(err),
+        logger.error(
+          {
+            token: maskToken(token),
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "oob-catcher failed to record hit",
         );
       });
 
@@ -113,9 +130,9 @@ const server = http.createServer((req, res) => {
     res.writeHead(404, { "content-type": "text/plain" });
     res.end("not found\n");
   } catch (err) {
-    console.error(
-      "[oob-catcher] request handler error:",
-      err instanceof Error ? err.message : String(err),
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err) },
+      "oob-catcher request handler error",
     );
     try {
       if (!res.headersSent) res.writeHead(500, { "content-type": "text/plain" });
@@ -128,18 +145,18 @@ const server = http.createServer((req, res) => {
 
 // A malformed request (bad HTTP) surfaces here rather than as an exception.
 server.on("clientError", (err, socket) => {
-  console.error("[oob-catcher] clientError:", err.message);
+  logger.error({ err: err.message }, "oob-catcher clientError");
   if (socket.writable) {
     socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
   }
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[oob-catcher] listening on http://${HOST}:${PORT} — catch-all /oob/<token>`);
+  logger.info(`oob-catcher listening on http://${HOST}:${PORT} — catch-all /oob/<token>`);
 });
 
 async function shutdown(signal: string): Promise<void> {
-  console.log(`[oob-catcher] ${signal} received, closing...`);
+  logger.info(`oob-catcher ${signal} received, closing...`);
   server.close(() => process.exit(0));
   // Safety net if sockets keep the server from closing promptly.
   setTimeout(() => process.exit(0), 5000).unref();

@@ -15,6 +15,7 @@ import { redis } from "./connection";
 import { SCAN_QUEUE_NAME, type ScanJobData } from "./scanQueue";
 import { runRecon } from "@/server/scanners/recon";
 import { runHunt } from "@/server/scanners/hunt";
+import { logger, scanLogger } from "@/lib/logger";
 
 async function processScan(job: Job<ScanJobData>): Promise<void> {
   const { scanRunId, type } = job.data;
@@ -97,15 +98,17 @@ const worker = new Worker<ScanJobData>(SCAN_QUEUE_NAME, processScan, {
 });
 
 worker.on("failed", (job, err) => {
-  console.error(`[worker] job ${job?.id} failed:`, err?.message ?? err);
+  const scanRunId = job?.data?.scanRunId;
+  const log = scanRunId ? scanLogger(scanRunId) : logger;
+  log.error({ jobId: job?.id, err: err?.message ?? err }, "worker job failed");
 });
 
 worker.on("ready", () => {
-  console.log(`[worker] ready — processing "${SCAN_QUEUE_NAME}" (concurrency 1)`);
+  logger.info(`worker ready — processing "${SCAN_QUEUE_NAME}" (concurrency 1)`);
 });
 
 async function shutdown(signal: string) {
-  console.log(`[worker] ${signal} received, closing...`);
+  logger.info(`worker ${signal} received, closing...`);
   await worker.close();
   process.exit(0);
 }
