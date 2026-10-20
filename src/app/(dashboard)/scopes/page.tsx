@@ -1,11 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  ScopePolicyFields,
+  ScopePolicyView,
+  hasPolicy,
+  type PolicyValues,
+  type ScopePolicyData,
+} from "@/components/ScopePolicy";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { POLICY_TEXT_FIELDS } from "@/lib/scopePolicy";
 
-interface Scope {
+interface Scope extends ScopePolicyData {
   id: string;
   hostPattern: string;
   programName: string | null;
@@ -20,6 +28,152 @@ const STATUS_TONE: Record<Scope["status"], BadgeTone> = {
   REVOKED: "killed",
 };
 
+/** Only filled fields are sent, so a simple scope stays a simple request. */
+function policyPayload(v: PolicyValues): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (v.platform) out.platform = v.platform;
+  for (const f of POLICY_TEXT_FIELDS) {
+    const t = (v[f] ?? "").trim();
+    if (t) out[f] = t;
+  }
+  return out;
+}
+
+function policyValuesOf(s: Scope): PolicyValues {
+  const v: PolicyValues = { platform: s.platform ?? "" };
+  for (const f of POLICY_TEXT_FIELDS) v[f] = s[f] ?? "";
+  return v;
+}
+
+function ScopeCard({
+  scope,
+  onApprove,
+  onSaved,
+  onError,
+}: {
+  scope: Scope;
+  onApprove: (id: string) => void;
+  onSaved: () => Promise<void>;
+  onError: (msg: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [values, setValues] = useState<PolicyValues>(() => policyValuesOf(scope));
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      // On edit, send every field so a cleared textarea clears the stored value
+      // (blank strings are stored as null by the API).
+      const body: Record<string, string | null> = {
+        platform: values.platform || null,
+      };
+      for (const f of POLICY_TEXT_FIELDS) body[f] = (values[f] ?? "").trim();
+      const res = await fetch(`/api/scopes/${scope.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error ?? `Failed to save policy (${res.status})`);
+      }
+      setEditing(false);
+      await onSaved();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to save policy");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-sm text-foreground">
+              {scope.hostPattern}
+            </span>
+            <Badge tone={STATUS_TONE[scope.status]}>{scope.status}</Badge>
+            {scope.platform && <Badge tone="brand">{scope.platform}</Badge>}
+          </div>
+          {scope.programName && (
+            <p className="mt-1 text-sm text-muted">{scope.programName}</p>
+          )}
+          {scope.justification && (
+            <p className="mt-1 text-xs text-subtle">{scope.justification}</p>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setOpen((o) => !o)}
+          >
+            {open ? "Hide policy" : hasPolicy(scope) ? "Program policy" : "Add policy"}
+          </Button>
+          {scope.status === "PENDING" && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => onApprove(scope.id)}
+            >
+              Approve
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {open && (
+        <div className="mt-4 space-y-3 border-t border-border pt-4">
+          {editing ? (
+            <>
+              <ScopePolicyFields values={values} onChange={setValues} />
+              <div className="flex gap-2">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={save}
+                  disabled={saving}
+                >
+                  {saving ? "Saving…" : "Save policy"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setValues(policyValuesOf(scope));
+                    setEditing(false);
+                  }}
+                  disabled={saving}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <ScopePolicyView policy={scope} />
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setValues(policyValuesOf(scope));
+                  setEditing(true);
+                }}
+              >
+                Edit policy
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function ScopesPage() {
   const [scopes, setScopes] = useState<Scope[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,6 +183,7 @@ export default function ScopesPage() {
   const [hostPattern, setHostPattern] = useState("");
   const [programName, setProgramName] = useState("");
   const [justification, setJustification] = useState("");
+  const [policy, setPolicy] = useState<PolicyValues>({});
 
   async function load() {
     setLoading(true);
@@ -60,6 +215,7 @@ export default function ScopesPage() {
           hostPattern,
           programName: programName || undefined,
           justification: justification || undefined,
+          ...policyPayload(policy),
         }),
       });
       if (!res.ok) {
@@ -69,6 +225,7 @@ export default function ScopesPage() {
       setHostPattern("");
       setProgramName("");
       setJustification("");
+      setPolicy({});
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create scope");
@@ -136,6 +293,19 @@ export default function ScopesPage() {
             rows={2}
             className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
           />
+
+          <details className="rounded-md border border-border bg-surface-2 px-3 py-2">
+            <summary className="cursor-pointer text-sm font-medium text-foreground">
+              Program policy{" "}
+              <span className="font-normal text-subtle">
+                (optional — scope, out of scope, rules of engagement, rewards…)
+              </span>
+            </summary>
+            <div className="mt-3">
+              <ScopePolicyFields values={policy} onChange={setPolicy} />
+            </div>
+          </details>
+
           <div>
             <Button type="submit" variant="primary" disabled={submitting}>
               {submitting ? "Declaring…" : "Declare scope"}
@@ -154,32 +324,12 @@ export default function ScopesPage() {
           <ul className="space-y-2">
             {scopes.map((s) => (
               <li key={s.id}>
-                <Card className="flex items-start justify-between gap-4 p-4">
-                  <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm text-foreground">
-                      {s.hostPattern}
-                    </span>
-                    <Badge tone={STATUS_TONE[s.status]}>{s.status}</Badge>
-                  </div>
-                  {s.programName && (
-                    <p className="mt-1 text-sm text-muted">{s.programName}</p>
-                  )}
-                  {s.justification && (
-                    <p className="mt-1 text-xs text-subtle">{s.justification}</p>
-                  )}
-                  </div>
-                  {s.status === "PENDING" && (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      className="shrink-0"
-                      onClick={() => approve(s.id)}
-                    >
-                      Approve
-                    </Button>
-                  )}
-                </Card>
+                <ScopeCard
+                  scope={s}
+                  onApprove={approve}
+                  onSaved={load}
+                  onError={setError}
+                />
               </li>
             ))}
           </ul>

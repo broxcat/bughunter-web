@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import ScanLogViewer from "@/components/ScanLogViewer";
+import {
+  ScopePolicyView,
+  hasPolicy,
+  type ScopePolicyData,
+} from "@/components/ScopePolicy";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -17,7 +22,7 @@ interface ScanRun {
   createdAt: string;
 }
 
-interface Scope {
+interface Scope extends ScopePolicyData {
   id: string;
   hostPattern: string;
   status: string;
@@ -287,6 +292,28 @@ export default function TargetDetailPage({
         <p className="text-sm text-muted">
           This target&apos;s scope is not approved, so scans are disabled.
         </p>
+      )}
+
+      {/* Program policy reminder — informational only; scan authorization is
+          decided by the scope status above, never by this text. */}
+      {hasPolicy(target.scope) && (
+        <details
+          open={Boolean(
+            target.scope.outOfScope?.trim() ||
+              target.scope.rulesOfEngagement?.trim(),
+          )}
+          className="rounded-md border border-border bg-surface-2 px-4 py-3"
+        >
+          <summary className="cursor-pointer text-sm font-medium text-foreground">
+            Program policy{" "}
+            <span className="font-normal text-subtle">
+              — review Out of Scope and Rules of Engagement before testing
+            </span>
+          </summary>
+          <div className="mt-3">
+            <ScopePolicyView policy={target.scope} emphasisFirst />
+          </div>
+        </details>
       )}
 
       <div className="space-y-3">

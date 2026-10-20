@@ -2,11 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  POLICY_TEXT_FIELDS,
+  nullIfBlank,
+  policyShape,
+} from "@/lib/scopePolicy";
 
 const createScopeSchema = z.object({
   hostPattern: z.string().trim().min(1, "hostPattern is required"),
   programName: z.string().trim().min(1).optional(),
   justification: z.string().trim().min(1).optional(),
+  ...policyShape,
 });
 
 // GET /api/scopes — list the signed-in user's scopes.
@@ -26,6 +32,7 @@ export async function GET() {
 
 // POST /api/scopes — declare a scope. Always created PENDING; the user approves
 // it themselves (the approval is the authorization attestation, never automatic).
+// The program-policy fields are optional and informational only.
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -41,12 +48,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const policy: Record<string, string | null | undefined> = {};
+  for (const field of POLICY_TEXT_FIELDS) {
+    policy[field] = nullIfBlank(parsed.data[field]);
+  }
+
   const scope = await prisma.scope.create({
     data: {
       userId: session.user.id,
       hostPattern: parsed.data.hostPattern,
       programName: parsed.data.programName,
       justification: parsed.data.justification,
+      platform: parsed.data.platform,
+      ...policy,
       status: "PENDING", // never APPROVED on create
     },
   });
