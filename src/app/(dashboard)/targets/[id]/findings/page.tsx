@@ -19,6 +19,8 @@ interface Finding {
   evidence: string | null;
   gateStatus: GateStatus;
   killedReason: string | null;
+  oobToken?: string | null;
+  oobHits?: { receivedAt: string; sourceIp: string | null; method: string }[];
 }
 
 const SEVERITIES: Severity[] = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
@@ -300,6 +302,28 @@ export default function FindingsPage({
                         {f.description}
                       </p>
                     )}
+                    {f.oobHits && f.oobHits.length > 0 ? (
+                      <div className="mt-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 dark:border-emerald-800 dark:bg-emerald-950/40">
+                        <p className="text-xs font-medium text-emerald-800 dark:text-emerald-300">
+                          OOB callbacks ({f.oobHits.length}):
+                        </p>
+                        <ul className="mt-1 space-y-0.5">
+                          {f.oobHits.map((h, i) => (
+                            <li
+                              key={i}
+                              className="font-mono text-xs text-emerald-700 dark:text-emerald-400"
+                            >
+                              {h.method} from {h.sourceIp ?? "unknown"} at{" "}
+                              {new Date(h.receivedAt).toLocaleString()}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : f.oobToken ? (
+                      <p className="mt-2 text-xs italic text-zinc-400 dark:text-zinc-500">
+                        awaiting OOB callback…
+                      </p>
+                    ) : null}
                   </div>
                   <span
                     className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${GATE_STYLE[f.gateStatus]}`}

@@ -39,7 +39,41 @@ export async function GET(req: NextRequest) {
     orderBy: { createdAt: "desc" },
   });
 
-  return NextResponse.json(findings);
+  // Attach correlated out-of-band callbacks (Phase 5). A finding's oobToken
+  // matches OobHit.token (0, 1, or many hits). One batched query for all tokens
+  // on this page, then group in memory — no N+1.
+  const tokens = findings
+    .map((f) => f.oobToken)
+    .filter((t): t is string => t !== null && t !== undefined);
+
+  const hitsByToken = new Map<
+    string,
+    { receivedAt: Date; sourceIp: string | null; method: string }[]
+  >();
+
+  if (tokens.length > 0) {
+    const hits = await prisma.oobHit.findMany({
+      where: { token: { in: tokens } },
+      orderBy: { receivedAt: "asc" },
+      select: { token: true, receivedAt: true, sourceIp: true, method: true },
+    });
+    for (const h of hits) {
+      const list = hitsByToken.get(h.token) ?? [];
+      list.push({
+        receivedAt: h.receivedAt,
+        sourceIp: h.sourceIp,
+        method: h.method,
+      });
+      hitsByToken.set(h.token, list);
+    }
+  }
+
+  const withHits = findings.map((f) => ({
+    ...f,
+    oobHits: f.oobToken ? (hitsByToken.get(f.oobToken) ?? []) : [],
+  }));
+
+  return NextResponse.json(withHits);
 }
 
 // POST /api/findings — create a finding on an owned target. Starts UNVALIDATED;
