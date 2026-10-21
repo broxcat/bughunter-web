@@ -45,24 +45,25 @@ const PROVEN_SIM = 0.8;
 const AMBIG_SIM = 0.4;
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-// Query keys that commonly carry a direct object reference.
-const ID_PARAM_RE =
-  /(^|_)(id|uid|user|account|order|invoice|doc|document|report|file|ticket|msg|message)s?(_?id)?$/i;
 // A numeric id as a path segment, e.g. /users/123 or /orders/123/items.
 const NUMERIC_PATH_RE = /\/\d{1,}(?:\/|$)/;
 
-// Common id-bearing object patterns, used only to top up discovery when the
-// root page does not link enough. id "1" is the canonical "first object".
-const COMMON_PATTERNS = [
-  "/api/users/1",
-  "/api/user/1",
-  "/api/accounts/1",
-  "/api/orders/1",
-  "/api/invoices/1",
-  "/api/documents/1",
-  "/users/1",
-  "/orders/1",
-];
+// A URL addresses a per-user OBJECT (not shared/public content) when it carries
+// an id inside an OWNERSHIP context, or an owner-scoped id query param. BOLA
+// replays such a URL as the other account, so a bare numeric path like
+// /courses/123 is deliberately NOT a candidate — reading another user's course
+// is shared content, not a cross-tenant violation.
+//
+// Blind REST guesses (/api/users/1, …) were intentionally removed: seeding
+// speculative object ids is idor.ts's job (the unauthenticated candidate
+// surfacer). The two-account prover only cross-tests per-user objects actually
+// seen in A's authenticated crawl — otherwise it manufactures candidates that
+// 404 and reports nothing meaningful (exactly what happened on the training
+// target during the smoke test).
+const OWNERSHIP_PATH_RE =
+  /\/(me|my[-/]|profile|account|settings|users?|members?|customers?|orders?|invoices?|receipts?|documents?|files?|messages?|tickets?|carts?|addresses?|payments?|subscriptions?|bookings?|reservations?|notifications?)\b/i;
+const OWNER_ID_PARAM_RE =
+  /(^|_)(user|account|owner|customer|member|order|invoice|document|file|ticket|message)_?id$/i;
 
 const norm = (body: string): string => body.replace(/\s+/g, "");
 
@@ -82,8 +83,13 @@ function contentType(p: ProbeResult): string {
   return (p.headers["content-type"] ?? "").toLowerCase();
 }
 
-/** True when the URL carries a direct object reference we can cross-test. */
-function hasObjectId(url: string): boolean {
+/**
+ * True when the URL addresses a per-user OBJECT we can cross-test across accounts:
+ * an owner-scoped id query param, or an id (numeric/UUID) inside an ownership path
+ * context. Shared/public id paths (e.g. /courses/123) are excluded by design —
+ * reading them as another account is not a cross-tenant violation.
+ */
+function looksUserOwned(url: string): boolean {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -91,9 +97,10 @@ function hasObjectId(url: string): boolean {
     return false;
   }
   for (const key of parsed.searchParams.keys()) {
-    if (ID_PARAM_RE.test(key)) return true;
+    if (OWNER_ID_PARAM_RE.test(key)) return true;
   }
-  return UUID_RE.test(url) || NUMERIC_PATH_RE.test(parsed.pathname);
+  const hasId = NUMERIC_PATH_RE.test(parsed.pathname) || UUID_RE.test(url);
+  return hasId && OWNERSHIP_PATH_RE.test(parsed.pathname);
 }
 
 /** pathname + search, for classifyBypassResponse's `path` argument + logging. */
@@ -199,26 +206,29 @@ export async function runBola(ctx: ScanContext): Promise<void> {
 
   const discovered: string[] = [];
   const seen = new Set<string>();
-  const push = (u: string) => {
-    if (!seen.has(u) && hasObjectId(u)) {
+  for (const u of corpus.urls) {
+    if (discovered.length >= MAX_DISCOVERY) break;
+    if (!seen.has(u) && looksUserOwned(u)) {
       seen.add(u);
       discovered.push(u);
     }
-  };
-  for (const u of corpus.urls) {
-    push(u);
-    if (discovered.length >= MAX_DISCOVERY) break;
-  }
-  // Top up with common id-bearing patterns if the crawl linked few objects.
-  for (const p of COMMON_PATTERNS) {
-    if (discovered.length >= MAX_DISCOVERY) break;
-    push(new URL(p, ctx.baseUrl).toString());
   }
 
   await logLine(
     ctx.scanRunId,
-    `[bola] ${discovered.length} id-bearing candidate URL(s) from ${corpus.urls.length} crawled URL(s) to confirm as A`,
+    `[bola] ${discovered.length} per-user object URL(s) in A's view (of ${corpus.urls.length} crawled) to cross-test`,
   );
+
+  if (discovered.length === 0) {
+    await logLine(
+      ctx.scanRunId,
+      `[bola] A's authenticated crawl surfaced no per-user object URLs (an id in an ownership ` +
+        `context such as /users/<id>, /orders/<id>, or an ?..._id= param). This surface exposes ` +
+        `no user-owned objects by direct reference, so there is nothing to cross-test — BOLA not ` +
+        `applicable to this target (not forcing a result).`,
+    );
+    return;
+  }
 
   // 2) Keep only URLs A can actually read (200 + non-trivial, non-error body),
   //    capped at MAX_BOLA_PAIRS.
@@ -226,33 +236,25 @@ export async function runBola(ctx: ScanContext): Promise<void> {
   for (const url of discovered) {
     if (objects.length >= MAX_BOLA_PAIRS) break;
     const aResp = await probe(url, { headers: headersA, timeoutMs: PROBE_TIMEOUT });
-    // TEMP DIAGNOSTIC (point 3): log exactly what account A sees for each candidate
-    // so a targeted run can tell apart (a) cookie not authenticating [redirect to
-    // /login, 401/403], (b) public / non-personal URL, (c) a request-construction
-    // bug. Credential VALUES are never logged — only status / content-type /
-    // a short body excerpt of the TARGET's own page.
-    const loc = aResp.headers["location"] ? ` -> ${aResp.headers["location"]}` : "";
-    const excerpt = aResp.error ? `ERROR ${aResp.error}` : norm(aResp.body).slice(0, 100);
+    const readable =
+      !aResp.error && aResp.status === 200 && !looksEmpty(aResp.body) && !looksLikeError(aResp);
+    // Lightweight, permanent: the status account A sees for each candidate (no
+    // body, no secrets) — enough to tell at a glance whether A's session reaches
+    // these objects, without verbose per-request dumps.
     await logLine(
       ctx.scanRunId,
-      `[bola][diag] A GET ${pathOf(url)} -> ${aResp.error ? "err" : aResp.status}${loc} ` +
-        `ct=${contentType(aResp) || "?"} len=${aResp.bodyLen} ` +
-        `empty=${!aResp.error && looksEmpty(aResp.body)} errShell=${!aResp.error && looksLikeError(aResp)} ` +
-        `body="${excerpt}"`,
+      `[bola] A GET ${pathOf(url)} -> ${aResp.error ? `error (${aResp.error})` : aResp.status}` +
+        `${readable ? " — A-readable object" : " — not an A-owned readable object"}`,
     );
-    if (aResp.error) continue;
-    if (aResp.status === 200 && !looksEmpty(aResp.body) && !looksLikeError(aResp)) {
-      objects.push({ url, aResp });
-    }
+    if (readable) objects.push({ url, aResp });
   }
 
   if (objects.length === 0) {
     await logLine(
       ctx.scanRunId,
-      `[bola] of ${discovered.length} id-bearing candidate(s) from ${corpus.urls.length} crawled URL(s), ` +
-        `account A ("${a.label}") could read 0 as a non-trivial 200 object (see the [bola][diag] lines above ` +
-        `for each candidate's status/body). No A-owned object means no cross-account test is possible — ` +
-        `recording nothing rather than forcing a result.`,
+      `[bola] of ${discovered.length} per-user candidate(s), account A ("${a.label}") could read 0 as a ` +
+        `non-trivial 200 object — no A-owned object to cross-test; recording nothing rather than forcing ` +
+        `a result.`,
     );
     return;
   }
