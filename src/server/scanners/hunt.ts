@@ -18,6 +18,9 @@ import { runSsti } from "./ssti";
 import { runCors } from "./cors";
 import { runJwt } from "./jwt";
 import { runOauth } from "./oauth";
+import { runXxe } from "./xxe";
+import { runLfi } from "./lfi";
+import { runDeserialization } from "./deserialization";
 
 const MINUTE = 60_000;
 
@@ -34,6 +37,9 @@ const FAMILIES: ReadonlyArray<readonly [string, (ctx: ScanContext) => Promise<vo
   ["cors", runCors],
   ["jwt", runJwt],
   ["oauth", runOauth],
+  ["xxe", runXxe],
+  ["lfi", runLfi],
+  ["deserialization", runDeserialization],
 ];
 
 export async function runHunt(host: string, scanRunId: string): Promise<void> {
