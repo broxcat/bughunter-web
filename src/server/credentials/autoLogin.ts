@@ -19,10 +19,14 @@ import { chromium, type Browser, type BrowserContext } from "playwright-chromium
 const LAUNCH_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"] as const;
 
 /** Overall wall-clock budget for one acquireSessionCookies() call. */
-const OVERALL_DEADLINE_MS = 15_000;
+const OVERALL_DEADLINE_MS = 20_000;
 const NAV_TIMEOUT_MS = 12_000;
 /** Grace after submit for the post-login navigation / state change. */
 const POST_SUBMIT_WAIT_MS = 6_000;
+/** Max wait for a client-rendered (SPA/Auth.js) login form to hydrate. */
+const FORM_HYDRATE_MS = 10_000;
+/** A cookie name that looks like a real session (so we can poll for it post-login). */
+const SESSION_COOKIE_RE = /(session[._-]?token|sessionid|connect\.sid|jwt|auth.*token)/i;
 
 const EMAIL_SELECTORS = [
   'input[type="email"]',
@@ -108,6 +112,26 @@ export async function acquireSessionCookies(
       return { cookies: {}, error: `could not load login page: ${errMsg(e)}` };
     }
 
+    // The target may be a client-rendered SPA (React / Auth.js): the form inputs
+    // exist only after hydration, so `domcontentloaded` fires before they appear.
+    // Wait for an email/username field to be VISIBLE before filling, or we'd
+    // immediately (and wrongly) conclude there is no login form.
+    try {
+      await page
+        .locator(EMAIL_SELECTORS.join(", "))
+        .first()
+        .waitFor({
+          state: "visible",
+          timeout: Math.min(FORM_HYDRATE_MS, Math.max(1_000, deadline - Date.now())),
+        });
+    } catch {
+      return {
+        cookies: {},
+        error:
+          "login form never rendered an email/username field (client-render not hydrated in time, or selectors do not match)",
+      };
+    }
+
     const emailFilled = await fillFirst(page, EMAIL_SELECTORS, input.email);
     if (!emailFilled) {
       return { cookies: {}, error: "could not find an email/username field on the login page" };
@@ -141,16 +165,24 @@ export async function acquireSessionCookies(
       return { cookies: {}, error: "could not find/click a submit control on the login form" };
     }
 
-    // Give the post-login navigation/state change a moment, bounded by the budget.
-    await page
-      .waitForTimeout(Math.min(1_500, Math.max(0, deadline - Date.now())))
-      .catch(() => {});
-
-    const raw = await context.cookies();
-    const cookies: Record<string, string> = {};
-    for (const c of raw) {
-      if (c.name) cookies[c.name] = c.value;
+    // Auth.js (and similar) set the session cookie asynchronously — a POST to the
+    // credentials callback, then a redirect — so it is not present the instant the
+    // click resolves. Poll the context for a session-looking cookie within the
+    // remaining budget rather than reading once after a fixed wait.
+    let cookies: Record<string, string> = {};
+    const readCookies = async () => {
+      const raw = await context!.cookies().catch(() => []);
+      const map: Record<string, string> = {};
+      for (const c of raw) if (c.name) map[c.name] = c.value;
+      return map;
+    };
+    while (Date.now() < deadline) {
+      cookies = await readCookies();
+      if (Object.keys(cookies).some((n) => SESSION_COOKIE_RE.test(n))) break;
+      await page.waitForTimeout(400).catch(() => {});
     }
+    // Final read in case the loop exited on the deadline mid-set.
+    if (Object.keys(cookies).length === 0) cookies = await readCookies();
 
     if (Object.keys(cookies).length === 0) {
       return { cookies: {}, error: "login submitted but no cookies were set (wrong credentials or unexpected flow?)" };
