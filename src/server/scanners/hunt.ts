@@ -21,6 +21,9 @@ import { runOauth } from "./oauth";
 import { runXxe } from "./xxe";
 import { runLfi } from "./lfi";
 import { runDeserialization } from "./deserialization";
+import { runBusinessLogicRace } from "./businessLogicRace";
+import { runBusinessLogicTamper } from "./businessLogicTamper";
+import { runBusinessLogicWorkflow } from "./businessLogicWorkflow";
 
 const MINUTE = 60_000;
 
@@ -40,6 +43,9 @@ const FAMILIES: ReadonlyArray<readonly [string, (ctx: ScanContext) => Promise<vo
   ["xxe", runXxe],
   ["lfi", runLfi],
   ["deserialization", runDeserialization],
+  ["business-logic-race", runBusinessLogicRace],
+  ["business-logic-tamper", runBusinessLogicTamper],
+  ["business-logic-workflow", runBusinessLogicWorkflow],
 ];
 
 export async function runHunt(host: string, scanRunId: string): Promise<void> {
