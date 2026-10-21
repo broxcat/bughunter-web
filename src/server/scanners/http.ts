@@ -9,6 +9,8 @@
 export interface ProbeOptions {
   method?: string;
   headers?: Record<string, string>;
+  /** Optional request body (e.g. an XML/SOAP document for an XXE probe). */
+  body?: string;
   timeoutMs?: number;
   /** Cap how much of the body we read into memory. */
   maxBodyBytes?: number;
@@ -42,6 +44,7 @@ export async function probe(
     const res = await fetch(url, {
       method,
       headers: opts.headers,
+      body: opts.body,
       redirect: "manual",
       signal: controller.signal,
     });
