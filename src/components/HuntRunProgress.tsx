@@ -16,7 +16,8 @@ export default function HuntRunProgress({ id }: { id: string }) {
     async function poll() {
       try {
         const response = await fetch(`/api/scan-runs/${encodeURIComponent(id)}/hunt`, { signal: controller.signal, cache: "no-store" });
-        if (!response.ok) throw new Error(response.status === 404 ? "Hunt not found" : "Unable to load Hunt");
+        if ([401, 403, 404].includes(response.status)) { setError(response.status === 404 ? "Hunt not found" : "Sign in to view this Hunt"); return; }
+        if (!response.ok) throw new Error("Unable to load Hunt");
         const next: Run = await response.json(); setRun(next); setError("");
         if (["QUEUED", "RUNNING"].includes(next.status)) timer = setTimeout(poll, 1500);
       } catch (e) { if (!controller.signal.aborted) { setError((e as Error).message); timer = setTimeout(poll, 5000); } }
@@ -26,7 +27,7 @@ export default function HuntRunProgress({ id }: { id: string }) {
   const report = run?.huntReport;
   return <div className="space-y-6"><Link href="/hunt" className="text-brand">← Hunt</Link><h1 className="text-2xl font-semibold">HUNT</h1>
     {error && <p role="alert">{error}</p>}
-    {!run ? <p>Loading Hunt…</p> : <>
+    {!run ? <p>{error ? "No Hunt report available." : "Loading Hunt…"}</p> : <>
       <Card className="p-5 space-y-2"><h2 className="text-xl">{run.target.program?.companyName ?? "Historical target"}</h2><p>{run.target.host}</p><p role="status">{run.status}</p><Link className="text-brand" href={`/targets/${run.target.id}/findings`}>Open findings</Link></Card>
       {report ? <>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">{Object.entries(huntCounts(report)).map(([label, count]) => <Card key={label} className="p-4"><p>{label}</p><p className="text-2xl font-semibold">{count}</p></Card>)}</div>

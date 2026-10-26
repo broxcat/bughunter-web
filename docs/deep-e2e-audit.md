@@ -160,3 +160,16 @@ Commit: `fix(auth): verify dashboard session before displaying cached content`.
 - Regression: actual Chromium label audit across Findings, Report, Settings, Recon
   and Hunt; all now have zero missing names. Login Tab order and password masking pass.
 - Commit: `fix(a11y): label finding and report form controls`.
+
+## Bugs discovered — terminal Hunt error kept polling
+
+- Severity: LOW; `/hunt/not-owned`.
+- Browser reproduction: visit a missing run while authenticated and wait beyond
+  one polling interval. Observed repeated 404 requests and a contradictory Loading
+  message alongside Hunt not found.
+- Fix: stop polling on terminal 401/403/404; clear the loading message on failure;
+  key the run component by ID so an old report cannot appear under a new run URL.
+- Regression: compiled browser negative flow waits 5500ms, sees one 404 request,
+  no Loading message, safe other missing-ID screens, handled API network failure
+  and correct legacy host redirect, with no unhandled browser exception.
+- Commit: `fix(hunt): stop polling terminal run errors`.
