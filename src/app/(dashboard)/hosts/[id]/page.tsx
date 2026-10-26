@@ -413,7 +413,7 @@ export default function TargetDetailPage({
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-medium text-foreground">
-                        {run.type}
+                        {run.type === "HUNT" ? <Link href={`/hunt/${run.id}`} className="text-brand">HUNT — open progress</Link> : run.type}
                       </span>
                       <Badge tone={STATUS_TONE[run.status] ?? "neutral"}>
                         {run.status}

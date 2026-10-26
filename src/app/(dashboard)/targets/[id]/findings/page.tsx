@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { EVIDENCE_LABELS, findingEvidenceLevel } from "@/lib/hunt/presentation";
 import { use, useEffect, useState } from "react";
 import { GATE_QUESTIONS } from "@/lib/gate";
 import {
@@ -17,6 +18,7 @@ type Confidence = "CANDIDATE" | "PROVEN";
 
 interface Finding {
   id: string;
+  huntMetadata?: unknown;
   title: string;
   vulnClass: string | null;
   severity: Severity;
@@ -44,11 +46,6 @@ const SEVERITY_TONE: Record<Severity, BadgeTone> = {
   MEDIUM: "medium",
   HIGH: "high",
   CRITICAL: "critical",
-};
-
-const CONFIDENCE_TONE: Record<Confidence, BadgeTone> = {
-  PROVEN: "proven",
-  CANDIDATE: "candidate",
 };
 
 const GATE_TONE: Record<GateStatus, BadgeTone> = {
@@ -307,19 +304,7 @@ export default function FindingsPage({
                         <Badge tone={SEVERITY_TONE[f.severity]}>
                           {f.severity}
                         </Badge>
-                        {f.confidence && (
-                          <span
-                            title={
-                              f.confidence === "PROVEN"
-                                ? "Direct evidence in the response/behavior"
-                                : "Needs manual or out-of-band confirmation"
-                            }
-                          >
-                            <Badge tone={CONFIDENCE_TONE[f.confidence]}>
-                              {f.confidence}
-                            </Badge>
-                          </span>
-                        )}
+                        <Badge tone={findingEvidenceLevel(f) === "CONFIRMED" ? "proven" : "candidate"}>{EVIDENCE_LABELS[findingEvidenceLevel(f)]}</Badge>
                         {f.vulnClass && (
                           <span className="text-xs text-subtle">
                             {f.vulnClass}
