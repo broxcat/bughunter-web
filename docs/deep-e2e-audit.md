@@ -57,3 +57,17 @@ because global pages are absent; their resource/console 404 events are expected
 inventory limitations, not hidden as successful page tests. Use the canonical
 AUTH_URL origin (`localhost:3000`) for logout; an alternate loopback origin returns
 to that configured canonical host. No secret/cookie value was captured.
+
+## Bugs discovered — health dependency outage
+
+- Severity: MEDIUM (operational liveness/readiness).
+- Route: `/api/health`.
+- Reproduction: start the separately compiled audit app against disposable services,
+  stop only `bughunter-deep-audit-redis`, request health from Chromium's HTTP client.
+- Expected: bounded 503 with Redis down; observed: request still pending after 3500ms.
+- Root cause: health used BullMQ's shared Redis client with unlimited retries.
+- Fix: dedicated nonretrying Redis connection, 1500ms concurrent dependency deadlines,
+  unconditional connection disposal and generic dependency status only.
+- Regression: three route tests, plus actual built-app Redis outage/recovery smoke.
+  After fix the outage returned 503 in 11ms. Existing services were not stopped.
+- Commit: `fix(health): bound dependency checks during service outages`.
