@@ -31,6 +31,8 @@ describe("public authentication origin", () => {
     ["http://localhost:3000", "/reports", true],
     ["http://example.test:3000", "/targets", false],
     ["https://example.test", "/settings", true],
+    ["https://bughunter-web.tailc6d37b.ts.net", "/targets", true],
+    ["https://bughunter-web.tailc6d37b.ts.net", "https://untrusted.example/targets", true],
   ])("login → session → logout on %s from %s (configured: %s)", async (origin, route, configured) => {
     if (configured) vi.stubEnv("AUTH_URL", origin);
     mocks.findUnique.mockResolvedValue({
@@ -44,10 +46,10 @@ describe("public authentication origin", () => {
     async function request(action: string, body?: Record<string, string>) {
       const headers = new Headers({
         host: new URL(internalOrigin).host,
-        "x-forwarded-host": new URL(origin).host,
-        "x-forwarded-proto": new URL(origin).protocol.slice(0, -1),
+        "x-forwarded-host": configured ? "untrusted.example" : new URL(origin).host,
+        "x-forwarded-proto": configured ? "http" : new URL(origin).protocol.slice(0, -1),
         cookie: [...cookies].map(([key, value]) => `${key}=${value}`).join("; "),
-        referer: `${origin}${route}`,
+        referer: route.startsWith("/") ? `${origin}${route}` : `${origin}/login`,
       });
       if (body) {
         headers.set("Content-Type", "application/x-www-form-urlencoded");
@@ -59,6 +61,11 @@ describe("public authentication origin", () => {
       });
       const response = await (body ? POST(req) : GET(req));
       for (const cookie of response.headers.getSetCookie()) {
+        expect(cookie).toMatch(/; SameSite=Lax/i);
+        if (origin.startsWith("https://")) expect(cookie).toMatch(/; Secure/i);
+        if (cookie.startsWith("__Secure-authjs.session-token=")) {
+          expect(cookie).toMatch(/; HttpOnly/i);
+        }
         const pair = cookie.split(";", 1)[0];
         const index = pair.indexOf("=");
         const key = pair.slice(0, index), value = pair.slice(index + 1);
@@ -73,7 +80,7 @@ describe("public authentication origin", () => {
     const login = await request("callback/credentials", {
       csrfToken, email: "origin@example.test", password: "fixture-password", callbackUrl: route,
     });
-    expect(login.url).toBe(`${origin}${route}`);
+    expect(login.url).toBe(route.startsWith("/") ? `${origin}${route}` : origin);
     expect((await request("session")).user.id).toBe("origin-test-user");
     const logout = await request("signout", { csrfToken, callbackUrl: "/login" });
     expect(logout.url).toBe(`${origin}/login`);
