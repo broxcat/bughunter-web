@@ -33,7 +33,7 @@ async function resolveEmailPasswordCookies(row: {
   passwordCipher: string | null;
   sessionCookiesCipher: string | null;
   sessionRefreshedAt: Date | null;
-}): Promise<Record<string, string> | null> {
+}, allowLogin = false): Promise<Record<string, string> | null> {
   // Fresh cache?
   if (
     row.sessionCookiesCipher &&
@@ -43,6 +43,8 @@ async function resolveEmailPasswordCookies(row: {
     const cached = parseCookieJson(row.sessionCookiesCipher);
     if (cached) return cached;
   }
+
+  if (!allowLogin) return null; // Session creation requires an explicit user action.
 
   // Need to (re-)login. Decrypt the stored email/password/loginUrl.
   if (!row.loginUrl || !row.emailCipher || !row.passwordCipher) return null;
@@ -184,4 +186,11 @@ export function credentialHeaders(
   }
 
   return headers;
+}
+
+/** Explicit account-login action; ordinary scans consume cached sessions only. */
+export async function refreshTargetCredential(targetId: string, credentialId: string): Promise<boolean> {
+  const row = await prisma.targetCredential.findFirst({ where: { id: credentialId, targetId, mode: "EMAIL_PASSWORD" } });
+  if (!row) return false;
+  return Boolean(await resolveEmailPasswordCookies({ ...row, sessionRefreshedAt: null }, true));
 }

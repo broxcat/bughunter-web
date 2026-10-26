@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
+import HuntRequirements from "@/components/HuntRequirements";
 import ProgramForm, { type ProgramData } from "@/components/ProgramForm";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -27,7 +28,7 @@ export default function ProgramPage({ params }: { params: Promise<{ id: string }
         <dl className="grid grid-cols-2 gap-2">{(["Low", "Medium", "High", "Critical"] as const).map(l => <div key={l}><dt>{l}</dt><dd>{program[`reward${l}`] ?? "—"} {program.rewardCurrency}</dd></div>)}</dl>
         <p>Required User-Agent: <code>{program.requiredUserAgent}</code></p><p>Scope — {program.targets.length} hosts</p><p>Out of Scope — {program.outOfScope.length} hosts</p>
         <p>Qualifying: {program.qualifying.join(", ") || "All supported Hunt families"}</p><p>Non-qualifying: {program.nonQualifying.join(", ") || "None"}</p>
-      </Card><div className="flex gap-4"><Link className="text-brand" href={`/scopes/${id}`}>Open Scope →</Link><Link className="text-brand" href={`/recon?program=${id}`}>Start Recon →</Link></div>
+      </Card><HuntRequirements hosts={program.targets.filter(h => !h.host.includes("*"))} policy={program} /><div className="flex gap-4"><Link className="text-brand" href={`/scopes/${id}`}>Open Scope →</Link><Link className="text-brand" href={`/recon?program=${id}`}>Start Recon →</Link></div>
     </>}
   </div>;
 }

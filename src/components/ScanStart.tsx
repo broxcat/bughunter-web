@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import HuntRequirements from "@/components/HuntRequirements";
 import HuntFamilySelection from "@/components/HuntFamilySelection";
 import { resolveHuntFamilies } from "@/lib/hunt/policy";
 import { useEffect, useState } from "react";
@@ -34,6 +35,7 @@ export default function ScanStart({ type }: { type: "RECON" | "HUNT" }) {
     <label className="block">Host<select aria-label="Host" className="block w-full rounded border border-border bg-surface p-2" value={host} onChange={e => setHost(e.target.value)}>{program?.hosts.map(h => <option value={h.id} key={h.id}>{h.host}</option>)}</select></label>
     {program && <p className="text-sm">Required User-Agent: <code>{program.requiredUserAgent}</code></p>}
     {type === "HUNT" && program && <HuntFamilySelection families={resolveHuntFamilies(program)} />}
+    {type === "HUNT" && program && host && <HuntRequirements key={host} hosts={program.hosts.filter(h => h.id === host)} policy={program} />}
     {!host && <p>Add a concrete FQDN to <Link className="text-brand" href={program ? `/scopes/${program.id}` : "/targets"}>Scope</Link> to start scanning.</p>}
     {error && <p role="alert">{error}</p>}<Button type="submit" disabled={!host || busy}>{busy ? "Starting…" : type === "RECON" ? "Start Recon" : "Start Hunt"}</Button>
   </form></Card></div>;

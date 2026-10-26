@@ -516,4 +516,28 @@ d("API route authorization (integration)", () => {
     expect((await GET(req("http://localhost", {}), context)).status).toBe(404);
   });
 
+  it("uses existing encrypted credentials for account readiness and only edits owned metadata", async () => {
+    process.env.CREDENTIALS_ENCRYPTION_KEY ??= "0".repeat(64);
+    const { POST, PATCH } = await import("@/app/api/targets/[id]/credentials/route");
+    const { loadReadinessFacts } = await import("@/server/hunt/readiness");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Accounts", requiredUserAgent: "Accounts/1" } });
+    const scope = await prisma.scope.create({ data: { userId, hostPattern: "accounts.example.test", status: "APPROVED" } });
+    const t = await prisma.target.create({ data: { userId, programId: p.id, scopeId: scope.id, host: "accounts.example.test" } });
+    const context = { params: Promise.resolve({ id: t.id }) };
+    const add = (data: object) => POST(req("http://localhost", data), context);
+    expect((await add({ label: "invalid reference", cookies: { sid: "a" }, ownedObjectUrl: "https://foreign.example/object/1" })).status).toBe(400);
+    const a = await (await add({ label: "Account A", cookies: { sid: "a-secret" }, purpose: "ACCOUNT_A" })).json();
+    const b = await (await add({ label: "Account B", cookies: { sid: "b-secret" }, purpose: "ACCOUNT_B", ownedObjectUrl: "https://accounts.example.test/documents/123" })).json();
+    expect((await loadReadinessFacts(t.id)).facts).toMatchObject({ primaryCredential: true, secondCredential: true, secondUserObjectReference: true });
+    expect(JSON.stringify([a, b])).not.toContain("a-secret");
+    expect(JSON.stringify([a, b])).not.toContain("b-secret");
+    const before = await prisma.targetCredential.findUniqueOrThrow({ where: { id: b.credential.id } });
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await PATCH(req("http://localhost", { credentialId: b.credential.id, purpose: "OTHER" }, "PATCH"), context)).status).toBe(404);
+    expect((await PATCH(req("http://localhost", { credentialId: b.credential.id, purpose: "SESSION_COOKIE", cookiesCipher: "replace" }, "PATCH"), context)).status).toBe(200);
+    expect((await prisma.targetCredential.findUniqueOrThrow({ where: { id: b.credential.id } })).cookiesCipher).toBe(before.cookiesCipher);
+    const { POST: refresh } = await import("@/app/api/targets/[id]/credentials/refresh/route");
+    expect((await refresh(req("http://localhost", { credentialId: a.credential.id }), context)).status).toBe(400);
+  });
+
 });
