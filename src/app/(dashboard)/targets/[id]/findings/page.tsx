@@ -234,6 +234,7 @@ export default function FindingsPage({
             required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            aria-label="Finding title"
             placeholder="Title"
             className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
           />
@@ -241,10 +242,12 @@ export default function FindingsPage({
             <input
               value={vulnClass}
               onChange={(e) => setVulnClass(e.target.value)}
-              placeholder="Vuln class (e.g. IDOR)"
+              aria-label="Vulnerability family"
+            placeholder="Vuln class (e.g. IDOR)"
               className="flex-1 rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
             />
             <select
+              aria-label="Finding severity"
               value={severity}
               onChange={(e) => setSeverity(e.target.value as Severity)}
               className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground"
@@ -259,6 +262,7 @@ export default function FindingsPage({
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
+            aria-label="Finding description"
             placeholder="Description"
             rows={2}
             className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
@@ -266,12 +270,14 @@ export default function FindingsPage({
           <input
             value={location}
             onChange={(e) => setLocation(e.target.value)}
+            aria-label="Finding location"
             placeholder="Location (URL, endpoint or parameter — e.g. /api/users/{id}, ?redirect=)"
             className="rounded-md border border-border-strong bg-surface px-3 py-2 font-mono text-sm text-foreground placeholder:text-subtle"
           />
           <textarea
             value={evidence}
             onChange={(e) => setEvidence(e.target.value)}
+            aria-label="Finding evidence"
             placeholder="Evidence / proof of concept"
             rows={2}
             className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"

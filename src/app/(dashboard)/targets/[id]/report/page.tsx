@@ -122,10 +122,12 @@ export default function ReportPage({
             required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            aria-label="Report title"
             placeholder="Report title"
             className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
           />
           <select
+            aria-label="Report platform"
             value={platform}
             onChange={(e) => setPlatform(e.target.value as Platform)}
             className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground"

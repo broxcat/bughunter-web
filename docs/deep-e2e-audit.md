@@ -150,3 +150,13 @@ the current cookie on mount before showing authenticated content, then subscribe
 to Auth.js broadcasts/focus changes. Full real-browser authentication sequence
 passes all six cases (including network rejection and multi-tab logout).
 Commit: `fix(auth): verify dashboard session before displaying cached content`.
+
+## Bugs discovered — missing accessible form names
+
+- Severity: LOW; Findings creation and report generation forms.
+- Browser DOM audit found six visible controls without associated labels/ARIA names
+  in Findings and two in Report. Placeholders alone did not label these controls.
+- Fix: explicit accessible names on the eight existing controls; no layout refactor.
+- Regression: actual Chromium label audit across Findings, Report, Settings, Recon
+  and Hunt; all now have zero missing names. Login Tab order and password masking pass.
+- Commit: `fix(a11y): label finding and report form controls`.
