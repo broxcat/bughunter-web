@@ -16,5 +16,11 @@ try {
     let external=false;await context.route("https://outside.invalid/**",async route=>{external=true;await route.abort()});
     await page.goto(`${app}/login?callbackUrl=${encodeURIComponent("https://outside.invalid/never-contacted")}`);await submit();await page.waitForTimeout(1200);record("external callback refused without leaving app",!external && new URL(page.url()).origin===app && new URL(page.url()).pathname==="/targets");
   }
+  if(enabled("network")) {
+    await page.goto(`${app}/login`);let unhandled=false;page.on("pageerror",()=>{unhandled=true});await page.route(url => url.pathname === "/api/auth/callback/credentials",route=>route.abort());await submit();
+    try{await page.getByText("Unable to sign in. Please try again.",{exact:true}).waitFor({timeout:3000})}catch{}
+
+    record("login network failure restores button and shows safe error",!unhandled && await page.getByRole("button",{name:"Sign in",exact:true}).count()===1 && await page.getByText("Unable to sign in. Please try again.",{exact:true}).count()===1);
+  }
 } finally {await writeFile(process.env.AUDIT_RESULTS_PATH??`/tmp/deep-auth-${selected}.json`,JSON.stringify(results,null,2));await browser.close()}
 if(results.some(r=>r.result==="FAIL"))process.exitCode=1;

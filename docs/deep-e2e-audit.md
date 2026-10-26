@@ -83,3 +83,17 @@ to that configured canonical host. No secret/cookie value was captured.
   backslashes and control/whitespace characters; default to `/targets`.
 - Regression: unit URL matrix and compiled Chromium relative/external callback tests.
 - Commit: `fix(auth): restrict post-login navigation to internal paths`.
+
+## Bugs discovered — login network failure
+
+- Severity: MEDIUM; route `/login`.
+- Steps: Chromium aborts the credentials callback request (URL pathname matcher,
+  including Auth.js query variants), then submits the supplied credentials.
+- Expected: safe retry error and enabled Sign in button. Original compiled app:
+  unhandled promise rejection and loading state not restored.
+- Root cause: awaited `signIn` had no catch/finally.
+- Fix: generic network message plus loading reset in finally; invalid credentials
+  retain their separate safe message. No request body or exception detail logged.
+- Regression: same intercepted browser failure against old image and fresh build;
+  fresh build stays on login, shows retry error and restores the button.
+- Commit: `fix(auth): recover login form after network failure`.

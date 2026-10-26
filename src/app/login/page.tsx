@@ -23,21 +23,19 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const res = await signIn("credentials", {
-      redirect: false,
-      email,
-      password,
-    });
-
-    setLoading(false);
-
-    if (!res || res.error) {
-      setError("Invalid email or password");
-      return;
+    try {
+      const res = await signIn("credentials", { redirect: false, email, password });
+      if (!res || res.error) {
+        setError("Invalid email or password");
+        return;
+      }
+      router.push(callbackUrl);
+      router.refresh();
+    } catch {
+      setError("Unable to sign in. Please try again.");
+    } finally {
+      setLoading(false);
     }
-
-    router.push(callbackUrl);
-    router.refresh();
   }
 
   return (
