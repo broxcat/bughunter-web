@@ -78,12 +78,11 @@ network("real HTTP tools and Chromium capture", () => {
     });
     assertReceived(from);
   }, 20000);
-  it("real CSRF browser PoC uses the program UA and no off-scope HTTP", async () => {
+  it("CSRF dispatcher refuses unprepared action execution and sends no state-changing HTTP", async () => {
     const from = seen.length;
-    await withTargetExecution(execution(), () => runCsrf({ scanRunId: "fixture", targetId: "network", userId: "test", host: new URL(base).host, baseUrl: base }));
-    assertReceived(from);
-    expect(seen.slice(from).some(r => r.url === "/transfer")).toBe(true);
-  }, 25000);
+    await expect(withTargetExecution(execution(), () => runCsrf({ scanRunId: "fixture", targetId: "network", userId: "test", host: new URL(base).host, baseUrl: base }))).rejects.toThrow(/prepared/);
+    expect(seen.slice(from).some(r => r.url === "/transfer")).toBe(false);
+  });
   it("real XSS confirmation uses the program UA", async () => {
     const from = seen.length;
     const result = await withTargetExecution(execution(), () => confirmXssSink(`${base}/xss?q=hello`, { sink: "innerHTML", canaryId: "uaTestCanary" }));

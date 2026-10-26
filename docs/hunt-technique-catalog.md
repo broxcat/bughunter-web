@@ -30,11 +30,11 @@ Race/financial/workflow actions are reviewed without issuing the action.
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `auth.public-baseline` — Public and error-shell baseline | Public observation | ALWAYS | PASSIVE | PLANNED | ≤ 0 |
-| `auth.read-differential` — Authenticated versus anonymous content differential | Public observation | API_ENDPOINT | SAFE_ACTIVE | PLANNED | ≤ 6 |
-| `auth.routing-control` — Read-only routing header with independent content control | Public observation | API_ENDPOINT | SAFE_ACTIVE | PLANNED | ≤ 6 |
+| `auth.public-baseline` — Public and error-shell baseline | Observed safe context | ALWAYS | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `auth.read-differential` — Authenticated versus anonymous content differential | AUTHENTICATED_SESSION | API_ENDPOINT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
+| `auth.routing-control` — Read-only routing header with independent content control | AUTHENTICATED_SESSION | API_ENDPOINT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.
 
 References reviewed:
 
@@ -47,11 +47,11 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `idor.reference-discovery` — Numeric and opaque references in observed URLs | Public observation | OBJECT_REFERENCE | PASSIVE | PLANNED | ≤ 0 |
-| `idor.query-reference` — Query and nested reference inventory | Public observation | OBJECT_REFERENCE | PASSIVE | PLANNED | ≤ 0 |
-| `idor.static-reference` — Observed static object references | Public observation | OBJECT_REFERENCE | PASSIVE | PLANNED | ≤ 0 |
+| `idor.reference-discovery` — Numeric and opaque references in observed URLs | Observed safe context | ALWAYS | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `idor.query-reference` — Query and nested reference inventory | Observed safe context | OBJECT_REFERENCE | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `idor.static-reference` — Observed static object references | Observed safe context | OBJECT_REFERENCE | PASSIVE | IMPLEMENTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.
 
 References reviewed:
 
@@ -64,10 +64,10 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `bola.account-differential` — Two-account comparison on an explicitly owned object | PRIMARY_CREDENTIAL, SECOND_CREDENTIAL, SECOND_USER_OBJECT_REFERENCE | OBJECT_REFERENCE | SAFE_ACTIVE | PLANNED | ≤ 6 |
-| `bola.anonymous-control` — Anonymous and repeated-account negative controls | PRIMARY_CREDENTIAL, SECOND_CREDENTIAL, SECOND_USER_OBJECT_REFERENCE | OBJECT_REFERENCE | SAFE_ACTIVE | PLANNED | ≤ 6 |
+| `bola.account-differential` — Two-account comparison on an explicitly owned object | PRIMARY_CREDENTIAL, SECOND_CREDENTIAL, SECOND_USER_OBJECT_REFERENCE | OBJECT_REFERENCE | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
+| `bola.anonymous-control` — Anonymous and repeated-account negative controls | PRIMARY_CREDENTIAL, SECOND_CREDENTIAL, SECOND_USER_OBJECT_REFERENCE | OBJECT_REFERENCE | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Owner-attested JSON object matches across two explicit independent test identities, repeated under a second technique, and differs from independent anonymous controls.
 
 References reviewed:
 
@@ -80,12 +80,12 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `xss.reflection` — Unique reflected canary and output context | Public observation | QUERY_INPUT | SAFE_ACTIVE | PLANNED | ≤ 6 |
-| `xss.dom-source-sink` — DOM sources and sinks as discovery signals | Public observation | JAVASCRIPT | PASSIVE | PLANNED | ≤ 0 |
-| `xss.browser-confirmation` — Independent harmless canary execution in a confined browser | BROWSER_CONTEXT | QUERY_INPUT | SAFE_ACTIVE | PLANNED | ≤ 6 |
-| `xss.stored-write` — Stored XSS write/cleanup | Public observation | ALWAYS | STATE_CHANGING | UNSUPPORTED | ≤ 0 |
+| `xss.reflection` — Unique reflected canary and output context | Observed safe context | QUERY_INPUT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
+| `xss.dom-source-sink` — DOM sources and sinks as discovery signals | Observed safe context | JAVASCRIPT | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `xss.browser-confirmation` — Independent harmless canary execution in a confined browser | BROWSER_CONTEXT | QUERY_INPUT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
+| `xss.stored-write` — Stored XSS write/cleanup | Observed safe context | ALWAYS | STATE_CHANGING | UNSUPPORTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Separate browser canary execution is required; reflection and sink names never confirm XSS.
 
 References reviewed:
 
@@ -98,12 +98,12 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `csrf.form-inventory` — State-changing form and simple-request inventory | Public observation | FORM | PASSIVE | PLANNED | ≤ 0 |
-| `csrf.cookie-metadata` — Session SameSite and CSRF-token metadata review | Public observation | COOKIE | PASSIVE | PLANNED | ≤ 0 |
-| `csrf.api-inventory` — Observed script API methods and content-type constraints | Public observation | JAVASCRIPT | PASSIVE | PLANNED | ≤ 0 |
-| `csrf.submit-action` — Trigger a real state-changing CSRF action | Public observation | ALWAYS | STATE_CHANGING | UNSUPPORTED | ≤ 0 |
+| `csrf.form-inventory` — State-changing form and simple-request inventory | Observed safe context | FORM | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `csrf.cookie-metadata` — Session SameSite and CSRF-token metadata review | Observed safe context | COOKIE | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `csrf.api-inventory` — Observed script API methods and content-type constraints | Observed safe context | JAVASCRIPT | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `csrf.submit-action` — Trigger a real state-changing CSRF action | Observed safe context | ALWAYS | STATE_CHANGING | UNSUPPORTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Not executable: confinement or reversibility is not guaranteed.
 
 References reviewed:
 
@@ -116,11 +116,12 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `sqli.error-differential` — Repeated SQL-like error differential with inert control | Public observation | QUERY_INPUT | SAFE_ACTIVE | PLANNED | ≤ 6 |
-| `sqli.boolean-differential` — Matched boolean responses with repeated controls | Public observation | QUERY_INPUT | SAFE_ACTIVE | PLANNED | ≤ 6 |
-| `sqli.paired-timing` — Induced delays and timing distribution confirmation | Public observation | ALWAYS | HIGH_RISK | UNSUPPORTED | ≤ 0 |
+| `sqli.error-differential` — Repeated SQL-like error differential with inert control | Observed safe context | QUERY_INPUT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
+| `sqli.boolean-differential` — Matched boolean responses with repeated controls | Observed safe context | QUERY_INPUT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
+| `sqli.timing-screen` — Explicitly approved bounded timing screen | Observed safe context | QUERY_INPUT | HIGH_RISK | IMPLEMENTED | ≤ 6 |
+| `sqli.timing-confirm` — Explicitly approved bounded timing confirm | Observed safe context | QUERY_INPUT | HIGH_RISK | IMPLEMENTED | ≤ 6 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Repeated error versus inert controls and independently repeated boolean positive/negative controls must both agree before promotion.
 
 References reviewed:
 
@@ -133,11 +134,12 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `cmdi.input-discovery` — Command-shaped input inventory without executing commands | Public observation | QUERY_INPUT | PASSIVE | PLANNED | ≤ 0 |
-| `cmdi.error-signature` — Existing command/parser errors as weak signals | Public observation | ALWAYS | PASSIVE | PLANNED | ≤ 0 |
-| `cmdi.paired-timing` — Induced command timing/marker execution | Public observation | ALWAYS | HIGH_RISK | UNSUPPORTED | ≤ 0 |
+| `cmdi.input-discovery` — Command-shaped input inventory without executing commands | Observed safe context | QUERY_INPUT | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `cmdi.error-signature` — Existing command/parser errors as weak signals | Observed safe context | ALWAYS | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `cmdi.timing-screen` — Explicitly approved bounded timing screen | Observed safe context | QUERY_INPUT | HIGH_RISK | IMPLEMENTED | ≤ 6 |
+| `cmdi.timing-confirm` — Explicitly approved bounded timing confirm | Observed safe context | QUERY_INPUT | HIGH_RISK | IMPLEMENTED | ≤ 6 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Independent zero/two-second pairs, stable response content, low variance, and delays tracking expected values.
 
 References reviewed:
 
@@ -150,11 +152,11 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `ssrf.url-input-discovery` — URL-like query and callback/import input discovery | Public observation | URL_INPUT | PASSIVE | PLANNED | ≤ 0 |
-| `ssrf.controlled-oob` — Token-correlated callback to the configured operator catcher | OOB_CALLBACK | URL_INPUT | SAFE_ACTIVE | PLANNED | ≤ 6 |
-| `ssrf.internal-probing` — Metadata, LAN or arbitrary protocol probing | Public observation | ALWAYS | HIGH_RISK | UNSUPPORTED | ≤ 0 |
+| `ssrf.url-input-discovery` — URL-like query and callback/import input discovery | Observed safe context | URL_INPUT | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `ssrf.controlled-oob` — Token-correlated callback to the configured operator catcher | OOB_CALLBACK | URL_INPUT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
+| `ssrf.internal-probing` — Metadata, LAN or arbitrary protocol probing | Observed safe context | ALWAYS | HIGH_RISK | UNSUPPORTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Two unique configured-catcher tokens correlate; this validates server-side callback behavior, not arbitrary internal access or SSRF impact.
 
 References reviewed:
 
@@ -167,12 +169,12 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `xxe.xml-inventory` — Observed XML support and endpoint inventory | XML_ENDPOINT | XML | PASSIVE | PLANNED | ≤ 0 |
-| `xxe.document-review` — Existing DOCTYPE and parser metadata review | XML_ENDPOINT | XML | PASSIVE | PLANNED | ≤ 0 |
-| `xxe.controlled-oob` — POST external entity to configured catcher | Public observation | ALWAYS | STATE_CHANGING | UNSUPPORTED | ≤ 0 |
-| `xxe.file-read` — External entity local-file retrieval | Public observation | ALWAYS | HIGH_RISK | UNSUPPORTED | ≤ 0 |
+| `xxe.xml-inventory` — Observed XML support and endpoint inventory | XML_ENDPOINT | XML | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `xxe.document-review` — Existing DOCTYPE and parser metadata review | XML_ENDPOINT | XML | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `xxe.controlled-oob` — POST external entity to configured catcher | Observed safe context | ALWAYS | STATE_CHANGING | UNSUPPORTED | ≤ 0 |
+| `xxe.file-read` — External entity local-file retrieval | Observed safe context | ALWAYS | HIGH_RISK | UNSUPPORTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Not executable: confinement or reversibility is not guaranteed.
 
 References reviewed:
 
@@ -185,10 +187,10 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `ssti.arithmetic-differential` — Two arithmetic expressions with inert and literal controls | Public observation | QUERY_INPUT | SAFE_ACTIVE | PLANNED | ≤ 6 |
-| `ssti.literal-control` — Literal-reflection negative control | Public observation | QUERY_INPUT | SAFE_ACTIVE | PLANNED | ≤ 6 |
+| `ssti.arithmetic-differential` — Two arithmetic expressions with inert and literal controls | Observed safe context | QUERY_INPUT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
+| `ssti.literal-control` — Literal-reflection negative control | Observed safe context | QUERY_INPUT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Two distinct nonce-delimited arithmetic results evaluate correctly and an inert control does not; literal expressions are rejected.
 
 References reviewed:
 
@@ -201,10 +203,10 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `cors.origin-matrix` — Arbitrary/null/prefix/suffix Origin matrix | Public observation | API_ENDPOINT | SAFE_ACTIVE | PLANNED | ≤ 6 |
-| `cors.sensitive-comparison` — Credentialed versus anonymous content comparison | AUTHENTICATED_SESSION | API_ENDPOINT | SAFE_ACTIVE | PLANNED | ≤ 6 |
+| `cors.origin-matrix` — Arbitrary/null/prefix/suffix Origin matrix | Observed safe context | API_ENDPOINT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
+| `cors.sensitive-comparison` — Credentialed versus anonymous content comparison | AUTHENTICATED_SESSION | API_ENDPOINT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Header reflection is only a candidate. Repeated credentialed content difference can be VALIDATED, but remains below Finding without demonstrated browser readability and cookie feasibility.
 
 References reviewed:
 
@@ -217,11 +219,11 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `jwt.claims-audit` — Offline token structure and expiry metadata | JWT | JWT | PASSIVE | PLANNED | ≤ 0 |
-| `jwt.validation-differential` — Changed-signature acceptance versus valid/anonymous controls | JWT | JWT | SAFE_ACTIVE | PLANNED | ≤ 6 |
-| `jwt.secret-recovery` — Signing-secret guessing or recovery | Public observation | ALWAYS | HIGH_RISK | UNSUPPORTED | ≤ 0 |
+| `jwt.claims-audit` — Offline token structure and expiry metadata | JWT | JWT | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `jwt.validation-differential` — Changed-signature acceptance versus valid/anonymous controls | JWT | JWT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
+| `jwt.secret-recovery` — Signing-secret guessing or recovery | Observed safe context | ALWAYS | HIGH_RISK | UNSUPPORTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Two independently corrupted signatures still read the same protected JSON object as the valid token while anonymous controls do not.
 
 References reviewed:
 
@@ -235,10 +237,10 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `oauth.flow-inventory` — Observed OAuth flow, state and PKCE inventory | OAUTH_FLOW | OAUTH | PASSIVE | PLANNED | ≤ 0 |
-| `oauth.flow-controls` — Redirect and response-type configuration observations | OAUTH_FLOW | OAUTH | PASSIVE | PLANNED | ≤ 0 |
+| `oauth.flow-inventory` — Observed OAuth flow, state and PKCE inventory | OAUTH_FLOW | OAUTH | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `oauth.flow-controls` — Redirect and response-type configuration observations | OAUTH_FLOW | OAUTH | PASSIVE | IMPLEMENTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.
 
 References reviewed:
 
@@ -252,11 +254,11 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `lfi.path-input-discovery` — File/path-like input inventory | Public observation | FILE_INPUT | PASSIVE | PLANNED | ≤ 0 |
-| `lfi.path-error-differential` — Nonexistent harmless path and error controls | Public observation | FILE_INPUT | SAFE_ACTIVE | PLANNED | ≤ 6 |
-| `lfi.file-read` — System-file inclusion or remote code inclusion | Public observation | ALWAYS | HIGH_RISK | UNSUPPORTED | ≤ 0 |
+| `lfi.path-input-discovery` — File/path-like input inventory | Observed safe context | FILE_INPUT | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `lfi.path-error-differential` — Nonexistent harmless path and error controls | Observed safe context | FILE_INPUT | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
+| `lfi.file-read` — System-file inclusion or remote code inclusion | Observed safe context | ALWAYS | HIGH_RISK | UNSUPPORTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: A benign missing-filename error remains CANDIDATE/INFO; traversal, local inclusion and remote inclusion are not inferred.
 
 References reviewed:
 
@@ -269,11 +271,11 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `serialization.cookie-signature` — Cookie format signature without storing values | Public observation | COOKIE | PASSIVE | PLANNED | ≤ 0 |
-| `serialization.input-signature` — Observed query/hidden-input serialization signatures | Public observation | ALWAYS | PASSIVE | PLANNED | ≤ 0 |
-| `serialization.gadget-chain` — Execute a deserialization gadget chain | Public observation | ALWAYS | HIGH_RISK | UNSUPPORTED | ≤ 0 |
+| `serialization.cookie-signature` — Cookie format signature without storing values | Observed safe context | COOKIE | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `serialization.input-signature` — Observed query/hidden-input serialization signatures | Observed safe context | ALWAYS | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `serialization.gadget-chain` — Execute a deserialization gadget chain | Observed safe context | ALWAYS | HIGH_RISK | UNSUPPORTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Not executable: confinement or reversibility is not guaranteed.
 
 References reviewed:
 
@@ -286,11 +288,11 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `business.race-inventory` — Limited-use action inventory without replay | Public observation | BUSINESS_FLOW | PASSIVE | PLANNED | ≤ 0 |
-| `business.replay-review` — Observed retry/idempotency context review | Public observation | BUSINESS_FLOW | PASSIVE | PLANNED | ≤ 0 |
-| `business.race-replay` — Concurrent business action replay | Public observation | ALWAYS | STATE_CHANGING | UNSUPPORTED | ≤ 0 |
+| `business.race-inventory` — Limited-use action inventory without replay | Observed safe context | BUSINESS_FLOW | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `business.replay-review` — Observed retry/idempotency context review | Observed safe context | BUSINESS_FLOW | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `business.race-replay` — Concurrent business action replay | Observed safe context | ALWAYS | STATE_CHANGING | UNSUPPORTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Not executable: confinement or reversibility is not guaranteed.
 
 References reviewed:
 
@@ -303,11 +305,11 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `business.critical-field-inventory` — Quantity/price/role/plan field inventory | Public observation | BUSINESS_FLOW | PASSIVE | PLANNED | ≤ 0 |
-| `business.value-review` — Observed server/client value-trust assumptions | Public observation | BUSINESS_FLOW | PASSIVE | PLANNED | ≤ 0 |
-| `business.value-mutation` — Mutate financial or authorization fields | Public observation | ALWAYS | STATE_CHANGING | UNSUPPORTED | ≤ 0 |
+| `business.critical-field-inventory` — Quantity/price/role/plan field inventory | Observed safe context | BUSINESS_FLOW | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `business.value-review` — Observed server/client value-trust assumptions | Observed safe context | BUSINESS_FLOW | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `business.value-mutation` — Mutate financial or authorization fields | Observed safe context | ALWAYS | STATE_CHANGING | UNSUPPORTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Not executable: confinement or reversibility is not guaranteed.
 
 References reviewed:
 
@@ -320,11 +322,11 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `business.workflow-inventory` — Observed multi-step route sequences | Public observation | BUSINESS_FLOW | PASSIVE | PLANNED | ≤ 0 |
-| `business.transition-review` — Review transition ordering without calling final actions | Public observation | BUSINESS_FLOW | PASSIVE | PLANNED | ≤ 0 |
-| `business.skip-final` — Call a final workflow action out of order | Public observation | ALWAYS | STATE_CHANGING | UNSUPPORTED | ≤ 0 |
+| `business.workflow-inventory` — Observed multi-step route sequences | Observed safe context | BUSINESS_FLOW | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `business.transition-review` — Review transition ordering without calling final actions | Observed safe context | BUSINESS_FLOW | PASSIVE | IMPLEMENTED | ≤ 0 |
+| `business.skip-final` — Call a final workflow action out of order | Observed safe context | ALWAYS | STATE_CHANGING | UNSUPPORTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: Not executable: confinement or reversibility is not guaranteed.
 
 References reviewed:
 
@@ -337,10 +339,10 @@ References reviewed:
 
 | Technique | Prerequisites | Applicability | Risk | Status | Requests |
 | --- | --- | --- | --- | --- | --- |
-| `disclosure.git-head` — Minimal Git HEAD exposure with catch-all controls | Public observation | ALWAYS | SAFE_ACTIVE | PLANNED | ≤ 6 |
-| `disclosure.header-inventory` — Observed diagnostic/security-header metadata | Public observation | ALWAYS | PASSIVE | PLANNED | ≤ 0 |
+| `disclosure.git-head` — Minimal Git HEAD exposure with catch-all controls | Observed safe context | ALWAYS | SAFE_ACTIVE | IMPLEMENTED | ≤ 6 |
+| `disclosure.header-inventory` — Observed diagnostic/security-header metadata | Observed safe context | ALWAYS | PASSIVE | IMPLEMENTED | ≤ 0 |
 
-Safe validation: compare independently collected responses and negative controls; store only sanitized observation metadata. Ambiguous results remain INFO candidates; status, timeout, literal reflection and passive signatures are never sufficient for confirmation.
+Safe validation / false-positive controls: A minimal Git HEAD ref marker repeats and differs from the nonexistent-path catch-all.
 
 References reviewed:
 
@@ -349,11 +351,32 @@ References reviewed:
 - [Web vulnerabilities methodology — information gathering](https://github.com/HackTricks-wiki/hacktricks/blob/master/src/pentesting-web/web-vulnerabilities-methodology.md) — HACKTRICKS, COMMUNITY_METHODOLOGY, reviewed 2026-10-26.
 - [Web Security Academy: information-disclosure](https://portswigger.net/web-security/information-disclosure) — PORTSWIGGER_ACADEMY, VENDOR_METHODOLOGY, reviewed 2026-10-26.
 
-## CLI integration
+## Execution and approval boundaries
 
-Dalfox v2.13.0 uses JSON (`cmd/root.go`, `loadConfigFile` / `json.Unmarshal`).
-Its wrapper uses a dedicated `dalfox-config.json`, never the commented YAML used
-by the ProjectDiscovery tools. A real local-server smoke test asserts the exact
-Target UA and absence of a configuration parse error in captured output.
+57 descriptors: 42 safe/passive methods, four implemented approval-only timing
+methods, eleven intentionally unsupported methods. No general exploitation hooks.
+Fixed PostgreSQL/Unix delay proofs use three interleaved zero/one-second pairs and
+an independent set of zero/two-second pairs. Both halves require explicit per-run
+approval; no automatic delay request is sent by default. Maximum induced waiting
+is nine seconds across the two proofs; jitter/content controls reject weak signals.
+Other DBMS/OS timing syntax is not currently implemented. No arbitrary command or
+statement can be supplied through the API.
 
-Tool source: [Dalfox v2.13.0 configuration loader](https://github.com/hahwul/dalfox/blob/v2.13.0/cmd/root.go).
+All methods share a corpus, current scope checks and Target UA. Limits: 100 total
+HTTP attempts, 12 discovery attempts, 8 maximum requests per technique (usually 6),
+24 per family, 4 techniques per family, concurrency 1, 20s per family, 120s global,
+5s per request, 64KiB response bodies and at most 80 candidate records.
+
+Durable Recon metadata contains routes, input names, forms, JS chunk paths,
+technology labels and cookie attributes, never HTML bodies, raw tokens or cookie
+values. A single bounded refresh uses recent Recon routes; families never crawl
+independently. OAuth authorization links are observed but never followed by the
+crawler. XML response metadata does not authorize a parser POST.
+
+External CLI tools remain audited integrations tested on a local server. They
+cannot run inside a bounded Hunt because their internal request counts cannot be
+guaranteed. The bounded internal Git exposure method reads HEAD only, never config.
+Dalfox v2.13.0 now receives `dalfox-config.json`, not commented YAML. Its real smoke
+test asserts the exact Target UA and absence of configuration parse errors.
+
+[Dalfox JSON loader](https://github.com/hahwul/dalfox/blob/v2.13.0/cmd/root.go).

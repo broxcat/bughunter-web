@@ -8,7 +8,7 @@ export async function startHuntSnapshot(scanRunId: string, execution: TargetExec
   const run = await prisma.scanRun.findFirst({ where });
   if (!run) throw new Error("Hunt run does not belong to the selected host");
   if (run.huntSnapshot !== null) return huntPolicySnapshotSchema.parse(run.huntSnapshot);
-  const snapshot = createHuntPolicySnapshot(execution);
+  const snapshot = { ...createHuntPolicySnapshot(execution), approvedTechniques: [...run.approvedHuntTechniques] };
   // SQL NULL, not JSON null. The predicate prevents concurrent/retried writes.
   const { Prisma } = await import("@prisma/client");
   await prisma.scanRun.updateMany({ where: { ...where, huntSnapshot: { equals: Prisma.DbNull } }, data: { huntSnapshot: snapshot } });

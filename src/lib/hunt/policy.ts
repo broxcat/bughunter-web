@@ -39,12 +39,12 @@ export function resolveHuntFamilies(program: HuntPolicy, capabilities: readonly 
   });
 }
 export const huntPolicySnapshotSchema = z.object({
-  version: z.literal(1), capturedAt: z.iso.datetime(),
+  version: z.literal(1), approvedTechniques: z.array(z.string()).default([]), capturedAt: z.iso.datetime(),
   qualifying: z.array(z.string()), nonQualifying: z.array(z.string()),
   selectedFamilies: z.array(z.string()), families: z.array(selectionSchema),
 });
 export type HuntPolicySnapshot = z.infer<typeof huntPolicySnapshotSchema>;
 export function createHuntPolicySnapshot(program: HuntPolicy, now = new Date()): HuntPolicySnapshot {
   const families = resolveHuntFamilies(program);
-  return { version: 1, capturedAt: now.toISOString(), qualifying: [...program.qualifying], nonQualifying: [...program.nonQualifying], selectedFamilies: families.filter(f => f.selected).map(f => f.family), families };
+  return { version: 1, approvedTechniques: [], capturedAt: now.toISOString(), qualifying: [...program.qualifying], nonQualifying: [...program.nonQualifying], selectedFamilies: families.filter(f => f.selected).map(f => f.family), families };
 }

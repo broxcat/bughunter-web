@@ -10,14 +10,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "ALWAYS",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -30,11 +30,13 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "version": 1,
     "family": "auth-bypass",
     "title": "Authenticated versus anonymous content differential",
-    "prerequisites": [],
+    "prerequisites": [
+      "AUTHENTICATED_SESSION"
+    ],
     "applicability": "API_ENDPOINT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
     "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
@@ -54,11 +56,13 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "version": 1,
     "family": "auth-bypass",
     "title": "Read-only routing header with independent content control",
-    "prerequisites": [],
+    "prerequisites": [
+      "AUTHENTICATED_SESSION"
+    ],
     "applicability": "API_ENDPOINT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
     "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
@@ -79,17 +83,17 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "family": "idor",
     "title": "Numeric and opaque references in observed URLs",
     "prerequisites": [],
-    "applicability": "OBJECT_REFERENCE",
+    "applicability": "ALWAYS",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -106,14 +110,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "OBJECT_REFERENCE",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -130,14 +134,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "OBJECT_REFERENCE",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -158,14 +162,15 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "OBJECT_REFERENCE",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "confirmationEvidence": "Owner-attested JSON object matches across two explicit independent test identities, repeated under a second technique, and differs from independent anonymous controls.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Explicit second-account object ownership",
+      "Error/login/catch-all rejection",
+      "Repeated canonical content hash, content type and object markers",
+      "Anonymous comparison"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -186,14 +191,15 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "OBJECT_REFERENCE",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "confirmationEvidence": "Owner-attested JSON object matches across two explicit independent test identities, repeated under a second technique, and differs from independent anonymous controls.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Explicit second-account object ownership",
+      "Error/login/catch-all rejection",
+      "Repeated canonical content hash, content type and object markers",
+      "Anonymous comparison"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -210,14 +216,13 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "QUERY_INPUT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "A fresh non-secret canary appears in an authorized response.",
+    "confirmationEvidence": "Separate browser canary execution is required; reflection and sink names never confirm XSS.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Encoded/literal reflection is not execution",
+      "Independent fresh execution canary"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -234,14 +239,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "JAVASCRIPT",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -260,14 +265,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "QUERY_INPUT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "confirmationEvidence": "A fresh canary generated by the independent browser confirmer causes an observed dialog inside the scope/UA/request guard.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Unique unpredictable canary",
+      "No matching dialog means unconfirmed",
+      "Foreign HTTP, service workers and mutating methods blocked"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -284,14 +289,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "FORM",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -308,14 +313,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "COOKIE",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -332,14 +337,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "JAVASCRIPT",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -356,14 +361,15 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "QUERY_INPUT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "confirmationEvidence": "Repeated error versus inert controls and independently repeated boolean positive/negative controls must both agree before promotion.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Repeat database-specific signature",
+      "Inert control without SQL error",
+      "Positive response matches baseline",
+      "Repeated negative differs without error; no OR/UNION/data extraction"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -380,14 +386,15 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "QUERY_INPUT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "confirmationEvidence": "Repeated error versus inert controls and independently repeated boolean positive/negative controls must both agree before promotion.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Repeat database-specific signature",
+      "Inert control without SQL error",
+      "Positive response matches baseline",
+      "Repeated negative differs without error; no OR/UNION/data extraction"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -404,14 +411,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "QUERY_INPUT",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -428,14 +435,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "ALWAYS",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -452,14 +459,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "URL_INPUT",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -478,14 +485,15 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "URL_INPUT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "confirmationEvidence": "Two unique configured-catcher tokens correlate; this validates server-side callback behavior, not arbitrary internal access or SSRF impact.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Only configured operator origin/path",
+      "No implicit fallback",
+      "No LAN/cloud/alternate protocol probes",
+      "No Finding from callback capability alone"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -504,14 +512,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "XML",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -530,14 +538,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "XML",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -554,14 +562,15 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "QUERY_INPUT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "confirmationEvidence": "Two distinct nonce-delimited arithmetic results evaluate correctly and an inert control does not; literal expressions are rejected.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Fresh marker",
+      "Different arithmetic results",
+      "Inert control",
+      "Reject literal reflection"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -578,7 +587,7 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "QUERY_INPUT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
     "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
@@ -602,14 +611,15 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "API_ENDPOINT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "confirmationEvidence": "Header reflection is only a candidate. Repeated credentialed content difference can be VALIDATED, but remains below Finding without demonstrated browser readability and cookie feasibility.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Origin matrix including null/prefix/suffix",
+      "Authenticated and anonymous content comparison",
+      "Repeated content stability",
+      "No header-only impact escalation"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -628,14 +638,15 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "API_ENDPOINT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "confirmationEvidence": "Header reflection is only a candidate. Repeated credentialed content difference can be VALIDATED, but remains below Finding without demonstrated browser readability and cookie feasibility.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Origin matrix including null/prefix/suffix",
+      "Authenticated and anonymous content comparison",
+      "Repeated content stability",
+      "No header-only impact escalation"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -654,14 +665,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "JWT",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -680,14 +691,15 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "JWT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "confirmationEvidence": "Two independently corrupted signatures still read the same protected JSON object as the valid token while anonymous controls do not.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Valid-token baseline",
+      "Anonymous control",
+      "Two independent invalid signatures",
+      "No changed identity claims or secret guessing"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -706,14 +718,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "OAUTH",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -732,14 +744,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "OAUTH",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -756,14 +768,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "FILE_INPUT",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -780,14 +792,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "FILE_INPUT",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "confirmationEvidence": "A benign missing-filename error remains CANDIDATE/INFO; traversal, local inclusion and remote inclusion are not inferred.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Original baseline",
+      "Nonexistent benign filename",
+      "No system-file retrieval"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -804,14 +816,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "COOKIE",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -828,14 +840,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "ALWAYS",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -852,14 +864,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "BUSINESS_FLOW",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -876,14 +888,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "BUSINESS_FLOW",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -900,14 +912,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "BUSINESS_FLOW",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -924,14 +936,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "BUSINESS_FLOW",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -948,14 +960,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "BUSINESS_FLOW",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -972,14 +984,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "BUSINESS_FLOW",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -996,14 +1008,15 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "ALWAYS",
     "risk": "SAFE_ACTIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 6,
     "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "confirmationEvidence": "A minimal Git HEAD ref marker repeats and differs from the nonexistent-path catch-all.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "Strict ref syntax",
+      "Independent repeat",
+      "Catch-all comparison",
+      "No config/source/credential retrieval"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -1020,14 +1033,14 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
     "applicability": "ALWAYS",
     "risk": "PASSIVE",
     "requiresApproval": false,
-    "implementation": "PLANNED",
+    "implementation": "IMPLEMENTED",
     "maxRequests": 0,
-    "candidateEvidence": "Observed input, format or reproducible response anomaly; never status alone.",
-    "confirmationEvidence": "Independent positive and negative comparisons or controlled browser/OOB evidence; otherwise remain INFO candidate.",
+    "candidateEvidence": "An observed structure/format/input, without executing a state-changing action.",
+    "confirmationEvidence": "Passive observation is not independently confirmable: retain SIGNAL/INFO, never promote from a signature alone.",
     "negativeControls": [
-      "Baseline and catch-all/error-shell rejection",
-      "Repeatability; reflection is not evaluation",
-      "No sensitive payload/body/token persisted"
+      "A route, field, sink or format signature alone is insufficient",
+      "No inferred ownership or security impact",
+      "No credentials, token prefix or response body persisted"
     ],
     "evidenceRequired": [
       "Scoped reproducible observation",
@@ -1076,48 +1089,6 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
       "Separate explicit human testing plan"
     ],
     "references": HUNT_REFERENCES["csrf"]
-  },
-  {
-    "id": "sqli.paired-timing",
-    "version": 1,
-    "family": "sqli",
-    "title": "Induced delays and timing distribution confirmation",
-    "prerequisites": [],
-    "applicability": "ALWAYS",
-    "risk": "HIGH_RISK",
-    "requiresApproval": true,
-    "implementation": "UNSUPPORTED",
-    "maxRequests": 0,
-    "candidateEvidence": "Manual review only.",
-    "confirmationEvidence": "Not executable: confinement or reversibility is not guaranteed.",
-    "negativeControls": [
-      "No automated request permitted"
-    ],
-    "evidenceRequired": [
-      "Separate explicit human testing plan"
-    ],
-    "references": HUNT_REFERENCES["sqli"]
-  },
-  {
-    "id": "cmdi.paired-timing",
-    "version": 1,
-    "family": "command-injection",
-    "title": "Induced command timing/marker execution",
-    "prerequisites": [],
-    "applicability": "ALWAYS",
-    "risk": "HIGH_RISK",
-    "requiresApproval": true,
-    "implementation": "UNSUPPORTED",
-    "maxRequests": 0,
-    "candidateEvidence": "Manual review only.",
-    "confirmationEvidence": "Not executable: confinement or reversibility is not guaranteed.",
-    "negativeControls": [
-      "No automated request permitted"
-    ],
-    "evidenceRequired": [
-      "Separate explicit human testing plan"
-    ],
-    "references": HUNT_REFERENCES["command-injection"]
   },
   {
     "id": "ssrf.internal-probing",
@@ -1307,5 +1278,105 @@ export const HUNT_TECHNIQUES: HuntTechniqueDescriptor[] = [
       "Separate explicit human testing plan"
     ],
     "references": HUNT_REFERENCES["business-logic-workflow"]
+  },
+  {
+    "id": "sqli.timing-screen",
+    "version": 1,
+    "family": "sqli",
+    "title": "Explicitly approved bounded timing screen",
+    "prerequisites": [],
+    "applicability": "QUERY_INPUT",
+    "risk": "HIGH_RISK",
+    "requiresApproval": true,
+    "implementation": "IMPLEMENTED",
+    "maxRequests": 6,
+    "candidateEvidence": "Three interleaved matched zero/one-second pairs.",
+    "confirmationEvidence": "Independent zero/two-second pairs, stable response content, low variance, and delays tracking expected values.",
+    "negativeControls": [
+      "Interleaved zero-delay controls",
+      "Repeated samples and jitter distribution",
+      "Independent larger delay",
+      "Explicit per-run approval"
+    ],
+    "evidenceRequired": [
+      "Matched content",
+      "Six independent positive/control pairs"
+    ],
+    "references": HUNT_REFERENCES["sqli"]
+  },
+  {
+    "id": "sqli.timing-confirm",
+    "version": 1,
+    "family": "sqli",
+    "title": "Explicitly approved bounded timing confirm",
+    "prerequisites": [],
+    "applicability": "QUERY_INPUT",
+    "risk": "HIGH_RISK",
+    "requiresApproval": true,
+    "implementation": "IMPLEMENTED",
+    "maxRequests": 6,
+    "candidateEvidence": "Three interleaved matched zero/one-second pairs.",
+    "confirmationEvidence": "Independent zero/two-second pairs, stable response content, low variance, and delays tracking expected values.",
+    "negativeControls": [
+      "Interleaved zero-delay controls",
+      "Repeated samples and jitter distribution",
+      "Independent larger delay",
+      "Explicit per-run approval"
+    ],
+    "evidenceRequired": [
+      "Matched content",
+      "Six independent positive/control pairs"
+    ],
+    "references": HUNT_REFERENCES["sqli"]
+  },
+  {
+    "id": "cmdi.timing-screen",
+    "version": 1,
+    "family": "command-injection",
+    "title": "Explicitly approved bounded timing screen",
+    "prerequisites": [],
+    "applicability": "QUERY_INPUT",
+    "risk": "HIGH_RISK",
+    "requiresApproval": true,
+    "implementation": "IMPLEMENTED",
+    "maxRequests": 6,
+    "candidateEvidence": "Three interleaved matched zero/one-second pairs.",
+    "confirmationEvidence": "Independent zero/two-second pairs, stable response content, low variance, and delays tracking expected values.",
+    "negativeControls": [
+      "Interleaved zero-delay controls",
+      "Repeated samples and jitter distribution",
+      "Independent larger delay",
+      "Explicit per-run approval"
+    ],
+    "evidenceRequired": [
+      "Matched content",
+      "Six independent positive/control pairs"
+    ],
+    "references": HUNT_REFERENCES["command-injection"]
+  },
+  {
+    "id": "cmdi.timing-confirm",
+    "version": 1,
+    "family": "command-injection",
+    "title": "Explicitly approved bounded timing confirm",
+    "prerequisites": [],
+    "applicability": "QUERY_INPUT",
+    "risk": "HIGH_RISK",
+    "requiresApproval": true,
+    "implementation": "IMPLEMENTED",
+    "maxRequests": 6,
+    "candidateEvidence": "Three interleaved matched zero/one-second pairs.",
+    "confirmationEvidence": "Independent zero/two-second pairs, stable response content, low variance, and delays tracking expected values.",
+    "negativeControls": [
+      "Interleaved zero-delay controls",
+      "Repeated samples and jitter distribution",
+      "Independent larger delay",
+      "Explicit per-run approval"
+    ],
+    "evidenceRequired": [
+      "Matched content",
+      "Six independent positive/control pairs"
+    ],
+    "references": HUNT_REFERENCES["command-injection"]
   }
 ];

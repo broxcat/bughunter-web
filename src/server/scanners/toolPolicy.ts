@@ -8,6 +8,7 @@ const HTTP_TOOLS = new Set(["httpx", "katana", "nuclei", "dalfox"]);
 /** The backend is the final writer of UA headers, even if a caller proposes one. */
 export function enforcedToolArgs(cmd: string, args: string[]): string[] {
   const ctx = currentTargetExecution();
+  if (ctx.requestGuard) throw new Error("External CLI request counts cannot be enforced inside a bounded Hunt");
   if (cmd === "nmap") return ["-sT", "-Pn", "-n", ctx.host.split(":")[0]];
   if (!HTTP_TOOLS.has(cmd)) throw new Error("Unaudited scanner tool; refusing execution");
   for (const arg of args) if (/^https?:\/\//i.test(arg)) assertExecutionUrl(arg, ctx);

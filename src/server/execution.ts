@@ -3,7 +3,13 @@ import type { Browser, Route } from "playwright-chromium";
 import { prisma } from "@/lib/prisma";
 import { isExcluded, programSchema } from "@/lib/bountyProgram";
 
+export interface TargetRequestGuard {
+  acquire(url: string, method: string): (() => void) | Promise<() => void>;
+  remainingMs(): number;
+  signal: AbortSignal;
+}
 export interface TargetExecution {
+  requestGuard?: TargetRequestGuard;
   targetId: string;
   host: string;
   requiredUserAgent: string;
@@ -61,16 +67,19 @@ export async function newTargetBrowserContext(browser: Browser, syntheticPage?: 
     headers.set("User-Agent", ctx.requiredUserAgent);
     // Chromium does not route every hop of a native redirect chain. Observe
     // redirects without following them, as the internal HTTP probe does.
+    let release: (() => void) | undefined;
     try {
-      const response = await route.fetch({ headers: Object.fromEntries(headers), maxRedirects: 0 });
+      release = await ctx.requestGuard?.acquire(url, route.request().method());
+      const response = await route.fetch({ headers: Object.fromEntries(headers), maxRedirects: 0, timeout: Math.min(5000, ctx.requestGuard?.remainingMs() ?? 5000) });
       const responseHeaders = { ...response.headers() };
       if (response.status() >= 300 && response.status() < 400 && responseHeaders.location) {
         responseHeaders["x-bughunter-redirect-location"] = responseHeaders.location;
         delete responseHeaders.location;
       }
       await route.fulfill({ response, headers: responseHeaders });
-    } catch { await route.abort("failed").catch(() => {}); }
+    } catch { await route.abort("failed").catch(() => {}); } finally { release?.(); }
   });
+  ctx.requestGuard?.signal.addEventListener("abort", () => { void context.close().catch(() => {}); }, { once: true });
   // Browser WebSocket traffic has no HTTP scan capability in BugHunter.
   await context.routeWebSocket("**/*", socket => socket.close());
   return context;

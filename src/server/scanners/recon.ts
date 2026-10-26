@@ -1,3 +1,6 @@
+import { analyzeCorpus, persistableCorpus } from "@/server/hunt/corpus";
+import { discoverCorpus, clearDiscoveryCorpus } from "./discovery";
+import { prisma } from "@/lib/prisma";
 import { currentTargetExecution } from "@/server/execution";
 import { resolveAny } from "node:dns/promises";
 import { logLine } from "./context";
@@ -23,6 +26,9 @@ export async function runRecon(_host: string, scanRunId: string): Promise<void> 
   const ctx = await loadScanContext(scanRunId);
   if (!ctx || execution.targetId !== ctx.targetId) throw new Error("Missing authorized scan context");
   await logLine(scanRunId, `[recon] User-Agent: ${execution.requiredUserAgent}`);
+  const corpus = analyzeCorpus(await discoverCorpus(ctx), ctx.baseUrl);
+  await prisma.scanRun.updateMany({ where: { id: scanRunId, targetId: ctx.targetId }, data: { reconCorpus: persistableCorpus(corpus) } });
+  clearDiscoveryCorpus(scanRunId);
   const bareHost = ctx.host;
   const url = ctx.baseUrl;
   const domain = bareHost.split(":")[0]; // no port — subfinder/nmap want this

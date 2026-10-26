@@ -1,3 +1,5 @@
+import { operatorOobBase } from "./oobPolicy";
+import { recentReconCorpus } from "./corpus";
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { chromium } from "playwright-chromium";
@@ -29,12 +31,12 @@ export async function loadReadinessFacts(targetId: string, observed: Partial<Rea
   const b = usable.find(c => c.purpose === "ACCOUNT_B" && c.fingerprint !== a?.fingerprint);
   const independent = Boolean(a && b);
   const ownedReference = independent && Boolean(b?.ownedObjectUrl);
-  let oobCallback = false;
-  try { const u = new URL(process.env.OOB_PUBLIC_BASE_URL ?? ""); oobCallback = /^https?:$/.test(u.protocol) && !u.username && !u.password; } catch { /* unset */ }
+  const oobCallback = Boolean(operatorOobBase());
   const facts: ReadinessFacts = { ...EMPTY_READINESS_FACTS, ...observed, primaryCredential: usable.length > 0, secondCredential: independent, secondUserObjectReference: ownedReference, objectReference: Boolean(observed.objectReference) || ownedReference, authenticatedSession: usable.length > 0, sessionCookie: materials.some(c => c.hasCookies), jwt: materials.some(c => c.hasJwt) || Boolean(observed.jwt), oobCallback, browserContext: existsSync(chromium.executablePath()) };
   return { facts, credentials: materials.map(({ id, label, mode, purpose, hasSession, hasCookies, hasJwt }) => ({ id, label, mode, purpose, hasSession, hasCookies, hasJwt })) };
 }
 export async function loadHuntReadiness(targetId: string, policy: HuntPolicy, observed: Partial<ReadinessFacts> = {}) {
-  const metadata = await loadReadinessFacts(targetId, observed);
+  const recon = await recentReconCorpus(targetId);
+  const metadata = await loadReadinessFacts(targetId, { ...(recon ? { discoveryComplete: true, xmlEndpoint: recon.surface.xml, oauthFlow: recon.surface.oauth, objectReference: recon.surface.objectReferences, stateChangingEndpoint: recon.surface.forms, jwt: recon.surface.jwt } : {}), ...observed });
   return { ...metadata, families: resolveHuntReadiness(policy, metadata.facts) };
 }

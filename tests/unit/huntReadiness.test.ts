@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { EMPTY_READINESS_FACTS as empty, resolveHuntReadiness } from "@/lib/hunt/readiness";
 const assess = (family: string, facts = empty) => resolveHuntReadiness({ qualifying: [], nonQualifying: [] }, facts).find(f => f.family === family)!;
 describe("Hunt readiness prerequisites", () => {
-  it("blocks IDOR/BOLA without independent accounts and an owned foreign object", () => {
+  it("blocks strong BOLA while allowing degraded IDOR discovery without an owned reference", () => {
     expect(assess("bola").state).toBe("BLOCKED");
-    expect(assess("idor", { ...empty, primaryCredential: true, secondCredential: true }).state).toBe("BLOCKED");
+    expect(assess("idor", { ...empty, primaryCredential: true, secondCredential: true }).state).toBe("DEGRADED");
     expect(assess("bola", { ...empty, primaryCredential: true, secondCredential: true, secondUserObjectReference: true, objectReference: true }).state).toBe("READY");
   });
   it("does not block public XSS/SQLi/access-control checks without credentials", () => {

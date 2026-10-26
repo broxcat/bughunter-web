@@ -100,6 +100,8 @@ async function resolveEmailPasswordCookies(row: {
 // request headers for the target.
 
 export interface DecryptedTargetCredential {
+  purpose?: string;
+  ownedObjectUrl?: string | null;
   id: string;
   label: string;
   cookies?: Record<string, string>; // session cookies for the TARGET
@@ -125,7 +127,7 @@ export async function loadTargetCredentials(
 
   const out: DecryptedTargetCredential[] = [];
   for (const row of rows) {
-    const cred: DecryptedTargetCredential = { id: row.id, label: row.label };
+    const cred: DecryptedTargetCredential = { id: row.id, label: row.label, purpose: row.purpose, ownedObjectUrl: row.ownedObjectUrl };
 
     // EMAIL_PASSWORD: mint/refresh the session via headless login (cached).
     if (row.mode === "EMAIL_PASSWORD") {

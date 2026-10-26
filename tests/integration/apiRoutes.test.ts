@@ -540,4 +540,22 @@ d("API route authorization (integration)", () => {
     expect((await refresh(req("http://localhost", { credentialId: a.credential.id }), context)).status).toBe(400);
   });
 
+  it("requires explicit bounded timing approval and refuses unsupported or excluded approvals", async () => {
+    const program = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Approved timing", requiredUserAgent: "Timing/1", qualifying: ["SQL_INJECTION", "RCE"] } });
+    const scope = await prisma.scope.create({ data: { userId, hostPattern: "timing.example.test", status: "APPROVED" } });
+    const target = await prisma.target.create({ data: { userId, programId: program.id, scopeId: scope.id, host: "timing.example.test" } });
+    const create = (extra: object) => scanRunsPost(req("http://localhost", { targetId: target.id, type: "HUNT", ...extra }));
+    expect((await create({ approvedTechniques: ["sqli.timing-screen"] })).status).toBe(400);
+    expect((await create({ approvedTechniques: ["business.race-replay"], approveBoundedTiming: true })).status).toBe(400);
+    const res = await create({ approvedTechniques: ["sqli.timing-screen", "sqli.timing-confirm"], approveBoundedTiming: true });
+    expect(res.status).toBe(201);
+    const run = await res.json();
+    expect(run.approvedHuntTechniques).toEqual(["sqli.timing-screen", "sqli.timing-confirm"]);
+    const { startHuntSnapshot } = await import("@/server/hunt/snapshot");
+    const { loadTargetExecution } = await import("@/server/execution");
+    expect((await startHuntSnapshot(run.id, await loadTargetExecution(target.id))).approvedTechniques).toEqual(run.approvedHuntTechniques);
+    await prisma.bountyProgram.update({ where: { id: program.id }, data: { nonQualifying: ["RCE"] } });
+    expect((await create({ approvedTechniques: ["cmdi.timing-screen"], approveBoundedTiming: true })).status).toBe(400);
+  });
+
 });
