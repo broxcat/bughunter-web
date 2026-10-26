@@ -489,4 +489,31 @@ d("API route authorization (integration)", () => {
     expect(await (await GET()).json()).toEqual([]);
   });
 
+  it("readiness exposes only safe credential metadata and rejects cross-user access", async () => {
+    process.env.CREDENTIALS_ENCRYPTION_KEY ??= "0".repeat(64);
+    const { encryptSecret } = await import("@/lib/crypto");
+    const { GET } = await import("@/app/api/targets/[id]/hunt-readiness/route");
+    const { loadReadinessFacts } = await import("@/server/hunt/readiness");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Readiness", requiredUserAgent: "Ready/1" } });
+    const scope = await prisma.scope.create({ data: { userId, hostPattern: "ready.example.test", status: "APPROVED" } });
+    const t = await prisma.target.create({ data: { userId, programId: p.id, scopeId: scope.id, host: "ready.example.test" } });
+    const token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature";
+    for (const label of ["Account A", "Duplicate A"]) await prisma.targetCredential.create({ data: { targetId: t.id, label, mode: "BEARER", headerCipher: encryptSecret(token) } });
+    const context = { params: Promise.resolve({ id: t.id }) };
+    const res = await GET(req("http://localhost", {}), context);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.facts.jwt).toBe(true);
+    expect(body.facts.secondCredential).toBe(false);
+    expect(JSON.stringify(body)).not.toContain(token);
+    expect(JSON.stringify(body)).not.toContain("Cipher");
+    expect(JSON.stringify(body)).not.toContain("fingerprint");
+    expect(body.credentials[0].label).toBe("Account A");
+    await prisma.targetCredential.deleteMany({ where: { targetId: t.id } });
+    await prisma.targetCredential.create({ data: { targetId: t.id, label: "Expired login", mode: "EMAIL_PASSWORD", loginUrl: "https://ready.example.test/login", emailCipher: encryptSecret("test@example.test"), passwordCipher: encryptSecret("never-return-password"), sessionCookiesCipher: encryptSecret(JSON.stringify({ sessionid: "expired-secret-cookie" })), sessionRefreshedAt: new Date(0) } });
+    expect((await loadReadinessFacts(t.id)).facts.authenticatedSession).toBe(false);
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await GET(req("http://localhost", {}), context)).status).toBe(404);
+  });
+
 });

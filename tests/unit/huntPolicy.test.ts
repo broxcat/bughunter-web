@@ -40,6 +40,7 @@ vi.mock("@/server/scanners/deserialization", () => ({ runDeserialization: calls.
 vi.mock("@/server/scanners/businessLogicRace", () => ({ runBusinessLogicRace: calls.runBusinessLogicRace }));
 vi.mock("@/server/scanners/businessLogicTamper", () => ({ runBusinessLogicTamper: calls.runBusinessLogicTamper }));
 vi.mock("@/server/scanners/businessLogicWorkflow", () => ({ runBusinessLogicWorkflow: calls.runBusinessLogicWorkflow }));
+vi.mock("@/server/hunt/readiness", () => ({ loadHuntReadiness: vi.fn(async (_target, policy) => ({ families: createHuntPolicySnapshot(policy).families.map(f => ({ ...f, safeSubset: f.selected, state: f.selected ? "READY" : "NOT_SELECTED", prerequisites: [], riskClass: "SAFE_ACTIVE" })) })) }));
 vi.mock("@/server/hunt/snapshot", () => ({ startHuntSnapshot: vi.fn(async (_id, execution) => createHuntPolicySnapshot(execution)) }));
 vi.mock("@/server/scanners/runCommand", () => ({ runCommand: calls.command }));
 vi.mock("@/server/scanners/context", () => ({ loadScanContext: vi.fn(async () => ({ scanRunId: "r", targetId: "t", userId: "u", host: "api.example.com", baseUrl: "https://api.example.com" })), logLine: vi.fn(async () => {}) }));

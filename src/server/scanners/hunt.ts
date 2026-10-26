@@ -1,4 +1,5 @@
 import { currentTargetExecution } from "@/server/execution";
+import { loadHuntReadiness } from "@/server/hunt/readiness";
 import { startHuntSnapshot } from "@/server/hunt/snapshot";
 import { NUCLEI_TEMPLATE } from "./toolPolicy";
 // Hunt orchestrator. Runs the nuclei sweep, then the ported vuln-class families.
@@ -59,7 +60,11 @@ export async function runHunt(_host: string, scanRunId: string): Promise<void> {
   if (execution.targetId !== ctx.targetId) throw new Error("Target execution mismatch");
   await logLine(scanRunId, `[hunt] User-Agent: ${execution.requiredUserAgent}`);
   const snapshot = await startHuntSnapshot(scanRunId, execution);
-  const selected = new Set(snapshot.selectedFamilies);
+  const readiness = await loadHuntReadiness(ctx.targetId, snapshot);
+  const selected = new Set(readiness.families.filter(f => f.safeSubset).map(f => f.family));
+  for (const family of readiness.families.filter(f => f.selected && !f.safeSubset)) {
+    await logLine(scanRunId, `[hunt] ${family.displayName}: ${family.state} — ${family.prerequisites.filter(p => !p.satisfied).map(p => p.reason).join(" ")}`);
+  }
   // Only an audited, same-host HTTP template. Arbitrary templates may dial other
   // hosts, invoke non-HTTP protocols or enable families excluded by the program.
   if (selected.has("information-disclosure")) await runCommand(
@@ -70,6 +75,11 @@ export async function runHunt(_host: string, scanRunId: string): Promise<void> {
   for (const [name, run] of FAMILIES) {
     if (!selected.has(name)) {
       await logLine(scanRunId, `[hunt] ${name} excluded by Target policy`);
+      continue;
+    }
+    const descriptor = readiness.families.find(f => f.family === name);
+    if (descriptor && ["STATE_CHANGING", "HIGH_RISK"].includes(descriptor.riskClass)) {
+      await logLine(scanRunId, `[hunt] ${name}: legacy active probes withheld; only audited safe catalogue techniques may run without approval`);
       continue;
     }
     try {
