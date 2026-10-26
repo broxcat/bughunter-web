@@ -1,3 +1,4 @@
+import { enforcedToolArgs, safeCommandSummary } from "./toolPolicy";
 // runCommand — the single, security-critical primitive every scanner uses to
 // spawn an external tool.
 //
@@ -55,12 +56,14 @@ export function runCommand(
   opts: RunCommandOptions,
 ): Promise<RunCommandResult> {
   const { scanRunId, timeoutMs } = opts;
+  args = enforcedToolArgs(cmd, args);
 
   return new Promise<RunCommandResult>((resolve) => {
-    void record(scanRunId, `$ ${cmd} ${args.join(" ")}`, "STDOUT");
+    void record(scanRunId, safeCommandSummary(cmd, args), "STDOUT");
 
     // shell: false is the whole point — argv array, no shell interpretation.
     const child = spawn(cmd, args, { shell: false });
+    child.stdin.end(); // argv-only tools must receive EOF, not wait on an open pipe.
 
     let settled = false;
     let timedOut = false;

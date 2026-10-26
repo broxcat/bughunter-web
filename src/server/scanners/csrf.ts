@@ -1,3 +1,4 @@
+import { newTargetBrowserContext } from "@/server/execution";
 // CSRF scanner (web2-vuln-classes SKILL — Cross-Site Request Forgery).
 //
 // EPISTEMIC HONESTY, same contract as xssConfirm.ts: a token-less state-changing
@@ -29,13 +30,11 @@
 // Hard operational constraints (mirroring xssConfirm.ts): launch with --no-sandbox
 // + --disable-dev-shm-usage, a FRESH context per use always closed in finally, a
 // strict overall budget (~12s), and the whole thing NEVER throws into the hunt —
-// any failure degrades to a CANDIDATE carrying the reason. The ephemeral attacker
-// server is always torn down in finally. Cookie/token VALUES are NEVER logged or
+// any failure degrades to a CANDIDATE carrying the reason. The synthetic attacker
+// page is fulfilled in-process. Cookie/token VALUES are NEVER logged or
 // placed in any finding's evidence.
 
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-chromium";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { Severity } from "@prisma/client";
 import {
   loadTargetCredentials,
@@ -245,6 +244,7 @@ function attackerHtml(action: string, params: Record<string, string>): string {
 async function submitOnce(
   browser: Browser,
   attackerUrl: string,
+  syntheticHtml: string,
   endpoint: string,
   cookies: DecryptedTargetCredential["cookies"] | undefined,
   sameSiteByName: Map<string, SameSite>,
@@ -257,7 +257,7 @@ async function submitOnce(
   let outcome: SubmitOutcome = { status: null, redirectToLogin: false };
 
   try {
-    context = await browser.newContext();
+    context = await newTargetBrowserContext(browser, { url: attackerUrl, html: syntheticHtml });
 
     if (cookies) {
       const secure = baseUrl.startsWith("https://");
@@ -304,7 +304,7 @@ async function submitOnce(
       const status = res.status();
       let redirectToLogin = false;
       if (status >= 300 && status < 400) {
-        const loc = res.headers()["location"];
+        const loc = res.headers()["x-bughunter-redirect-location"] ?? res.headers()["location"];
         if (loc && /login|signin|sign-in|auth|sso/i.test(loc)) redirectToLogin = true;
       }
       outcome = { status, redirectToLogin };
@@ -357,7 +357,6 @@ function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
  */
 async function pocEndpoint(
   browser: Browser,
-  serveHtml: (html: string) => void,
   attackerUrl: string,
   form: ParsedForm,
   cookies: NonNullable<DecryptedTargetCredential["cookies"]>,
@@ -366,7 +365,6 @@ async function pocEndpoint(
   budgetMs: number,
 ): Promise<PocVerdict> {
   const endpoint = form.action as string; // caller guarantees non-null
-  serveHtml(attackerHtml(endpoint, form.params));
 
   const per = Math.max(MIN_SUBMIT_BUDGET_MS, Math.floor(budgetMs / 2));
 
@@ -374,6 +372,7 @@ async function pocEndpoint(
   const auth = await submitOnce(
     browser,
     attackerUrl,
+    attackerHtml(endpoint, form.params),
     endpoint,
     cookies,
     sameSiteByName,
@@ -403,6 +402,7 @@ async function pocEndpoint(
   const unauth = await submitOnce(
     browser,
     attackerUrl,
+    attackerHtml(endpoint, form.params),
     endpoint,
     undefined,
     sameSiteByName,
@@ -609,29 +609,10 @@ async function runBrowserPocs(
   const deadline = Date.now() + OVERALL_DEADLINE_MS;
 
   let browser: Browser | null = null;
-  let server: Server | null = null;
-  let currentHtml = "<!doctype html><html><body></body></html>";
-  const serveHtml = (html: string) => {
-    currentHtml = html;
-  };
-
+  // Fulfilled by the browser route: preserves a separate origin without any
+  // request to a host outside the selected Scope identity.
+  const attackerUrl = "http://bughunter-csrf.invalid/";
   try {
-    // Ephemeral attacker origin: a tiny server on a random 127.0.0.1 port. This is
-    // a DIFFERENT origin from the target, which a genuine cross-site test requires.
-    server = createServer((_req, res) => {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(currentHtml);
-    });
-    const port = await new Promise<number>((resolve, reject) => {
-      server!.once("error", reject);
-      server!.listen(0, "127.0.0.1", () => {
-        const addr = server!.address() as AddressInfo | null;
-        if (addr && typeof addr === "object") resolve(addr.port);
-        else reject(new Error("could not determine ephemeral port"));
-      });
-    });
-    const attackerUrl = `http://127.0.0.1:${port}/`;
-
     browser = await chromium.launch({ headless: true, args: [...LAUNCH_ARGS] });
 
     for (const f of pocForms) {
@@ -643,7 +624,6 @@ async function runBrowserPocs(
       }
       const verdict = await pocEndpoint(
         browser,
-        serveHtml,
         attackerUrl,
         f,
         cookies,
@@ -673,8 +653,5 @@ async function runBrowserPocs(
     );
   } finally {
     if (browser) await browser.close().catch(() => {});
-    if (server) {
-      await new Promise<void>((resolve) => server!.close(() => resolve())).catch(() => {});
-    }
   }
 }

@@ -1,3 +1,4 @@
+import { assertExecutionUrl, newTargetBrowserContext } from "@/server/execution";
 // Automatic session acquisition for EMAIL_PASSWORD target credentials.
 //
 // Instead of pasting cookies from devtools (which expire), the operator gives an
@@ -99,8 +100,9 @@ export async function acquireSessionCookies(
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;
   try {
+    assertExecutionUrl(loginUrl);
     browser = await chromium.launch({ headless: true, args: [...LAUNCH_ARGS] });
-    context = await browser.newContext();
+    context = await newTargetBrowserContext(browser);
     const page = await context.newPage();
 
     try {

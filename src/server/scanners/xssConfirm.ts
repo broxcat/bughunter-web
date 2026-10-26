@@ -1,3 +1,4 @@
+import { newTargetBrowserContext } from "@/server/execution";
 // Headless DOM-XSS confirmation (web2-vuln-classes SKILL §3, confirmation stage).
 //
 // EPISTEMIC HONESTY is the whole point. The static pass in xss.ts records every
@@ -250,7 +251,7 @@ export async function confirmXssSink(
   try {
     // A fresh context per call — no cookies/state shared between targets.
     browser = await chromium.launch({ headless: true, args: [...LAUNCH_ARGS] });
-    context = await browser.newContext();
+    context = await newTargetBrowserContext(browser);
 
     const confirm = runCandidates(context, candidates, canaryId, sinkInfo, url, deadline);
 

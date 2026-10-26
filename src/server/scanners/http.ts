@@ -1,3 +1,4 @@
+import { assertExecutionUrl, executionHeaders } from "@/server/execution";
 // Minimal HTTP probe helper for the vuln-class scanners. Uses global fetch with
 // a hard per-request timeout and manual redirect handling (so a 30x is observed,
 // not silently followed — important for auth/bypass checks). Never throws: a
@@ -41,9 +42,10 @@ export async function probe(
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT);
   const started = Date.now();
   try {
+    assertExecutionUrl(url);
     const res = await fetch(url, {
       method,
-      headers: opts.headers,
+      headers: executionHeaders(opts.headers),
       body: opts.body,
       redirect: "manual",
       signal: controller.signal,

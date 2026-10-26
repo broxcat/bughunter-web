@@ -19,6 +19,7 @@ interface ScanRun {
   type: ScanType;
   status: string;
   jobId: string | null;
+  requiredUserAgent: string | null;
   createdAt: string;
 }
 
@@ -29,6 +30,8 @@ interface Scope extends ScopePolicyData {
 }
 
 interface TargetDetail {
+  scanRejection: string | null;
+  program: { id: string; companyName: string; requiredUserAgent: string } | null;
   id: string;
   host: string;
   label: string | null;
@@ -120,7 +123,7 @@ export default function TargetDetailPage({
       .then(async ([t, c]) => {
         if (!t.ok) throw new Error("Host not found");
         setTarget(await t.json());
-        if (c.ok) setCredentials(await c.json());
+        if (c.ok) setCredentials((await c.json()).credentials ?? []);
         setLoading(false);
       }).catch(e => { setError(e.message); setLoading(false); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -305,7 +308,7 @@ export default function TargetDetailPage({
     );
   if (!target) return <p className="text-sm text-muted">Not found.</p>;
 
-  const scopeApproved = target.scope.status === "APPROVED";
+  const scopeApproved = !target.scanRejection;
 
   return (
     <div className="space-y-8">
@@ -314,7 +317,7 @@ export default function TargetDetailPage({
           ← Targets
         </Link>
         <h1 className="mt-2 font-mono text-2xl font-semibold tracking-tight text-foreground">
-          {target.host}
+          {target.program?.companyName && <span className="block text-sm font-sans">{target.program.companyName}</span>}{target.host}
         </h1>
         {target.label && <p className="text-sm text-muted">{target.label}</p>}
         <p className="mt-1 flex items-center gap-2 text-xs text-subtle">
@@ -368,10 +371,11 @@ export default function TargetDetailPage({
 
       {!scopeApproved && (
         <p className="text-sm text-muted">
-          This target&apos;s scope is not approved, so scans are disabled.
+          {target.scanRejection}
         </p>
       )}
 
+      {target.program && <p className="text-sm">Required User-Agent: <code>{target.program.requiredUserAgent}</code></p>}
       {/* Program policy reminder — informational only; scan authorization is
           decided by the scope status above, never by this text. */}
       {hasPolicy(target.scope) && (
@@ -423,6 +427,7 @@ export default function TargetDetailPage({
                   </button>
                   {openRun === run.id && (
                     <div className="border-t border-border p-4">
+                      {run.requiredUserAgent && <p>User-Agent used: <code>{run.requiredUserAgent}</code></p>}
                       <ScanLogViewer scanRunId={run.id} />
                     </div>
                   )}

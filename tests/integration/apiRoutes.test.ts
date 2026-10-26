@@ -399,4 +399,33 @@ d("API route authorization (integration)", () => {
     expect((await create("stolen.example.com")).status).toBe(404);
   });
 
+  it("Recon/Hunt selectors and enqueue only allow active, owned, non-excluded concrete hosts", async () => {
+    const { GET } = await import("@/app/api/scan-hosts/route");
+    const { POST: add } = await import("@/app/api/programs/[id]/hosts/route");
+    const { loadTargetExecution } = await import("@/server/execution");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Scan Lab", requiredUserAgent: "ScanLab/1", outOfScope: ["admin.scan.example"] } });
+    const context = { params: Promise.resolve({ id: p.id }) };
+    const host = async (fqdn: string) => (await add(req("http://localhost", { host: fqdn }), context)).json();
+    const active = await host("api.scan.example");
+    const excluded = await host("admin.scan.example");
+    const removed = await host("old.scan.example");
+    const wildcard = await host("*.scan.example");
+    await prisma.target.update({ where: { id: removed.id }, data: { active: false } });
+    const programs = await (await GET()).json();
+    expect(programs.find((v: { id: string }) => v.id === p.id).hosts.map((v: { id: string }) => v.id)).toEqual([active.id]);
+    for (const h of [excluded, removed, wildcard]) {
+      expect((await scanRunsPost(req("http://localhost", { targetId: h.id, type: "RECON" }))).status).toBe(400);
+      await expect(loadTargetExecution(h.id)).rejects.toThrow();
+    }
+    expect((await scanRunsPost(req("http://localhost", { targetId: active.id, type: "HUNT", requiredUserAgent: "untrusted" }))).status).toBe(201);
+    expect((await loadTargetExecution(active.id)).requiredUserAgent).toBe("ScanLab/1");
+    await prisma.bountyProgram.update({ where: { id: p.id }, data: { requiredUserAgent: "ScanLab/2" } });
+    expect((await loadTargetExecution(active.id)).requiredUserAgent).toBe("ScanLab/2");
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await scanRunsPost(req("http://localhost", { targetId: active.id, type: "HUNT" }))).status).toBe(404);
+    expect(await prisma.target.count({ where: { programId: p.id, host: "discovered.other.example" } })).toBe(0);
+    await prisma.bountyProgram.update({ where: { id: p.id }, data: { outOfScope: ["*.scan.example"] } });
+    await expect(loadTargetExecution(active.id)).rejects.toThrow(/out of scope/);
+  });
+
 });

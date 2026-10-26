@@ -7,6 +7,8 @@ import NavLinks from "./_components/NavLinks";
 const NAV = [
   { href: "/targets", label: "Targets" },
   { href: "/scopes", label: "Scopes" },
+  { href: "/recon", label: "Recon" },
+  { href: "/hunt", label: "Hunt" },
   { href: "/settings", label: "Settings" },
 ];
 
