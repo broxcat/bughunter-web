@@ -131,7 +131,7 @@ d("API route authorization (integration)", () => {
     expect(body.error).toMatch(/not APPROVED/i);
   });
 
-  it("POST /api/reports rejects a finding whose gateStatus !== PASSED", async () => {
+  it("POST /api/reports rejects a finding that is not confirmed", async () => {
     const scope = await prisma.scope.create({
       data: { userId, hostPattern: "*.rep.com", status: "APPROVED" },
     });
@@ -151,7 +151,7 @@ d("API route authorization (integration)", () => {
     );
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toMatch(/PASSED/);
+    expect(body.error).toMatch(/confirmed/);
   });
 
   it("POST /api/reports accepts a PASSED finding (201)", async () => {
@@ -498,7 +498,7 @@ d("API route authorization (integration)", () => {
     const scope = await prisma.scope.create({ data: { userId, hostPattern: "ready.example.test", status: "APPROVED" } });
     const t = await prisma.target.create({ data: { userId, programId: p.id, scopeId: scope.id, host: "ready.example.test" } });
     const token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature";
-    for (const label of ["Account A", "Duplicate A"]) await prisma.targetCredential.create({ data: { targetId: t.id, label, mode: "BEARER", headerCipher: encryptSecret(token) } });
+    for (const label of ["Account A", "Duplicate A"]) await prisma.targetCredential.create({ data: { targetId: t.id, label, mode: "BEARER", sessionStatus: "VALID", sessionCheckedAt: new Date(), headerCipher: encryptSecret(token) } });
     const context = { params: Promise.resolve({ id: t.id }) };
     const res = await GET(req("http://localhost", {}), context);
     expect(res.status).toBe(200);
@@ -528,6 +528,8 @@ d("API route authorization (integration)", () => {
     expect((await add({ label: "invalid reference", cookies: { sid: "a" }, ownedObjectUrl: "https://foreign.example/object/1" })).status).toBe(400);
     const a = await (await add({ label: "Account A", cookies: { sid: "a-secret" }, purpose: "ACCOUNT_A" })).json();
     const b = await (await add({ label: "Account B", cookies: { sid: "b-secret" }, purpose: "ACCOUNT_B", ownedObjectUrl: "https://accounts.example.test/documents/123" })).json();
+    await prisma.targetCredential.update({ where: { id: a.credential.id }, data: { sessionStatus: "VALID", sessionCheckedAt: new Date(), sessionIdentityHash: "verified-test-account-a" } });
+    await prisma.targetCredential.update({ where: { id: b.credential.id }, data: { sessionStatus: "VALID", sessionCheckedAt: new Date(), sessionIdentityHash: "verified-test-account-b" } });
     expect((await loadReadinessFacts(t.id)).facts).toMatchObject({ primaryCredential: true, secondCredential: true, secondUserObjectReference: true });
     expect(JSON.stringify([a, b])).not.toContain("a-secret");
     expect(JSON.stringify([a, b])).not.toContain("b-secret");
@@ -556,6 +558,29 @@ d("API route authorization (integration)", () => {
     expect((await startHuntSnapshot(run.id, await loadTargetExecution(target.id))).approvedTechniques).toEqual(run.approvedHuntTechniques);
     await prisma.bountyProgram.update({ where: { id: program.id }, data: { nonQualifying: ["RCE"] } });
     expect((await create({ approvedTechniques: ["cmdi.timing-screen"], approveBoundedTiming: true })).status).toBe(400);
+  });
+
+  it("reviews evidence through draft and final decisions without the retired questionnaire", async () => {
+    const { POST: review } = await import("@/app/api/findings/[id]/validate/route");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Evidence review fixture", requiredUserAgent: "Review/1" } });
+    const scope = await prisma.scope.create({ data: { userId, hostPattern: "review.example.test", status: "APPROVED" } });
+    const target = await prisma.target.create({ data: { userId, scopeId: scope.id, programId: p.id, host: "review.example.test" } });
+    const finding = await prisma.finding.create({ data: { targetId: target.id, title: "Synthetic evidence", evidence: JSON.stringify({ controls: ["BASELINE_CONTROL", "INDEPENDENT_REPEAT"] }), impact: "Controlled fixture object exposed" } });
+    const params = { params: Promise.resolve({ id: finding.id }) };
+    const post = (body: object) => review(req("http://localhost", body), params);
+    expect((await post({ answers: { q1_useNow: true } })).status).toBe(400);
+    expect((await post({ status: "CONFIRMED", notes: "Local reproduction demonstrates controlled impact" })).status).toBe(400);
+    expect((await post({ status: "EVIDENCE_REVIEW" })).status).toBe(200);
+    expect((await post({ status: "CONFIRMED", notes: "Local reproduction compares baseline, probe and control on the owned fixture." })).status).toBe(200);
+    const saved = await prisma.finding.findUniqueOrThrow({ where: { id: finding.id } });
+    expect(saved.reviewStatus).toBe("CONFIRMED"); expect(saved.gateAnswers).toBeNull();
+    expect(saved.reviewEvidence).toMatchObject({ scope: "IN_SCOPE", control: ["BASELINE_CONTROL", "INDEPENDENT_REPEAT"] });
+    expect((await reportsPost(req("http://localhost", { title: "Evidence reviewed report", platform: "GENERIC", findingIds: [finding.id] }))).status).toBe(201);
+    expect((await post({ status: "EVIDENCE_REVIEW" })).status).toBe(200);
+    expect((await post({ status: "INCONCLUSIVE", notes: "A later local control could not reproduce the observation." })).status).toBe(200);
+    expect((await reportsPost(req("http://localhost", { title: "Uncertain result", platform: "GENERIC", findingIds: [finding.id] }))).status).toBe(400);
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await post({ status: "EVIDENCE_REVIEW" })).status).toBe(404);
   });
 
 });

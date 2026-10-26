@@ -1,198 +1,38 @@
 import { prisma } from "@/lib/prisma";
-import { decryptSecret, encryptSecret } from "@/lib/crypto";
-
-// How long an auto-minted EMAIL_PASSWORD session is reused before re-logging in.
-const SESSION_TTL_MS =
-  (Number(process.env.TARGET_SESSION_TTL_MINUTES) || 20) * 60_000;
-
-function parseCookieJson(cipher: string): Record<string, string> | null {
-  try {
-    const parsed: unknown = JSON.parse(decryptSecret(cipher));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    const cookies: Record<string, string> = {};
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof v === "string") cookies[k] = v;
-    }
-    return Object.keys(cookies).length > 0 ? cookies : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Resolve session cookies for an EMAIL_PASSWORD credential: reuse the cached
- * session when it is fresh (< SESSION_TTL_MS), otherwise log in via headless
- * Chromium, persist the refreshed cookies (encrypted) for next time, and return
- * them. Returns null (never throws) when it cannot obtain a usable session, so
- * the scanner simply sees one fewer credential.
- */
-async function resolveEmailPasswordCookies(row: {
-  id: string;
-  loginUrl: string | null;
-  emailCipher: string | null;
-  passwordCipher: string | null;
-  sessionCookiesCipher: string | null;
-  sessionRefreshedAt: Date | null;
-}, allowLogin = false): Promise<Record<string, string> | null> {
-  // Fresh cache?
-  if (
-    row.sessionCookiesCipher &&
-    row.sessionRefreshedAt &&
-    Date.now() - row.sessionRefreshedAt.getTime() < SESSION_TTL_MS
-  ) {
-    const cached = parseCookieJson(row.sessionCookiesCipher);
-    if (cached) return cached;
-  }
-
-  if (!allowLogin) return null; // Session creation requires an explicit user action.
-
-  // Need to (re-)login. Decrypt the stored email/password/loginUrl.
-  if (!row.loginUrl || !row.emailCipher || !row.passwordCipher) return null;
-  let email: string;
-  let password: string;
-  try {
-    email = decryptSecret(row.emailCipher);
-    password = decryptSecret(row.passwordCipher);
-  } catch {
-    return null;
-  }
-
-  try {
-    const { acquireSessionCookies } = await import("./autoLogin");
-    const result = await acquireSessionCookies({
-      loginUrl: row.loginUrl,
-      email,
-      password,
-    });
-    if (Object.keys(result.cookies).length === 0) return null;
-
-    // Cache the freshly minted session (encrypted) for subsequent runs.
-    await prisma.targetCredential
-      .update({
-        where: { id: row.id },
-        data: {
-          sessionCookiesCipher: encryptSecret(JSON.stringify(result.cookies)),
-          sessionRefreshedAt: new Date(),
-        },
-      })
-      .catch(() => {});
-
-    return result.cookies;
-  } catch {
-    return null;
-  }
-}
-
-// Server-side loader for TARGET credentials — session cookies / bearer token
-// FOR THE SCANNED TARGET (a bug-bounty program's app), NEVER the bughunter-web
-// login. These let the BOLA/CSRF scanners authenticate as real test accounts on
-// the target the user is authorized to test.
-//
-// COMPLIANCE CAVEAT: the operator is responsible for ensuring these test
-// accounts — and their use by the scanners — comply with the target program's
-// rules of engagement. bughunter-web stores them only to drive authenticated
-// requests against an APPROVED scope.
-//
-// SECURITY INVARIANT (same as AiProviderConfig.apiKeyCipher): the ciphertext and
-// the decrypted plaintext are NEVER returned to any client and NEVER logged.
-// This module is server-only; keys are decrypted in-process at request time by
-// the scanners that import it. The decrypted values here exist purely to build
-// request headers for the target.
+import { decryptSecret } from "@/lib/crypto";
+import { normalizeCookies, sessionState } from "@/lib/targetAuth";
+import type { TargetCredential } from "@prisma/client";
 
 export interface DecryptedTargetCredential {
   purpose?: string;
   ownedObjectUrl?: string | null;
+  validationUrl?: string | null;
+  identityHash?: string | null;
   id: string;
   label: string;
-  cookies?: Record<string, string>; // session cookies for the TARGET
-  bearerToken?: string; // Authorization: Bearer value for the TARGET
+  cookies?: Record<string, string>;
+  bearerToken?: string;
 }
-
-/**
- * Loads a target's credentials and decrypts them server-side (decryptSecret).
- *
- * Reads prisma.targetCredential for the targetId, decrypts cookiesCipher
- * (JSON.parse) / headerCipher via `decryptSecret`, and degrades gracefully: a
- * row whose decrypt or JSON.parse fails is skipped rather than throwing, so one
- * corrupt/key-rotated row never breaks an authenticated scan. A row that yields
- * neither cookies nor a bearer token is dropped.
- */
-export async function loadTargetCredentials(
-  targetId: string,
-): Promise<DecryptedTargetCredential[]> {
-  const rows = await prisma.targetCredential.findMany({
-    where: { targetId },
-    orderBy: { createdAt: "asc" },
-  });
-
-  const out: DecryptedTargetCredential[] = [];
-  for (const row of rows) {
-    const cred: DecryptedTargetCredential = { id: row.id, label: row.label, purpose: row.purpose, ownedObjectUrl: row.ownedObjectUrl };
-
-    // EMAIL_PASSWORD: mint/refresh the session via headless login (cached).
-    if (row.mode === "EMAIL_PASSWORD") {
-      const cookies = await resolveEmailPasswordCookies(row);
-      if (cookies) cred.cookies = cookies;
-      if (cred.cookies || cred.bearerToken) out.push(cred);
-      continue;
-    }
-
-    if (row.cookiesCipher) {
-      try {
-        const parsed: unknown = JSON.parse(decryptSecret(row.cookiesCipher));
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const cookies: Record<string, string> = {};
-          for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-            if (typeof v === "string") cookies[k] = v;
-          }
-          if (Object.keys(cookies).length > 0) cred.cookies = cookies;
-        }
-      } catch {
-        // Skip an undecryptable / malformed cookies blob; never throw.
-      }
-    }
-
-    if (row.headerCipher) {
-      try {
-        const token = decryptSecret(row.headerCipher);
-        if (token) cred.bearerToken = token;
-      } catch {
-        // Skip an undecryptable bearer token; never throw.
-      }
-    }
-
-    if (cred.cookies || cred.bearerToken) out.push(cred);
-  }
-
-  return out;
+/** Internal decoder for an explicit connection check; never returned to clients. */
+export function decodeTargetCredential(row: TargetCredential): DecryptedTargetCredential | null {
+  const cred: DecryptedTargetCredential = { id: row.id, label: row.label, purpose: row.purpose, ownedObjectUrl: row.ownedObjectUrl, validationUrl: row.validationUrl, identityHash: row.sessionIdentityHash };
+  try {
+    const cipher = row.mode === "EMAIL_PASSWORD" ? row.sessionCookiesCipher : row.cookiesCipher;
+    if (cipher) cred.cookies = normalizeCookies(JSON.parse(decryptSecret(cipher)));
+    if (row.headerCipher) cred.bearerToken = decryptSecret(row.headerCipher);
+    return cred.cookies || cred.bearerToken ? cred : null;
+  } catch { return null; }
 }
-
-/**
- * Turns a credential into request headers for the TARGET:
- *   cookies     -> "Cookie: k=v; k2=v2"
- *   bearerToken -> "Authorization: Bearer <token>"
- * Returns an empty object when the credential carries neither.
- */
-export function credentialHeaders(
-  cred: DecryptedTargetCredential,
-): Record<string, string> {
-  const headers: Record<string, string> = {};
-
-  if (cred.cookies) {
-    const pairs = Object.entries(cred.cookies).map(([k, v]) => `${k}=${v}`);
-    if (pairs.length > 0) headers["Cookie"] = pairs.join("; ");
-  }
-
-  if (cred.bearerToken) {
-    headers["Authorization"] = `Bearer ${cred.bearerToken}`;
-  }
-
-  return headers;
+/** Scans consume verified sessions only; never log in or expose stored secrets. */
+export async function loadTargetCredentials(targetId: string): Promise<DecryptedTargetCredential[]> {
+  const rows = await prisma.targetCredential.findMany({ where: { targetId }, orderBy: { createdAt: "asc" } });
+  return rows.filter(row => sessionState(row) === "VALID").map(decodeTargetCredential).filter((c): c is DecryptedTargetCredential => c !== null);
 }
-
-/** Explicit account-login action; ordinary scans consume cached sessions only. */
+export function credentialHeaders(cred: DecryptedTargetCredential): Record<string, string> {
+  return { ...(cred.cookies ? { Cookie: Object.entries(cred.cookies).map(([k, v]) => `${k}=${v}`).join("; ") } : {}), ...(cred.bearerToken ? { Authorization: `Bearer ${cred.bearerToken}` } : {}) };
+}
+/** Compatibility endpoint: an explicit check uses the same guarded login path. */
 export async function refreshTargetCredential(targetId: string, credentialId: string): Promise<boolean> {
-  const row = await prisma.targetCredential.findFirst({ where: { id: credentialId, targetId, mode: "EMAIL_PASSWORD" } });
-  if (!row) return false;
-  return Boolean(await resolveEmailPasswordCookies({ ...row, sessionRefreshedAt: null }, true));
+  const { testStoredConnection } = await import("./connection");
+  return (await testStoredConnection(targetId, credentialId)).status === "VALID";
 }

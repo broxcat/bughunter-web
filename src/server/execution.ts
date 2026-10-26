@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { isExcluded, programSchema } from "@/lib/bountyProgram";
 
 export interface TargetRequestGuard {
+  assertRequest?(url: string, method: string, body?: string): void;
   acquire(url: string, method: string): (() => void) | Promise<() => void>;
   remainingMs(): number;
   signal: AbortSignal;
@@ -69,6 +70,7 @@ export async function newTargetBrowserContext(browser: Browser, syntheticPage?: 
     // redirects without following them, as the internal HTTP probe does.
     let release: (() => void) | undefined;
     try {
+      ctx.requestGuard?.assertRequest?.(url, route.request().method(), route.request().postData() ?? undefined);
       release = await ctx.requestGuard?.acquire(url, route.request().method());
       const response = await route.fetch({ headers: Object.fromEntries(headers), maxRedirects: 0, timeout: Math.min(5000, ctx.requestGuard?.remainingMs() ?? 5000) });
       const responseHeaders = { ...response.headers() };

@@ -1,4 +1,5 @@
 import { loadTargetExecution } from "@/server/execution";
+import { revalidateTargetSessions } from "@/server/credentials/connection";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
@@ -44,12 +45,13 @@ export async function withHuntSession(ctx: ScanContext, snapshot: HuntPolicySnap
   try {
     await persist();
     await budget.run(async () => {
+      await revalidateTargetSessions(ctx.targetId);
       const corpus = await collectHuntCorpus(ctx);
       const credentials = await loadTargetCredentials(ctx.targetId);
       const readiness = await loadHuntReadiness(ctx.targetId, snapshot, { publicXssSurface: corpus.publicXssSurface, discoveryComplete: Boolean(corpus.raw.pages?.length), objectReference: corpus.surface.objectReferences, jwt: corpus.jwtPresent, xmlEndpoint: corpus.surface.xml, oauthFlow: corpus.surface.oauth, stateChangingEndpoint: corpus.forms.some(f => f.method !== "GET") });
       const surface = { ...corpus.surface, apiEndpoints: corpus.surface.apiEndpoints || credentials.some(c => Boolean(c.ownedObjectUrl)), jwt: readiness.facts.jwt, cookies: corpus.surface.cookies || readiness.facts.sessionCookie, objectReferences: corpus.surface.objectReferences || readiness.facts.secondUserObjectReference };
       const plan = selectHuntTechniques(readiness.families, surface, readiness.facts, undefined, snapshot.approvedTechniques);
-      report.families = readiness.families.map(f => ({ family: f.family, displayName: f.displayName, selected: f.selected, selectionReason: f.reason, reason: f.prerequisites.filter(p => !p.satisfied).map(p => p.reason).join(" ") || f.reason, readiness: f.state, state: !f.selected ? "SKIPPED" : f.safeSubset ? "WAITING" : "BLOCKED", completedTechniques: 0, applicableTechniques: plan.filter(p => p.technique.family === f.family && p.executable).length, requests: 0 }));
+      report.families = readiness.families.map(f => ({ family: f.family, displayName: f.displayName, selected: f.selected, selectionReason: f.reason, reason: f.prerequisites.filter(p => !p.satisfied).map(p => p.reason).join(" ") || f.reason, readiness: f.state, state: !f.selected || f.state === "NOT_APPLICABLE" ? "SKIPPED" : f.safeSubset ? "WAITING" : "BLOCKED", completedTechniques: 0, applicableTechniques: plan.filter(p => p.technique.family === f.family && p.executable).length, requests: 0 }));
       report.techniques = plan.map(p => ({ techniqueId: p.technique.id, family: p.technique.family, title: p.technique.title, state: p.executable ? "WAITING" : "SKIPPED", requests: 0, reason: p.reason, referenceIds: p.technique.references.map(r => r.id) }));
       await prisma.scanRun.updateMany({ where: { id: ctx.scanRunId, targetId: ctx.targetId }, data: { reconCorpus: persistableCorpus(corpus) } });
       for (const family of report.families.filter(f => f.selected && f.state === "BLOCKED")) await logLine(ctx.scanRunId, `[hunt] ${family.displayName}: ${family.readiness} — ${family.reason}`);

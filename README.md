@@ -133,16 +133,34 @@ TEST_APP_URL=http://localhost:3101 npm run test:ui
 ```
 
 Secrets remain encrypted at rest. Credential values are never exposed by program
-or host list APIs. Findings still pass the existing manual triage gate before they
+or host list APIs. Findings undergo an evidence review before they
 can be included in reports.
 
 
 ## Qualified Hunt workflow
 
 Target qualifying vulnerabilities select supported Hunt families; non-qualifying
-exclusions always win. Target detail shows missing accounts, sessions, JWT/XML/OAuth
-context and OOB prerequisites before Hunt. Safe subsets run independently of blocked
-families. Hunt progress separates Signal, Candidate, Validated and Confirmed evidence.
+exclusions always win. Target detail shows a compact Hunt readiness summary: scope,
+User-Agent, public testing and authenticated session availability. Provide only
+username/password or a session cookie, then use Test connection. Login forms and
+CSRF are discovered automatically; a protected-resource comparison must prove a
+session valid. Public Hunt remains available without authentication. Technical
+family requirements remain internal or under collapsed Advanced diagnostics.
+Hunt progress separates Signal, Candidate, Validated and Confirmed evidence.
+
+Findings follow `CANDIDATE → EVIDENCE_REVIEW → CONFIRMED / REJECTED / INCONCLUSIVE`.
+The former questionnaire is removed. Existing ciphertext, finding IDs and reports
+are preserved by an additive migration. See [black-box authentication and evidence
+review](docs/BLACKBOX-AUTH-UX.md) for session states, security limits and compatibility.
+
+Run the isolated browser workflow against a built local app and the dedicated
+disposable database (no worker or Internet target is used):
+
+```sh
+TEST_APP_URL=http://127.0.0.1:3315 \
+TEST_DATABASE_URL=postgresql://.../bughunter_blackbox_e2e \
+node tests/e2e/blackboxUx.mjs
+```
 Fixed bounded timing checks require explicit per-run approval; stateful business
 actions and destructive exploit techniques remain unsupported.
 

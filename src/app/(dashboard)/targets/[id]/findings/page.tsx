@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { EVIDENCE_LABELS, findingEvidenceLevel } from "@/lib/hunt/presentation";
 import { use, useEffect, useState } from "react";
-import { GATE_QUESTIONS } from "@/lib/gate";
+import EvidenceReview from "@/components/EvidenceReview";
+import { findingReviewStatus, type ReviewState } from "@/lib/evidenceReview";
 import {
   ClassificationChips,
   FindingClassification,
@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
 type Severity = "INFO" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-type GateStatus = "UNVALIDATED" | "PASSED" | "KILLED";
 type Confidence = "CANDIDATE" | "PROVEN";
 
 interface Finding {
@@ -26,7 +25,9 @@ interface Finding {
   description: string | null;
   location: string | null;
   evidence: string | null;
-  gateStatus: GateStatus;
+  gateStatus: string;
+  reviewStatus: ReviewState;
+  reviewEvidence: { notes?: string } | null;
   killedReason: string | null;
   cwe: string | null;
   cvssVector: string | null;
@@ -48,82 +49,7 @@ const SEVERITY_TONE: Record<Severity, BadgeTone> = {
   CRITICAL: "critical",
 };
 
-const GATE_TONE: Record<GateStatus, BadgeTone> = {
-  UNVALIDATED: "unvalidated",
-  PASSED: "passed",
-  KILLED: "killed",
-};
-
-function GateForm({
-  findingId,
-  onDone,
-}: {
-  findingId: string;
-  onDone: () => void;
-}) {
-  const [answers, setAnswers] = useState<Record<string, boolean>>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function submit() {
-    setSubmitting(true);
-    setError(null);
-    try {
-      const full: Record<string, boolean> = {};
-      for (const q of GATE_QUESTIONS) full[q.id] = answers[q.id] === true;
-      const res = await fetch(`/api/findings/${findingId}/validate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers: full }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error ?? `Validation failed (${res.status})`);
-      }
-      onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Validation failed");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <div className="mt-3 space-y-2 border-t border-border pt-3">
-      <p className="text-xs font-medium text-muted">7-Question Gate</p>
-      {GATE_QUESTIONS.map((q) => (
-        <label
-          key={q.id}
-          className="flex items-start gap-2 text-sm text-foreground"
-        >
-          <input
-            type="checkbox"
-            checked={answers[q.id] === true}
-            onChange={(e) =>
-              setAnswers((a) => ({ ...a, [q.id]: e.target.checked }))
-            }
-            className="mt-1 accent-brand"
-          />
-          <span>{q.text}</span>
-        </label>
-      ))}
-      {error && (
-        <p className="flex items-center gap-2 text-xs">
-          <Badge tone="critical">Error</Badge>
-          <span className="text-foreground">{error}</span>
-        </p>
-      )}
-      <Button
-        variant="primary"
-        size="sm"
-        onClick={submit}
-        disabled={submitting}
-      >
-        {submitting ? "Running gate…" : "Run gate"}
-      </Button>
-    </div>
-  );
-}
+const REVIEW_TONE: Record<ReviewState, BadgeTone> = { CANDIDATE: "candidate", EVIDENCE_REVIEW: "info", CONFIRMED: "passed", REJECTED: "killed", INCONCLUSIVE: "neutral" };
 
 export default function FindingsPage({
   params,
@@ -213,7 +139,7 @@ export default function FindingsPage({
           Findings
         </h1>
         <p className="mt-1 text-sm text-muted">
-          Run the 7-Question Gate on each finding before it can go in a report.
+          Review reproducible evidence and impact before confirming a finding for a report.
         </p>
       </div>
 
@@ -310,7 +236,6 @@ export default function FindingsPage({
                         <Badge tone={SEVERITY_TONE[f.severity]}>
                           {f.severity}
                         </Badge>
-                        <Badge tone={findingEvidenceLevel(f) === "CONFIRMED" ? "proven" : "candidate"}>{EVIDENCE_LABELS[findingEvidenceLevel(f)]}</Badge>
                         {f.vulnClass && (
                           <span className="text-xs text-subtle">
                             {f.vulnClass}
@@ -352,18 +277,16 @@ export default function FindingsPage({
                         </p>
                       ) : null}
                     </div>
-                    <Badge tone={GATE_TONE[f.gateStatus]} className="shrink-0">
-                      {f.gateStatus}
+                    <Badge tone={REVIEW_TONE[findingReviewStatus(f)]} className="shrink-0">
+                      {findingReviewStatus(f)}
                     </Badge>
                   </div>
 
-                  {f.gateStatus === "KILLED" && f.killedReason && (
+                  {findingReviewStatus(f) === "REJECTED" && f.killedReason && (
                     <p className="mt-2 text-xs text-muted">{f.killedReason}</p>
                   )}
 
-                  {f.gateStatus === "UNVALIDATED" && (
-                    <GateForm findingId={f.id} onDone={load} />
-                  )}
+                  <EvidenceReview key={`${f.id}-${f.reviewStatus}`} finding={f} onDone={load} />
 
                   <FindingClassification
                     key={`${f.id}-${f.cvssVector}-${f.cwe}`}

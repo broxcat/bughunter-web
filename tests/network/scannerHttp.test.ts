@@ -29,6 +29,10 @@ network("real HTTP tools and Chromium capture", () => {
       if (req.url === "/login") return res.end('<form action="/session" method="POST"><input type="email" name="email"><input type="password" name="password"><button type="submit">Sign in</button></form>');
       if (req.url === "/session") { res.setHeader("Set-Cookie", "sessionid=test; Path=/"); res.writeHead(302, { Location: "/redirect-chain" }); return res.end("signed in"); }
       if (req.url?.startsWith("/xss")) return res.end('<div id="out"></div><script>document.getElementById("out").innerHTML=new URLSearchParams(location.search).get("q")</script>');
+      if (req.url?.startsWith("/private-xss")) {
+        if (!req.headers.cookie?.includes("sessionid=test")) { res.writeHead(401); return res.end("unauthorized"); }
+        return res.end('<div id="out"></div><script>document.getElementById("out").innerHTML=new URLSearchParams(location.search).get("q")</script>');
+      }
       if (req.url?.startsWith("/dialog-echo")) return res.end('<script>alert(new URLSearchParams(location.search).get("q"))</script>');
       if (req.url === "/.git/config") return res.end("[core]\nrepositoryformatversion = 0");
       res.end('<!doctype html><a href="/redirect">redirect</a><a href="http://localhost:' + (server.address() as { port: number }).port + '/foreign">foreign</a><a href="/child">child</a><form action="/transfer" method="POST"><input name="amount" value="1"></form>');
@@ -93,6 +97,11 @@ network("real HTTP tools and Chromium capture", () => {
     const from = seen.length;
     const result = await withTargetExecution(execution(), () => confirmXssSink(`${base}/dialog-echo?q=hello`, { sink: "application dialog", canaryId: "inertDialogControl" }));
     expect(result.confirmed).toBe(false); expect(result.reason).toContain("inert canary control"); assertReceived(from);
+  }, 20000);
+  it("uses a verified target session for authenticated XSS confirmation", async () => {
+    const from = seen.length;
+    const result = await withTargetExecution(execution(), () => confirmXssSink(`${base}/private-xss?q=hello`, { sink: "authenticated input", canaryId: "privateXssCanary", authentication: { cookies: { sessionid: "test" } } }));
+    expect(result.confirmed).toBe(true); assertReceived(from);
   }, 20000);
   it("real credential auto-login uses the program UA", async () => {
     const from = seen.length;

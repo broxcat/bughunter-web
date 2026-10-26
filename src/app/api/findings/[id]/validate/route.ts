@@ -1,55 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { evaluateGate, type GateAnswers } from "@/lib/gate";
+import { evidenceReviewSchema, reviewDecision } from "@/lib/evidenceReview";
+import { scanRejection } from "@/server/execution";
+import { redactHuntText } from "@/lib/hunt/safety";
 
-const validateSchema = z.object({
-  answers: z.record(z.string(), z.boolean()),
-});
-
-// POST /api/findings/[id]/validate — run the 7-Question Gate. All "yes" ⇒
-// PASSED; otherwise KILLED with a reason. The raw answers are persisted as JSON.
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
+/** Evidence review replaces the retired questionnaire, preserving old columns. */
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-
-  const body = await req.json().catch(() => null);
-  const parsed = validateSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid input", details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
-
-  // Ownership via the finding's target.
-  const finding = await prisma.finding.findFirst({
-    where: { id, target: { userId: session.user.id } },
-    select: { id: true },
-  });
-  if (!finding) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  const answers: GateAnswers = parsed.data.answers;
-  const result = evaluateGate(answers);
-
-  const updated = await prisma.finding.update({
-    where: { id: finding.id },
-    data: {
-      gateStatus: result.status,
-      gateAnswers: answers,
-      killedReason: result.status === "KILLED" ? result.killedReason : null,
+  const parsed = evidenceReviewSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Choose an evidence-review decision" }, { status: 400 });
+  const finding = await prisma.finding.findFirst({ where: { id, target: { userId: session.user.id } }, include: { target: { include: { scope: true, program: true } }, scanRun: { select: { reconCorpus: true } } } });
+  if (!finding) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const { status, notes } = parsed.data;
+  const inScope = !scanRejection(finding.target);
+  const error = reviewDecision(finding, status, notes, inScope);
+  if (error) return NextResponse.json({ error }, { status: 400 });
+  const metadata = finding.huntMetadata as { controls?: string[]; evidenceLevel?: string } | null;
+  const observations = (() => { try { return JSON.parse(finding.evidence ?? "null"); } catch { return null; } })();
+  const controls: string[] = Array.isArray(observations?.controls) ? observations.controls.filter((c: unknown) => typeof c === "string").slice(0, 20) : [];
+  const corpus = finding.scanRun?.reconCorpus as { authenticated?: boolean } | null;
+  const updated = await prisma.finding.updateMany({
+    where: { id, reviewStatus: finding.reviewStatus, updatedAt: finding.updatedAt },
+    data: { reviewStatus: status, reviewedAt: status === "EVIDENCE_REVIEW" ? null : new Date(),
+      reviewEvidence: { notes: redactHuntText(notes), reproduction: redactHuntText(notes), baseline: controls.filter(c => /BASELINE|AUTHENTICATED.*CONTROL/i.test(c)), probe: { observationAvailable: Boolean(finding.evidence?.trim()) }, control: controls, scope: inScope ? "IN_SCOPE" : "UNAVAILABLE", authContext: corpus?.authenticated === true ? "VERIFIED_SESSION" : corpus?.authenticated === false ? "ANONYMOUS" : "UNKNOWN", scannerEvidenceLevel: metadata?.evidenceLevel ?? "UNKNOWN", impact: finding.impact ? "Impact section available" : "See reproduction and impact notes" },
+      // Compatibility for historical reports/readers; no question answers written.
+      gateStatus: status === "CONFIRMED" ? "PASSED" : status === "REJECTED" ? "KILLED" : "UNVALIDATED",
+      killedReason: status === "REJECTED" ? redactHuntText(notes) : null,
     },
   });
-
-  return NextResponse.json(updated);
+  if (!updated.count) return NextResponse.json({ error: "This finding changed; reload before reviewing" }, { status: 409 });
+  return NextResponse.json({ id, reviewStatus: status });
 }

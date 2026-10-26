@@ -30,6 +30,7 @@ try {
   await client.$executeRaw`INSERT INTO "TargetCredential" (id, "targetId", label, "headerCipher") VALUES ('upgrade-credential', 'upgrade-host', 'Historical credential', 'fixture-cipher')`;
   await client.$executeRaw`INSERT INTO "Report" (id, "userId", "targetId", title, "updatedAt") VALUES ('upgrade-report', 'upgrade-user', 'upgrade-host', 'Historical report', now())`;
   await client.$executeRaw`INSERT INTO "ReportItem" (id, "reportId", "findingId") VALUES ('upgrade-item', 'upgrade-report', 'upgrade-finding')`;
+  await client.$executeRaw`INSERT INTO "Finding" (id, "targetId", title, "gateStatus", "updatedAt") VALUES ('upgrade-passed', 'upgrade-host', 'Previously accepted', 'PASSED', now()), ('upgrade-killed', 'upgrade-host', 'Previously rejected', 'KILLED', now())`;
   migrate(schema);
   const host = await client.target.findUniqueOrThrow({ where: { id: "upgrade-host" }, include: { scanRuns: true, findings: true, reports: { include: { items: true } }, credentials: true, scope: true } });
   assert.equal(host.programId, null);
@@ -42,10 +43,16 @@ try {
   assert.equal(host.scanRuns[0].huntReport, null);
   assert.equal(host.scanRuns[0].reconCorpus, null);
   assert.deepEqual(host.scanRuns[0].approvedHuntTechniques, []);
-  assert.equal(host.findings[0].huntMetadata, null);
+  const originalFinding = host.findings.find(f => f.id === "upgrade-finding");
+  assert.equal(originalFinding.huntMetadata, null);
+  assert.equal(originalFinding.reviewStatus, "CANDIDATE");
+  assert.equal(host.findings.find(f => f.id === "upgrade-passed").reviewStatus, "CONFIRMED");
+  assert.equal(host.findings.find(f => f.id === "upgrade-killed").reviewStatus, "REJECTED");
+  assert.equal(host.credentials[0].sessionStatus, "UNKNOWN");
+  assert.equal(host.credentials[0].sessionCheckedAt, null);
   assert.equal(host.credentials[0].purpose, "OTHER");
   assert.equal(host.credentials[0].ownedObjectUrl, null);
-  assert.equal(host.findings[0].scanRunId, "upgrade-run");
+  assert.equal(originalFinding.scanRunId, "upgrade-run");
   assert.equal(host.credentials[0].headerCipher, "fixture-cipher");
   assert.equal(host.reports[0].items[0].findingId, "upgrade-finding");
   await assert.rejects(client.bountyProgram.create({ data: { ownerId: "upgrade-user", companyName: "Invalid", requiredUserAgent: "" } }));

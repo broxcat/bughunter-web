@@ -70,7 +70,7 @@ async function hunt(qualifying: string[], nonQualifying: string[] = []) {
 }
 function addAccounts() {
   fixture.credentials = [{ id: "a", label: "Account A", purpose: "ACCOUNT_A", cookies: { session: "secret-a" } }, { id: "b", label: "Account B", purpose: "ACCOUNT_B", ownedObjectUrl: `${base}/objects/123`, cookies: { session: "secret-b" } }];
-  fixture.rows = fixture.credentials.map((c: object) => { const v = c as { id: string; label: string; purpose: string; cookies: object; ownedObjectUrl?: string }; return { id: v.id, label: v.label, purpose: v.purpose, ownedObjectUrl: v.ownedObjectUrl, mode: "COOKIES", cookiesCipher: encryptSecret(JSON.stringify(v.cookies)), headerCipher: null, sessionRefreshedAt: null }; });
+  fixture.rows = fixture.credentials.map((c: object) => { const v = c as { id: string; label: string; purpose: string; cookies: object; ownedObjectUrl?: string }; return { id: v.id, label: v.label, purpose: v.purpose, ownedObjectUrl: v.ownedObjectUrl, mode: "COOKIES", sessionStatus: "VALID", sessionCheckedAt: new Date(), sessionIdentityHash: v.id, cookiesCipher: encryptSecret(JSON.stringify(v.cookies)), headerCipher: null, sessionRefreshedAt: null }; });
 }
 describe("bounded local Hunt runtime", () => {
   it("keeps literal SSTI reflection and a DOM sink at INFO signal/candidate, never a finding", async () => {
@@ -99,7 +99,8 @@ describe("bounded local Hunt runtime", () => {
   });
   it("blocks unconfigured IDOR/BOLA/JWT and unavailable XML/OAuth without stopping safe families", async () => {
     const report = await hunt(["IDOR", "JWT", "XXE", "OAUTH", "XSS"]);
-    for (const family of ["bola", "jwt"]) expect(report.families.find(f => f.family === family)?.state).toBe("BLOCKED");
+    expect(report.families.find(f => f.family === "bola")?.state).toBe("SKIPPED");
+    expect(report.families.find(f => f.family === "jwt")?.state).toBe("BLOCKED");
     expect(report.families.find(f => f.family === "idor")?.readiness).toBe("DEGRADED");
     expect(report.families.find(f => f.family === "xss")?.completedTechniques).toBeGreaterThan(0);
     expect(fixture.findings).toHaveLength(0);
@@ -123,7 +124,7 @@ describe("bounded local Hunt runtime", () => {
   });
   it("JWT integrity confirmation retains no token and performs no signing-secret recovery", async () => {
     fixture.credentials = [{ id: "jwt", label: "JWT test", purpose: "JWT", bearerToken: token, ownedObjectUrl: `${base}/objects/123` }];
-    fixture.rows = [{ id: "jwt", label: "JWT test", mode: "BEARER", purpose: "JWT", ownedObjectUrl: `${base}/objects/123`, headerCipher: encryptSecret(token), cookiesCipher: null }];
+    fixture.rows = [{ id: "jwt", label: "JWT test", mode: "BEARER", sessionStatus: "VALID", sessionCheckedAt: new Date(), purpose: "JWT", ownedObjectUrl: `${base}/objects/123`, headerCipher: encryptSecret(token), cookiesCipher: null }];
     const report = await hunt(["JWT"]);
     expect(fixture.findings).toHaveLength(1);
     expect(JSON.stringify([report, fixture.findings, fixture.logs])).not.toContain(token);

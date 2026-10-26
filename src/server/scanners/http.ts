@@ -45,6 +45,7 @@ export async function probe(
   try {
     assertExecutionUrl(url);
     const guard = currentTargetExecution().requestGuard;
+    guard?.assertRequest?.(url, method, opts.body);
     release = await guard?.acquire(url, method);
     const res = await fetch(url, {
       method,

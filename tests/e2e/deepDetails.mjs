@@ -11,17 +11,10 @@ try{
   await page.goto(`${app}/login`);await page.getByLabel("Email",{exact:true}).fill(process.env.E2E_EMAIL);await page.getByLabel("Password",{exact:true}).fill(process.env.E2E_PASSWORD);await page.getByRole("button",{name:"Sign in",exact:true}).click();await page.waitForURL(`${app}/targets`);
   const findings=await(await context.request.get(`${app}/api/findings?targetId=${hostId}`)).json();const finding=findings.find(f=>f.huntMetadata?.evidenceLevel==="CONFIRMED");assert(finding,"Requires a confirmed result from the actual local-fixture Hunt");
   await page.goto(`${app}/targets/${hostId}/findings`); const item=page.locator("li").filter({has:page.getByText(finding.title,{exact:true})}).first();
-  if(finding.gateStatus!=="PASSED"){
-    for(const name of [/Can an attacker use this RIGHT NOW/,/Is the impact on the program/,/Is the root cause/,/Can you prove impact beyond/,/session|identit/i]){
-      const checkbox=item.getByRole("checkbox",{name}); if(await checkbox.count()===1)await checkbox.check();
-    }
-    // Use the public gate's exact pass polarity, not an invented all-true gate.
-    const gate=await import("../../src/lib/gate.ts").catch(()=>null);
-    if(gate){for(const q of gate.GATE_QUESTIONS)await item.getByRole("checkbox",{name:q.text,exact:true}).setChecked(q.passWhen)}
-    else{
-      const labels=await item.locator("label").allTextContents();for(const label of labels){const c=item.getByLabel(label,{exact:true});if(await c.count()===1)await c.setChecked(!/require privileged|already known|only work|already disclosed|intended functionality/i.test(label));}
-    }
-    await item.getByRole("button",{name:"Run gate",exact:true}).click();
+  if(finding.reviewStatus!=="CONFIRMED"){
+    await item.getByRole("button",{name:"Review evidence",exact:true}).click();
+    await item.getByLabel("Reproduction and impact",{exact:true}).fill("Local fixture reproduces the independent control difference and demonstrated scoped impact.");
+    await item.getByRole("button",{name:"Confirm",exact:true}).click();
   }
   await page.reload(); const refreshed=await(await context.request.get(`${app}/api/findings?targetId=${hostId}`)).json(); record("actual fixture confirmed finding remains confirmed",refreshed.find(f=>f.id===finding.id)?.huntMetadata?.evidenceLevel==="CONFIRMED");
   const reportTitle=`E2E Deep Audit Report ${Date.now()}`;

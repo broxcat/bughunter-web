@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/findings — create a finding on an owned target. Starts UNVALIDATED;
-// the gate route decides PASSED/KILLED.
+// the evidence-review route decides its validation state.
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {

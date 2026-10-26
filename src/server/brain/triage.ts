@@ -154,7 +154,7 @@ export interface TriageFindingInput {
  * Suggested enrichment fields. The caller fills only its EMPTY fields from
  * these — triage never overrides what a scanner already set with confidence,
  * and (HARD RULE) it NEVER sets or implies gateStatus and NEVER passes a
- * finding. Validation stays manual via the 7-Question Gate.
+ * finding. Validation stays manual via the evidence review.
  */
 export interface TriageSuggestion {
   title?: string;

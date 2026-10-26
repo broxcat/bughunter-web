@@ -1,3 +1,4 @@
+import { normalizeCookies, sessionState } from "@/lib/targetAuth";
 import { credentialMetadataSchema, ownedReferenceUrl } from "@/lib/hunt/credentialMetadata";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -31,23 +32,9 @@ const createSchema = z.object({
   // EMAIL_PASSWORD mode: the app logs in via headless Chromium to mint cookies.
   loginUrl: z.string().trim().url().optional(),
   email: z.string().trim().min(1).optional(),
+  username: z.string().trim().min(1).optional(),
   password: z.string().min(1).optional(),
 });
-
-/** Parse a raw "k=v; k2=v2" cookie string into a map. Skips malformed segments. */
-function parseCookieString(raw: string): Record<string, string> {
-  const map: Record<string, string> = {};
-  for (const part of raw.split(";")) {
-    const seg = part.trim();
-    if (!seg) continue;
-    const eq = seg.indexOf("=");
-    if (eq <= 0) continue;
-    const name = seg.slice(0, eq).trim();
-    const value = seg.slice(eq + 1).trim();
-    if (name) map[name] = value;
-  }
-  return map;
-}
 
 /** Client-safe view of a credential row — never ciphers or plaintext secrets. */
 function toSafe(r: {
@@ -61,6 +48,9 @@ function toSafe(r: {
   emailCipher: string | null;
   loginUrl: string | null;
   sessionRefreshedAt: Date | null;
+  sessionStatus?: string;
+  sessionCheckedAt?: Date | null;
+  sessionExpiresAt?: Date | null;
   createdAt: Date;
 }) {
   return {
@@ -74,7 +64,9 @@ function toSafe(r: {
     hasToken: Boolean(r.headerCipher),
     // EMAIL_PASSWORD: configured (creds stored) + when the session was last minted.
     hasAutoLogin: r.mode === "EMAIL_PASSWORD" && Boolean(r.emailCipher),
-    loginUrl: r.loginUrl, // a URL, not a secret
+    sessionStatus: sessionState(r),
+    sessionCheckedAt: r.sessionCheckedAt ?? null,
+    sessionExpiresAt: r.sessionExpiresAt ?? null,
     sessionRefreshedAt: r.sessionRefreshedAt,
   };
 }
@@ -152,7 +144,8 @@ export async function POST(
     );
   }
 
-  const { label, cookies, bearerToken, loginUrl, email, password } = parsed.data;
+  const { label, cookies, bearerToken, loginUrl, password } = parsed.data;
+  const email = parsed.data.username ?? parsed.data.email;
   let ownedObjectUrl: string | null;
   try { ownedObjectUrl = ownedReferenceUrl(parsed.data.ownedObjectUrl, target.host); }
   catch { return NextResponse.json({ error: "Owned object must be a same-host URL without secrets" }, { status: 400 }); }
@@ -163,9 +156,9 @@ export async function POST(
   const wantsEmailPassword =
     parsed.data.mode === "EMAIL_PASSWORD" || Boolean(email || password);
   if (wantsEmailPassword) {
-    if (!loginUrl || !email || !password) {
+    if (!email || !password) {
       return NextResponse.json(
-        { error: "EMAIL_PASSWORD mode requires loginUrl, email and password" },
+        { error: "Username and password are required" },
         { status: 400 },
       );
     }
@@ -186,13 +179,10 @@ export async function POST(
     );
   }
 
-  // Normalize cookies into a map (parse a raw string), then encrypt its JSON.
   let cookieMap: Record<string, string> | undefined;
-  if (typeof cookies === "string") {
-    const m = parseCookieString(cookies);
-    if (Object.keys(m).length > 0) cookieMap = m;
-  } else if (cookies && Object.keys(cookies).length > 0) {
-    cookieMap = cookies;
+  if (cookies !== undefined) {
+    try { cookieMap = normalizeCookies(cookies); }
+    catch { return NextResponse.json({ error: "Invalid session cookie" }, { status: 400 }); }
   }
 
   const token =

@@ -60,7 +60,7 @@ function inventory(t: HuntTechniqueDescriptor, c: TechniqueContext): HuntObserva
 async function xss(t: HuntTechniqueDescriptor, c: TechniqueContext): Promise<HuntObservation[]> {
   const input = firstInput(c); if (!input) return [];
   if (t.id === "xss.browser-confirmation") {
-    const result = await confirmXssSink(input.url, { sink: "controlled input", parameter: input.key, context: c.cache.get(`xss:context:${input.url}:${input.key}`) as "HTML" | "ATTRIBUTE" | "JAVASCRIPT" | "UNKNOWN" | undefined, canaryId: `bh${randomUUID().replaceAll("-", "")}` });
+    const result = await confirmXssSink(input.url, { sink: "controlled input", authentication: c.credentials[0], parameter: input.key, context: c.cache.get(`xss:context:${input.url}:${input.key}`) as "HTML" | "ATTRIBUTE" | "JAVASCRIPT" | "UNKNOWN" | undefined, canaryId: `bh${randomUUID().replaceAll("-", "")}` });
     return result.confirmed ? [{ title: "Confirmed controlled XSS execution", summary: "An independently generated canary executed in the confined browser after an inert control. No data extraction or stored write performed.", location: input.url, evidenceLevel: "CONFIRMED", controls: ["UNIQUE_EXECUTION_CANARY", "BROWSER_OBSERVED_DIALOG", "INERT_CANARY_CONTROL"], severity: "MEDIUM" }] : [outcome("Browser execution not demonstrated", result.reason?.includes("inert canary") ? "An inert canary also caused a dialog; this is application behavior rather than injected execution." : "No independent execution proof within the confined browser budget.", input.url, result.reason?.includes("inert canary") ? "FALSE_POSITIVE" : "INCONCLUSIVE")];
   }
   const marker = `bh${randomUUID().replaceAll("-", "")}`;
@@ -136,6 +136,7 @@ async function sql(t: HuntTechniqueDescriptor, c: TechniqueContext): Promise<Hun
 async function bola(t: HuntTechniqueDescriptor, c: TechniqueContext): Promise<HuntObservation[]> {
   const a = c.credentials.find(v => v.purpose === "ACCOUNT_A"), b = c.credentials.find(v => v.purpose === "ACCOUNT_B");
   if (!a || !b?.ownedObjectUrl) return [];
+  if (a.identityHash && b.identityHash && a.identityHash === b.identityHash) return [];
   const url = b.ownedObjectUrl, cacheKey = `bola:${url}`;
   if (t.id === "bola.account-differential") {
     const owner = await c.request(url, { headers: credentialHeaders(b) });

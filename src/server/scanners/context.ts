@@ -108,7 +108,7 @@ export async function recordFinding(
   //    for epistemic honesty (a triage model must not inflate an INFO candidate);
   //    a differing suggestion is kept as an advisory note only.
   //  - it NEVER touches gateStatus — findings always start UNVALIDATED and must
-  //    pass the manual 7-Question Gate.
+  //    pass the manual evidence review.
   // Bounded by ENRICH_TIMEOUT_MS so a slow/unreachable provider can't stall scans.
   let description = f.description;
   let vulnClass = f.vulnClass;

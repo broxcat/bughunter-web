@@ -3,7 +3,7 @@ import { EMPTY_READINESS_FACTS as empty, resolveHuntReadiness } from "@/lib/hunt
 const assess = (family: string, facts = empty) => resolveHuntReadiness({ qualifying: [], nonQualifying: [] }, facts).find(f => f.family === family)!;
 describe("Hunt readiness prerequisites", () => {
   it("blocks strong BOLA while allowing degraded IDOR discovery without an owned reference", () => {
-    expect(assess("bola").state).toBe("BLOCKED");
+    expect(assess("bola").state).toBe("NOT_APPLICABLE");
     expect(assess("idor", { ...empty, primaryCredential: true, secondCredential: true }).state).toBe("DEGRADED");
     expect(assess("bola", { ...empty, primaryCredential: true, secondCredential: true, secondUserObjectReference: true, objectReference: true }).state).toBe("READY");
   });

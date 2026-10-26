@@ -15,7 +15,7 @@ const req = (type: PrerequisiteType, reason: string): PrerequisiteDefinition => 
 const rec = (type: PrerequisiteType, reason: string): PrerequisiteDefinition => ({ type, reason, level: "recommended" });
 const session = rec("AUTHENTICATED_SESSION", "A configured session improves coverage of protected routes; public checks remain available.");
 const objects = rec("OBJECT_REFERENCE", "Discover an actual object reference before testing object access.");
-const twoAccounts = [req("PRIMARY_CREDENTIAL", "Configure a primary test account."), req("SECOND_CREDENTIAL", "Configure a second independent test account."), req("SECOND_USER_OBJECT_REFERENCE", "Provide an object explicitly owned by a different test identity.")];
+const twoAccounts = [req("PRIMARY_CREDENTIAL", "No verified test session available."), req("SECOND_CREDENTIAL", "A second independent test session has not been verified."), req("SECOND_USER_OBJECT_REFERENCE", "No independently owned test object was discovered.")];
 const definitions: Record<HuntFamily, { prerequisites: PrerequisiteDefinition[]; riskClass: HuntRisk; techniques: string[] }> = {
   "auth-bypass": { prerequisites: [session], riskClass: "SAFE_ACTIVE", techniques: ["auth.public-baseline", "auth.read-differential"] },
   idor: { prerequisites: [...twoAccounts.map(p => ({ ...p, level: "recommended" as const })), objects], riskClass: "SAFE_ACTIVE", techniques: ["idor.reference-discovery", "idor.account-differential"] },
@@ -28,7 +28,7 @@ const definitions: Record<HuntFamily, { prerequisites: PrerequisiteDefinition[];
   xxe: { prerequisites: [req("XML_ENDPOINT", "An observed XML-accepting endpoint is required."), rec("OOB_CALLBACK", "A configured operator-owned callback is needed for blind XXE.")], riskClass: "SAFE_ACTIVE", techniques: ["xxe.xml-inventory", "xxe.controlled-oob"] },
   ssti: { prerequisites: [session], riskClass: "SAFE_ACTIVE", techniques: ["ssti.arithmetic-differential", "ssti.literal-control"] },
   cors: { prerequisites: [session], riskClass: "SAFE_ACTIVE", techniques: ["cors.origin-matrix", "cors.sensitive-comparison"] },
-  jwt: { prerequisites: [req("JWT", "JWT_NOT_AVAILABLE: configure a real test JWT or discover one in the authorized corpus.")], riskClass: "SAFE_ACTIVE", techniques: ["jwt.claims-audit", "jwt.validation-differential", "jwt.algorithm-differential", "jwt.key-selection-review"] },
+  jwt: { prerequisites: [req("JWT", "JWT_NOT_AVAILABLE: no JWT observed in a verified test session or authorized corpus.")], riskClass: "SAFE_ACTIVE", techniques: ["jwt.claims-audit", "jwt.validation-differential", "jwt.algorithm-differential", "jwt.key-selection-review"] },
   oauth: { prerequisites: [req("OAUTH_FLOW", "An observed OAuth/OIDC authorization flow is required.")], riskClass: "SAFE_ACTIVE", techniques: ["oauth.flow-inventory", "oauth.flow-controls"] },
   lfi: { prerequisites: [session], riskClass: "SAFE_ACTIVE", techniques: ["lfi.path-input-discovery", "lfi.path-error-differential"] },
   deserialization: { prerequisites: [], riskClass: "PASSIVE", techniques: ["serialization.cookie-signature", "serialization.input-signature"] },
@@ -58,7 +58,8 @@ export function resolveHuntReadiness(policy: HuntPolicy, facts: ReadinessFacts) 
     const missingRequired = prerequisites.filter(p => p.level === "required" && !p.satisfied);
     const missingRecommended = prerequisites.filter(p => p.level === "recommended" && !p.satisfied);
     const absentAfterDiscovery = facts.discoveryComplete && missingRequired.some(p => p.type === "XML_ENDPOINT" || p.type === "OAUTH_FLOW");
-    const state: ReadinessState = !selection.selected ? "NOT_SELECTED" : absentAfterDiscovery ? "NOT_APPLICABLE" : missingRequired.length ? "BLOCKED" : missingRecommended.length ? "DEGRADED" : "READY";
+    const sessionUnavailable = !facts.authenticatedSession && missingRequired.some(p => ["PRIMARY_CREDENTIAL", "SECOND_CREDENTIAL", "AUTHENTICATED_SESSION", "SESSION_COOKIE"].includes(p.type));
+    const state: ReadinessState = !selection.selected ? "NOT_SELECTED" : absentAfterDiscovery || sessionUnavailable ? "NOT_APPLICABLE" : missingRequired.length ? "BLOCKED" : missingRecommended.length ? "DEGRADED" : "READY";
     return { ...selection, state, prerequisites, riskClass: descriptor?.riskClass ?? "HIGH_RISK", safeSubset: state === "READY" || state === "DEGRADED" };
   });
 }

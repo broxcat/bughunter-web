@@ -51,7 +51,7 @@ export function ClassificationChips({ f }: { f: ClassifiedFinding }) {
 
 /**
  * Edit CWE, the CVSS v3.1 vector, and the manual Impact / Remediation report
- * sections. Saved through PATCH /api/findings/[id]; severity and the gate are
+ * sections. Saved through PATCH /api/findings/[id]; severity and review status are
  * not touched.
  */
 export function FindingClassification({

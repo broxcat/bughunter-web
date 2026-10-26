@@ -1,4 +1,5 @@
 "use client";
+import { findingReviewStatus } from "@/lib/evidenceReview";
 
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
@@ -18,7 +19,8 @@ interface Finding {
   id: string;
   title: string;
   severity: string;
-  gateStatus: string;
+  gateStatus?: string;
+  reviewStatus?: string;
 }
 
 const PLATFORMS: Platform[] = [
@@ -53,7 +55,7 @@ export default function ReportPage({
     const controller = new AbortController();
     Promise.all([fetch(`/api/findings?targetId=${encodeURIComponent(id)}`, { signal: controller.signal }), fetch(`/api/reports?targetId=${encodeURIComponent(id)}`, { signal: controller.signal })]).then(async ([findingsResponse, reportsResponse]) => {
       if (!findingsResponse.ok || !reportsResponse.ok) throw new Error("Unable to load findings and report history");
-      const all: Finding[] = await findingsResponse.json(); setPassed(all.filter(f => f.gateStatus === "PASSED"));
+      const all: Finding[] = await findingsResponse.json(); setPassed(all.filter(f => findingReviewStatus(f) === "CONFIRMED"));
       const saved = await reportsResponse.json(); setReports(saved); setReportId(saved[0]?.id ?? ""); setMarkdown(saved[0]?.markdown ?? null);
     }).catch(e => { if (e.name !== "AbortError") setError("Unable to load findings and report history"); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -63,7 +65,7 @@ export default function ReportPage({
     e.preventDefault();
     const findingIds = passed.filter((f) => selected[f.id]).map((f) => f.id);
     if (findingIds.length === 0) {
-      setError("Select at least one passed finding.");
+      setError("Select at least one confirmed finding.");
       return;
     }
     setGenerating(true);
@@ -102,7 +104,7 @@ export default function ReportPage({
           Report
         </h1>
         <p className="mt-1 text-sm text-muted">
-          Only findings that passed the gate can be included.
+          Only confirmed findings can be included.
         </p>
       </div>
 
@@ -140,12 +142,12 @@ export default function ReportPage({
           </select>
 
           <div className="space-y-1">
-            <p className="text-sm font-medium text-foreground">Passed findings</p>
+            <p className="text-sm font-medium text-foreground">Confirmed findings</p>
             {loading ? (
               <p className="text-sm text-muted">Loading…</p>
             ) : passed.length === 0 ? (
               <p className="text-sm text-muted">
-                No findings have passed the gate yet.
+                No confirmed findings yet.
               </p>
             ) : (
               passed.map((f) => (

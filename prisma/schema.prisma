@@ -211,6 +211,12 @@ enum CredentialPurpose {
 }
 
 model TargetCredential {
+  sessionStatus        TargetSessionStatus @default(UNKNOWN)
+  sessionCheckedAt     DateTime?
+  sessionExpiresAt     DateTime?
+  validationUrl        String? @db.Text
+  sessionIdentityHash  String?
+  sessionCheckId       String?
   purpose              CredentialPurpose @default(OTHER)
   // Explicit user attestation: a read-only object owned by this test account.
   ownedObjectUrl       String?
@@ -232,6 +238,13 @@ model TargetCredential {
   target Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
 
   @@index([targetId])
+}
+
+enum TargetSessionStatus {
+  VALID
+  INVALID
+  EXPIRED
+  UNKNOWN
 }
 
 enum CredentialMode {
@@ -289,6 +302,9 @@ model ScanLog {
 // ---------------------------------------------------------------------------
 
 model Finding {
+  reviewStatus FindingReviewStatus @default(CANDIDATE)
+  reviewEvidence Json?
+  reviewedAt DateTime?
   huntMetadata Json?
   id           String             @id @default(cuid())
   targetId     String
@@ -306,7 +322,7 @@ model Finding {
   // out-of-band confirmation. A CANDIDATE may still carry a high severity.
   confidence   FindingConfidence? @default(CANDIDATE)
   gateStatus   GateStatus         @default(UNVALIDATED)
-  // JSON: the 7-Question Gate answers.
+  // Historical validation columns retained for migration compatibility only.
   gateAnswers  Json?
   killedReason String?            @db.Text
   // Out-of-band correlation key (Phase 5). The SSRF scanner sets this to the
@@ -334,6 +350,14 @@ model Finding {
 
   @@index([targetId])
   @@index([gateStatus])
+}
+
+enum FindingReviewStatus {
+  CANDIDATE
+  EVIDENCE_REVIEW
+  CONFIRMED
+  REJECTED
+  INCONCLUSIVE
 }
 
 // ---------------------------------------------------------------------------

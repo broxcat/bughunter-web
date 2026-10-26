@@ -52,6 +52,7 @@ export interface XssSinkInfo {
   canaryId?: string;
   parameter?: string;
   context?: "HTML" | "ATTRIBUTE" | "JAVASCRIPT" | "UNKNOWN";
+  authentication?: { cookies?: Record<string, string>; bearerToken?: string };
 }
 
 export interface XssConfirmResult {
@@ -215,6 +216,8 @@ export async function confirmXssSink(
     // A fresh context per call — no cookies/state shared between targets.
     browser = await chromium.launch({ headless: true, args: [...LAUNCH_ARGS], timeout: Math.max(1, Math.min(5000, deadline - Date.now())) });
     context = await newTargetBrowserContext(browser);
+    if (sinkInfo.authentication?.cookies) await context.addCookies(Object.entries(sinkInfo.authentication.cookies).map(([name, value]) => ({ name, value, url: parsed.origin })));
+    if (sinkInfo.authentication?.bearerToken) await context.setExtraHTTPHeaders({ Authorization: `Bearer ${sinkInfo.authentication.bearerToken}` });
 
     const confirm = runCandidates(context, candidates, canaryId, sinkInfo, url, deadline);
 

@@ -1,3 +1,4 @@
+import { findingReviewStatus } from "@/lib/evidenceReview";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/reports — NON-NEGOTIABLE: a report may include ONLY findings whose
-// gateStatus === "PASSED" and that the user owns. Any violation rejects the
+// review status CONFIRMED and that the user owns. Any violation rejects the
 // whole request (400); nothing is written.
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -68,13 +69,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Every included finding must have PASSED the gate. No exceptions.
-  const notPassed = findings.filter((f) => f.gateStatus !== "PASSED");
+  // Every included finding must have confirmed evidence.
+  const notPassed = findings.filter((f) => findingReviewStatus(f) !== "CONFIRMED");
   if (notPassed.length > 0) {
     return NextResponse.json(
       {
-        error: "A report may only include findings that PASSED the 7-Question Gate",
-        offending: notPassed.map((f) => ({ id: f.id, gateStatus: f.gateStatus })),
+        error: "A report may only include confirmed findings",
+        offending: notPassed.map((f) => ({ id: f.id, reviewStatus: findingReviewStatus(f) })),
       },
       { status: 400 },
     );

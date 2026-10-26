@@ -1,213 +1,101 @@
-import { assertExecutionUrl, newTargetBrowserContext } from "@/server/execution";
-// Automatic session acquisition for EMAIL_PASSWORD target credentials.
-//
-// Instead of pasting cookies from devtools (which expire), the operator gives an
-// email + password + login URL for the TARGET, and we log in via the headless
-// Chromium already used by the XSS/CSRF scanners to mint/refresh session cookies.
-//
-// Same operational constraints as xssConfirm.ts (Agent K's containerized Chromium):
-// launch with --no-sandbox + --disable-dev-shm-usage, a fresh context closed in a
-// finally (no leaked browser), a bounded wall-clock budget, and it NEVER throws —
-// a failed login returns { cookies: {}, error } so an authenticated scan degrades
-// to "credential unavailable" rather than crashing the hunt.
-//
-// SECURITY: email/password arrive already decrypted from the caller and are only
-// typed into the target's login form. They are NEVER logged. The returned cookies
-// are session material for the TARGET and are handled like every other secret.
-
+import { assertExecutionUrl, currentTargetExecution, newTargetBrowserContext } from "@/server/execution";
+import { isSafeReadUrl } from "@/lib/hunt/safety";
 import { chromium, type Browser, type BrowserContext } from "playwright-chromium";
-
-const LAUNCH_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"] as const;
-
-/** Overall wall-clock budget for one acquireSessionCookies() call. */
-const OVERALL_DEADLINE_MS = 20_000;
-const NAV_TIMEOUT_MS = 12_000;
-/** Grace after submit for the post-login navigation / state change. */
-const POST_SUBMIT_WAIT_MS = 6_000;
-/** Max wait for a client-rendered (SPA/Auth.js) login form to hydrate. */
-const FORM_HYDRATE_MS = 10_000;
-/** A cookie name that looks like a real session (so we can poll for it post-login). */
-const SESSION_COOKIE_RE = /(session[._-]?token|sessionid|connect\.sid|jwt|auth.*token)/i;
-
-const EMAIL_SELECTORS = [
-  'input[type="email"]',
-  'input[name="email"]',
-  'input[name="username"]',
-  'input[name="login"]',
-  'input[name="user"]',
-  'input[id="email"]',
-  'input[id="username"]',
-  'input[autocomplete="username"]',
-];
-const PASSWORD_SELECTORS = [
-  'input[type="password"]',
-  'input[name="password"]',
-  'input[id="password"]',
-  'input[autocomplete="current-password"]',
-];
-const SUBMIT_SELECTORS = [
-  'button[type="submit"]',
-  'input[type="submit"]',
-  'button[name="login"]',
-  "form button",
-  "button",
-];
+import { detectCsrf } from "./csrf";
 
 export interface AutoLoginInput {
-  loginUrl: string;
-  email: string;
+  baseUrl?: string;
+  loginUrl?: string; // legacy/internal discovered hint, never requested by the UI
+  username?: string;
+  email?: string; // encrypted legacy column compatibility
   password: string;
+  allowLoginAction?: (url: string, detectedPasswordForm?: boolean, passwordField?: string) => void;
 }
-
 export interface AutoLoginResult {
   cookies: Record<string, string>;
   error?: string;
+  rejected?: boolean;
+  loginUrl?: string;
+  candidateUrls?: string[];
+  expiresAt?: Date;
+  csrfSources?: string[];
+  bearerToken?: string;
 }
-
-async function fillFirst(
-  page: import("playwright-chromium").Page,
-  selectors: string[],
-  value: string,
-): Promise<boolean> {
-  for (const sel of selectors) {
-    const el = page.locator(sel).first();
-    if ((await el.count()) > 0) {
-      try {
-        await el.fill(value, { timeout: 2_000 });
-        return true;
-      } catch {
-        // try the next selector
-      }
-    }
-  }
-  return false;
-}
-
-/**
- * Log in to the target and return its session cookies as a name->value map.
- * Best-effort and total: every failure path returns { cookies: {}, error } and
- * nothing throws into the caller.
- */
-export async function acquireSessionCookies(
-  input: AutoLoginInput,
-): Promise<AutoLoginResult> {
-  const { loginUrl } = input;
-  if (!/^https?:\/\//i.test(loginUrl)) {
-    return { cookies: {}, error: `invalid loginUrl (must be http/https): ${loginUrl}` };
-  }
-
-  const deadline = Date.now() + OVERALL_DEADLINE_MS;
-  let browser: Browser | null = null;
-  let context: BrowserContext | null = null;
+const usernameSelector = 'input[autocomplete="username"], input[type="email"], input[name="username"], input[name="email"], input[name="login"], input[name="user"], input[type="text"]';
+/** Discover a visible password form, preserve hidden inputs and browser cookies. */
+export async function acquireSessionCookies(input: AutoLoginInput): Promise<AutoLoginResult> {
+  const base = input.baseUrl ?? input.loginUrl;
+  if (!base) return { cookies: {}, error: "Login form unavailable" };
+  let browser: Browser | null = null, context: BrowserContext | null = null;
+  const deadline = Date.now() + 24000;
   try {
-    assertExecutionUrl(loginUrl);
-    browser = await chromium.launch({ headless: true, args: [...LAUNCH_ARGS] });
+    const execution = currentTargetExecution();
+    assertExecutionUrl(base);
+    browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"], timeout: 5000 });
     context = await newTargetBrowserContext(browser);
     const page = await context.newPage();
-
-    try {
-      await page.goto(loginUrl, {
-        waitUntil: "domcontentloaded",
-        timeout: Math.min(NAV_TIMEOUT_MS, Math.max(1_000, deadline - Date.now())),
-      });
-    } catch (e) {
-      return { cookies: {}, error: `could not load login page: ${errMsg(e)}` };
-    }
-
-    // The target may be a client-rendered SPA (React / Auth.js): the form inputs
-    // exist only after hydration, so `domcontentloaded` fires before they appear.
-    // Wait for an email/username field to be VISIBLE before filling, or we'd
-    // immediately (and wrongly) conclude there is no login form.
-    try {
-      await page
-        .locator(EMAIL_SELECTORS.join(", "))
-        .first()
-        .waitFor({
-          state: "visible",
-          timeout: Math.min(FORM_HYDRATE_MS, Math.max(1_000, deadline - Date.now())),
-        });
-    } catch {
-      return {
-        cookies: {},
-        error:
-          "login form never rendered an email/username field (client-render not hydrated in time, or selectors do not match)",
-      };
-    }
-
-    const emailFilled = await fillFirst(page, EMAIL_SELECTORS, input.email);
-    if (!emailFilled) {
-      return { cookies: {}, error: "could not find an email/username field on the login page" };
-    }
-    const passwordFilled = await fillFirst(page, PASSWORD_SELECTORS, input.password);
-    if (!passwordFilled) {
-      return { cookies: {}, error: "could not find a password field on the login page" };
-    }
-
-    // Submit: prefer a navigation, but tolerate SPA logins that just swap state.
-    let submitted = false;
-    for (const sel of SUBMIT_SELECTORS) {
-      const el = page.locator(sel).first();
-      if ((await el.count()) === 0) continue;
-      try {
-        await Promise.all([
-          page
-            .waitForLoadState("networkidle", {
-              timeout: Math.min(POST_SUBMIT_WAIT_MS, Math.max(1_000, deadline - Date.now())),
-            })
-            .catch(() => {}),
-          el.click({ timeout: 2_000 }),
-        ]);
-        submitted = true;
-        break;
-      } catch {
-        // try the next submit candidate
+    const candidates = [base];
+    if (input.loginUrl) { try { assertExecutionUrl(input.loginUrl); if (!candidates.includes(input.loginUrl)) candidates.push(input.loginUrl); } catch { /* stale legacy hints never bypass scope */ } }
+    const observedHeaders: Record<string, string> = {};
+    let bearerToken: string | undefined;
+    page.on("request", request => {
+      try { assertExecutionUrl(request.url(), execution); const value = request.headers().authorization; if (value && /^Bearer [A-Za-z0-9._~+\/-]+=*$/.test(value) && value.length <= 8192) bearerToken = value.slice(7); } catch { /* foreign auth material never retained */ }
+    });
+    page.on("response", response => { void response.allHeaders().then(headers => { for (const [k, v] of Object.entries(headers)) if (/^x-(csrf-token|xsrf-token|csrftoken)$/i.test(k)) observedHeaders[k] = v; }).catch(() => {}); });
+    let found = false;
+    for (let i = 0; i < Math.min(candidates.length, 5) && Date.now() < deadline; i++) {
+      await page.goto(candidates[i], { waitUntil: "domcontentloaded", timeout: Math.min(5000, Math.max(1, deadline - Date.now())) }).catch(() => {});
+      const password = page.locator('form input[type="password"]').first();
+      try { await password.waitFor({ state: "visible", timeout: Math.min(1500, Math.max(1, deadline - Date.now())) }); found = true; break; } catch { /* next observed login link */ }
+      if (i === 0) {
+        const links = await page.locator("a[href]").evaluateAll(elements => elements.map(e => e.getAttribute("href") ?? ""));
+        for (const raw of [...links.filter(v => /login|signin|sign-in|log-in/i.test(v)), "/login", "/signin"]) {
+          try { const u = new URL(raw, base); assertExecutionUrl(u.toString()); if (isSafeReadUrl(u.toString()) && !candidates.includes(u.toString())) candidates.push(u.toString()); } catch { /* foreign links never grant scope */ }
+        }
       }
     }
-    if (!submitted) {
-      return { cookies: {}, error: "could not find/click a submit control on the login form" };
+    if (!found) return { cookies: {}, error: "Login form unavailable" };
+    const form = page.locator("form").filter({ has: page.locator('input[type="password"]') }).first();
+    const loginUrl = page.url();
+    const action = new URL(await form.getAttribute("action") || loginUrl, loginUrl).toString();
+    const fields = await form.locator("input[name], select[name]").evaluateAll(elements => elements.map(e => e.getAttribute("name") ?? ""));
+    const buttons = await form.locator('button, input[type="submit"]').evaluateAll(elements => elements.map(e => `${e.textContent ?? ""} ${e.getAttribute("value") ?? ""}`));
+    const semantics = `${action} ${await form.getAttribute("id") ?? ""} ${buttons.join(" ")}`;
+    if (!/login|log-in|signin|sign-in|sign in|log in|session|connexion|connecter|\/auth\b/i.test(semantics) || /register|sign.?up|create.account/i.test(semantics) || fields.some(f => /^(price|amount|total|quantity|qty|discount|coupon|currency|transfer|purchase)$/i.test(f))) return { cookies: {}, error: "A safe login form could not be identified" };
+    const passwordField = await form.locator('input[type="password"]').first().getAttribute("name") ?? "password";
+    if (new URL(action).origin !== new URL(base).origin) return { cookies: {}, error: "Login action is outside the selected origin" };
+    assertExecutionUrl(action); input.allowLoginAction?.(action, true, passwordField);
+    // AJAX login routes are accepted only when discovered in this form's scripts.
+    const html = await page.content();
+    for (const m of html.matchAll(/(?:fetch|post)\(\s*["']([^"']+)["']/gi)) {
+      try { const u = new URL(m[1], loginUrl); if (u.origin === new URL(base).origin) input.allowLoginAction?.(u.toString(), false, passwordField); } catch { /* unsupported actions remain blocked */ }
     }
-
-    // Auth.js (and similar) set the session cookie asynchronously — a POST to the
-    // credentials callback, then a redirect — so it is not present the instant the
-    // click resolves. Poll the context for a session-looking cookie within the
-    // remaining budget rather than reading once after a fixed wait.
-    let cookies: Record<string, string> = {};
-    const readCookies = async () => {
-      const raw = await context!.cookies().catch(() => []);
-      const map: Record<string, string> = {};
-      for (const c of raw) if (c.name) map[c.name] = c.value;
-      return map;
-    };
-    while (Date.now() < deadline) {
-      cookies = await readCookies();
-      if (Object.keys(cookies).some((n) => SESSION_COOKIE_RE.test(n))) break;
-      await page.waitForTimeout(400).catch(() => {});
+    const initialCookies = Object.fromEntries((await context.cookies()).map(c => [c.name, c.value]));
+    const csrf = detectCsrf(html, initialCookies, observedHeaders);
+    await context.setExtraHTTPHeaders(csrf.headers);
+    await form.locator(usernameSelector).first().fill(input.username ?? input.email ?? "", { timeout: 2000 });
+    await form.locator('input[type="password"]').first().fill(input.password, { timeout: 2000 });
+    const responsePromise = page.waitForResponse(r => r.request().method() === "POST", { timeout: 6000 }).catch(() => null);
+    await form.locator('button[type="submit"], input[type="submit"], button:not([type])').first().click({ timeout: 3000 });
+    const response = await responsePromise;
+    await page.waitForLoadState("domcontentloaded", { timeout: 3000 }).catch(() => {});
+    const urls: string[] = [];
+    const location = response ? (await response.allHeaders())["x-bughunter-redirect-location"] : undefined;
+    if (location) {
+      try { const u = new URL(location, loginUrl); assertExecutionUrl(u.toString()); if (isSafeReadUrl(u.toString())) { urls.push(u.toString()); await page.goto(u.toString(), { waitUntil: "domcontentloaded", timeout: 4000 }).catch(() => {}); } } catch { /* no foreign or action redirect */ }
     }
-    // Final read in case the loop exited on the deadline mid-set.
-    if (Object.keys(cookies).length === 0) cookies = await readCookies();
-
-    if (Object.keys(cookies).length === 0) {
-      return { cookies: {}, error: "login submitted but no cookies were set (wrong credentials or unexpected flow?)" };
+    const links = await page.locator("a[href]").evaluateAll(elements => elements.map(e => e.getAttribute("href") ?? "")).catch(() => []);
+    for (const raw of [page.url(), ...links]) {
+      try { const u = new URL(raw, base); assertExecutionUrl(u.toString()); if (isSafeReadUrl(u.toString())) urls.push(u.toString()); } catch { /* no scope expansion */ }
     }
-
-    // Heuristic: a password field still present often means login failed.
-    const stillHasPassword = (await page.locator('input[type="password"]').count()) > 0;
-    if (stillHasPassword) {
-      return {
-        cookies,
-        error: "a password field is still present after submit — login may have failed (returning cookies anyway for inspection)",
-      };
-    }
-
-    return { cookies };
-  } catch (e) {
-    return { cookies: {}, error: `auto-login failed: ${errMsg(e)}` };
-  } finally {
-    await context?.close().catch(() => {});
-    await browser?.close().catch(() => {});
-  }
-}
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+    const rejected = Boolean(response && [400, 401, 403].includes(response.status()));
+    if (!rejected) await page.locator('input[type="password"]').first().waitFor({ state: "hidden", timeout: 2500 }).catch(() => {});
+    if ((await page.locator('input[autocomplete="one-time-code"], input[name="otp"], input[name="totp"]').count()) > 0) return { cookies: {}, error: "Additional sign-in step could not be verified" };
+    if (rejected) return { cookies: {}, rejected: true, error: "Credentials rejected", csrfSources: csrf.sources };
+    const raw = await context.cookies();
+    const cookies = Object.fromEntries(raw.map(c => [c.name, c.value]));
+    const expiries = raw.filter(c => c.expires > 0 && !/csrf|xsrf/i.test(c.name)).map(c => c.expires * 1000);
+    return { cookies, bearerToken, loginUrl, candidateUrls: [...new Set(urls)].slice(0, 8), expiresAt: expiries.length ? new Date(Math.min(...expiries)) : undefined, csrfSources: csrf.sources };
+  } catch { return { cookies: {}, error: "Unable to establish a verified session" }; }
+  finally { await context?.close().catch(() => {}); await browser?.close().catch(() => {}); }
 }
