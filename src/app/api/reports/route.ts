@@ -19,14 +19,16 @@ const createReportSchema = z.object({
 });
 
 // GET /api/reports — list the user's reports.
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const targetId = req.nextUrl.searchParams.get("targetId");
+  if (targetId && !await prisma.target.findFirst({ where: { id: targetId, userId: session.user.id }, select: { id: true } })) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const reports = await prisma.report.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, ...(targetId ? { targetId } : {}) },
     orderBy: { createdAt: "desc" },
   });
 

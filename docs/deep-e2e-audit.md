@@ -110,3 +110,17 @@ to that configured canonical host. No secret/cookie value was captured.
   on focus; no token/cookie storage was introduced.
 - Regression: actual two-tab Chromium signout, no manual reload; passed on build.
 - Commit: `fix(auth): clear stale dashboard sessions across tabs`.
+
+## Bugs discovered — saved report inaccessible after refresh
+
+- Severity: MEDIUM; `/targets/h/report`.
+- Steps: use an actual confirmed BOLA result from the local fixture Hunt, pass the
+  manual gate, generate its report and reload the page.
+- Expected: saved report remains accessible. Observed: report exists in GET reports,
+  but UI discards markdown on refresh and has no history selector.
+- Root cause: preview existed only in React state; page never loaded stored reports.
+- Fix: owned host-filtered report history and saved-report selector; latest saved
+  preview restored after refresh, without regenerating or changing historical data.
+- Regression: four API ownership/filter tests and real compiled browser generation,
+  persistence, reload and all three viewport widths. All pass.
+- Commit: `fix(reports): restore saved host report previews after refresh`.
