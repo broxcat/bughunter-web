@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import { chromium } from "playwright-chromium";
 import { withTargetExecution, newTargetBrowserContext } from "@/server/execution";
+import { prisma } from "@/lib/prisma";
 import { runCommand } from "@/server/scanners/runCommand";
 import { NUCLEI_TEMPLATE } from "@/server/scanners/toolPolicy";
 import { confirmXssSink } from "@/server/scanners/xssConfirm";
@@ -52,6 +53,8 @@ network("real HTTP tools and Chromium capture", () => {
           ["url", `${base}/?q=hello`, "--silence", "--no-color", "--worker", "2", "--skip-mining-all", "--timeout", "2", "--user-agent", "Tool-Wrong"];
         const result = await runCommand(tool, args, { scanRunId: "fixture", timeoutMs: 45000 });
         expect(result).toEqual({ code: 0, timedOut: false });
+        const output = vi.mocked(prisma.scanLog.create).mock.calls.map(call => call[0].data.line).join("\n");
+        expect(output).not.toMatch(/Error parsing config file|invalid character '#'/i);
       });
       assertReceived(from);
     }, 50000);
