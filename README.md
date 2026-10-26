@@ -1,5 +1,7 @@
 # BugHunter Web
 
+License: AGPL-3.0-only ([LICENSE](LICENSE))
+
 Bug bounty workflow: **Targets → Scope → Recon → Hunt → Findings → Report**.
 
 A Target is a company or bug bounty program (VINCI, Doctolib, a private lab).
