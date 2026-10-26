@@ -48,13 +48,13 @@ RUN set -eux; \
 # Scanner binaries land in $GOPATH/bin (= /root/go/bin).
 RUN set -eux; \
     go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest; \
-    go install github.com/projectdiscovery/httpx/cmd/httpx@latest; \
-    go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest; \
-    go install github.com/projectdiscovery/katana/cmd/katana@latest; \
+    go install github.com/projectdiscovery/httpx/cmd/httpx@v1.12.0; \
+    go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.11.1; \
+    go install github.com/projectdiscovery/katana/cmd/katana@v1.8.0; \
     go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest; \
     go install github.com/ffuf/ffuf/v2@latest; \
     go install github.com/lc/gau/v2/cmd/gau@latest; \
-    go install github.com/hahwul/dalfox/v2@latest
+    go install github.com/hahwul/dalfox/v2@v2.13.0
 
 # Pre-pull nuclei templates into the image (written to /root/nuclei-templates
 # and /root/.config/nuclei); copied into the runtime stage below.

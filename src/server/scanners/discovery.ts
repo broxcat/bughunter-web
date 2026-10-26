@@ -79,7 +79,7 @@ async function crawl(ctx: ScanContext): Promise<DiscoveryCorpus> {
   const bodies: string[] = [];
   const discovered = new Set<string>();
   const visited = new Set<string>();
-  let queue: Array<{ url: string; depth: number }> = [{ url: ctx.baseUrl, depth: 0 }];
+  const queue: Array<{ url: string; depth: number }> = [{ url: ctx.baseUrl, depth: 0 }];
 
   while (queue.length > 0 && visited.size < MAX_PAGES) {
     const { url, depth } = queue.shift()!;

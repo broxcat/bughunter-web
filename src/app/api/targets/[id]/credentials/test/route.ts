@@ -1,3 +1,4 @@
+import { loadTargetExecution, withTargetExecution, assertExecutionUrl } from "@/server/execution";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -51,7 +52,12 @@ export async function POST(
     );
   }
 
-  const result = await acquireSessionCookies(parsed.data);
+  let result;
+  try {
+    const execution = await loadTargetExecution(id);
+    assertExecutionUrl(parsed.data.loginUrl, execution);
+    result = await withTargetExecution(execution, () => acquireSessionCookies(parsed.data));
+  } catch { return NextResponse.json({ error: "Login URL must belong to an active in-scope host with a required User-Agent" }, { status: 400 }); }
   const cookieCount = Object.keys(result.cookies).length;
   const ok = cookieCount > 0 && !result.error;
 

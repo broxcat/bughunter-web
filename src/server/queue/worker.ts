@@ -1,3 +1,4 @@
+import { loadTargetExecution, withTargetExecution } from "@/server/execution";
 // The scan worker — a standalone process entrypoint (`npm run worker` →
 // `tsx src/server/queue/worker.ts`). It creates a single BullMQ Worker at module
 // load and processes scan jobs one at a time.
@@ -52,6 +53,9 @@ async function processScan(job: Job<ScanJobData>): Promise<void> {
   });
 
   try {
+    const execution = await loadTargetExecution(target.id);
+    await prisma.scanRun.update({ where: { id: scanRunId }, data: { requiredUserAgent: execution.requiredUserAgent } });
+    await withTargetExecution(execution, async () => {
     switch (type) {
       case "RECON":
         await runRecon(target.host, scanRunId);
@@ -75,6 +79,7 @@ async function processScan(job: Job<ScanJobData>): Promise<void> {
       }
     }
 
+    });
     await prisma.scanRun.update({
       where: { id: scanRunId },
       data: { status: "COMPLETED", finishedAt: new Date() },

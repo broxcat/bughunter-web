@@ -69,7 +69,10 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
-    load();
+    fetch("/api/ai-providers", { cache: "no-store" }).then(async res => {
+      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
+      setConfigs((await res.json()).providers ?? []);
+    }).catch(e => setError(e.message)).finally(() => setLoading(false));
   }, []);
 
   async function onSubmit(e: React.FormEvent) {

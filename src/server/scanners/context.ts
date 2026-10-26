@@ -1,3 +1,4 @@
+import { loadTargetExecution } from "@/server/execution";
 // Shared scanner context + helpers used by the vuln-class modules.
 //
 // Scanners receive only a scanRunId (keeping runHunt's signature stable so the
@@ -55,6 +56,7 @@ export async function loadScanContext(
     include: { target: true },
   });
   if (!run || !run.target) return null;
+  await loadTargetExecution(run.target.id);
   return {
     scanRunId,
     targetId: run.target.id,

@@ -1,0 +1,17 @@
+id: bughunter-exposed-git-config
+info:
+  name: Exposed Git configuration
+  author: bughunter
+  severity: info
+  tags: exposure
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.git/config"
+    redirects: false
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        words: ["[core]"]

@@ -1,11 +1,3 @@
-// bughunter-web — shared data contract (FROZEN after Phase 0).
-// Phase 1 agents MUST NOT edit this file. If a field is missing, request it in
-// your final report; the lead adds it once at the end of Phase 1 and re-migrates.
-//
-// Security invariant encoded here: a Target references a Scope, and the whole
-// application refuses to scan unless that Scope.status === APPROVED. This is the
-// authorization attestation; it is re-checked in the worker just before any tool runs.
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -30,6 +22,7 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  bountyPrograms   BountyProgram[]
   accounts         Account[]
   sessions         Session[]
   aiProviderConfig AiProviderConfig[]
@@ -136,12 +129,50 @@ model Scope {
   @@index([status])
 }
 
+enum BountyPlatform {
+  YESWEHACK
+  HACKERONE
+  INTIGRITI
+  BUGCROWD
+  OTHER
+  PRIVATE
+}
+
+// Business Target. Technical Target identities and their historical FKs stay intact.
+model BountyProgram {
+  id                String          @id @default(cuid())
+  ownerId           String
+  companyName       String
+  platform          BountyPlatform?
+  programUrl        String?
+  rewardCurrency    String          @default("EUR")
+  rewardLow         Decimal?        @db.Decimal(18, 2)
+  rewardMedium      Decimal?        @db.Decimal(18, 2)
+  rewardHigh        Decimal?        @db.Decimal(18, 2)
+  rewardCritical    Decimal?        @db.Decimal(18, 2)
+  requiredUserAgent String
+  outOfScope        String[]        @default([])
+  qualifying        String[]        @default([])
+  nonQualifying     String[]        @default([])
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  owner             User            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  targets           Target[]
+
+  @@index([ownerId])
+}
+
 model Target {
+  programId String?
+  active    Boolean        @default(true)
+  program   BountyProgram? @relation(fields: [programId], references: [id], onDelete: Restrict)
+
   id        String   @id @default(cuid())
   userId    String
   scopeId   String
   // Bare host (no scheme, no path, no trailing slash); may include :port.
-  // Unique per user. subfinder/nmap take this (port stripped); httpx/katana/
+  // Active hosts are unique per program (partial SQL index). nmap takes the
+  // host without a port; httpx/katana/
   // nuclei take scheme://host rebuilt from `scheme`.
   host      String
   // Original scheme ("http"/"https") when the user entered a full URL; null
@@ -160,6 +191,7 @@ model Target {
 
   @@index([userId])
   @@index([scopeId])
+  @@index([programId, active])
 }
 
 // ---------------------------------------------------------------------------
@@ -171,20 +203,20 @@ model Target {
 // in-process at request time. At least one of cookiesCipher/headerCipher must be
 // set per row (enforced in the API, not the DB).
 model TargetCredential {
-  id            String         @id @default(cuid())
-  targetId      String
-  label         String
-  mode          CredentialMode @default(COOKIES)
-  cookiesCipher String?        @db.Text // AES-GCM of JSON.stringify(cookies map)
-  headerCipher  String?        @db.Text // AES-GCM of a bearer token (Authorization value)
+  id                   String         @id @default(cuid())
+  targetId             String
+  label                String
+  mode                 CredentialMode @default(COOKIES)
+  cookiesCipher        String?        @db.Text // AES-GCM of JSON.stringify(cookies map)
+  headerCipher         String?        @db.Text // AES-GCM of a bearer token (Authorization value)
   // EMAIL_PASSWORD mode: the app logs in via headless Chromium to mint/refresh
   // the session cookies automatically. Email/password encrypted like everything else.
-  loginUrl             String?   @db.Text
-  emailCipher          String?   @db.Text
-  passwordCipher       String?   @db.Text
-  sessionCookiesCipher String?   @db.Text // cached cookies obtained by auto-login
+  loginUrl             String?        @db.Text
+  emailCipher          String?        @db.Text
+  passwordCipher       String?        @db.Text
+  sessionCookiesCipher String?        @db.Text // cached cookies obtained by auto-login
   sessionRefreshedAt   DateTime? // when the cached session was last minted
-  createdAt            DateTime  @default(now())
+  createdAt            DateTime       @default(now())
 
   target Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
 
@@ -202,16 +234,18 @@ enum CredentialMode {
 // ---------------------------------------------------------------------------
 
 model ScanRun {
-  id         String     @id @default(cuid())
-  targetId   String
-  type       ScanType
-  status     ScanStatus @default(QUEUED)
+  // Effective execution-time configuration, never changed by later program edits.
+  requiredUserAgent String?
+  id                String     @id @default(cuid())
+  targetId          String
+  type              ScanType
+  status            ScanStatus @default(QUEUED)
   // BullMQ job id, set once enqueued.
-  jobId      String?
-  error      String?    @db.Text
-  createdAt  DateTime   @default(now())
-  startedAt  DateTime?
-  finishedAt DateTime?
+  jobId             String?
+  error             String?    @db.Text
+  createdAt         DateTime   @default(now())
+  startedAt         DateTime?
+  finishedAt        DateTime?
 
   target   Target    @relation(fields: [targetId], references: [id], onDelete: Cascade)
   logs     ScanLog[]
@@ -239,25 +273,25 @@ model ScanLog {
 // ---------------------------------------------------------------------------
 
 model Finding {
-  id           String     @id @default(cuid())
+  id           String             @id @default(cuid())
   targetId     String
   scanRunId    String?
   title        String
   vulnClass    String?
-  severity     Severity   @default(INFO)
-  description  String?    @db.Text
+  severity     Severity           @default(INFO)
+  description  String?            @db.Text
   // Where the finding was observed: URL, endpoint, or parameter
   // (e.g. "/api/users/{id}", "?redirect="). Optional.
   location     String?
-  evidence     String?    @db.Text
+  evidence     String?            @db.Text
   // Confidence axis, INDEPENDENT of severity and gateStatus. PROVEN = direct
   // evidence in the HTTP response/observed behavior; CANDIDATE = needs manual or
   // out-of-band confirmation. A CANDIDATE may still carry a high severity.
   confidence   FindingConfidence? @default(CANDIDATE)
-  gateStatus   GateStatus @default(UNVALIDATED)
+  gateStatus   GateStatus         @default(UNVALIDATED)
   // JSON: the 7-Question Gate answers.
   gateAnswers  Json?
-  killedReason String?    @db.Text
+  killedReason String?            @db.Text
   // Out-of-band correlation key (Phase 5). The SSRF scanner sets this to the
   // per-attempt token it embedded in a self-hosted OOB callback URL; a matching
   // OobHit.token row (written by the catcher when the target calls back) CONFIRMS
@@ -272,10 +306,10 @@ model Finding {
   cvssVector   String?
   cvssScore    Float?
   // Manually written report sections; the report shows a placeholder when empty.
-  impact       String?    @db.Text
-  remediation  String?    @db.Text
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  impact       String?            @db.Text
+  remediation  String?            @db.Text
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
 
   target      Target       @relation(fields: [targetId], references: [id], onDelete: Cascade)
   scanRun     ScanRun?     @relation(fields: [scanRunId], references: [id], onDelete: SetNull)

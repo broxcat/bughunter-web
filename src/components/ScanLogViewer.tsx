@@ -17,15 +17,14 @@ function statusTone(status: string): BadgeTone {
 }
 
 export default function ScanLogViewer({ scanRunId }: { scanRunId: string }) {
+  return <ScanLogSession key={scanRunId} scanRunId={scanRunId} />;
+}
+function ScanLogSession({ scanRunId }: { scanRunId: string }) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<string>("CONNECTING");
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    // Reset when the run changes.
-    setLogs([]);
-    setStatus("CONNECTING");
-
     const es = new EventSource(`/api/scan-runs/${scanRunId}/stream`);
 
     es.addEventListener("open", () => {

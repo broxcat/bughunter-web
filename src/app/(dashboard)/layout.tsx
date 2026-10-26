@@ -7,6 +7,8 @@ import NavLinks from "./_components/NavLinks";
 const NAV = [
   { href: "/targets", label: "Targets" },
   { href: "/scopes", label: "Scopes" },
+  { href: "/recon", label: "Recon" },
+  { href: "/hunt", label: "Hunt" },
   { href: "/settings", label: "Settings" },
 ];
 
@@ -20,8 +22,8 @@ export default async function DashboardLayout({
   return (
     <div className="flex min-h-full flex-col bg-background text-foreground">
       <header className="sticky top-0 z-10 border-b border-border bg-surface/90 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3">
-          <div className="flex items-center gap-6">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
             <Link
               href="/targets"
               className="flex items-center gap-2 font-semibold tracking-tight"

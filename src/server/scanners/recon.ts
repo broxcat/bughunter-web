@@ -1,3 +1,6 @@
+import { currentTargetExecution } from "@/server/execution";
+import { resolveAny } from "node:dns/promises";
+import { logLine } from "./context";
 // Minimal recon port: run the core discovery tools in sequence against one host.
 // Every invocation goes through runCommand (argv arrays only, shell: false) so
 // the host — user input — is never shell-interpreted. Tools run best-effort: a
@@ -8,17 +11,20 @@
 // rebuilt from the target's stored scheme (falls back to https).
 
 import { runCommand } from "./runCommand";
-import { loadScanContext, toBaseUrl } from "./context";
+import { loadScanContext } from "./context";
 import { loadTargetCredentials, credentialHeaders } from "@/server/credentials";
 
 const MINUTE = 60_000;
 
-export async function runRecon(host: string, scanRunId: string): Promise<void> {
+export async function runRecon(_host: string, scanRunId: string): Promise<void> {
   const opts = (timeoutMs: number) => ({ scanRunId, timeoutMs });
 
+  const execution = currentTargetExecution();
   const ctx = await loadScanContext(scanRunId);
-  const bareHost = ctx?.host ?? host; // stored bare host, may include :port
-  const url = ctx?.baseUrl ?? toBaseUrl(host); // scheme://host
+  if (!ctx || execution.targetId !== ctx.targetId) throw new Error("Missing authorized scan context");
+  await logLine(scanRunId, `[recon] User-Agent: ${execution.requiredUserAgent}`);
+  const bareHost = ctx.host;
+  const url = ctx.baseUrl;
   const domain = bareHost.split(":")[0]; // no port — subfinder/nmap want this
 
   // If the target has a credential, crawl authenticated so katana/httpx reach
@@ -40,17 +46,21 @@ export async function runRecon(host: string, scanRunId: string): Promise<void> {
   }
   if (headerArgs.length > 0) {
     // (no cookie/token values logged — only that auth is in use)
-    await runCommand("printf", ["%s", "[recon] authenticated crawl enabled"], opts(10_000));
+    await logLine(scanRunId, "[recon] authenticated crawl enabled");
   }
 
-  // Subdomain enumeration — bare domain only.
-  await runCommand("subfinder", ["-silent", "-d", domain], opts(10 * MINUTE));
+  // DNS records only: discovered identities are never auto-authorized.
+  // Passive provider HTTP has no reliable per-program UA control in subfinder.
+  // DNS-only resolution performs no HTTP and does not authorize discovered hosts.
+  await logLine(scanRunId, "[recon] subfinder disabled: provider HTTP cannot guarantee Target User-Agent; DNS resolution USER_AGENT_NOT_APPLICABLE");
+  const records = await resolveAny(domain).catch(() => []);
+  await logLine(scanRunId, `[dns] ${JSON.stringify(records)}`);
 
   // Live host probing — full URL (authenticated when a credential exists).
   await runCommand("httpx", ["-silent", "-u", url, ...headerArgs], opts(5 * MINUTE));
 
-  // Service/version scan — host/IP, no scheme or port.
-  await runCommand("nmap", ["-sV", "-Pn", domain], opts(10 * MINUTE));
+  // TCP connect scan only: no service/version detection or HTTP probes.
+  await runCommand("nmap", ["-sT", "-Pn", "-n", domain], opts(10 * MINUTE));
 
   // URL crawling — full URL, depth 3 to reach dashboard sub-pages, authenticated
   // when a credential exists.

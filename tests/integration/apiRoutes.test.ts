@@ -91,6 +91,7 @@ d("API route authorization (integration)", () => {
     await prisma.scanRun.deleteMany();
     await prisma.target.deleteMany();
     await prisma.scope.deleteMany();
+    await prisma.bountyProgram.deleteMany();
     await prisma.user.deleteMany();
 
     const user = await prisma.user.create({
@@ -332,4 +333,141 @@ d("API route authorization (integration)", () => {
     expect(markdown).toContain("GET from 203.0.113.9");
     expect(markdown).toContain("À compléter : impact business/technique démontré");
   });
+  it("creates a business Target atomically with decimal rewards and active hosts", async () => {
+    const { POST } = await import("@/app/api/programs/route");
+    const res = await POST(req("http://localhost/api/programs", {
+      companyName: "VINCI", requiredUserAgent: "VINCI-Research/1.0", rewardLow: "100.10",
+      scopeHosts: ["WWW.Vinci.com.", "*.example.vinci.com"], outOfScope: ["admin.example.vinci.com"],
+    }));
+    expect(res.status).toBe(201);
+    const p = await res.json();
+    expect(p.rewardLow).toBe("100.1");
+    const hosts = await prisma.target.findMany({ where: { programId: p.id }, include: { scope: true } });
+    expect(hosts.map(t => t.host).sort()).toEqual(["*.example.vinci.com", "www.vinci.com"]);
+    expect(hosts.every(t => t.active && t.scope.status === "APPROVED")).toBe(true);
+  });
+  it("rejects missing User-Agent, invalid rewards and malformed scope at program creation", async () => {
+    const { POST } = await import("@/app/api/programs/route");
+    for (const body of [{ companyName: "x" }, { companyName: "x", requiredUserAgent: "" },
+      { companyName: "x", requiredUserAgent: "x", rewardLow: 0.1 },
+      { companyName: "x", requiredUserAgent: "x", scopeHosts: ["https://example.com/path"] }]) {
+      expect((await POST(req("http://localhost/api/programs", body))).status).toBe(400);
+    }
+  });
+  it("edits program configuration and protects ownership", async () => {
+    const { PATCH, GET } = await import("@/app/api/programs/[id]/route");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Lab", requiredUserAgent: "old" } });
+    const context = { params: Promise.resolve({ id: p.id }) };
+    expect((await PATCH(req("http://localhost", { companyName: "Private Lab", requiredUserAgent: "new", rewardHigh: "999.99" }, "PATCH"), context)).status).toBe(200);
+    expect((await prisma.bountyProgram.findUniqueOrThrow({ where: { id: p.id } })).requiredUserAgent).toBe("new");
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await GET(req("http://localhost", {}), context)).status).toBe(404);
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await PATCH(req("http://localhost", { requiredUserAgent: "stolen" }, "PATCH"), context)).status).toBe(404);
+    expect((await PATCH(req("http://localhost", { requiredUserAgent: "" }, "PATCH"), context)).status).toBe(400);
+  });
+
+  it("adds, edits and removes scope hosts while preserving all historical references", async () => {
+    const { POST } = await import("@/app/api/programs/[id]/hosts/route");
+    const { PATCH, DELETE } = await import("@/app/api/programs/[id]/hosts/[hostId]/route");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Scope Lab", requiredUserAgent: "Lab/1" } });
+    const params = { params: Promise.resolve({ id: p.id }) };
+    const create = (host: string) => POST(req("http://localhost", { host }), params);
+    const added = await create("API.Example.com.");
+    expect(added.status).toBe(201);
+    const h = await added.json();
+    expect(h.host).toBe("api.example.com");
+    expect((await create("api.example.com")).status).toBe(409);
+    expect((await create("*.example.com")).status).toBe(201);
+    expect((await create("https://example.com/a")).status).toBe(400);
+    const run = await prisma.scanRun.create({ data: { targetId: h.id, type: "RECON" } });
+    const finding = await prisma.finding.create({ data: { targetId: h.id, scanRunId: run.id, title: "history" } });
+    const credential = await prisma.targetCredential.create({ data: { targetId: h.id, label: "test", headerCipher: "encrypted" } });
+    const report = await prisma.report.create({ data: { targetId: h.id, userId, title: "history" } });
+    const hParams = { params: Promise.resolve({ id: p.id, hostId: h.id }) };
+    const edited = await PATCH(req("http://localhost", { host: "new.example.com" }, "PATCH"), hParams);
+    expect(edited.status).toBe(200);
+    const newHost = await edited.json();
+    expect(newHost.id).not.toBe(h.id);
+    expect((await prisma.target.findUniqueOrThrow({ where: { id: h.id } })).active).toBe(false);
+    expect((await prisma.finding.findUniqueOrThrow({ where: { id: finding.id } })).targetId).toBe(h.id);
+    expect((await prisma.targetCredential.findUniqueOrThrow({ where: { id: credential.id } })).targetId).toBe(h.id);
+    expect((await prisma.report.findUniqueOrThrow({ where: { id: report.id } })).targetId).toBe(h.id);
+    expect((await DELETE(req("http://localhost", {}, "DELETE"), { params: Promise.resolve({ id: p.id, hostId: newHost.id }) })).status).toBe(200);
+    expect((await prisma.target.findUniqueOrThrow({ where: { id: newHost.id } })).active).toBe(false);
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await create("stolen.example.com")).status).toBe(404);
+  });
+
+  it("Recon/Hunt selectors and enqueue only allow active, owned, non-excluded concrete hosts", async () => {
+    const { GET } = await import("@/app/api/scan-hosts/route");
+    const { POST: add } = await import("@/app/api/programs/[id]/hosts/route");
+    const { loadTargetExecution } = await import("@/server/execution");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Scan Lab", requiredUserAgent: "ScanLab/1", outOfScope: ["admin.scan.example"] } });
+    const context = { params: Promise.resolve({ id: p.id }) };
+    const host = async (fqdn: string) => (await add(req("http://localhost", { host: fqdn }), context)).json();
+    const active = await host("api.scan.example");
+    const excluded = await host("admin.scan.example");
+    const removed = await host("old.scan.example");
+    const wildcard = await host("*.scan.example");
+    await prisma.target.update({ where: { id: removed.id }, data: { active: false } });
+    const programs = await (await GET()).json();
+    expect(programs.find((v: { id: string }) => v.id === p.id).hosts.map((v: { id: string }) => v.id)).toEqual([active.id]);
+    for (const h of [excluded, removed, wildcard]) {
+      expect((await scanRunsPost(req("http://localhost", { targetId: h.id, type: "RECON" }))).status).toBe(400);
+      await expect(loadTargetExecution(h.id)).rejects.toThrow();
+    }
+    expect((await scanRunsPost(req("http://localhost", { targetId: active.id, type: "HUNT", requiredUserAgent: "untrusted" }))).status).toBe(201);
+    expect((await loadTargetExecution(active.id)).requiredUserAgent).toBe("ScanLab/1");
+    await prisma.bountyProgram.update({ where: { id: p.id }, data: { requiredUserAgent: "ScanLab/2" } });
+    expect((await loadTargetExecution(active.id)).requiredUserAgent).toBe("ScanLab/2");
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await scanRunsPost(req("http://localhost", { targetId: active.id, type: "HUNT" }))).status).toBe(404);
+    expect(await prisma.target.count({ where: { programId: p.id, host: "discovered.other.example" } })).toBe(0);
+    await prisma.bountyProgram.update({ where: { id: p.id }, data: { outOfScope: ["*.scan.example"] } });
+    await expect(loadTargetExecution(active.id)).rejects.toThrow(/out of scope/);
+  });
+
+  it("reuses legacy identities only after explicit assignment and preserves their original authorization relation", async () => {
+    const { POST } = await import("@/app/api/programs/[id]/hosts/route");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Legacy Lab", requiredUserAgent: "Legacy/1" } });
+    const scope = await prisma.scope.create({ data: { userId, hostPattern: "*.legacy.example", status: "APPROVED" } });
+    const old = await prisma.target.create({ data: { userId, scopeId: scope.id, host: "old.legacy.example" } });
+    const run = await prisma.scanRun.create({ data: { targetId: old.id, type: "RECON" } });
+    const res = await POST(req("http://localhost", { host: old.host, legacyTargetId: old.id }), { params: Promise.resolve({ id: p.id }) });
+    expect(res.status).toBe(201);
+    const host = await res.json();
+    expect(host.id).toBe(old.id);
+    expect(host.scopeId).toBe(scope.id);
+    expect((await prisma.scanRun.findUniqueOrThrow({ where: { id: run.id } })).targetId).toBe(old.id);
+  });
+  it("rejects cross-user host edits/removals and unauthenticated program reads", async () => {
+    const { POST } = await import("@/app/api/programs/[id]/hosts/route");
+    const { PATCH, DELETE } = await import("@/app/api/programs/[id]/hosts/[hostId]/route");
+    const { GET } = await import("@/app/api/programs/route");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Owned Lab", requiredUserAgent: "Owned/1" } });
+    const h = await (await POST(req("http://localhost", { host: "owned.example.test" }), { params: Promise.resolve({ id: p.id }) })).json();
+    const params = { params: Promise.resolve({ id: p.id, hostId: h.id }) };
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await PATCH(req("http://localhost", { host: "stolen.example.test" }, "PATCH"), params)).status).toBe(404);
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await DELETE(req("http://localhost", {}, "DELETE"), params)).status).toBe(404);
+    authMock.auth.mockResolvedValueOnce(null);
+    expect((await GET()).status).toBe(401);
+    expect((await prisma.target.findUniqueOrThrow({ where: { id: h.id } })).active).toBe(true);
+  });
+  it("serializes concurrent duplicate additions and never rewrites historical scan User-Agents", async () => {
+    const { POST } = await import("@/app/api/programs/[id]/hosts/route");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Race Lab", requiredUserAgent: "Race/1" } });
+    const add = () => POST(req("http://localhost", { host: "race.example.test" }), { params: Promise.resolve({ id: p.id }) });
+    const responses = await Promise.all([add(), add()]);
+    expect(responses.map(r => r.status).sort()).toEqual([201, 409]);
+    const target = await prisma.target.findFirstOrThrow({ where: { programId: p.id } });
+    const run = await prisma.scanRun.create({ data: { targetId: target.id, type: "RECON", status: "COMPLETED", requiredUserAgent: "Race/1" } });
+    await prisma.bountyProgram.update({ where: { id: p.id }, data: { requiredUserAgent: "Race/2" } });
+    const { loadTargetExecution } = await import("@/server/execution");
+    expect((await loadTargetExecution(target.id)).requiredUserAgent).toBe("Race/2");
+    expect((await prisma.scanRun.findUniqueOrThrow({ where: { id: run.id } })).requiredUserAgent).toBe("Race/1");
+  });
+
 });

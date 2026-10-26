@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/target-scope-workflow]
   pull_request:
 
 jobs:
@@ -65,6 +65,9 @@ jobs:
       - name: Generate Next route types
         run: npx next typegen
 
+      - name: Lint
+        run: npm run lint
+
       - name: Typecheck
         run: npx tsc --noEmit
 
@@ -73,3 +76,10 @@ jobs:
 
       - name: Test (unit + integration)
         run: npm test
+
+      - name: Validate upgrade preserves historical data
+        env:
+          TEST_MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bughunter_upgrade
+        run: |
+          docker exec ${{ job.services.postgres.id }} createdb -U postgres bughunter_upgrade
+          npm run test:migration

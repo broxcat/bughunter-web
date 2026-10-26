@@ -1,3 +1,4 @@
+import { scanRejection } from "@/server/execution";
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -18,6 +19,7 @@ export async function GET(
     where: { id, userId: session.user.id },
     include: {
       scope: true,
+      program: true,
       scanRuns: { orderBy: { createdAt: "desc" } },
       findings: { orderBy: { createdAt: "desc" } },
     },
@@ -27,5 +29,5 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json(target);
+  return NextResponse.json({ ...target, scanRejection: scanRejection(target) });
 }

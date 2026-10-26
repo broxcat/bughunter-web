@@ -1,3 +1,4 @@
+import { scanRejection } from "@/server/execution";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
@@ -80,17 +81,13 @@ export async function POST(req: NextRequest) {
   try {
     const target = await prisma.target.findFirst({
       where: { id: parsed.data.targetId, userId: session.user.id },
-      include: { scope: true },
+      include: { scope: true, program: true },
     });
     if (!target) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    if (target.scope.status !== "APPROVED") {
-      return NextResponse.json(
-        { error: "Target's scope is not APPROVED; refusing to scan" },
-        { status: 400 },
-      );
-    }
+    const rejection = scanRejection(target);
+    if (rejection) return NextResponse.json({ error: rejection }, { status: 400 });
 
     const run = await prisma.scanRun.create({
       data: {

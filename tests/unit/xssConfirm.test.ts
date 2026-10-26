@@ -35,6 +35,8 @@ vi.mock("playwright-chromium", () => {
     };
   };
   const context = {
+    async route() {},
+    async routeWebSocket() {},
     async newPage() {
       return makePage();
     },
@@ -59,7 +61,9 @@ vi.mock("playwright-chromium", () => {
 });
 
 // Imported AFTER the mock is declared (vi.mock is hoisted above this anyway).
-import { confirmXssSink } from "@/server/scanners/xssConfirm";
+import { confirmXssSink as confirm } from "@/server/scanners/xssConfirm";
+import { withTargetExecution } from "@/server/execution";
+const confirmXssSink = (...args: Parameters<typeof confirm>) => withTargetExecution({ targetId: "fixture", host: "victim.example", requiredUserAgent: "Test/1", qualifying: [], nonQualifying: [] }, () => confirm(...args));
 
 afterEach(() => {
   vi.useRealTimers();

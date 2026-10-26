@@ -1,3 +1,4 @@
+import { enforcedToolArgs, safeCommandSummary } from "./toolPolicy";
 // runCommand — the single, security-critical primitive every scanner uses to
 // spawn an external tool.
 //
@@ -55,12 +56,21 @@ export function runCommand(
   opts: RunCommandOptions,
 ): Promise<RunCommandResult> {
   const { scanRunId, timeoutMs } = opts;
+  args = enforcedToolArgs(cmd, args);
+  const secrets = args.flatMap((arg, i) => {
+    if (!["-H", "-header", "-headers", "--header"].includes(args[i - 1]) || /^user-agent\s*:/i.test(arg)) return [];
+    const value = arg.slice(arg.indexOf(":") + 1).trim();
+    return [value, ...(/^authorization:/i.test(arg) ? [value.replace(/^Bearer\s+/i, "")] : []),
+      ...(/^cookie:/i.test(arg) ? value.split(";").map(pair => pair.slice(pair.indexOf("=") + 1).trim()) : [])].filter(Boolean);
+  });
+  const redact = (line: string) => secrets.reduce((text, secret) => text.replaceAll(secret, "[REDACTED]"), line);
 
   return new Promise<RunCommandResult>((resolve) => {
-    void record(scanRunId, `$ ${cmd} ${args.join(" ")}`, "STDOUT");
+    void record(scanRunId, safeCommandSummary(cmd, args), "STDOUT");
 
     // shell: false is the whole point — argv array, no shell interpretation.
     const child = spawn(cmd, args, { shell: false });
+    child.stdin.end(); // argv-only tools must receive EOF, not wait on an open pipe.
 
     let settled = false;
     let timedOut = false;
@@ -77,14 +87,14 @@ export function runCommand(
       while ((idx = buffers[stream].indexOf("\n")) !== -1) {
         const line = buffers[stream].slice(0, idx).replace(/\r$/, "");
         buffers[stream] = buffers[stream].slice(idx + 1);
-        void record(scanRunId, line, stream);
+        void record(scanRunId, redact(line), stream);
       }
     };
 
     const flush = () => {
       (["STDOUT", "STDERR"] as const).forEach((stream) => {
         if (buffers[stream].length > 0) {
-          void record(scanRunId, buffers[stream].replace(/\r$/, ""), stream);
+          void record(scanRunId, redact(buffers[stream].replace(/\r$/, "")), stream);
           buffers[stream] = "";
         }
       });
