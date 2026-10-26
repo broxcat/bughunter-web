@@ -1,4 +1,5 @@
 import { newTargetBrowserContext } from "@/server/execution";
+import { payloadVariant } from "@/lib/hunt/payloads";
 // Headless DOM-XSS confirmation (web2-vuln-classes SKILL §3, confirmation stage).
 //
 // EPISTEMIC HONESTY is the whole point. The static pass in xss.ts records every
@@ -49,6 +50,8 @@ export interface XssSinkInfo {
   location?: string;
   /** Optional caller-supplied canary id; one is generated when absent. */
   canaryId?: string;
+  parameter?: string;
+  context?: "HTML" | "ATTRIBUTE" | "JAVASCRIPT" | "UNKNOWN";
 }
 
 export interface XssConfirmResult {
@@ -62,6 +65,7 @@ interface Candidate {
   url: string;
   /** Human description of the source we drove (for the evidence string). */
   via: string;
+  controlUrl: string;
 }
 
 /**
@@ -69,60 +73,17 @@ interface Candidate {
  * sources DOM sinks most commonly read from. We cannot know the real wiring, so
  * this is a prioritized best-effort list; the deadline decides how many we reach.
  */
-function buildCandidates(url: string, canaryId: string): Candidate[] {
-  const candidates: Candidate[] = [];
-
-  // alert(canaryId) is the execution proof. The canary is single-quoted so it
-  // survives inside the payloads below without extra escaping.
-  const imgPayload = `<img src=x onerror=alert('${canaryId}')>`;
-  const svgPayload = `<svg onload=alert('${canaryId}')>`;
-  const breakoutPayload = `"><img src=x onerror=alert('${canaryId}')>`;
-
-  // location.hash variants. The fragment is appended RAW (not via URL encoding):
-  // DOM sinks read location.hash and browsers hand most of these bytes back
-  // verbatim, so a raw fragment is what actually reaches an innerHTML/doc.write
-  // style sink. We strip any existing fragment first.
-  let base: string;
-  try {
-    const u = new URL(url);
-    u.hash = "";
-    base = u.toString();
-  } catch {
-    base = url;
-  }
-  candidates.push({
-    url: `${base}#${imgPayload}`,
-    via: "location.hash (img/onerror)",
-  });
-  candidates.push({
-    url: `${base}#${svgPayload}`,
-    via: "location.hash (svg/onload)",
-  });
-
-  // Query-parameter variant — reuse an existing param if the URL has one,
-  // otherwise fall back to a common search param name. Here URL encoding is fine:
-  // a server/JS reading the param decodes it before it reaches the sink.
-  try {
-    const u = new URL(url);
-    const existing = [...u.searchParams.keys()];
-    const key = existing[0] ?? "q";
-    u.searchParams.set(key, imgPayload);
-    candidates.push({
-      url: u.toString(),
-      via: `query param "${key}" (img/onerror)`,
-    });
-  } catch {
-    /* unparseable URL — hash candidates still cover the common case */
-  }
-
-  // Attribute-breakout via hash, last: useful when the sink drops the fragment
-  // inside an existing attribute context.
-  candidates.push({
-    url: `${base}#${breakoutPayload}`,
-    via: "location.hash (attribute breakout)",
-  });
-
-  return candidates;
+function buildCandidates(url: string, canaryId: string, info: XssSinkInfo): Candidate[] {
+  const base = new URL(url); base.hash = "";
+  const key = info.parameter ?? [...base.searchParams.keys()][0] ?? "q";
+  const preferred = info.context === "JAVASCRIPT" ? "xss.javascript" : info.context === "ATTRIBUTE" ? "xss.attribute" : "xss.html";
+  const query = (id: string): Candidate => {
+    const u = new URL(base), control = new URL(base);
+    u.searchParams.set(key, payloadVariant(id).build("", canaryId));
+    control.searchParams.set(key, canaryId);
+    return { url: u.toString(), controlUrl: control.toString(), via: `query ${key} (${id})` };
+  };
+  return [query(preferred), { url: `${base}#${payloadVariant("xss.html").build("", canaryId)}`, controlUrl: `${base}#${canaryId}`, via: "location.hash (HTML)" }, query(preferred === "xss.attribute" ? "xss.javascript" : "xss.attribute")];
 }
 
 /**
@@ -142,12 +103,12 @@ async function tryCandidate(
   try {
     page = await context.newPage();
 
-    // A dialog whose message contains our canary is unforgeable proof that the
-    // injected JavaScript ran. We always dismiss it so the page never blocks.
+    // Require the exact canary. The separate inert input control rejects normal
+    // application dialog echoes. Always dismiss so the page never blocks.
     page.on("dialog", (dialog: Dialog) => {
       const message = dialog.message();
       void dialog.dismiss().catch(() => {});
-      if (firedMessage === null && message.includes(canaryId)) {
+      if (firedMessage === null && message === canaryId) {
         firedMessage = message;
       }
     });
@@ -243,14 +204,16 @@ export async function confirmXssSink(
 
   const canaryId =
     sinkInfo.canaryId?.trim() || `xssc${Math.random().toString(36).slice(2, 10)}`;
-  const candidates = buildCandidates(url, canaryId);
+  if (!/^[A-Za-z0-9_-]{1,96}$/.test(canaryId)) return { confirmed: false, reason: "invalid execution canary" };
+  const candidates = buildCandidates(url, canaryId, sinkInfo);
 
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;
 
+  let overallTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     // A fresh context per call — no cookies/state shared between targets.
-    browser = await chromium.launch({ headless: true, args: [...LAUNCH_ARGS] });
+    browser = await chromium.launch({ headless: true, args: [...LAUNCH_ARGS], timeout: Math.max(1, Math.min(5000, deadline - Date.now())) });
     context = await newTargetBrowserContext(browser);
 
     const confirm = runCandidates(context, candidates, canaryId, sinkInfo, url, deadline);
@@ -259,7 +222,7 @@ export async function confirmXssSink(
     // its own timeout, the whole call returns by ~12s. The finally below still
     // tears the browser down, so no Chromium process leaks.
     const overall = new Promise<XssConfirmResult>((resolve) => {
-      setTimeout(
+      overallTimer = setTimeout(
         () =>
           resolve({
             confirmed: false,
@@ -276,6 +239,7 @@ export async function confirmXssSink(
       reason: `browser launch/run failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   } finally {
+    clearTimeout(overallTimer);
     if (context) await context.close().catch(() => {});
     if (browser) await browser.close().catch(() => {});
   }
@@ -297,14 +261,18 @@ async function runCandidates(
       reasons.push("budget exhausted before all sources tried");
       break;
     }
-    const result = await tryCandidate(context, candidate, canaryId, remaining);
+    const control = await tryCandidate(context, { ...candidate, url: candidate.controlUrl, via: "inert canary control" }, canaryId, remaining);
+    if (control.fired) return { confirmed: false, reason: "inert canary control also triggered a dialog; application dialog echo is not injected execution" };
+    if (control.reason !== "no dialog/canary observed") { reasons.push("inert control unavailable"); continue; }
+    if (deadline - Date.now() < MIN_CANDIDATE_BUDGET_MS) break;
+    const result = await tryCandidate(context, candidate, canaryId, deadline - Date.now());
     if (result.fired) {
       const where = sinkInfo.location ? ` (sink seen at ${sinkInfo.location})` : "";
       return {
         confirmed: true,
         evidence:
           `alert() fired with canary "${canaryId}" via ${candidate.via} on ${originalUrl} ` +
-          `— confirms DOM-XSS sink "${sinkInfo.sink}"${where}. ` +
+          `— confirms XSS sink "${sinkInfo.sink}"${where} after an inert canary control. ` +
           `Dialog message: ${result.message}`,
       };
     }

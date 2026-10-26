@@ -1,3 +1,5 @@
+import { objectReference } from "./fingerprints";
+import { isLikelyUserParam } from "@/server/scanners/paramFilter";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { isSafeReadUrl, safeObservationUrl } from "@/lib/hunt/safety";
@@ -5,7 +7,6 @@ import type { HuntSurface } from "@/lib/hunt/catalog";
 import { discoverCorpus, type DiscoveryCorpus } from "@/server/scanners/discovery";
 import type { ScanContext } from "@/server/scanners/context";
 
-const objectRe = /\/\d+(?:\/|$)|[0-9a-f]{8}-[0-9a-f-]{27,}|[?&](?:id|user_id|owner_id|document_id|account_id)=/i;
 const urlKey = /^(url|uri|src|source|dest|destination|avatar|image|import|callback|webhook|feed|fetch|proxy|remote|redirect)$/i;
 const fileKey = /^(file|filename|path|filepath|template|include|document|download|resource)$/i;
 const secretKey = /token|secret|password|session|cookie|authorization|api.?key|code$/i;
@@ -22,7 +23,7 @@ export function analyzeCorpus(raw: DiscoveryCorpus, baseUrl: string): HuntCorpus
   const base = new URL(baseUrl);
   const observedUrls = [...new Set([baseUrl, ...raw.urls])].filter(u => { try { const v = new URL(u); return /^https?:$/.test(v.protocol) && v.host === base.host && !v.username && !v.password; } catch { return false; } });
   const urls = observedUrls.filter(u => { try { return new URL(u).host === base.host && isSafeReadUrl(u) && ![...new URL(u).searchParams.keys()].some(k => secretKey.test(k)); } catch { return false; } }).slice(0, 100);
-  const queryInputs = urls.flatMap(url => [...new URL(url).searchParams].filter(([k, v]) => !secretKey.test(k) && v.length <= 256 && !/eyJ[A-Za-z0-9_-]+\./.test(v)).map(([key, value]) => ({ url, key, value }))).slice(0, 40);
+  const queryInputs = urls.flatMap(url => [...new URL(url).searchParams].filter(([k, v]) => isLikelyUserParam(url, k) && !secretKey.test(k) && v.length <= 256 && !/eyJ[A-Za-z0-9_-]+\./.test(v)).map(([key, value]) => ({ url, key, value }))).slice(0, 40);
   const forms: FormObservation[] = [];
   for (const match of raw.html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/gi)) {
     try {
@@ -45,11 +46,11 @@ export function analyzeCorpus(raw: DiscoveryCorpus, baseUrl: string): HuntCorpus
   const jsUrls = urls.filter(u => /\.m?js(?:\?|$)/i.test(u));
   const xmlUrls = (raw.pages ?? []).filter(p => /(?:application|text)\/(?:[\w.+-]*\+)?xml|soap/i.test(p.headers["content-type"] ?? "") || /^\s*<\?xml\b/.test(p.body)).map(p => p.url);
   const oauthUrls = observedUrls.filter(u => { const url = new URL(u); return /oauth|authorize|openid/i.test(url.pathname) && ["client_id", "response_type", "redirect_uri"].some(k => url.searchParams.has(k)); });
-  const objectUrls = urls.filter(u => objectRe.test(u));
+  const objectUrls = urls.filter(objectReference);
   const apiUrls = urls.filter(u => /\/(api|v\d+|graphql|account|profile|user|documents?)\b/i.test(new URL(u).pathname));
   const jwtPresent = /\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/.test(raw.html);
   const hints = (raw.pages ?? []).map(p => [p.headers.server, p.headers["x-powered-by"]].join(" ")).join(" ");
-  const technologies = [...new Set((hints.match(/\b(?:next\.js|express|django|php|nginx|apache|asp\.net|tomcat|jetty)\b/gi) ?? []).map(v => v.toLowerCase()))];
+  const technologies = [...new Set((hints.match(/\b(?:next\.js|express|node|rails|ruby|django|jinja|twig|php|nginx|apache|iis|asp\.net|tomcat|jetty|spring|java)\b/gi) ?? []).map(v => v.toLowerCase()))];
   const authUrls = urls.filter(u => /\/(?:auth|login|signin|oauth|openid)(?:\/|$)/i.test(new URL(u).pathname));
   const surface: HuntSurface = { queryInputs: queryInputs.length > 0, objectReferences: objectUrls.length > 0, forms: forms.length > 0, javascript: jsUrls.length > 0 || /<script|innerHTML|postMessage|document\.write/i.test(raw.html), cookies: cookies.length > 0, jwt: jwtPresent, oauth: oauthUrls.length > 0, xml: xmlUrls.length > 0, urlInputs: queryInputs.some(p => urlKey.test(p.key)) || forms.some(f => f.fields.some(k => urlKey.test(k))), fileInputs: queryInputs.some(p => fileKey.test(p.key)) || forms.some(f => f.fields.some(k => fileKey.test(k))), businessFlows: forms.some(f => f.method !== "GET" || f.fields.some(k => /price|quantity|plan|role|amount|total/i.test(k))) || /checkout|coupon|workflow|step[\/-]?\d|redeem/i.test(raw.html), apiEndpoints: apiUrls.length > 0 };
   const parameterPages = (raw.pages ?? []).filter(p => { try { const u = new URL(p.url); return u.host === new URL(baseUrl).host && u.searchParams.size > 0; } catch { return false; } });

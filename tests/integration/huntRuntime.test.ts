@@ -37,7 +37,7 @@ beforeAll(async () => {
       res.end('{"id":123,"ownerId":"account-b","document":"private test fixture"}'); return;
     }
     if (u.pathname === "/search") {
-      const q = u.searchParams.get("q") ?? "1";
+      const q = (u.searchParams.get("q") ?? "1").replaceAll("/**/", " ");
       if (fixture.mode === "sql") {
         res.setHeader("Content-Type", "application/json");
         if (q.endsWith("'")) res.end('{"error":"SQL syntax error at or near quote"}');
@@ -128,5 +128,6 @@ describe("bounded local Hunt runtime", () => {
     expect(fixture.findings).toHaveLength(1);
     expect(JSON.stringify([report, fixture.findings, fixture.logs])).not.toContain(token);
     expect(report.techniques.find(t => t.techniqueId === "jwt.secret-recovery")?.state).toBe("SKIPPED");
+    expect(report.techniques.find(t => t.techniqueId === "jwt.algorithm-differential")?.reason).toBe("FAMILY_ALREADY_CONFIRMED");
   });
 });

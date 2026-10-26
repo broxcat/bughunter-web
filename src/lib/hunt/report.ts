@@ -1,6 +1,6 @@
 import type { HuntFamilySelection } from "./policy";
 import type { ReadinessState } from "./readiness";
-export type EvidenceLevel = "SIGNAL" | "CANDIDATE" | "VALIDATED" | "CONFIRMED";
+export type EvidenceLevel = "SIGNAL" | "CANDIDATE" | "VALIDATED" | "CONFIRMED" | "FALSE_POSITIVE" | "INCONCLUSIVE";
 export type TechniqueState = "WAITING" | "RUNNING" | "VALIDATING" | "COMPLETED" | "BLOCKED" | "SKIPPED" | "LIMIT_REACHED" | "ERROR";
 export interface HuntObservation {
   title: string; summary: string; location?: string;

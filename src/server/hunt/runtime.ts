@@ -30,7 +30,7 @@ interface Session extends TechniqueContext {
   persist(): Promise<void>;
 }
 const storage = new AsyncLocalStorage<Session>();
-const limitCodes = new Set(["HUNT_TIMEOUT", "TOTAL_REQUEST_LIMIT", "FAMILY_REQUEST_LIMIT", "TECHNIQUE_REQUEST_LIMIT", "DISCOVERY_REQUEST_LIMIT", "CONCURRENCY_LIMIT", "STATE_CHANGING_REQUEST_UNSUPPORTED", "SCOPE_REVOKED"]);
+const limitCodes = new Set(["HUNT_TIMEOUT", "TOTAL_REQUEST_LIMIT", "FAMILY_REQUEST_LIMIT", "TECHNIQUE_REQUEST_LIMIT", "PARAMETER_PROBE_LIMIT", "DISCOVERY_REQUEST_LIMIT", "CONCURRENCY_LIMIT", "STATE_CHANGING_REQUEST_UNSUPPORTED", "SCOPE_REVOKED"]);
 export async function withHuntSession(ctx: ScanContext, snapshot: HuntPolicySnapshot, work: (readiness: { families: HuntReadiness }) => Promise<void>) {
   const budget = new HuntBudget(async () => {
     const execution = await loadTargetExecution(ctx.targetId);
@@ -56,6 +56,7 @@ export async function withHuntSession(ctx: ScanContext, snapshot: HuntPolicySnap
       const session: Session = { ctx, corpus, credentials, approvedTechniques: snapshot.approvedTechniques, cache: new Map(), budget, report, readiness: readiness.families, plan, persist, remainingMs: budget.remainingMs, request: async (url, opts = {}) => {
         const r = await probe(url, { ...opts, timeoutMs: HUNT_LIMITS.requestTimeoutMs, maxBodyBytes: HUNT_LIMITS.maxBodyBytes });
         if (r.error && limitCodes.has(r.error)) throw new HuntLimitError(r.error);
+        if (r.error) session.cache.set(`transport-failure:${budget.technique?.id}`, true);
         return r;
       } };
       await persist();
@@ -86,11 +87,13 @@ export async function runFamilyTechniques(ctx: ScanContext, family: HuntFamily):
   for (const decision of decisions) {
     const technique = decision.technique;
     const progress = session.report.techniques.find(v => v.techniqueId === technique.id)!;
+    if (session.report.candidates.filter(c => c.family === family && c.evidenceLevel === "CONFIRMED").length >= HUNT_LIMITS.maxConfirmationsPerFamily) { progress.state = "SKIPPED"; progress.reason = "FAMILY_ALREADY_CONFIRMED"; continue; }
     session.budget.beginTechnique(technique.id, technique.maxRequests);
     progress.state = "RUNNING"; await session.persist();
     try {
       await logLine(ctx.scanRunId, `[hunt] ${f.displayName} / ${technique.title}: RUNNING`);
       const observations = await executeHuntTechnique(technique, session);
+      if (!observations.length && session.cache.has(`transport-failure:${technique.id}`)) observations.push({ title: "Technique transport incomplete", summary: "A required HTTP control failed; no vulnerability conclusion can be drawn.", evidenceLevel: "INCONCLUSIVE", controls: [] });
       if (observations.length) { f.state = "VALIDATING"; progress.state = "VALIDATING"; await session.persist(); }
       for (const raw of observations.slice(0, 5)) {
         if (session.report.candidates.length >= HUNT_LIMITS.maxCandidates) break;

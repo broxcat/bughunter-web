@@ -3,6 +3,7 @@ import type { HuntObservation } from "@/lib/hunt/report";
 import type { TechniqueContext } from "./runtime";
 import { assessPairedTiming, bodyHash } from "./evidence";
 import { credentialHeaders } from "@/server/credentials";
+import { payloadVariant } from "@/lib/hunt/payloads";
 
 /** No arbitrary statements/commands: two constants, 1s screening and 2s repeat. */
 export async function executeBoundedTiming(t: HuntTechniqueDescriptor, c: TechniqueContext): Promise<HuntObservation[]> {
@@ -16,7 +17,7 @@ export async function executeBoundedTiming(t: HuntTechniqueDescriptor, c: Techni
   const delay = confirmation ? 2 : 1;
   const baselines: number[] = [], probes: number[] = [];
   const headers = c.credentials[0] ? credentialHeaders(c.credentials[0]) : {};
-  const payload = (seconds: number) => command ? `${input.value};sleep ${seconds}` : `${input.value} AND (SELECT 1 FROM pg_sleep(${seconds}))=1`;
+  const payload = (seconds: number) => payloadVariant(command ? "cmd.delay" : "sql.delay").build(input.value, String(seconds));
   const url = (seconds: number) => { const u = new URL(input.url); u.searchParams.set(input.key, payload(seconds)); return u.toString(); };
   for (let i = 0; i < 3; i++) {
     const baseline = await c.request(url(0), { headers });

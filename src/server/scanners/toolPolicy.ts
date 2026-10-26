@@ -15,9 +15,11 @@ export function enforcedToolArgs(cmd: string, args: string[]): string[] {
   const clean: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
+    if (["-H", "-header", "-headers", "--header"].includes(flag) && /[\r\n]/.test(args[i + 1] ?? "")) throw new Error("Multiline tool headers are forbidden");
+    if (/^(?:-H|-headers?|--header)=/i.test(flag) && /[\r\n]/.test(flag)) throw new Error("Multiline tool headers are forbidden");
     if (["-H", "-header", "-headers", "--header"].includes(flag) && /^user-agent\s*:/i.test(args[i + 1] ?? "")) { i++; continue; }
     if (["--user-agent", "-user-agent"].includes(flag)) { i++; continue; }
-    if (/^(?:--user-agent=|-H=User-Agent:|-header=User-Agent:)/i.test(flag)) continue;
+    if (/^(?:--?user-agent=|(?:-H|-headers?|--header)=\s*user-agent\s*:)/i.test(flag)) continue;
     clean.push(flag);
   }
   if (cmd === "dalfox") return [...clean, "--user-agent", ctx.requiredUserAgent, "--skip-headless", "--skip-bav", "--config", DALFOX_CONFIG];

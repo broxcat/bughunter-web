@@ -1,4 +1,5 @@
 export interface HuntReference { id: string; referenceTitle: string; referenceSource: string; referenceUrl: string; referenceType: string; lastReviewedAt: string }
+import { PATT_COMMIT } from "./payloads";
 export const HUNT_REFERENCES: Record<string, HuntReference[]> = {
   "auth-bypass": [
     {
@@ -663,3 +664,18 @@ export const HUNT_REFERENCES: Record<string, HuntReference[]> = {
     }
   ]
 };
+
+const pattSections: Record<string, string[]> = {
+  "auth-bypass": ["Insecure Direct Object References"], idor: ["Insecure Direct Object References"], bola: ["Insecure Direct Object References"],
+  sqli: ["SQL Injection"], xss: ["XSS Injection"], ssrf: ["Server Side Request Forgery"], cors: ["CORS Misconfiguration"], csrf: ["Cross-Site Request Forgery"],
+  xxe: ["XXE Injection"], lfi: ["File Inclusion", "Directory Traversal"], deserialization: ["Insecure Deserialization"],
+  "command-injection": ["Command Injection"], ssti: ["Server Side Template Injection"], jwt: ["JSON Web Token"], oauth: ["OAuth Misconfiguration"],
+  "business-logic-race": ["Business Logic Errors", "Race Condition"], "business-logic-tamper": ["Business Logic Errors"], "business-logic-workflow": ["Business Logic Errors"],
+};
+for (const [family, sections] of Object.entries(pattSections)) {
+  for (const [index, section] of sections.entries()) HUNT_REFERENCES[family].push({
+    id: `patt-${family}-${index}-${PATT_COMMIT.slice(0, 8)}`, referenceTitle: section,
+    referenceSource: "PAYLOADS_ALL_THE_THINGS", referenceType: "COMMUNITY_METHODOLOGY",
+    referenceUrl: `https://github.com/swisskyrepo/PayloadsAllTheThings/blob/${PATT_COMMIT}/${encodeURIComponent(section)}/README.md`, lastReviewedAt: "2026-10-26",
+  });
+}

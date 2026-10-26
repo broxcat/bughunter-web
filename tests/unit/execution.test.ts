@@ -38,12 +38,14 @@ describe("enforced Target HTTP context", () => {
   it("overrides CLI User-Agent proposals without shell interpolation or logging secrets", () => {
     withTargetExecution(context(), () => {
       for (const tool of ["httpx", "katana", "nuclei", "dalfox"]) {
-        const args = enforcedToolArgs(tool, ["-H", "user-agent: wrong", "--user-agent", "wrong", "-H", "Cookie: secret"]);
+        const args = enforcedToolArgs(tool, ["-H", "user-agent: wrong", "--user-agent", "wrong", "-headers=User-Agent: wrong", "--header=USER-AGENT: wrong", "-user-agent=wrong", "-H", "Cookie: secret"]);
         expect(args.join(" ")).not.toContain("wrong"); expect(args.join(" ")).toContain(context().requiredUserAgent);
         expect(safeCommandSummary(tool, args)).not.toContain("secret");
       }
       expect(enforcedToolArgs("nmap", ["-sV", "-A", "foreign.example"])).toEqual(["-sT", "-Pn", "-n", "127.0.0.1"]);
       expect(() => enforcedToolArgs("curl", [base])).toThrow(/Unaudited/);
+      expect(() => enforcedToolArgs("ffuf", ["-u", base])).toThrow(/Unaudited/);
+      expect(() => enforcedToolArgs("httpx", ["-H", "Cookie: fixture\r\nUser-Agent: wrong"])).toThrow(/Multiline/);
       expect(() => enforcedToolArgs("httpx", ["-u", "http://foreign.example"])).toThrow(/Scope/);
     });
   });

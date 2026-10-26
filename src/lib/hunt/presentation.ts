@@ -1,5 +1,5 @@
 import type { EvidenceLevel, HuntReport } from "./report";
-export const EVIDENCE_LABELS: Record<EvidenceLevel, string> = { SIGNAL: "Signal", CANDIDATE: "Candidate", VALIDATED: "Validated", CONFIRMED: "Confirmed" };
+export const EVIDENCE_LABELS: Record<EvidenceLevel, string> = { SIGNAL: "Signal", CANDIDATE: "Candidate", VALIDATED: "Validated", CONFIRMED: "Confirmed", FALSE_POSITIVE: "False positive", INCONCLUSIVE: "Inconclusive" };
 /** Legacy PROVEN alone did not guarantee independent confirmation. */
 export function findingEvidenceLevel(f: { huntMetadata?: unknown; severity?: string; gateStatus?: string }): EvidenceLevel {
   const metadata = f.huntMetadata as { evidenceLevel?: string } | null;

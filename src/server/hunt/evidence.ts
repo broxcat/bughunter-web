@@ -15,10 +15,24 @@ export function usefulResponse(r: ProbeResult): boolean {
   return !r.error && r.status === 200 && r.bodyLen >= 24 && r.bodyLen < 65536 && !/(?:<input[^>]*type=["']password|<title>[^<]*(?:login|not found|error)|"(?:error|errors)"\s*:|unauthorized|access denied|permission denied)/i.test(r.body);
 }
 export function sameResponse(a: ProbeResult, b: ProbeResult): boolean {
-  return usefulResponse(a) && usefulResponse(b) && a.headers["content-type"]?.split(";")[0] === b.headers["content-type"]?.split(";")[0] && bodyHash(a.body) === bodyHash(b.body);
+  return usefulResponse(a) && usefulResponse(b) && responseType(a) === responseType(b) && bodyHash(a.body) === bodyHash(b.body);
+}
+export const responseType = (r: ProbeResult) => (r.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+/** A failed/redirected request or a status/type flip cannot validate a predicate. */
+export function comparableResponse(a: ProbeResult, b: ProbeResult): boolean {
+  return !a.error && !b.error && a.status === 200 && b.status === 200 && Boolean(responseType(a)) && responseType(a) === responseType(b) && a.bodyLen < 65536 && b.bodyLen < 65536;
+}
+/** Anonymous network failures, redirects and WAF errors are not access denial. */
+export function deniedObjectControl(owner: ProbeResult, anonymous: ProbeResult): boolean {
+  return !anonymous.error && [200, 401, 403].includes(anonymous.status) && !sameResponse(owner, anonymous) &&
+    (anonymous.status !== 200 || usefulResponse(anonymous));
 }
 export function hasObjectMarker(r: ProbeResult): boolean {
-  return /application\/json|\+json/i.test(r.headers["content-type"] ?? "") && /"(?:id|ownerId|owner_id|userId|user_id|documentId|document_id)"\s*:\s*(?:"[^"\s]+"|\d+)/.test(r.body);
+  if (!/application\/json|\+json/i.test(responseType(r))) return false;
+  try {
+    const object = JSON.parse(r.body);
+    return Boolean(object && typeof object === "object" && !Array.isArray(object) && Object.entries(object).some(([k, v]) => /^(id|ownerId|owner_id|userId|user_id|documentId|document_id)$/.test(k) && ((typeof v === "string" && v.trim().length > 0) || typeof v === "number")));
+  } catch { return false; }
 }
 export function safeResponseEvidence(r: ProbeResult) {
   return { status: r.status, contentType: /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test((r.headers["content-type"] ?? "").split(";")[0]) ? (r.headers["content-type"] ?? "").split(";")[0] : "unknown", bytes: r.bodyLen, bodyHash: bodyHash(r.body), error: Boolean(r.error) };

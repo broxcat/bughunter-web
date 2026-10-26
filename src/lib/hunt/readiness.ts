@@ -28,7 +28,7 @@ const definitions: Record<HuntFamily, { prerequisites: PrerequisiteDefinition[];
   xxe: { prerequisites: [req("XML_ENDPOINT", "An observed XML-accepting endpoint is required."), rec("OOB_CALLBACK", "A configured operator-owned callback is needed for blind XXE.")], riskClass: "SAFE_ACTIVE", techniques: ["xxe.xml-inventory", "xxe.controlled-oob"] },
   ssti: { prerequisites: [session], riskClass: "SAFE_ACTIVE", techniques: ["ssti.arithmetic-differential", "ssti.literal-control"] },
   cors: { prerequisites: [session], riskClass: "SAFE_ACTIVE", techniques: ["cors.origin-matrix", "cors.sensitive-comparison"] },
-  jwt: { prerequisites: [req("JWT", "JWT_NOT_AVAILABLE: configure a real test JWT or discover one in the authorized corpus.")], riskClass: "SAFE_ACTIVE", techniques: ["jwt.claims-audit", "jwt.validation-differential"] },
+  jwt: { prerequisites: [req("JWT", "JWT_NOT_AVAILABLE: configure a real test JWT or discover one in the authorized corpus.")], riskClass: "SAFE_ACTIVE", techniques: ["jwt.claims-audit", "jwt.validation-differential", "jwt.algorithm-differential", "jwt.key-selection-review"] },
   oauth: { prerequisites: [req("OAUTH_FLOW", "An observed OAuth/OIDC authorization flow is required.")], riskClass: "SAFE_ACTIVE", techniques: ["oauth.flow-inventory", "oauth.flow-controls"] },
   lfi: { prerequisites: [session], riskClass: "SAFE_ACTIVE", techniques: ["lfi.path-input-discovery", "lfi.path-error-differential"] },
   deserialization: { prerequisites: [], riskClass: "PASSIVE", techniques: ["serialization.cookie-signature", "serialization.input-signature"] },

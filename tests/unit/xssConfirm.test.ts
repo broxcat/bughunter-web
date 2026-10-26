@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Mutable control knobs shared with the hoisted mock factory. `vi.hoisted`
 // makes them exist before `vi.mock` is lifted to the top of the module.
 const ctrl = vi.hoisted(() => ({
-  mode: "dialog" as "dialog" | "nodialog" | "launchthrow" | "navthrow",
+  mode: "dialog" as "dialog" | "nodialog" | "launchthrow" | "navthrow" | "echo",
   canary: "",
   navStatus: 200,
 }));
@@ -19,13 +19,13 @@ vi.mock("playwright-chromium", () => {
       on(event: string, cb: (d: unknown) => void) {
         if (event === "dialog") dialogHandler = cb;
       },
-      async goto() {
+      async goto(url: string) {
         if (ctrl.mode === "navthrow") {
           throw new Error("net::ERR_CONNECTION_REFUSED");
         }
-        if (ctrl.mode === "dialog" && dialogHandler) {
+        if ((ctrl.mode === "echo" || ctrl.mode === "dialog" && /alert|onload|onerror/.test(decodeURIComponent(url))) && dialogHandler) {
           dialogHandler({
-            message: () => `alert fired :: ${ctrl.canary}`,
+            message: () => ctrl.canary,
             dismiss: async () => {},
           });
         }
@@ -85,6 +85,11 @@ describe("confirmXssSink — dialog carrying the canary", () => {
     expect(result.evidence).toBeDefined();
     expect(result.evidence).toContain("testcanaryABC123");
     expect(result.reason).toBeUndefined();
+  });
+  it("rejects application dialogs that also fire for an inert input", async () => {
+    ctrl.mode = "echo"; ctrl.canary = "inertEchoCanary"; ctrl.navStatus = 200;
+    const result = await confirmXssSink("https://victim.example/page?q=original", { sink: "dialog echo", canaryId: ctrl.canary });
+    expect(result.confirmed).toBe(false); expect(result.reason).toContain("inert canary control");
   });
 });
 
@@ -156,5 +161,9 @@ describe("confirmXssSink — input validation (no browser needed)", () => {
     const result = await confirmXssSink("ftp://host/file", { sink: "x", canaryId: "c" });
     expect(result.confirmed).toBe(false);
     expect(result.reason).toContain("unsupported scheme");
+  });
+  it("rejects canary strings that could change the payload syntax", async () => {
+    const result = await confirmXssSink("https://victim.example/", { sink: "x", canaryId: "';bad()" });
+    expect(result.confirmed).toBe(false); expect(result.reason).toBe("invalid execution canary");
   });
 });
