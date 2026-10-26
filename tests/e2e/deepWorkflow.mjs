@@ -15,7 +15,7 @@ page.on("pageerror", () => events.push({ kind: "pageerror", path: new URL(page.u
 page.on("console", msg => { if (["warning", "error"].includes(msg.type())) events.push({ kind: msg.type(), path: new URL(page.url()).pathname }); });
 page.on("response", r => { if (r.status() >= 400) events.push({ kind: "http", status: r.status(), path: new URL(r.url()).pathname }); });
 const company = `E2E Deep Audit Target ${Date.now()}`;
-const ua = `E2E-Deep-Audit/${Date.now()}`; let programId, host;
+let ua = `E2E-Deep-Audit/${Date.now()}`; let programId, host;
 async function check(condition, feature, scenario, notes = "") { record(feature, scenario, condition ? "PASS" : "FAIL", notes); }
 async function json(url, options) { const r = await context.request.fetch(app + url, options); return { status: r.status(), body: await r.json() }; }
 async function screen(route) {
@@ -30,6 +30,7 @@ async function waitRun(runId) {
   throw new Error("Local fixture scan did not finish within 180 seconds");
 }
 try {
+  const captureStart = (await (await fetch("http://127.0.0.1:55447/__audit/summary")).json()).requests.length;
   await page.goto(`${app}/login`); await page.getByLabel("Email", { exact: true }).fill(process.env.E2E_EMAIL); await page.getByLabel("Password", { exact: true }).fill(process.env.E2E_PASSWORD); await page.getByRole("button", { name: "Sign in", exact: true }).click(); await page.waitForURL(`${app}/targets`);
   await page.getByRole("button", { name: "Create Target", exact: true }).click();
   assert.equal(await page.locator("form").evaluate(f => f.checkValidity()), false);
@@ -49,7 +50,7 @@ try {
   const setup = 'const {PrismaClient}=require("@prisma/client");const p=new PrismaClient();(async()=>{const h=await p.target.findUnique({where:{id:process.argv[1]},include:{program:true}});if(!h||h.host!=="e2e-deep-audit.test"||!h.program.companyName.startsWith("E2E Deep Audit Target "))throw Error("Not an audit fixture");await p.target.update({where:{id:h.id},data:{scheme:"http"}});await p.$disconnect()})().catch(()=>process.exit(1))';
   execFileSync("docker", ["compose", "exec", "-T", "web", "node", "-e", setup, host.id], { stdio: "pipe" });
   await screen(`/targets/${programId}`);
-  await page.getByRole("button", { name: "Edit Target", exact: true }).click(); await page.getByLabel("Company / Program name *", { exact: true }).fill(company + " edited"); await page.getByLabel("Low", { exact: true }).fill("11.11");
+  await page.getByRole("button", { name: "Edit Target", exact: true }).click(); await page.getByLabel("Company / Program name *", { exact: true }).fill(company + " edited"); await page.getByLabel("Low", { exact: true }).fill("11.11"); ua += "-edited"; await page.getByLabel(/^Required User-Agent/).fill(ua);
   await page.getByRole("button", { name: /Save Target/ }).click(); await page.getByRole("heading", { name: company + " edited", exact: true }).waitFor(); await page.reload();
   const edited = await json(`/api/programs/${programId}`); assert.equal(edited.body.rewardLow, "11.11"); record("Targets", "edit and refresh persistence", "PASS");
   await screen(`/scopes/${programId}`);
@@ -78,12 +79,12 @@ try {
     assert(!detail.body.huntReport.candidates.some(c => c.title.includes("DOM") && c.evidenceLevel === "CONFIRMED")); assert(!detail.body.huntReport.candidates.some(c => /SSTI/.test(c.title) && c.evidenceLevel === "CONFIRMED"));
     record("Hunt", "snapshot, bounded techniques, literal/DOM false-positive controls", "PASS");
   }
-  const capture = await (await fetch("http://127.0.0.1:55447/__audit/summary")).json(); const targetRequests = capture.requests.filter(r => r.ua && /E2E-Deep-Audit\//.test(r.ua)); assert(targetRequests.length > 0); assert(targetRequests.every(r => r.ua === ua && r.host === "e2e-deep-audit.test")); assert(!capture.requests.some(r => r.host === "e2e-foreign-audit.test")); record("HTTP", "actual Recon/Hunt User-Agent capture and foreign redirect", "PASS", `${targetRequests.length} requests with required UA; no foreign host request`);
+  const capture = await (await fetch("http://127.0.0.1:55447/__audit/summary")).json(); const targetRequests = capture.requests.slice(captureStart); assert(targetRequests.length > 0); assert(targetRequests.every(r => r.ua === ua && r.host === "e2e-deep-audit.test")); assert(!targetRequests.some(r => r.host === "e2e-foreign-audit.test")); record("HTTP", "actual Recon/Hunt User-Agent capture and foreign redirect", "PASS", `${targetRequests.length} requests with required UA; no foreign host request`);
   await screen(`/targets/${host.id}/findings`); await page.getByPlaceholder("Title", { exact: true }).fill("E2E Deep Audit Signal"); await page.getByRole("button", { name: "Add finding", exact: true }).click(); await page.getByText("E2E Deep Audit Signal", { exact: true }).waitFor(); await page.reload(); await page.getByText("E2E Deep Audit Signal", { exact: true }).waitFor(); record("Findings", "manual signal create and persistence", "PASS");
   const findings = await json(`/api/findings?targetId=${host.id}`); const finding = findings.body.find(f => f.title === "E2E Deep Audit Signal"); assert(finding); const rejectedReport = await json("/api/reports", { method: "POST", data: { title: "E2E must reject", platform: "GENERIC", findingIds: [finding.id] } }); assert.equal(rejectedReport.status, 400); record("Reports", "unvalidated finding rejected", "PASS");
   await screen(`/targets/${host.id}/report`); await check(await page.getByRole("button", { name: "Generate report", exact: true }).isDisabled(), "Reports", "no passed findings disables generation");
   const all = await json(`/api/programs/${programId}/hosts`); const disposable = all.body.find(h => h.host === "api.example.test"); assert(disposable); const removed = await json(`/api/programs/${programId}/hosts/${disposable.id}`, { method: "DELETE" }); assert.equal(removed.status, 200); const refused = await json("/api/scan-runs", { method: "POST", data: { targetId: disposable.id, type: "RECON" } }); assert.equal(refused.status, 400); record("Scope", "removed host rejected for new scans", "PASS");
   const readded = await json(`/api/programs/${programId}/hosts`, { method: "POST", data: { host: "api.example.test" } }); assert.equal(readded.status, 201); record("Scope", "re-add removed host", "PASS");
   await writeFile("/tmp/deep-audit-objects.json", JSON.stringify({ programId, hostId: host.id, company, ua, paths }));
-} catch (e) { record("Workflow", "execution", "FAIL", `${e.name}: ${String(e.message).replaceAll(process.env.E2E_PASSWORD, "[REDACTED]").replaceAll(process.env.E2E_EMAIL, "[ACCOUNT]").slice(0, 750)}`); process.exitCode = 1; }
+} catch (e) { record("Workflow", "execution", "FAIL", `Failure type: ${e.name}; details suppressed to protect credentials`); process.exitCode = 1; }
 finally { await writeFile("/tmp/deep-e2e-workflow.json", JSON.stringify({ browser: browser.version(), programId, hostId: host?.id, company, ua, results, events }, null, 2)); await browser.close(); }

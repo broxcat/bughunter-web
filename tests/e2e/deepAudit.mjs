@@ -23,6 +23,7 @@ async function login(p = page) {
   await p.waitForURL(`${app}/targets`, { timeout: 20000 });
 }
 try {
+  await page.goto(app); assert.equal(safePath(page.url()), "/login"); record("Anonymous", "root entry redirect", "PASS");
   for (const route of ["/dashboard", "/targets", "/scopes", "/recon", "/hunt", "/findings", "/reports", "/settings", "/hosts/missing", "/targets/missing", "/scopes/missing", "/hunt/missing"]) {
     await page.goto(app + route); assert.equal(safePath(page.url()), "/login"); assert.equal(new URL(page.url()).searchParams.get("callbackUrl"), route);
     await page.reload(); assert.equal(safePath(page.url()), "/login"); record("Anonymous", route, "PASS", "login redirect and refresh");
@@ -48,5 +49,5 @@ try {
   const tab = await context.newPage(); await tab.goto(`${app}/targets`); await tab.getByRole("heading", { name: "Targets", exact: true }).waitFor();
   await page.goto(`${app}/targets`); await page.getByRole("button", { name: "Sign out", exact: true }).click(); await page.waitForURL(`${app}/login`);
   await tab.reload(); assert.equal(safePath(tab.url()), "/login"); await page.goto(`${app}/targets`); assert.equal(safePath(page.url()), "/login"); record("Authentication", "logout and second tab refresh", "PASS"); await tab.close();
-} catch (e) { record("Audit", "execution", "FAIL", e instanceof assert.AssertionError ? "Assertion failed; inspect scenario" : `${e.name}: ${String(e.message).replaceAll(process.env.E2E_PASSWORD, "[REDACTED]").replaceAll(process.env.E2E_EMAIL, "[ACCOUNT]").slice(0, 700)}`); process.exitCode = 1; }
+} catch (e) { record("Audit", "execution", "FAIL", `Failure type: ${e.name}; details suppressed to protect credentials`); process.exitCode = 1; }
 finally { await writeFile(process.env.AUDIT_RESULTS_PATH ?? "/tmp/deep-e2e-baseline.json", JSON.stringify({ browser: browser.version(), results, events }, null, 2)); await browser.close(); }
