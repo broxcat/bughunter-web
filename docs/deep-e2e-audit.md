@@ -124,3 +124,19 @@ to that configured canonical host. No secret/cookie value was captured.
 - Regression: four API ownership/filter tests and real compiled browser generation,
   persistence, reload and all three viewport widths. All pass.
 - Commit: `fix(reports): restore saved host report previews after refresh`.
+
+## Bugs discovered — public XSS readiness warning
+
+- Severity: LOW (misleading preflight); Target/Hunt readiness.
+- Reproduction: Recon observes successful anonymous query endpoints on the public
+  fixture, with no credentials. XSS still required a recommended session globally.
+- Expected: public XSS can be READY when browser confirmation is available.
+- Root cause: session recommendation was unconditional, independent of corpus.
+- Fix: persist a nonsecret public-XSS coverage fact only after anonymous successful
+  parameter-page observations; omit the session recommendation for that observed
+  public coverage. Authenticated, unknown or mixed/denied observations retain the
+  recommendation. Old metadata defaults to unknown conservatively. No migration.
+- Regression: readiness and corpus tests (anonymous/public, authenticated, denied,
+  no observations), plus a new actual Recon on the isolated worker and Target UI.
+  Browser: XSS READY, BOLA/JWT BLOCKED, OAuth/XXE NOT_APPLICABLE before Hunt.
+- Commit: `fix(hunt): recognize observed anonymous XSS readiness`.

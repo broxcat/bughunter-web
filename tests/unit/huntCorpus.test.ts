@@ -23,4 +23,12 @@ describe("structured Recon/Hunt corpus", () => {
     expect(corpus.surface.xml).toBe(false);
     expect(corpus.objectUrls).toEqual([]);
   });
+  it("only declares public XSS coverage after anonymous successful query observations", () => {
+    const raw = { html: "Public query", urls: ["https://example.test/search?q=public"], authenticated: false, pages: [{ url: "https://example.test/search?q=public", status: 200, body: "public", headers: { "content-type": "text/html" } }] };
+    expect(persistableCorpus(analyzeCorpus(raw, "https://example.test")).publicXssSurface).toBe(true);
+    expect(analyzeCorpus({ ...raw, authenticated: true }, "https://example.test").publicXssSurface).toBe(false);
+    expect(analyzeCorpus({ ...raw, pages: [...raw.pages, { ...raw.pages[0], url: "https://example.test/private?q=1", status: 401 }] }, "https://example.test").publicXssSurface).toBe(false);
+    expect(analyzeCorpus({ ...raw, pages: [] }, "https://example.test").publicXssSurface).toBe(false);
+  });
+
 });
