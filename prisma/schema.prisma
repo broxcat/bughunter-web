@@ -234,6 +234,8 @@ enum CredentialMode {
 // ---------------------------------------------------------------------------
 
 model ScanRun {
+  // Immutable execution-time Hunt policy; legacy runs remain unknown.
+  huntSnapshot      Json?
   // Effective execution-time configuration, never changed by later program edits.
   requiredUserAgent String?
   id                String     @id @default(cuid())

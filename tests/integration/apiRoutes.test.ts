@@ -470,4 +470,23 @@ d("API route authorization (integration)", () => {
     expect((await prisma.scanRun.findUniqueOrThrow({ where: { id: run.id } })).requiredUserAgent).toBe("Race/1");
   });
 
+  it("persists a Hunt policy once and rejects a different host's run", async () => {
+    const { startHuntSnapshot } = await import("@/server/hunt/snapshot");
+    const { loadTargetExecution } = await import("@/server/execution");
+    const program = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Hunt snapshot", requiredUserAgent: "Hunt/1", qualifying: ["XSS", "IDOR", "CSRF"], nonQualifying: ["CSRF"] } });
+    const scope = await prisma.scope.create({ data: { userId, hostPattern: "hunt.example.test", status: "APPROVED" } });
+    const target = await prisma.target.create({ data: { userId, programId: program.id, scopeId: scope.id, host: "hunt.example.test" } });
+    const run = await prisma.scanRun.create({ data: { targetId: target.id, type: "HUNT", status: "RUNNING" } });
+    const execution = await loadTargetExecution(target.id);
+    const first = await startHuntSnapshot(run.id, execution);
+    expect([...first.selectedFamilies].sort()).toEqual(["bola", "idor", "xss"]);
+    expect(first.families.find(f => f.family === "csrf")?.reason).toBe("NON_QUALIFYING_EXCLUDED");
+    await prisma.bountyProgram.update({ where: { id: program.id }, data: { qualifying: ["SSRF"], nonQualifying: ["XSS"] } });
+    expect(await startHuntSnapshot(run.id, await loadTargetExecution(target.id))).toEqual(first);
+    await expect(startHuntSnapshot(run.id, { ...execution, targetId: "another-host" })).rejects.toThrow(/belong/);
+    const { GET } = await import("@/app/api/scan-hosts/route");
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect(await (await GET()).json()).toEqual([]);
+  });
+
 });

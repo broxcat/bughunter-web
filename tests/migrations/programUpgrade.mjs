@@ -16,7 +16,7 @@ try {
   await writeFile(join(temp, "schema.prisma"), await readFile(schema));
   await mkdir(join(temp, "migrations"));
   for (const entry of await readdir("prisma/migrations")) {
-    if (entry !== migration) await cp(join("prisma/migrations", entry), join(temp, "migrations", entry), { recursive: true });
+    if (entry < migration || entry === "migration_lock.toml") await cp(join("prisma/migrations", entry), join(temp, "migrations", entry), { recursive: true });
   }
   const migrate = path => execFileSync("npx", ["prisma", "migrate", "deploy", "--schema", path], { env: { ...process.env, DATABASE_URL: url }, stdio: "pipe" });
   migrate(join(temp, "schema.prisma"));
