@@ -105,7 +105,7 @@ TEST_MIGRATION_DATABASE_URL=postgresql://.../empty_upgrade_db npm run test:migra
 HTTP tools are pinned in Docker to the audited versions. Real network tests use
 only a local HTTP server, check every captured UA, and reject foreign-host traffic.
 The suite also covers scanner-proposed UA overrides, redirects, XSS confirmation,
-CSRF browser PoCs and credential auto-login. The default suite runs local HTTP
+rejection of implicit CSRF writes and explicitly requested credential login. The default suite runs local HTTP
 client tests even without external tools; optional suites are skipped when their
 prerequisites are not explicitly enabled.
 
@@ -119,3 +119,24 @@ TEST_APP_URL=http://localhost:3101 npm run test:ui
 Secrets remain encrypted at rest. Credential values are never exposed by program
 or host list APIs. Findings still pass the existing manual triage gate before they
 can be included in reports.
+
+
+## Qualified Hunt workflow
+
+Target qualifying vulnerabilities select supported Hunt families; non-qualifying
+exclusions always win. Target detail shows missing accounts, sessions, JWT/XML/OAuth
+context and OOB prerequisites before Hunt. Safe subsets run independently of blocked
+families. Hunt progress separates Signal, Candidate, Validated and Confirmed evidence.
+Fixed bounded timing checks require explicit per-run approval; stateful business
+actions and destructive exploit techniques remain unsupported.
+
+See [readiness and limits](docs/hunt-readiness.md), the
+[versioned technique catalogue](docs/hunt-technique-catalog.md), and the
+[validation report](docs/hunt-validation-report.md). No worker is needed for UI tests:
+
+```sh
+TEST_APP_URL=http://127.0.0.1:3102 TEST_DATABASE_URL=postgresql://hunt:hunt@127.0.0.1:55441/hunt_clean node tests/e2e/huntWorkflow.mjs
+```
+
+Use disposable services only. The UI test enqueues a Hunt without executing it;
+its completed report is a labelled database fixture for progression/evidence UI.

@@ -38,6 +38,13 @@ try {
   assert.equal(host.scope.status, "APPROVED");
   assert.equal(host.scanRuns[0].id, "upgrade-run");
   assert.equal(host.scanRuns[0].requiredUserAgent, null);
+  assert.equal(host.scanRuns[0].huntSnapshot, null);
+  assert.equal(host.scanRuns[0].huntReport, null);
+  assert.equal(host.scanRuns[0].reconCorpus, null);
+  assert.deepEqual(host.scanRuns[0].approvedHuntTechniques, []);
+  assert.equal(host.findings[0].huntMetadata, null);
+  assert.equal(host.credentials[0].purpose, "OTHER");
+  assert.equal(host.credentials[0].ownedObjectUrl, null);
   assert.equal(host.findings[0].scanRunId, "upgrade-run");
   assert.equal(host.credentials[0].headerCipher, "fixture-cipher");
   assert.equal(host.reports[0].items[0].findingId, "upgrade-finding");
