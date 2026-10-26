@@ -71,3 +71,15 @@ to that configured canonical host. No secret/cookie value was captured.
 - Regression: three route tests, plus actual built-app Redis outage/recovery smoke.
   After fix the outage returned 503 in 11ms. Existing services were not stopped.
 - Commit: `fix(health): bound dependency checks during service outages`.
+
+## Bugs discovered — unsafe post-login destination
+
+- Severity: MEDIUM; route `/login?callbackUrl=...`.
+- Steps: provide an external callbackUrl, sign in with the E2E account. Browser
+  routing to the foreign destination was intercepted and aborted before traffic.
+- Expected: remain inside BugHunter; observed: UI attempted external navigation.
+- Root cause: raw query value passed directly to the client router after sign-in.
+- Fix: accept only relative internal paths; reject schemes, double slashes,
+  backslashes and control/whitespace characters; default to `/targets`.
+- Regression: unit URL matrix and compiled Chromium relative/external callback tests.
+- Commit: `fix(auth): restrict post-login navigation to internal paths`.

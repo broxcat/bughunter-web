@@ -4,13 +4,14 @@ import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { safeLoginRedirect } from "@/lib/loginRedirect";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") || "/targets";
+  const callbackUrl = safeLoginRedirect(searchParams.get("callbackUrl"));
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
