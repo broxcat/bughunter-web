@@ -35,10 +35,24 @@ Next.js 16 / React 19, Prisma 6 / PostgreSQL, BullMQ / Redis, Auth.js, Tailwind 
 
 ```sh
 cp .env.example .env
-# Fill AUTH_SECRET, CREDENTIALS_ENCRYPTION_KEY and database/Redis settings.
+# Fill AUTH_URL, AUTH_SECRET, CREDENTIALS_ENCRYPTION_KEY and database/Redis settings.
 docker compose up --build -d
 docker compose exec web npx prisma migrate deploy
 ```
+
+Set `AUTH_URL` in `.env` to the origin used in your browser, including scheme and
+port (for example `AUTH_URL="http://example.test:3000"`). Compose requires this
+value for `web`. Auth.js v5 uses it for login, OAuth callbacks and logout; a
+localhost value redirects to localhost even when you browse through another host.
+After changing it, apply the environment with `docker compose up -d --no-deps
+--force-recreate web`. A simple restart does not reload the container environment.
+
+The supplied Compose stack publishes Next.js directly and has no reverse proxy.
+If you add one, preserve the public `Host`, `X-Forwarded-Host` and
+`X-Forwarded-Proto` headers. The existing `trustHost: true` allows Auth.js to use
+these for server auth actions; explicit `AUTH_URL` takes priority and also avoids
+Next.js internal request URLs affecting authentication redirects. OAuth providers
+must register callbacks under the same public origin (`/api/auth/callback/<provider>`).
 
 Local development: provision Postgres and Redis, configure `.env`, then:
 
