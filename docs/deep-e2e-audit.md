@@ -140,3 +140,13 @@ to that configured canonical host. No secret/cookie value was captured.
   no observations), plus a new actual Recon on the isolated worker and Target UI.
   Browser: XSS READY, BOLA/JWT BLOCKED, OAuth/XXE NOT_APPLICABLE before Hunt.
 - Commit: `fix(hunt): recognize observed anonymous XSS readiness`.
+
+### Second-tab hydration race follow-up
+
+The full authentication sequence reproduced a timing case missed by the initial
+standalone tab test: a server-provided session could remain stale if signout
+occurred before the other tab subscribed during hydration. The provider now checks
+the current cookie on mount before showing authenticated content, then subscribes
+to Auth.js broadcasts/focus changes. Full real-browser authentication sequence
+passes all six cases (including network rejection and multi-tab logout).
+Commit: `fix(auth): verify dashboard session before displaying cached content`.

@@ -21,7 +21,7 @@ export default async function DashboardLayout({
   const session = await auth();
 
   return (
-    <AuthenticatedSession session={session}><div className="flex min-h-full flex-col bg-background text-foreground">
+    <AuthenticatedSession><div className="flex min-h-full flex-col bg-background text-foreground">
       <header className="sticky top-0 z-10 border-b border-border bg-surface/90 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-3">
           <div className="flex min-w-0 flex-wrap items-center gap-3">

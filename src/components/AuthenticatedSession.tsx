@@ -1,6 +1,5 @@
 "use client";
 import { SessionProvider, useSession } from "next-auth/react";
-import type { Session } from "next-auth";
 import { useEffect, type ReactNode } from "react";
 function SessionContent({ children }: { children: ReactNode }) {
   const { status } = useSession();
@@ -8,7 +7,8 @@ function SessionContent({ children }: { children: ReactNode }) {
   if (status !== "authenticated") return <p role="status">Checking session…</p>;
   return children;
 }
-/** Observe Auth.js signout broadcasts and recheck sessions when another tab gains focus. */
-export default function AuthenticatedSession({ session, children }: { session: Session | null; children: ReactNode }) {
-  return <SessionProvider session={session} refetchOnWindowFocus><SessionContent>{children}</SessionContent></SessionProvider>;
+/** Check the current cookie on mount, then observe signout broadcasts and focus.
+ * A server snapshot can become stale before another tab finishes hydration. */
+export default function AuthenticatedSession({ children }: { children: ReactNode }) {
+  return <SessionProvider refetchOnWindowFocus><SessionContent>{children}</SessionContent></SessionProvider>;
 }
