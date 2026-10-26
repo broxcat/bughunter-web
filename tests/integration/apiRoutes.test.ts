@@ -367,4 +367,36 @@ d("API route authorization (integration)", () => {
     expect((await PATCH(req("http://localhost", { requiredUserAgent: "" }, "PATCH"), context)).status).toBe(400);
   });
 
+  it("adds, edits and removes scope hosts while preserving all historical references", async () => {
+    const { POST } = await import("@/app/api/programs/[id]/hosts/route");
+    const { PATCH, DELETE } = await import("@/app/api/programs/[id]/hosts/[hostId]/route");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Scope Lab", requiredUserAgent: "Lab/1" } });
+    const params = { params: Promise.resolve({ id: p.id }) };
+    const create = (host: string) => POST(req("http://localhost", { host }), params);
+    const added = await create("API.Example.com.");
+    expect(added.status).toBe(201);
+    const h = await added.json();
+    expect(h.host).toBe("api.example.com");
+    expect((await create("api.example.com")).status).toBe(409);
+    expect((await create("*.example.com")).status).toBe(201);
+    expect((await create("https://example.com/a")).status).toBe(400);
+    const run = await prisma.scanRun.create({ data: { targetId: h.id, type: "RECON" } });
+    const finding = await prisma.finding.create({ data: { targetId: h.id, scanRunId: run.id, title: "history" } });
+    const credential = await prisma.targetCredential.create({ data: { targetId: h.id, label: "test", headerCipher: "encrypted" } });
+    const report = await prisma.report.create({ data: { targetId: h.id, userId, title: "history" } });
+    const hParams = { params: Promise.resolve({ id: p.id, hostId: h.id }) };
+    const edited = await PATCH(req("http://localhost", { host: "new.example.com" }, "PATCH"), hParams);
+    expect(edited.status).toBe(200);
+    const newHost = await edited.json();
+    expect(newHost.id).not.toBe(h.id);
+    expect((await prisma.target.findUniqueOrThrow({ where: { id: h.id } })).active).toBe(false);
+    expect((await prisma.finding.findUniqueOrThrow({ where: { id: finding.id } })).targetId).toBe(h.id);
+    expect((await prisma.targetCredential.findUniqueOrThrow({ where: { id: credential.id } })).targetId).toBe(h.id);
+    expect((await prisma.report.findUniqueOrThrow({ where: { id: report.id } })).targetId).toBe(h.id);
+    expect((await DELETE(req("http://localhost", {}, "DELETE"), { params: Promise.resolve({ id: p.id, hostId: newHost.id }) })).status).toBe(200);
+    expect((await prisma.target.findUniqueOrThrow({ where: { id: newHost.id } })).active).toBe(false);
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await create("stolen.example.com")).status).toBe(404);
+  });
+
 });
