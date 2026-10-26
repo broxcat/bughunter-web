@@ -1,3 +1,4 @@
+import { isSafeReadUrl } from "@/lib/hunt/safety";
 // Shared, authenticated, depth-limited crawl used by ALL hunt families so they
 // discover candidate URLs/params from the real app — including pages that need a
 // session — instead of each re-parsing only the public root page.
@@ -25,6 +26,7 @@ const PAGE_TIMEOUT_MS = 10_000;
 export interface DiscoveryCorpus {
   /** Concatenated crawled page bodies + a synthetic anchor appendix of all URLs. */
   html: string;
+  pages?: { url: string; body: string; headers: Record<string, string>; status: number }[];
   /** Deduped same-origin absolute URLs discovered. */
   urls: string[];
   /** Whether the crawl ran authenticated (a credential was available). */
@@ -54,7 +56,7 @@ function sameOriginLinks(html: string, baseUrl: string, host: string): string[] 
   return [...out];
 }
 
-async function crawl(ctx: ScanContext): Promise<DiscoveryCorpus> {
+async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryCorpus> {
   let host: string;
   try {
     host = new URL(ctx.baseUrl).host;
@@ -77,19 +79,21 @@ async function crawl(ctx: ScanContext): Promise<DiscoveryCorpus> {
   }
 
   const bodies: string[] = [];
+  const pages: NonNullable<DiscoveryCorpus["pages"]> = [];
   const discovered = new Set<string>();
   const visited = new Set<string>();
-  const queue: Array<{ url: string; depth: number }> = [{ url: ctx.baseUrl, depth: 0 }];
+  const queue: Array<{ url: string; depth: number }> = [...new Set([ctx.baseUrl, ...seeds])].slice(0, MAX_PAGES).filter(isSafeReadUrl).map(url => ({ url, depth: 0 }));
 
   while (queue.length > 0 && visited.size < MAX_PAGES) {
     const { url, depth } = queue.shift()!;
-    const norm = url.replace(/#.*$/, "");
-    if (visited.has(norm)) continue;
+    const norm = new URL(url.replace(/#.*$/, "")).toString();
+    if (visited.has(norm) || !isSafeReadUrl(norm)) continue;
     visited.add(norm);
 
     const res = await probe(norm, { headers, timeoutMs: PAGE_TIMEOUT_MS });
     if (res.error || !res.body) continue;
     bodies.push(res.body);
+    pages.push({ url: norm, body: res.body, headers: res.headers, status: res.status });
     discovered.add(norm);
 
     if (depth < MAX_DEPTH) {
@@ -107,17 +111,19 @@ async function crawl(ctx: ScanContext): Promise<DiscoveryCorpus> {
   // extractors pick them up with URLs already resolved (no relative-path drift
   // from concatenating sub-page bodies).
   const appendix = urls.map((u) => `<a href="${u}"></a>`).join("\n");
-  return { html: bodies.join("\n") + "\n" + appendix, urls, authenticated };
+  return { html: bodies.join("\n") + "\n" + appendix, urls, authenticated, pages };
 }
 
 /**
  * Authenticated, depth-limited crawl of the target, cached per scan run. Returns
  * a corpus the families parse for candidate URLs/params. Never throws.
  */
-export function discoverCorpus(ctx: ScanContext): Promise<DiscoveryCorpus> {
+export function discoverCorpus(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryCorpus> {
   const cached = cache.get(ctx.scanRunId);
   if (cached) return cached;
-  const p = crawl(ctx).catch(() => ({ html: "", urls: [], authenticated: false }));
+  const p = crawl(ctx, seeds).catch(() => ({ html: "", urls: [], authenticated: false }));
   cache.set(ctx.scanRunId, p);
   return p;
 }
+
+export function clearDiscoveryCorpus(scanRunId: string) { cache.delete(scanRunId); }

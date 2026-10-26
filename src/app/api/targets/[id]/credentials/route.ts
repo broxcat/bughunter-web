@@ -1,3 +1,4 @@
+import { credentialMetadataSchema, ownedReferenceUrl } from "@/lib/hunt/credentialMetadata";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -19,6 +20,7 @@ import { encryptSecret } from "@/lib/crypto";
 export const runtime = "nodejs"; // node:crypto in encryptSecret requires the Node runtime
 
 const createSchema = z.object({
+  ...credentialMetadataSchema.shape,
   label: z.string().trim().min(1).max(200),
   mode: z.enum(["COOKIES", "BEARER", "EMAIL_PASSWORD"]).optional(),
   // Either a cookie map or a raw "k=v; k2=v2" cookie string.
@@ -52,6 +54,8 @@ function toSafe(r: {
   id: string;
   label: string;
   mode: "COOKIES" | "BEARER" | "EMAIL_PASSWORD";
+  purpose: string;
+  ownedObjectUrl: string | null;
   cookiesCipher: string | null;
   headerCipher: string | null;
   emailCipher: string | null;
@@ -63,6 +67,8 @@ function toSafe(r: {
     id: r.id,
     label: r.label,
     mode: r.mode,
+    purpose: r.purpose,
+    ownedObjectUrl: r.ownedObjectUrl,
     createdAt: r.createdAt,
     hasCookies: Boolean(r.cookiesCipher),
     hasToken: Boolean(r.headerCipher),
@@ -77,7 +83,7 @@ function toSafe(r: {
 async function loadOwnedTarget(targetId: string, userId: string) {
   return prisma.target.findFirst({
     where: { id: targetId, userId },
-    select: { id: true },
+    select: { id: true, host: true },
   });
 }
 
@@ -147,6 +153,10 @@ export async function POST(
   }
 
   const { label, cookies, bearerToken, loginUrl, email, password } = parsed.data;
+  let ownedObjectUrl: string | null;
+  try { ownedObjectUrl = ownedReferenceUrl(parsed.data.ownedObjectUrl, target.host); }
+  catch { return NextResponse.json({ error: "Owned object must be a same-host URL without secrets" }, { status: 400 }); }
+  const metadata = { purpose: parsed.data.purpose, ownedObjectUrl };
 
   // EMAIL_PASSWORD: store encrypted email/password + loginUrl; cookies are minted
   // later by headless auto-login. Requires all three.
@@ -162,6 +172,7 @@ export async function POST(
     const created = await prisma.targetCredential.create({
       data: {
         targetId: id,
+        ...metadata,
         label,
         mode: "EMAIL_PASSWORD",
         loginUrl,
@@ -201,6 +212,7 @@ export async function POST(
   const created = await prisma.targetCredential.create({
     data: {
       targetId: id,
+      ...metadata,
       label,
       mode: token && !cookieMap ? "BEARER" : "COOKIES",
       cookiesCipher: cookieMap ? encryptSecret(JSON.stringify(cookieMap)) : null,
@@ -249,4 +261,20 @@ export async function DELETE(
   }
 
   return NextResponse.json({ ok: true });
+}
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { id } = await params;
+  const target = await loadOwnedTarget(id, session.user.id);
+  if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const parsed = credentialMetadataSchema.extend({ credentialId: z.string().min(1) }).safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Invalid credential metadata" }, { status: 400 });
+  const credential = await prisma.targetCredential.findFirst({ where: { id: parsed.data.credentialId, targetId: id } });
+  if (!credential) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  try {
+    const data = { purpose: parsed.data.purpose, ownedObjectUrl: ownedReferenceUrl(parsed.data.ownedObjectUrl, target.host) };
+    return NextResponse.json({ credential: toSafe(await prisma.targetCredential.update({ where: { id: credential.id }, data })) });
+  } catch { return NextResponse.json({ error: "Owned object must be a same-host URL without secrets" }, { status: 400 }); }
 }

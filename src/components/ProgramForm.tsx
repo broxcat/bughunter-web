@@ -1,4 +1,7 @@
 "use client";
+import { HUNT_CAPABILITIES } from "@/lib/hunt/policy";
+import HuntRequirements from "@/components/HuntRequirements";
+import { EMPTY_READINESS_FACTS, resolveHuntReadiness } from "@/lib/hunt/readiness";
 import { useState } from "react";
 import { BOUNTY_PLATFORMS, VULNERABILITY_FAMILIES } from "@/lib/bountyProgram";
 import { Button } from "@/components/ui/Button";
@@ -17,6 +20,7 @@ function Hosts({ title, value, onChange }: { title: string; value: string[]; onC
   </fieldset>;
 }
 export default function ProgramForm({ initial, onSaved }: { initial?: ProgramData; onSaved: (id: string) => void }) {
+  const [facts, setFacts] = useState(EMPTY_READINESS_FACTS);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [scopeHosts, setScopeHosts] = useState<string[]>([]);
@@ -34,7 +38,14 @@ export default function ProgramForm({ initial, onSaved }: { initial?: ProgramDat
       const json = await res.json(); if (!res.ok) throw new Error(json.error); onSaved(json.id);
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
-  const families = (title: string, values: string[], set: (v: string[]) => void) => <fieldset><legend className="mb-2 font-semibold">{title} <span className="font-normal text-muted">(optional)</span></legend><div className="grid gap-2 sm:grid-cols-3">{VULNERABILITY_FAMILIES.map(f => <label key={f} className="text-sm"><input type="checkbox" checked={values.includes(f)} onChange={e => set(e.target.checked ? [...values, f] : values.filter(v => v !== f))} /> {f.replaceAll("_", " ")}</label>)}</div></fieldset>;
+  const readiness = resolveHuntReadiness({ qualifying, nonQualifying }, facts);
+  const badge = (f: string) => {
+    const family = readiness.filter(r => HUNT_CAPABILITIES.find(c => c.family === r.family)?.policyNames.some(n => n === f));
+    if (!family.length) return "UNSUPPORTED";
+    if (family.every(r => !r.selected)) return "NOT_SELECTED";
+    return family.some(r => r.state === "BLOCKED") ? "BLOCKED" : family.some(r => r.state === "DEGRADED") ? "DEGRADED" : "READY";
+  };
+  const families = (title: string, values: string[], set: (v: string[]) => void) => <fieldset><legend className="mb-2 font-semibold">{title} <span className="font-normal text-muted">(optional)</span></legend><div className="grid gap-2 sm:grid-cols-3">{VULNERABILITY_FAMILIES.map(f => <label key={f} className="text-sm"><input type="checkbox" checked={values.includes(f)} onChange={e => set(e.target.checked ? [...values, f] : values.filter(v => v !== f))} /> {f.replaceAll("_", " ")}{title === "Qualifying vulnerabilities" && values.includes(f) && <span className="ml-1 text-xs">— {badge(f)}</span>}</label>)}</div></fieldset>;
   return <form className="space-y-6" onSubmit={submit}>
     <label className="block">Company / Program name *<input autoFocus required name="companyName" maxLength={200} defaultValue={initial?.companyName} className={inputClass} /></label>
     <label className="block">Platform<select aria-label="Platform" name="platform" defaultValue={initial?.platform ?? ""} className={inputClass}><option value="">Choose platform</option>{BOUNTY_PLATFORMS.map(p => <option key={p}>{p}</option>)}</select></label>
@@ -45,6 +56,7 @@ export default function ProgramForm({ initial, onSaved }: { initial?: ProgramDat
     {families("Qualifying vulnerabilities", qualifying, setQualifying)}
     <p className="text-sm text-muted">Leave qualifying empty to allow all supported Hunt families. Explicit exclusions always take priority.</p>
     {families("Non-qualifying vulnerabilities", nonQualifying, setNonQualifying)}
+    {initial && <HuntRequirements hosts={initial.targets.filter(h => !h.host.includes("*"))} policy={{ qualifying, nonQualifying }} onFacts={setFacts} />}
     <label className="block">Required User-Agent *<input required name="requiredUserAgent" maxLength={512} placeholder="BugHunter/1.0" defaultValue={initial?.requiredUserAgent} className={inputClass} /><span className="text-sm text-muted">Used for every future scan. Enter BugHunter/1.0 explicitly if the program has no special value.</span></label>
     {error && <p role="alert" className="text-danger">{error}</p>}
     <Button type="submit" disabled={busy}>{busy ? "Saving…" : initial ? "Save Target" : "Create Target"}</Button>

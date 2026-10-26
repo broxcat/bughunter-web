@@ -2,11 +2,13 @@ import { join } from "node:path";
 import { assertExecutionUrl, currentTargetExecution } from "@/server/execution";
 
 export const TOOL_CONFIG = join(process.cwd(), "src/server/scanners/templates/config.yaml");
+export const DALFOX_CONFIG = join(process.cwd(), "src/server/scanners/templates/dalfox-config.json");
 export const NUCLEI_TEMPLATE = join(process.cwd(), "src/server/scanners/templates/git-config.yaml");
 const HTTP_TOOLS = new Set(["httpx", "katana", "nuclei", "dalfox"]);
 /** The backend is the final writer of UA headers, even if a caller proposes one. */
 export function enforcedToolArgs(cmd: string, args: string[]): string[] {
   const ctx = currentTargetExecution();
+  if (ctx.requestGuard) throw new Error("External CLI request counts cannot be enforced inside a bounded Hunt");
   if (cmd === "nmap") return ["-sT", "-Pn", "-n", ctx.host.split(":")[0]];
   if (!HTTP_TOOLS.has(cmd)) throw new Error("Unaudited scanner tool; refusing execution");
   for (const arg of args) if (/^https?:\/\//i.test(arg)) assertExecutionUrl(arg, ctx);
@@ -18,7 +20,7 @@ export function enforcedToolArgs(cmd: string, args: string[]): string[] {
     if (/^(?:--user-agent=|-H=User-Agent:|-header=User-Agent:)/i.test(flag)) continue;
     clean.push(flag);
   }
-  if (cmd === "dalfox") return [...clean, "--user-agent", ctx.requiredUserAgent, "--skip-headless", "--skip-bav", "--config", TOOL_CONFIG];
+  if (cmd === "dalfox") return [...clean, "--user-agent", ctx.requiredUserAgent, "--skip-headless", "--skip-bav", "--config", DALFOX_CONFIG];
   return [...clean, "-H", `User-Agent: ${ctx.requiredUserAgent}`, "-config", TOOL_CONFIG,
     ...(cmd === "httpx" ? ["-random-agent=false", "-nfs", "-duc"] : []),
     ...(cmd === "katana" ? ["-dr", "-fs", "fqdn", "-cs", `^https?://${ctx.host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:/|$)`, "-duc"] : []),

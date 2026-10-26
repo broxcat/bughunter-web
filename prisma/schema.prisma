@@ -202,21 +202,32 @@ model Target {
 // the cipher is NEVER returned to any client and decryption happens server-side
 // in-process at request time. At least one of cookiesCipher/headerCipher must be
 // set per row (enforced in the API, not the DB).
+enum CredentialPurpose {
+  ACCOUNT_A
+  ACCOUNT_B
+  SESSION_COOKIE
+  JWT
+  OTHER
+}
+
 model TargetCredential {
-  id                   String         @id @default(cuid())
+  purpose              CredentialPurpose @default(OTHER)
+  // Explicit user attestation: a read-only object owned by this test account.
+  ownedObjectUrl       String?
+  id                   String            @id @default(cuid())
   targetId             String
   label                String
-  mode                 CredentialMode @default(COOKIES)
-  cookiesCipher        String?        @db.Text // AES-GCM of JSON.stringify(cookies map)
-  headerCipher         String?        @db.Text // AES-GCM of a bearer token (Authorization value)
+  mode                 CredentialMode    @default(COOKIES)
+  cookiesCipher        String?           @db.Text // AES-GCM of JSON.stringify(cookies map)
+  headerCipher         String?           @db.Text // AES-GCM of a bearer token (Authorization value)
   // EMAIL_PASSWORD mode: the app logs in via headless Chromium to mint/refresh
   // the session cookies automatically. Email/password encrypted like everything else.
-  loginUrl             String?        @db.Text
-  emailCipher          String?        @db.Text
-  passwordCipher       String?        @db.Text
-  sessionCookiesCipher String?        @db.Text // cached cookies obtained by auto-login
+  loginUrl             String?           @db.Text
+  emailCipher          String?           @db.Text
+  passwordCipher       String?           @db.Text
+  sessionCookiesCipher String?           @db.Text // cached cookies obtained by auto-login
   sessionRefreshedAt   DateTime? // when the cached session was last minted
-  createdAt            DateTime       @default(now())
+  createdAt            DateTime          @default(now())
 
   target Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
 
@@ -234,18 +245,23 @@ enum CredentialMode {
 // ---------------------------------------------------------------------------
 
 model ScanRun {
+  approvedHuntTechniques String[]   @default([])
+  huntReport             Json?
+  reconCorpus            Json?
+  // Immutable execution-time Hunt policy; legacy runs remain unknown.
+  huntSnapshot           Json?
   // Effective execution-time configuration, never changed by later program edits.
-  requiredUserAgent String?
-  id                String     @id @default(cuid())
-  targetId          String
-  type              ScanType
-  status            ScanStatus @default(QUEUED)
+  requiredUserAgent      String?
+  id                     String     @id @default(cuid())
+  targetId               String
+  type                   ScanType
+  status                 ScanStatus @default(QUEUED)
   // BullMQ job id, set once enqueued.
-  jobId             String?
-  error             String?    @db.Text
-  createdAt         DateTime   @default(now())
-  startedAt         DateTime?
-  finishedAt        DateTime?
+  jobId                  String?
+  error                  String?    @db.Text
+  createdAt              DateTime   @default(now())
+  startedAt              DateTime?
+  finishedAt             DateTime?
 
   target   Target    @relation(fields: [targetId], references: [id], onDelete: Cascade)
   logs     ScanLog[]
@@ -273,6 +289,7 @@ model ScanLog {
 // ---------------------------------------------------------------------------
 
 model Finding {
+  huntMetadata Json?
   id           String             @id @default(cuid())
   targetId     String
   scanRunId    String?

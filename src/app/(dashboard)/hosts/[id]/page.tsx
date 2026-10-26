@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { CREDENTIAL_PURPOSES } from "@/lib/hunt/credentialMetadata";
 import { use, useEffect, useState } from "react";
 import ScanLogViewer from "@/components/ScanLogViewer";
 import {
@@ -44,6 +45,8 @@ interface TargetDetail {
 type CredentialMode = "COOKIES" | "BEARER" | "EMAIL_PASSWORD";
 
 interface TargetCredential {
+  purpose: string;
+  ownedObjectUrl: string | null;
   id: string;
   label: string;
   mode: CredentialMode;
@@ -78,6 +81,8 @@ export default function TargetDetailPage({
 
   // Target-credentials section state (cookies/bearer token FOR THE TARGET app).
   const [credentials, setCredentials] = useState<TargetCredential[]>([]);
+  const [credPurpose, setCredPurpose] = useState("OTHER");
+  const [ownedObject, setOwnedObject] = useState("");
   const [credLabel, setCredLabel] = useState("");
   const [credMode, setCredMode] = useState<CredentialMode>("COOKIES");
   const [credCookies, setCredCookies] = useState("");
@@ -192,7 +197,7 @@ export default function TargetDetailPage({
       const res = await fetch(`/api/targets/${id}/credentials`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, purpose: credPurpose, ownedObjectUrl: ownedObject || null }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -408,7 +413,7 @@ export default function TargetDetailPage({
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-medium text-foreground">
-                        {run.type}
+                        {run.type === "HUNT" ? <Link href={`/hunt/${run.id}`} className="text-brand">HUNT — open progress</Link> : run.type}
                       </span>
                       <Badge tone={STATUS_TONE[run.status] ?? "neutral"}>
                         {run.status}
@@ -441,6 +446,7 @@ export default function TargetDetailPage({
       <details className="space-y-3">
         <summary className="cursor-pointer text-sm font-medium text-foreground">Advanced — host credentials</summary>
         <Card className="space-y-5 p-4">
+          <h2 id="credentials" className="font-semibold">Host credentials</h2>
           <div className="rounded-md border border-border-strong bg-surface-2 px-3 py-2 text-xs text-muted">
             These are credentials for the <strong>TARGET</strong> you are
             testing (the bug-bounty program&apos;s app) — never your
@@ -460,6 +466,9 @@ export default function TargetDetailPage({
           )}
 
           <form onSubmit={saveCredential} className="space-y-3">
+            <label className="block text-sm">Test identity / purpose<select aria-label="Credential purpose" value={credPurpose} onChange={e => setCredPurpose(e.target.value)} className="ml-2 bg-surface">{CREDENTIAL_PURPOSES.map(p => <option key={p}>{p}</option>)}</select></label>
+            <label className="block text-sm">Read-only object owned by this test identity (optional)<input aria-label="Owned object URL" type="url" value={ownedObject} onChange={e => setOwnedObject(e.target.value)} className="block w-full rounded border border-border bg-surface p-2" placeholder={`https://${target.host}/api/documents/123`} /></label>
+            <p className="text-xs text-muted">Account A and Account B must be separate test identities. The object URL is your ownership attestation; BugHunter verifies access separately.</p>
             <div className="space-y-1">
               <label
                 htmlFor="cred-label"
@@ -530,7 +539,8 @@ export default function TargetDetailPage({
                   </label>
                   <input
                     id="cred-token"
-                    type="text"
+                    type="password"
+                    autoComplete="off"
                     value={credToken}
                     onChange={(e) => setCredToken(e.target.value)}
                     placeholder="eyJhbGciOi…"
@@ -629,8 +639,17 @@ export default function TargetDetailPage({
                       <span className="text-sm font-medium text-foreground">
                         {cred.label}
                       </span>
+                      <form className="flex flex-wrap gap-2" onSubmit={async e => {
+                        e.preventDefault(); const data = Object.fromEntries(new FormData(e.currentTarget));
+                        const res = await fetch(`/api/targets/${id}/credentials`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...data, credentialId: cred.id, ownedObjectUrl: data.ownedObjectUrl || null }) });
+                        if (!res.ok) setCredError((await res.json()).error); else await loadCredentials();
+                      }}><select aria-label={`Purpose for ${cred.label}`} name="purpose" defaultValue={cred.purpose} className="bg-surface">{CREDENTIAL_PURPOSES.map(p => <option key={p}>{p}</option>)}</select><input aria-label={`Owned object for ${cred.label}`} name="ownedObjectUrl" type="url" defaultValue={cred.ownedObjectUrl ?? ""} placeholder="Owned object URL" className="min-w-0 rounded border border-border bg-surface p-1" /><Button type="submit" size="sm" variant="secondary">Save identity</Button></form>
                       {cred.hasCookies && <Badge tone="info">cookies</Badge>}
                       {cred.hasToken && <Badge tone="brand">token</Badge>}
+                      {cred.hasAutoLogin && <Button size="sm" variant="secondary" onClick={async () => {
+                        const r = await fetch(`/api/targets/${id}/credentials/refresh`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credentialId: cred.id, approveTestAccountLogin: true }) });
+                        if (!r.ok || !(await r.json()).ok) setCredError("Unable to refresh the test session"); else await loadCredentials();
+                      }}>Sign in and refresh session</Button>}
                       {cred.hasAutoLogin && (
                         <Badge tone="proven">auto-login</Badge>
                       )}

@@ -33,7 +33,7 @@ async function resolveEmailPasswordCookies(row: {
   passwordCipher: string | null;
   sessionCookiesCipher: string | null;
   sessionRefreshedAt: Date | null;
-}): Promise<Record<string, string> | null> {
+}, allowLogin = false): Promise<Record<string, string> | null> {
   // Fresh cache?
   if (
     row.sessionCookiesCipher &&
@@ -43,6 +43,8 @@ async function resolveEmailPasswordCookies(row: {
     const cached = parseCookieJson(row.sessionCookiesCipher);
     if (cached) return cached;
   }
+
+  if (!allowLogin) return null; // Session creation requires an explicit user action.
 
   // Need to (re-)login. Decrypt the stored email/password/loginUrl.
   if (!row.loginUrl || !row.emailCipher || !row.passwordCipher) return null;
@@ -98,6 +100,8 @@ async function resolveEmailPasswordCookies(row: {
 // request headers for the target.
 
 export interface DecryptedTargetCredential {
+  purpose?: string;
+  ownedObjectUrl?: string | null;
   id: string;
   label: string;
   cookies?: Record<string, string>; // session cookies for the TARGET
@@ -123,7 +127,7 @@ export async function loadTargetCredentials(
 
   const out: DecryptedTargetCredential[] = [];
   for (const row of rows) {
-    const cred: DecryptedTargetCredential = { id: row.id, label: row.label };
+    const cred: DecryptedTargetCredential = { id: row.id, label: row.label, purpose: row.purpose, ownedObjectUrl: row.ownedObjectUrl };
 
     // EMAIL_PASSWORD: mint/refresh the session via headless login (cached).
     if (row.mode === "EMAIL_PASSWORD") {
@@ -184,4 +188,11 @@ export function credentialHeaders(
   }
 
   return headers;
+}
+
+/** Explicit account-login action; ordinary scans consume cached sessions only. */
+export async function refreshTargetCredential(targetId: string, credentialId: string): Promise<boolean> {
+  const row = await prisma.targetCredential.findFirst({ where: { id: credentialId, targetId, mode: "EMAIL_PASSWORD" } });
+  if (!row) return false;
+  return Boolean(await resolveEmailPasswordCookies({ ...row, sessionRefreshedAt: null }, true));
 }

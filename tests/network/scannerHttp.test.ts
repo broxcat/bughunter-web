@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import { chromium } from "playwright-chromium";
 import { withTargetExecution, newTargetBrowserContext } from "@/server/execution";
+import { prisma } from "@/lib/prisma";
 import { runCommand } from "@/server/scanners/runCommand";
 import { NUCLEI_TEMPLATE } from "@/server/scanners/toolPolicy";
 import { confirmXssSink } from "@/server/scanners/xssConfirm";
@@ -52,6 +53,8 @@ network("real HTTP tools and Chromium capture", () => {
           ["url", `${base}/?q=hello`, "--silence", "--no-color", "--worker", "2", "--skip-mining-all", "--timeout", "2", "--user-agent", "Tool-Wrong"];
         const result = await runCommand(tool, args, { scanRunId: "fixture", timeoutMs: 45000 });
         expect(result).toEqual({ code: 0, timedOut: false });
+        const output = vi.mocked(prisma.scanLog.create).mock.calls.map(call => call[0].data.line).join("\n");
+        expect(output).not.toMatch(/Error parsing config file|invalid character '#'/i);
       });
       assertReceived(from);
     }, 50000);
@@ -75,12 +78,11 @@ network("real HTTP tools and Chromium capture", () => {
     });
     assertReceived(from);
   }, 20000);
-  it("real CSRF browser PoC uses the program UA and no off-scope HTTP", async () => {
+  it("CSRF dispatcher refuses unprepared action execution and sends no state-changing HTTP", async () => {
     const from = seen.length;
-    await withTargetExecution(execution(), () => runCsrf({ scanRunId: "fixture", targetId: "network", userId: "test", host: new URL(base).host, baseUrl: base }));
-    assertReceived(from);
-    expect(seen.slice(from).some(r => r.url === "/transfer")).toBe(true);
-  }, 25000);
+    await expect(withTargetExecution(execution(), () => runCsrf({ scanRunId: "fixture", targetId: "network", userId: "test", host: new URL(base).host, baseUrl: base }))).rejects.toThrow(/prepared/);
+    expect(seen.slice(from).some(r => r.url === "/transfer")).toBe(false);
+  });
   it("real XSS confirmation uses the program UA", async () => {
     const from = seen.length;
     const result = await withTargetExecution(execution(), () => confirmXssSink(`${base}/xss?q=hello`, { sink: "innerHTML", canaryId: "uaTestCanary" }));

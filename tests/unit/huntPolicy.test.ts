@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createHuntPolicySnapshot } from "@/lib/hunt/policy";
 import { withTargetExecution } from "@/server/execution";
 const calls = vi.hoisted(() => ({
   runAuthBypass: vi.fn(async () => {}),
@@ -19,6 +20,7 @@ const calls = vi.hoisted(() => ({
   runBusinessLogicRace: vi.fn(async () => {}),
   runBusinessLogicTamper: vi.fn(async () => {}),
   runBusinessLogicWorkflow: vi.fn(async () => {}),
+  disclosure: vi.fn(async () => {}),
   command: vi.fn(async () => ({ code: 0, timedOut: false })),
 }));
 vi.mock("@/server/scanners/auth-bypass", () => ({ runAuthBypass: calls.runAuthBypass }));
@@ -39,6 +41,9 @@ vi.mock("@/server/scanners/deserialization", () => ({ runDeserialization: calls.
 vi.mock("@/server/scanners/businessLogicRace", () => ({ runBusinessLogicRace: calls.runBusinessLogicRace }));
 vi.mock("@/server/scanners/businessLogicTamper", () => ({ runBusinessLogicTamper: calls.runBusinessLogicTamper }));
 vi.mock("@/server/scanners/businessLogicWorkflow", () => ({ runBusinessLogicWorkflow: calls.runBusinessLogicWorkflow }));
+vi.mock("@/server/hunt/runtime", () => ({ withHuntSession: vi.fn(async (_ctx, policy, work) => work({ families: createHuntPolicySnapshot(policy).families.map(f => ({ ...f, safeSubset: f.selected })) })), runFamilyTechniques: vi.fn(async (_ctx, family) => { if (family === "information-disclosure") await calls.disclosure(); }) }));
+vi.mock("@/server/hunt/readiness", () => ({ loadHuntReadiness: vi.fn(async (_target, policy) => ({ families: createHuntPolicySnapshot(policy).families.map(f => ({ ...f, safeSubset: f.selected, state: f.selected ? "READY" : "NOT_SELECTED", prerequisites: [], riskClass: "SAFE_ACTIVE" })) })) }));
+vi.mock("@/server/hunt/snapshot", () => ({ startHuntSnapshot: vi.fn(async (_id, execution) => createHuntPolicySnapshot(execution)) }));
 vi.mock("@/server/scanners/runCommand", () => ({ runCommand: calls.command }));
 vi.mock("@/server/scanners/context", () => ({ loadScanContext: vi.fn(async () => ({ scanRunId: "r", targetId: "t", userId: "u", host: "api.example.com", baseUrl: "https://api.example.com" })), logLine: vi.fn(async () => {}) }));
 import { runHunt } from "@/server/scanners/hunt";
@@ -49,7 +54,8 @@ describe("Hunt program policy", () => {
     await run([], []);
     expect(calls.runXss).toHaveBeenCalledOnce();
     expect(calls.runSqli).toHaveBeenCalledOnce();
-    expect(calls.command).toHaveBeenCalledOnce();
+    expect(calls.disclosure).toHaveBeenCalledOnce();
+    expect(calls.command).not.toHaveBeenCalled();
   });
   it("explicit exclusion wins and excludes shared family aliases", async () => {
     await run(["XSS", "IDOR", "ACCESS_CONTROL"], ["XSS", "ACCESS_CONTROL"]);

@@ -1,4 +1,4 @@
-import { assertExecutionUrl, executionHeaders } from "@/server/execution";
+import { assertExecutionUrl, executionHeaders, currentTargetExecution } from "@/server/execution";
 // Minimal HTTP probe helper for the vuln-class scanners. Uses global fetch with
 // a hard per-request timeout and manual redirect handling (so a 30x is observed,
 // not silently followed — important for auth/bypass checks). Never throws: a
@@ -37,20 +37,33 @@ export async function probe(
   opts: ProbeOptions = {},
 ): Promise<ProbeResult> {
   const method = opts.method ?? "GET";
-  const maxBody = opts.maxBodyBytes ?? DEFAULT_MAX_BODY;
+  const maxBody = Math.min(opts.maxBodyBytes ?? DEFAULT_MAX_BODY, DEFAULT_MAX_BODY);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT);
   const started = Date.now();
+  let release: (() => void) | undefined;
   try {
     assertExecutionUrl(url);
+    const guard = currentTargetExecution().requestGuard;
+    release = await guard?.acquire(url, method);
     const res = await fetch(url, {
       method,
       headers: executionHeaders(opts.headers),
       body: opts.body,
       redirect: "manual",
-      signal: controller.signal,
+      signal: AbortSignal.any([controller.signal, ...(guard ? [guard.signal, AbortSignal.timeout(Math.max(1, Math.min(5000, guard.remainingMs())))] : [])]),
     });
-    const raw = await res.text().catch(() => "");
+    const reader = res.body?.getReader();
+    const chunks: Uint8Array[] = []; let bytes = 0;
+    if (reader) {
+      try {
+        while (bytes < maxBody) {
+          const { done, value } = await reader.read(); if (done) break;
+          const part = value.subarray(0, maxBody - bytes); chunks.push(part); bytes += part.length;
+        }
+      } finally { await reader.cancel().catch(() => {}); }
+    }
+    const raw = Buffer.concat(chunks).toString("utf8");
     const body = raw.length > maxBody ? raw.slice(0, maxBody) : raw;
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => {
@@ -77,6 +90,7 @@ export async function probe(
       error: err instanceof Error ? err.message : String(err),
     };
   } finally {
+    release?.();
     clearTimeout(timer);
   }
 }
