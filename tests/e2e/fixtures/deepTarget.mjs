@@ -1,10 +1,15 @@
 // Local read-only audit target. Never records cookies, tokens, bodies or query values.
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 const requests = [];
 createServer((req, res) => {
   const u = new URL(req.url ?? "/", "http://e2e-deep-audit.test");
   if (u.pathname === "/__audit/summary") { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ requests })); return; }
   requests.push({ host: req.headers.host, method: req.method, path: u.pathname, ua: req.headers["user-agent"] });
+  if (u.pathname === "/login") {
+    if (req.method === "POST") { res.setHeader("Set-Cookie", `fixture_session=${randomUUID()}; HttpOnly; SameSite=Lax; Path=/`); res.end("Signed in to isolated fixture"); return; }
+    res.setHeader("Content-Type", "text/html"); res.end('<html><form method="POST" action="/login"><label>Email<input type="email" name="email"></label><label>Password<input type="password" name="password"></label><button type="submit">Sign in</button></form></html>'); return;
+  }
   if (!["GET", "HEAD"].includes(req.method)) { res.writeHead(405); res.end("Read-only fixture"); return; }
   if (u.pathname === "/redirect") { res.writeHead(302, { location: "http://e2e-foreign-audit.test/foreign" }); res.end(); return; }
   if (u.pathname === "/api/objects/123") {
