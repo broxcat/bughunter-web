@@ -161,8 +161,10 @@ export default function FindingsPage({
   }
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetch(`/api/findings?targetId=${encodeURIComponent(id)}`).then(async res => {
+      if (!res.ok) throw new Error("Unable to load findings");
+      setFindings(await res.json());
+    }).catch(e => setError(e.message)).finally(() => setLoading(false));
   }, [id]);
 
   async function createFinding(e: React.FormEvent) {
@@ -205,10 +207,10 @@ export default function FindingsPage({
     <div className="space-y-8">
       <div>
         <Link
-          href={`/targets/${id}`}
+          href={`/hosts/${id}`}
           className="text-sm text-muted hover:text-foreground"
         >
-          ← Target
+          ← Host
         </Link>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
           Findings

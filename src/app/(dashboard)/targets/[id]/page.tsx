@@ -1,16 +1,24 @@
 "use client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
 import ProgramForm, { type ProgramData } from "@/components/ProgramForm";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 export default function ProgramPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const [program, setProgram] = useState<ProgramData | null>(null);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
   async function load() { try { const r = await fetch(`/api/programs/${id}`); if (!r.ok) throw new Error("Target not found"); setProgram(await r.json()); } catch (e) { setError((e as Error).message); } }
-  useEffect(() => { fetch(`/api/programs/${id}`).then(async r => { if (!r.ok) throw new Error("Target not found"); setProgram(await r.json()); }).catch(e => setError(e.message)); }, [id]);
+  useEffect(() => { fetch(`/api/programs/${id}`).then(async r => {
+    if (r.status === 404) {
+      const legacy = await fetch(`/api/targets/${id}`);
+      if (legacy.ok) { router.replace(`/hosts/${id}`); return; }
+    }
+    if (!r.ok) throw new Error("Target not found"); setProgram(await r.json());
+  }).catch(e => setError(e.message)); }, [id, router]);
   if (!program) return <p role="status">{error || "Loading…"}</p>;
   return <div className="space-y-6"><Link href="/targets" className="text-brand">← Targets</Link><h1 className="text-2xl font-semibold">{program.companyName}</h1>
     <Button variant="secondary" onClick={() => setEditing(!editing)}>{editing ? "Cancel" : "Edit Target"}</Button>

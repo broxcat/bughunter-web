@@ -1,13 +1,15 @@
 import { join } from "node:path";
-import { currentTargetExecution } from "@/server/execution";
+import { assertExecutionUrl, currentTargetExecution } from "@/server/execution";
 
 export const TOOL_CONFIG = join(process.cwd(), "src/server/scanners/templates/config.yaml");
 export const NUCLEI_TEMPLATE = join(process.cwd(), "src/server/scanners/templates/git-config.yaml");
 const HTTP_TOOLS = new Set(["httpx", "katana", "nuclei", "dalfox"]);
 /** The backend is the final writer of UA headers, even if a caller proposes one. */
 export function enforcedToolArgs(cmd: string, args: string[]): string[] {
-  if (!HTTP_TOOLS.has(cmd)) return args;
   const ctx = currentTargetExecution();
+  if (cmd === "nmap") return ["-sT", "-Pn", "-n", ctx.host.split(":")[0]];
+  if (!HTTP_TOOLS.has(cmd)) throw new Error("Unaudited scanner tool; refusing execution");
+  for (const arg of args) if (/^https?:\/\//i.test(arg)) assertExecutionUrl(arg, ctx);
   const clean: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];

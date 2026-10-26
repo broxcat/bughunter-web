@@ -1,10 +1,12 @@
 "use client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { ProgramData } from "@/components/ProgramForm";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 export default function ScopesPage() {
+  const router = useRouter();
   const [programs, setPrograms] = useState<ProgramData[]>([]);
   const [legacy, setLegacy] = useState<{ id: string; host: string; programId: string | null }[]>([]);
   const [error, setError] = useState("");
@@ -18,7 +20,7 @@ export default function ScopesPage() {
     e.preventDefault(); const id = new FormData(e.currentTarget).get("program");
     const r = await fetch(`/api/programs/${id}/hosts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ host: host.host, legacyTargetId: host.id }) });
     if (!r.ok) { setError((await r.json()).error); return; }
-    window.location.assign(`/scopes/${id}`);
+    router.push(`/scopes/${id}`);
   }
   return <div className="space-y-6"><h1 className="text-2xl font-semibold">Scopes</h1><p className="text-muted">Choose a Target to manage its hosts.</p>{error && <p role="alert">{error}</p>}
     {programs.map(p => <Card className="p-5" key={p.id}><Link className="text-xl text-brand" href={`/scopes/${p.id}`}>{p.companyName}</Link><p>Scope — {p.targets.length} hosts</p></Card>)}

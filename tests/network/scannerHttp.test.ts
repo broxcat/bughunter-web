@@ -18,7 +18,7 @@ network("real HTTP tools and Chromium capture", () => {
   let server: Server;
   let base: string;
   const seen: { ua: string | undefined; url: string | undefined; host: string | undefined }[] = [];
-  const ua = "BugHunter-Program-Required/7.3";
+  const ua = "BugHunter-Program-Required/7.3 $(printf literal-argv)";
   beforeAll(async () => {
     server = createServer((req, res) => {
       seen.push({ ua: req.headers["user-agent"], url: req.url, host: req.headers.host });

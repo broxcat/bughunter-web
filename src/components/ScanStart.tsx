@@ -28,8 +28,8 @@ export default function ScanStart({ type }: { type: "RECON" | "HUNT" }) {
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
   return <div className="space-y-6"><h1 className="text-2xl font-semibold">{type === "RECON" ? "Recon" : "Hunt"}</h1><p className="text-muted">Choose a Target and an active in-scope host.</p><Card className="p-6"><form className="space-y-4" onSubmit={start}>
-    <label className="block">Company<select className="block w-full rounded border border-border bg-surface p-2" value={company} onChange={e => { setCompany(e.target.value); setHost(programs.find(p => p.id === e.target.value)?.hosts[0]?.id ?? ""); }}>{programs.map(p => <option value={p.id} key={p.id}>{p.companyName}</option>)}</select></label>
-    <label className="block">Host<select className="block w-full rounded border border-border bg-surface p-2" value={host} onChange={e => setHost(e.target.value)}>{program?.hosts.map(h => <option value={h.id} key={h.id}>{h.host}</option>)}</select></label>
+    <label className="block">Company<select aria-label="Company" className="block w-full rounded border border-border bg-surface p-2" value={company} onChange={e => { setCompany(e.target.value); setHost(programs.find(p => p.id === e.target.value)?.hosts[0]?.id ?? ""); }}>{programs.map(p => <option value={p.id} key={p.id}>{p.companyName}</option>)}</select></label>
+    <label className="block">Host<select aria-label="Host" className="block w-full rounded border border-border bg-surface p-2" value={host} onChange={e => setHost(e.target.value)}>{program?.hosts.map(h => <option value={h.id} key={h.id}>{h.host}</option>)}</select></label>
     {program && <p className="text-sm">Required User-Agent: <code>{program.requiredUserAgent}</code></p>}
     {!host && <p>Add a concrete FQDN to <Link className="text-brand" href={program ? `/scopes/${program.id}` : "/targets"}>Scope</Link> to start scanning.</p>}
     {error && <p role="alert">{error}</p>}<Button type="submit" disabled={!host || busy}>{busy ? "Starting…" : type === "RECON" ? "Start Recon" : "Start Hunt"}</Button>

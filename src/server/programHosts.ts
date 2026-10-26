@@ -16,10 +16,10 @@ export async function mutateHost(ownerId: string, programId: string, action: "AD
     if (previous?.host === host) return previous;
     if (await tx.target.findFirst({ where: { programId, active: true, host } })) throw new HostError("This host is already in Scope", 409);
     if (input.legacyTargetId) {
-      const old = await tx.target.findFirst({ where: { id: input.legacyTargetId, userId: ownerId, programId: null } });
+      const old = await tx.target.findFirst({ where: { id: input.legacyTargetId, userId: ownerId, programId: null }, include: { scope: true } });
       if (!old || normalizeFqdn(old.host) !== host) throw new HostError("Previous host not found or FQDN differs", 404);
-      const scope = await tx.scope.create({ data: { userId: ownerId, hostPattern: host, status: "APPROVED" } });
-      return tx.target.update({ where: { id: old.id }, data: { programId, active: true, scopeId: scope.id } });
+      if (old.scope.status !== "APPROVED") throw new HostError("This previous host cannot be reused. Add its FQDN as a new scope host.");
+      return tx.target.update({ where: { id: old.id }, data: { programId, active: true } });
     }
     if (previous) await tx.target.update({ where: { id: previous.id }, data: { active: false } });
     const scope = await tx.scope.create({ data: { userId: ownerId, hostPattern: host, status: "APPROVED" } });

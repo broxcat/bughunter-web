@@ -428,4 +428,46 @@ d("API route authorization (integration)", () => {
     await expect(loadTargetExecution(active.id)).rejects.toThrow(/out of scope/);
   });
 
+  it("reuses legacy identities only after explicit assignment and preserves their original authorization relation", async () => {
+    const { POST } = await import("@/app/api/programs/[id]/hosts/route");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Legacy Lab", requiredUserAgent: "Legacy/1" } });
+    const scope = await prisma.scope.create({ data: { userId, hostPattern: "*.legacy.example", status: "APPROVED" } });
+    const old = await prisma.target.create({ data: { userId, scopeId: scope.id, host: "old.legacy.example" } });
+    const run = await prisma.scanRun.create({ data: { targetId: old.id, type: "RECON" } });
+    const res = await POST(req("http://localhost", { host: old.host, legacyTargetId: old.id }), { params: Promise.resolve({ id: p.id }) });
+    expect(res.status).toBe(201);
+    const host = await res.json();
+    expect(host.id).toBe(old.id);
+    expect(host.scopeId).toBe(scope.id);
+    expect((await prisma.scanRun.findUniqueOrThrow({ where: { id: run.id } })).targetId).toBe(old.id);
+  });
+  it("rejects cross-user host edits/removals and unauthenticated program reads", async () => {
+    const { POST } = await import("@/app/api/programs/[id]/hosts/route");
+    const { PATCH, DELETE } = await import("@/app/api/programs/[id]/hosts/[hostId]/route");
+    const { GET } = await import("@/app/api/programs/route");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Owned Lab", requiredUserAgent: "Owned/1" } });
+    const h = await (await POST(req("http://localhost", { host: "owned.example.test" }), { params: Promise.resolve({ id: p.id }) })).json();
+    const params = { params: Promise.resolve({ id: p.id, hostId: h.id }) };
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await PATCH(req("http://localhost", { host: "stolen.example.test" }, "PATCH"), params)).status).toBe(404);
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await DELETE(req("http://localhost", {}, "DELETE"), params)).status).toBe(404);
+    authMock.auth.mockResolvedValueOnce(null);
+    expect((await GET()).status).toBe(401);
+    expect((await prisma.target.findUniqueOrThrow({ where: { id: h.id } })).active).toBe(true);
+  });
+  it("serializes concurrent duplicate additions and never rewrites historical scan User-Agents", async () => {
+    const { POST } = await import("@/app/api/programs/[id]/hosts/route");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Race Lab", requiredUserAgent: "Race/1" } });
+    const add = () => POST(req("http://localhost", { host: "race.example.test" }), { params: Promise.resolve({ id: p.id }) });
+    const responses = await Promise.all([add(), add()]);
+    expect(responses.map(r => r.status).sort()).toEqual([201, 409]);
+    const target = await prisma.target.findFirstOrThrow({ where: { programId: p.id } });
+    const run = await prisma.scanRun.create({ data: { targetId: target.id, type: "RECON", status: "COMPLETED", requiredUserAgent: "Race/1" } });
+    await prisma.bountyProgram.update({ where: { id: p.id }, data: { requiredUserAgent: "Race/2" } });
+    const { loadTargetExecution } = await import("@/server/execution");
+    expect((await loadTargetExecution(target.id)).requiredUserAgent).toBe("Race/2");
+    expect((await prisma.scanRun.findUniqueOrThrow({ where: { id: run.id } })).requiredUserAgent).toBe("Race/1");
+  });
+
 });

@@ -18,7 +18,6 @@ interface ScanRun {
   id: string;
   type: ScanType;
   status: string;
-  jobId: string | null;
   requiredUserAgent: string | null;
   createdAt: string;
 }
@@ -126,7 +125,6 @@ export default function TargetDetailPage({
         if (c.ok) setCredentials((await c.json()).credentials ?? []);
         setLoading(false);
       }).catch(e => { setError(e.message); setLoading(false); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   // Default the login URL to <scheme>://<host>/login when switching to the
@@ -313,19 +311,14 @@ export default function TargetDetailPage({
   return (
     <div className="space-y-8">
       <div>
-        <Link href="/targets" className="text-sm text-muted hover:text-foreground">
-          ← Targets
+        <Link href={target.program ? `/scopes/${target.program.id}` : "/scopes"} className="text-sm text-muted hover:text-foreground">
+          ← Scope
         </Link>
         <h1 className="mt-2 font-mono text-2xl font-semibold tracking-tight text-foreground">
           {target.program?.companyName && <span className="block text-sm font-sans">{target.program.companyName}</span>}{target.host}
         </h1>
         {target.label && <p className="text-sm text-muted">{target.label}</p>}
-        <p className="mt-1 flex items-center gap-2 text-xs text-subtle">
-          <span className="font-mono">scope {target.scope.hostPattern}</span>
-          <Badge tone={STATUS_TONE[target.scope.status] ?? "neutral"}>
-            {target.scope.status}
-          </Badge>
-        </p>
+        <p className="mt-1 text-sm text-muted">{scopeApproved ? "Active scope host" : "History — unavailable for new scans"}</p>
       </div>
 
       {error && (
@@ -445,10 +438,8 @@ export default function TargetDetailPage({
         Compliance caveat: the operator is responsible for ensuring these test
         accounts and their use comply with that program's rules of engagement.
       */}
-      <div className="space-y-3">
-        <h2 className="text-sm font-medium text-foreground">
-          Target credentials
-        </h2>
+      <details className="space-y-3">
+        <summary className="cursor-pointer text-sm font-medium text-foreground">Advanced — host credentials</summary>
         <Card className="space-y-5 p-4">
           <div className="rounded-md border border-border-strong bg-surface-2 px-3 py-2 text-xs text-muted">
             These are credentials for the <strong>TARGET</strong> you are
@@ -668,7 +659,7 @@ export default function TargetDetailPage({
             )}
           </div>
         </Card>
-      </div>
+      </details>
     </div>
   );
 }

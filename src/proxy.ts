@@ -70,9 +70,7 @@ export default auth(async (req) => {
 });
 
 export const config = {
-  // auth() imports the Prisma adapter, so run middleware on the Node.js runtime
-  // (stable in Next 16) rather than the edge.
-  runtime: "nodejs",
+  // Proxy uses the Node.js runtime by default in Next 16.
   // Skip Next internals and static assets; run on everything else.
   matcher: [
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|otf|css|js|map|txt|xml|json)$).*)",

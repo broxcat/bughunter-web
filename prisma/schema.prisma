@@ -171,7 +171,8 @@ model Target {
   userId    String
   scopeId   String
   // Bare host (no scheme, no path, no trailing slash); may include :port.
-  // Unique per user. subfinder/nmap take this (port stripped); httpx/katana/
+  // Active hosts are unique per program (partial SQL index). nmap takes the
+  // host without a port; httpx/katana/
   // nuclei take scheme://host rebuilt from `scheme`.
   host      String
   // Original scheme ("http"/"https") when the user entered a full URL; null

@@ -47,23 +47,11 @@ export default function ReportPage({
   const [generating, setGenerating] = useState(false);
   const [markdown, setMarkdown] = useState<string | null>(null);
 
-  async function load() {
-    try {
-      const res = await fetch(`/api/findings?targetId=${encodeURIComponent(id)}`);
-      if (!res.ok) throw new Error(`Failed to load findings (${res.status})`);
-      const all: Finding[] = await res.json();
-      setPassed(all.filter((f) => f.gateStatus === "PASSED"));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load findings");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetch(`/api/findings?targetId=${encodeURIComponent(id)}`).then(async res => {
+      if (!res.ok) throw new Error("Unable to load findings");
+      const all: Finding[] = await res.json(); setPassed(all.filter(f => f.gateStatus === "PASSED"));
+    }).catch(e => setError(e.message)).finally(() => setLoading(false));
   }, [id]);
 
   async function generate(e: React.FormEvent) {
@@ -99,10 +87,10 @@ export default function ReportPage({
     <div className="space-y-8">
       <div>
         <Link
-          href={`/targets/${id}`}
+          href={`/hosts/${id}`}
           className="text-sm text-muted hover:text-foreground"
         >
-          ← Target
+          ← Host
         </Link>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
           Report

@@ -1,86 +1,121 @@
-# bughunter-web
+# BugHunter Web
 
-Web dashboard for the **Agentic-Bug-Hunter** CLI: an authorization-gated bug-bounty
-workflow — declare scope → approve it → recon/hunt → findings → triage gate → report.
+Bug bounty workflow: **Targets → Scope → Recon → Hunt → Findings → Report**.
 
-> **Security invariant (non-negotiable, every layer):** no scanner ever runs against a
-> target unless that target's `Scope` is `APPROVED`. The check happens when a Target is
-> created **and again** in the worker immediately before any tool is spawned (a scope can
-> be revoked between enqueue and execution). This is the authorization attestation; no
-> part of the app may relax it.
+A Target is a company or bug bounty program (VINCI, Doctolib, a private lab).
+Create it at `/targets` with a company name and an explicit **Required User-Agent**.
+Platform, program URL, rewards, scope hosts and vulnerability families are optional.
+Enter `BugHunter/1.0` explicitly when the program has no special User-Agent.
 
-## Stack
+Open the Target, then **Open Scope** to add, edit or remove FQDNs. All listed scope
+hosts are active. Supported inputs include `example.com`, `api.example.com` and
+`*.example.com`; case and the final DNS dot are normalized. Spaces, URLs, ports,
+paths and queries are rejected. Wildcards remain rules: add a concrete FQDN before
+scanning it. Discovery never automatically adds a new host to your authorized Scope.
 
-- **Next.js 16** (App Router) + React 19, TypeScript end to end
-- **PostgreSQL** + **Prisma 6**
-- **Redis** + **BullMQ** (serialized scan queue + live log pub/sub)
-- **Auth.js v5** (NextAuth beta) — credentials + optional GitHub/Google
-- **Tailwind v4** (via `@tailwindcss/turbopack` — no `postcss.config`; `next build` uses Turbopack)
-- **Docker** for the scanner runtime (nmap, nuclei, httpx, katana, subfinder, …)
+The **Out of scope** tab supports add/edit/remove. Explicit exclusions always win,
+even against a broader wildcard. Recon and Hunt let you choose a company, then an
+active concrete host that has not been excluded. Removed hosts cannot start scans.
+
+Qualifying and non-qualifying vulnerability families are optional. Empty qualifying
+allows all supported Hunt families; an explicit non-qualifying family always wins.
+Unsupported families do not enable new scanner capabilities. Monetary values use
+PostgreSQL `DECIMAL(18,2)` and decimal strings in the API, never binary floats.
+
+Program edits apply to future executions. The backend injects the current program
+User-Agent centrally into HTTP tools, internal probes and browser contexts. A scan
+records the actual execution-time User-Agent; program edits never rewrite history.
+See the [complete tool audit and HTTP guarantees](docs/scanner-http-audit.md),
+including deliberate limitations on passive provider enumeration, arbitrary Nuclei
+templates and browser redirects.
 
 ## Run
 
-```bash
-cp .env.example .env            # fill AUTH_SECRET, CREDENTIALS_ENCRYPTION_KEY, etc.
-docker compose up --build       # web + worker + postgres + redis
-# first boot: run migrations inside the web container
+Next.js 16 / React 19, Prisma 6 / PostgreSQL, BullMQ / Redis, Auth.js, Tailwind 4.
+
+```sh
+cp .env.example .env
+# Fill AUTH_SECRET, CREDENTIALS_ENCRYPTION_KEY and database/Redis settings.
+docker compose up --build -d
 docker compose exec web npx prisma migrate deploy
 ```
 
-Local dev without Docker: a Postgres + Redis reachable via `DATABASE_URL`/`REDIS_URL`, then
-`npm run dev` (app) and `npm run worker` (scan worker) in two terminals.
+Local development: provision Postgres and Redis, configure `.env`, then:
 
-> Note: `npx prisma generate` runs fine here; if an offline/sandboxed environment blocks the
-> engine download, that's an environment issue, not a code one — skip it and continue.
+```sh
+npm ci
+npx prisma generate
+npx prisma migrate deploy
+npm run dev
+# Separate terminal; scanner binaries and Playwright Chromium must be installed:
+npm run worker
+```
 
-## Prisma models (the frozen Phase-0 contract)
+## Data and upgrade
 
-| Model | One-liner |
-|---|---|
-| `User` / `Account` / `Session` / `VerificationToken` | Auth.js standard; `User.passwordHash` for credentials login |
-| `AiProviderConfig` | Per-user AI provider; API key stored **encrypted** (`apiKeyCipher`), never returned to the client |
-| `Scope` | Authorization record (`hostPattern`, `justification`, status `PENDING`/`APPROVED`/`REVOKED`) |
-| `Target` | A host to test; references a Scope that must be `APPROVED` |
-| `ScanRun` | One recon/hunt/validate execution (`type`, `status`, BullMQ `jobId`) |
-| `ScanLog` | Append-only scan output line (`stream` STDOUT/STDERR), streamed over SSE |
-| `Finding` | A result + triage gate (`gateStatus` UNVALIDATED/PASSED/KILLED, `gateAnswers` JSON) |
-| `Report` / `ReportItem` | A report and its items — items may reference **PASSED findings only** |
+`BountyProgram` is the business Target. `Target` remains the technical host identity
+because existing `ScanRun`, `Finding`, `TargetCredential` and `Report` relations
+already depend on it. Internal `Scope` authorization records remain; adding a host
+explicitly authorizes its exact identity without a separate approval screen.
 
-**`prisma/schema.prisma` is frozen after Phase 0.** Phase 1 agents must not edit it; a missing
-field is requested in the agent's final report, and the lead adds it once at the end of Phase 1.
+Migration `20261026090000_bounty_program_scope` is additive. It adds the parent,
+optional program relation, active membership flag, execution-time UA and a partial
+unique index for active hosts per program. No existing row is removed or reassigned.
 
-## Agent Teams ownership map (Phase 1 — disjoint file sets, built in parallel)
+Old hosts appear in **Scopes → Previous hosts and scan history**. Add them explicitly
+to a newly configured Target to scan again; there is no invented UA or automatic
+scope expansion during migration. Old scans, findings, reports and credentials
+remain accessible. Editing a FQDN creates a new identity and retires the previous
+one; removing it only retires it. Historical references stay attached to their
+original host. Previous host bookmarks redirect to their history page.
 
-| Agent | Owns (writes only these) |
-|---|---|
-| **AUTH** | `src/lib/auth.ts`, `src/middleware.ts`, `src/app/api/auth/[...nextauth]/route.ts`, `src/app/api/register/route.ts`, `src/app/login/page.tsx`, `src/app/register/page.tsx`, `src/types/next-auth.d.ts` |
-| **DOCKER** | `Dockerfile`, `docker-compose.yml`, `.env.example` (add only), `docker/` |
-| **QUEUE** | `src/server/queue/{connection,scanQueue,logBus,worker}.ts`, `src/server/scanners/{runCommand,recon,hunt}.ts` |
-| **REALTIME** | `src/app/api/scan-runs/[id]/stream/route.ts`, `src/components/ScanLogViewer.tsx` |
-| **UI** | `src/app/(dashboard)/**`, `src/app/api/{scopes,targets,findings}/**`, `src/app/api/scan-runs/route.ts`, `src/app/api/reports/route.ts`, `src/lib/{gate,reportTemplates}.ts`, `src/app/page.tsx` |
-| **SETTINGS** | `src/lib/crypto.ts`, `src/app/api/ai-providers/route.ts`, `src/app/(dashboard)/settings/page.tsx` |
+## Validation
 
-Shared, owned by the lead (do not edit as a teammate): `prisma/schema.prisma`, `src/lib/prisma.ts`,
-`package.json`, `tsconfig.json`, `next.config.ts`.
+```sh
+npm test
+npm run lint
+npx next typegen
+npx tsc --noEmit
+npm run build
+docker compose config --quiet
+git diff --check
+```
 
-### Cross-agent interface contracts (code against these; don't reach into another agent's files)
+API integration tests require a **disposable** Postgres database; their setup
+clears test data. Never point `TEST_DATABASE_URL` at a database you want to keep.
 
-- **Prisma client:** `import { prisma } from "@/lib/prisma"`.
-- **Auth:** `import { auth } from "@/lib/auth"`; `const session = await auth()`; user id at `session.user.id`.
-- **Scan job data (QUEUE ↔ UI):** `scanQueue.add("scan", { scanRunId: string, targetId: string, type: "RECON"|"HUNT"|"VALIDATE" })`.
-- **Log bus (QUEUE ↔ REALTIME):** in `src/server/queue/logBus.ts` —
-  `publishScanLog(scanRunId, { line, stream, createdAt })` and
-  `subscribeScanLog(scanRunId, cb): Promise<() => void>` (returns an unsubscribe fn).
-- **Worker script:** `npm run worker` → `tsx src/server/queue/worker.ts` (already in package.json).
-- **Crypto (SETTINGS):** `encryptSecret(plain): string` / `decryptSecret(cipher): string` in `src/lib/crypto.ts`,
-  keyed by `process.env.CREDENTIALS_ENCRYPTION_KEY`.
-- **No `npm install` in teammates:** all deps are already installed (prisma, @prisma/client,
-  next-auth, @auth/prisma-adapter, bullmq, ioredis, bcryptjs, zod, tsx). Need another? Note it in
-  your report instead of installing (avoids corrupting the shared lockfile).
-- **Verify your own files** with `npx tsc --noEmit`; the lead runs the full `npm run build` after merge.
+```sh
+docker run --name bh-workflow-tests -d -p 127.0.0.1:55439:5432 \
+  -e POSTGRES_USER=workflow -e POSTGRES_PASSWORD=workflow \
+  -e POSTGRES_DB=workflow postgres:16-alpine
+TEST_DATABASE_URL=postgresql://workflow:workflow@127.0.0.1:55439/workflow npm test
+# Real HTTP tool and browser captures (httpx, katana, nuclei, dalfox + Chromium):
+npm run test:network
+# Combined validation, including the actual tools:
+SCANNER_HTTP_TESTS=1 TEST_DATABASE_URL=postgresql://workflow:workflow@127.0.0.1:55439/workflow npm test
+```
 
-## Build order
+Test an upgrade with existing historical rows in a separate **empty** disposable
+Postgres database (the script refuses a nonempty database):
 
-Phase 0 (lead, done) → Phase 1 (6 teammates, parallel, disjoint files) → lead merges &
-`npm run build` → Phase 2 (port the Python `hunt.py`/`validate.py`/`brain.py` engine; solo,
-needs the CLI repo link).
+```sh
+TEST_MIGRATION_DATABASE_URL=postgresql://.../empty_upgrade_db npm run test:migration
+```
+
+HTTP tools are pinned in Docker to the audited versions. Real network tests use
+only a local HTTP server, check every captured UA, and reject foreign-host traffic.
+The suite also covers scanner-proposed UA overrides, redirects, XSS confirmation,
+CSRF browser PoCs and credential auto-login. The default suite runs local HTTP
+client tests even without external tools; optional suites are skipped when their
+prerequisites are not explicitly enabled.
+
+For the browser workflow smoke test, start the built app against disposable
+Postgres/Redis, without a worker (the test enqueues one Recon job but runs no scan):
+
+```sh
+TEST_APP_URL=http://localhost:3101 npm run test:ui
+```
+
+Secrets remain encrypted at rest. Credential values are never exposed by program
+or host list APIs. Findings still pass the existing manual triage gate before they
+can be included in reports.

@@ -23,7 +23,7 @@ export function scanRejection(target: { userId: string; host: string; active: bo
   if (target.scope.status !== "APPROVED") return "Target's scope is not APPROVED; refusing to scan";
   if (!target.active) return "Host has been removed from Scope";
   if (!target.program || target.program.ownerId !== target.userId) return "Add this host to a Target with a required User-Agent before scanning";
-  if (!programSchema.shape.requiredUserAgent.safeParse(target.program.requiredUserAgent).success) return "Target requires a valid User-Agent";
+  if (!programSchema.shape.requiredUserAgent.safeParse(target.program.requiredUserAgent).success || target.program.requiredUserAgent !== target.program.requiredUserAgent.trim()) return "Target requires a valid User-Agent";
   if (target.host.includes("*")) return "Add a concrete FQDN to Scope before scanning a wildcard rule";
   if (isExcluded(target.host, target.program.outOfScope)) return "Host is explicitly out of scope";
   return null;

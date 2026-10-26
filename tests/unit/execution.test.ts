@@ -42,7 +42,9 @@ describe("enforced Target HTTP context", () => {
         expect(args.join(" ")).not.toContain("wrong"); expect(args.join(" ")).toContain(context().requiredUserAgent);
         expect(safeCommandSummary(tool, args)).not.toContain("secret");
       }
-      expect(enforcedToolArgs("nmap", ["-sT"])).toEqual(["-sT"]);
+      expect(enforcedToolArgs("nmap", ["-sV", "-A", "foreign.example"])).toEqual(["-sT", "-Pn", "-n", "127.0.0.1"]);
+      expect(() => enforcedToolArgs("curl", [base])).toThrow(/Unaudited/);
+      expect(() => enforcedToolArgs("httpx", ["-u", "http://foreign.example"])).toThrow(/Scope/);
     });
   });
   it("rejects removed, excluded, wildcard and legacy hosts at the final execution gate", () => {
