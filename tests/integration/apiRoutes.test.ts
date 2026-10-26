@@ -91,6 +91,7 @@ d("API route authorization (integration)", () => {
     await prisma.scanRun.deleteMany();
     await prisma.target.deleteMany();
     await prisma.scope.deleteMany();
+    await prisma.bountyProgram.deleteMany();
     await prisma.user.deleteMany();
 
     const user = await prisma.user.create({
@@ -332,4 +333,38 @@ d("API route authorization (integration)", () => {
     expect(markdown).toContain("GET from 203.0.113.9");
     expect(markdown).toContain("À compléter : impact business/technique démontré");
   });
+  it("creates a business Target atomically with decimal rewards and active hosts", async () => {
+    const { POST } = await import("@/app/api/programs/route");
+    const res = await POST(req("http://localhost/api/programs", {
+      companyName: "VINCI", requiredUserAgent: "VINCI-Research/1.0", rewardLow: "100.10",
+      scopeHosts: ["WWW.Vinci.com.", "*.example.vinci.com"], outOfScope: ["admin.example.vinci.com"],
+    }));
+    expect(res.status).toBe(201);
+    const p = await res.json();
+    expect(p.rewardLow).toBe("100.1");
+    const hosts = await prisma.target.findMany({ where: { programId: p.id }, include: { scope: true } });
+    expect(hosts.map(t => t.host).sort()).toEqual(["*.example.vinci.com", "www.vinci.com"]);
+    expect(hosts.every(t => t.active && t.scope.status === "APPROVED")).toBe(true);
+  });
+  it("rejects missing User-Agent, invalid rewards and malformed scope at program creation", async () => {
+    const { POST } = await import("@/app/api/programs/route");
+    for (const body of [{ companyName: "x" }, { companyName: "x", requiredUserAgent: "" },
+      { companyName: "x", requiredUserAgent: "x", rewardLow: 0.1 },
+      { companyName: "x", requiredUserAgent: "x", scopeHosts: ["https://example.com/path"] }]) {
+      expect((await POST(req("http://localhost/api/programs", body))).status).toBe(400);
+    }
+  });
+  it("edits program configuration and protects ownership", async () => {
+    const { PATCH, GET } = await import("@/app/api/programs/[id]/route");
+    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Lab", requiredUserAgent: "old" } });
+    const context = { params: Promise.resolve({ id: p.id }) };
+    expect((await PATCH(req("http://localhost", { companyName: "Private Lab", requiredUserAgent: "new", rewardHigh: "999.99" }, "PATCH"), context)).status).toBe(200);
+    expect((await prisma.bountyProgram.findUniqueOrThrow({ where: { id: p.id } })).requiredUserAgent).toBe("new");
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await GET(req("http://localhost", {}), context)).status).toBe(404);
+    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
+    expect((await PATCH(req("http://localhost", { requiredUserAgent: "stolen" }, "PATCH"), context)).status).toBe(404);
+    expect((await PATCH(req("http://localhost", { requiredUserAgent: "" }, "PATCH"), context)).status).toBe(400);
+  });
+
 });
