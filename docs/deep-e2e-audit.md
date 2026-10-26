@@ -97,3 +97,16 @@ to that configured canonical host. No secret/cookie value was captured.
 - Regression: same intercepted browser failure against old image and fresh build;
   fresh build stays on login, shows retry error and restores the button.
 - Commit: `fix(auth): recover login form after network failure`.
+
+## Bugs discovered — stale authenticated second tab
+
+- Severity: MEDIUM; all authenticated dashboard pages.
+- Steps: sign in, open a second Targets tab, sign out in the first and focus the
+  second. Before fix its authenticated content remained until manual refresh.
+- Expected: clear stale authenticated UI and return to login without manual refresh.
+- Root cause: dashboard had no Auth.js session subscriber for signout broadcasts.
+- Fix: standard SessionProvider around authenticated content; unauthenticated
+  status immediately hides content and navigates to login. Session is rechecked
+  on focus; no token/cookie storage was introduced.
+- Regression: actual two-tab Chromium signout, no manual reload; passed on build.
+- Commit: `fix(auth): clear stale dashboard sessions across tabs`.
