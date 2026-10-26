@@ -31,4 +31,9 @@ describe("Hunt readiness prerequisites", () => {
   it("excluded families stay NOT_SELECTED regardless of configured prerequisites", () => {
     expect(resolveHuntReadiness({ qualifying: ["XSS", "JWT"], nonQualifying: ["JWT"] }, { ...empty, jwt: true }).find(f => f.family === "jwt")?.state).toBe("NOT_SELECTED");
   });
+  it("marks observed public XSS query coverage ready without requiring a session", () => {
+    expect(assess("xss", { ...empty, browserContext: true, publicXssSurface: true }).state).toBe("READY");
+    expect(assess("xss", { ...empty, browserContext: true }).state).toBe("DEGRADED");
+  });
+
 });

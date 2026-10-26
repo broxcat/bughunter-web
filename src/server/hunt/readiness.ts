@@ -37,6 +37,6 @@ export async function loadReadinessFacts(targetId: string, observed: Partial<Rea
 }
 export async function loadHuntReadiness(targetId: string, policy: HuntPolicy, observed: Partial<ReadinessFacts> = {}) {
   const recon = await recentReconCorpus(targetId);
-  const metadata = await loadReadinessFacts(targetId, { ...(recon ? { discoveryComplete: true, xmlEndpoint: recon.surface.xml, oauthFlow: recon.surface.oauth, objectReference: recon.surface.objectReferences, stateChangingEndpoint: recon.surface.forms, jwt: recon.surface.jwt } : {}), ...observed });
+  const metadata = await loadReadinessFacts(targetId, { ...(recon ? { publicXssSurface: recon.publicXssSurface, discoveryComplete: true, xmlEndpoint: recon.surface.xml, oauthFlow: recon.surface.oauth, objectReference: recon.surface.objectReferences, stateChangingEndpoint: recon.surface.forms, jwt: recon.surface.jwt } : {}), ...observed });
   return { ...metadata, families: resolveHuntReadiness(policy, metadata.facts) };
 }

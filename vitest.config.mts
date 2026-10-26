@@ -12,6 +12,8 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    // Auth.js imports extensionless Next entry points, resolved by the bundler.
+    server: { deps: { inline: ["next-auth"] } },
     include: ["tests/**/*.test.ts"],
   },
   resolve: {

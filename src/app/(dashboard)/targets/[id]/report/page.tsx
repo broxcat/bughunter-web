@@ -37,6 +37,8 @@ export default function ReportPage({
 }) {
   const { id } = use(params);
 
+  const [reports, setReports] = useState<{ id: string; title: string; markdown: string }[]>([]);
+  const [reportId, setReportId] = useState("");
   const [passed, setPassed] = useState<Finding[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,10 +50,13 @@ export default function ReportPage({
   const [markdown, setMarkdown] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/api/findings?targetId=${encodeURIComponent(id)}`).then(async res => {
-      if (!res.ok) throw new Error("Unable to load findings");
-      const all: Finding[] = await res.json(); setPassed(all.filter(f => f.gateStatus === "PASSED"));
-    }).catch(e => setError(e.message)).finally(() => setLoading(false));
+    const controller = new AbortController();
+    Promise.all([fetch(`/api/findings?targetId=${encodeURIComponent(id)}`, { signal: controller.signal }), fetch(`/api/reports?targetId=${encodeURIComponent(id)}`, { signal: controller.signal })]).then(async ([findingsResponse, reportsResponse]) => {
+      if (!findingsResponse.ok || !reportsResponse.ok) throw new Error("Unable to load findings and report history");
+      const all: Finding[] = await findingsResponse.json(); setPassed(all.filter(f => f.gateStatus === "PASSED"));
+      const saved = await reportsResponse.json(); setReports(saved); setReportId(saved[0]?.id ?? ""); setMarkdown(saved[0]?.markdown ?? null);
+    }).catch(e => { if (e.name !== "AbortError") setError("Unable to load findings and report history"); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [id]);
 
   async function generate(e: React.FormEvent) {
@@ -76,6 +81,7 @@ export default function ReportPage({
       }
       const report = await res.json();
       setMarkdown(report.markdown ?? "");
+      setReportId(report.id); setReports(previous => [report, ...previous]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to generate report");
     } finally {
@@ -116,10 +122,12 @@ export default function ReportPage({
             required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            aria-label="Report title"
             placeholder="Report title"
             className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
           />
           <select
+            aria-label="Report platform"
             value={platform}
             onChange={(e) => setPlatform(e.target.value as Platform)}
             className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground"
@@ -174,6 +182,7 @@ export default function ReportPage({
         </form>
       </Card>
 
+      {reports.length > 0 && <label className="block text-sm">Saved report<select aria-label="Saved report" className="mt-2 block w-full rounded border border-border bg-surface p-2" value={reportId} onChange={e => { setReportId(e.target.value); setMarkdown(reports.find(r => r.id === e.target.value)?.markdown ?? null); }}>{reports.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select></label>}
       {markdown !== null && (
         <div className="space-y-2">
           <h2 className="text-sm font-medium text-foreground">

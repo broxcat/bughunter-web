@@ -8,7 +8,7 @@ export default function SignOutButton() {
     <Button
       variant="secondary"
       size="sm"
-      onClick={() => signOut({ callbackUrl: "/login" })}
+      onClick={() => signOut({ redirectTo: "/login" })}
     >
       Sign out
     </Button>

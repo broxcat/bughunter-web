@@ -45,6 +45,9 @@ services:
     ports:
       - "3000:3000"
     env_file: .env
+    environment:
+      # Auth.js must use the browser-visible origin, not a container hostname.
+      AUTH_URL: "${AUTH_URL:?Set AUTH_URL to the public origin used in your browser}"
     depends_on:
       db:
         condition: service_healthy

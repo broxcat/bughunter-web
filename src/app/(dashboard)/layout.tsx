@@ -1,4 +1,5 @@
 import Link from "next/link";
+import AuthenticatedSession from "@/components/AuthenticatedSession";
 import { auth } from "@/lib/auth";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import SignOutButton from "./_components/SignOutButton";
@@ -20,7 +21,7 @@ export default async function DashboardLayout({
   const session = await auth();
 
   return (
-    <div className="flex min-h-full flex-col bg-background text-foreground">
+    <AuthenticatedSession><div className="flex min-h-full flex-col bg-background text-foreground">
       <header className="sticky top-0 z-10 border-b border-border bg-surface/90 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-3">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
@@ -45,6 +46,6 @@ export default async function DashboardLayout({
         </div>
       </header>
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">{children}</main>
-    </div>
+    </div></AuthenticatedSession>
   );
 }

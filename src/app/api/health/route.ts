@@ -1,46 +1,29 @@
-// Public health check. No auth — used by Docker/compose healthchecks and load
-// balancers to decide if this instance can serve traffic. Reports liveness of
-// the two hard dependencies: Postgres (via Prisma) and Redis (via the shared
-// ioredis connection). Returns 200 when both are up, 503 otherwise, naming
-// which dependency is down.
-//
-// NOTE: for this route to be reachable without a login, it must be in the
-// middleware public allowlist (middleware.ts, owned by Agent S).
-
+// Public readiness probe. Never wait on BullMQ's unbounded shared Redis retry queue.
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { redis } from "@/server/queue/connection";
+import { createRedisConnection } from "@/server/queue/connection";
 import { logger } from "@/lib/logger";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
+const DEPENDENCY_TIMEOUT_MS = 1500;
+async function dependencyUp(work: () => Promise<unknown>): Promise<"up" | "down"> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([Promise.resolve().then(work), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Dependency deadline")), DEPENDENCY_TIMEOUT_MS); })]);
+    return "up";
+  } catch { return "down"; } finally { clearTimeout(timer); }
+}
 export async function GET() {
-  let db: "up" | "down" = "down";
-  let redisStatus: "up" | "down" = "down";
-
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    db = "up";
-  } catch {
-    db = "down";
-  }
-
-  try {
-    await redis.ping();
-    redisStatus = "up";
-  } catch {
-    redisStatus = "down";
-  }
-
-  if (db === "up" && redisStatus === "up") {
-    logger.info({ db, redis: redisStatus }, "health check ok");
-    return NextResponse.json({ status: "ok", db, redis: redisStatus }, { status: 200 });
-  }
-
-  logger.warn({ db, redis: redisStatus }, "health check failed — dependency down");
-  return NextResponse.json(
-    { status: "error", db, redis: redisStatus },
-    { status: 503 },
-  );
+  // Dedicated, nonretrying connection: a health request must not queue a PING
+  // forever or accumulate commands on the worker's persistent connection.
+  const client = createRedisConnection({ maxRetriesPerRequest: 0, enableOfflineQueue: false, connectTimeout: 1000, retryStrategy: () => null });
+  const [db, redis] = await Promise.all([
+    dependencyUp(() => prisma.$queryRaw`SELECT 1`),
+    dependencyUp(async () => { await client.connect(); await client.ping(); }),
+  ]);
+  // Dispose on success, failure and when connect outlives the deadline.
+  client.disconnect();
+  const ok = db === "up" && redis === "up";
+  logger[ok ? "info" : "warn"]({ db, redis }, ok ? "health check ok" : "health check failed — dependency down");
+  return NextResponse.json({ status: ok ? "ok" : "error", db, redis }, { status: ok ? 200 : 503 });
 }

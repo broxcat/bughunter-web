@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import{chromium}from'playwright-chromium';import{writeFile,readFile}from'node:fs/promises';
+const app=process.env.TEST_APP_URL??'http://localhost:3103';assert(app==='http://localhost:3103');if(!process.env.E2E_EMAIL||!process.env.E2E_PASSWORD){console.error('E2E_AUTH_UNAVAILABLE: E2E_EMAIL and E2E_PASSWORD are required.');process.exit(2)}
+const b=await chromium.launch({headless:true,args:['--no-sandbox']});const c=await b.newContext();const p=await c.newPage();const results=[];const errors=[];p.on('pageerror',()=>errors.push('unhandled browser error'));
+const record=(scenario,pass)=>{results.push({scenario,result:pass?'PASS':'FAIL'});console.log(`${pass?'PASS':'FAIL'}: ${scenario}`)};
+try{
+await p.goto(`${app}/login`);await p.getByLabel('Email',{exact:true}).fill(process.env.E2E_EMAIL);await p.getByLabel('Password',{exact:true}).fill(process.env.E2E_PASSWORD);await p.getByRole('button',{name:'Sign in',exact:true}).click();await p.waitForURL(`${app}/targets`);
+for(const route of ['/targets/not-owned','/scopes/not-owned','/hosts/not-owned']){await p.goto(app+route);await p.waitForTimeout(300);const text=await p.locator('body').innerText();record(`safe missing-ID screen ${route}`,/not found|failed to load/i.test(text)&&!/PrismaClient|ciphertext|stack trace|at Object\./i.test(text))}
+let missingRequests=0;p.on('request',r=>{if(new URL(r.url()).pathname==='/api/scan-runs/not-owned/hunt')missingRequests++});await p.goto(`${app}/hunt/not-owned`);await p.getByText('Hunt not found',{exact:true}).waitFor();await p.waitForTimeout(5500);record('terminal Hunt 404 stops polling',missingRequests===1);record('terminal Hunt 404 clears loading state',await p.getByText('Loading Hunt…',{exact:true}).count()===0);
+await p.route(url=>url.pathname==='/api/programs',route=>route.abort());await p.goto(`${app}/targets`);await p.getByText(/^(Unable to load targets|Failed to fetch)$/).waitFor();record('unavailable API shows safe actionable error',true);await p.unrouteAll();
+const {hostId}=JSON.parse(await readFile('/tmp/deep-audit-objects.json','utf8'));await p.goto(`${app}/targets/${hostId}`);await p.waitForURL(`${app}/hosts/${hostId}`);record('legacy host Target URL redirects to correct history host',true);record('no unhandled browser exceptions during negative scenarios',errors.length===0);
+}catch(e){record(`error scenario (${e.name}; sensitive details suppressed)`,false);process.exitCode=1}finally{await writeFile('/tmp/deep-errors-results.json',JSON.stringify(results,null,2));await b.close()}
+if(results.some(r=>r.result==='FAIL'))process.exitCode=1;
