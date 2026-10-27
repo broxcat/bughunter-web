@@ -1,4 +1,5 @@
-// Shared ioredis connection for BullMQ + the log pub/sub bus.
+// Persistent ioredis connection for the blocking Worker and log pub/sub bus.
+// Short-lived scan producers have their own bounded connections in scanQueue.ts.
 //
 // BullMQ requires `maxRetriesPerRequest: null` on the connection it blocks on
 // (otherwise it throws at startup). We stash the primary client on globalThis in
@@ -42,7 +43,7 @@ const globalForRedis = globalThis as unknown as {
 };
 
 /**
- * The shared primary Redis connection (used by the BullMQ Queue/Worker and for
+ * The shared primary Redis connection (used by the BullMQ Worker and for
  * publishing log lines). Singleton across hot-reloads in dev.
  */
 export const redis: Redis = globalForRedis.redis ?? createRedisConnection();

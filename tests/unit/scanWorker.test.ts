@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Job } from "bullmq";
 import type { ScanJobData } from "@/server/queue/scanQueue";
-const mocks = vi.hoisted(() => ({ find: vi.fn(), update: vi.fn(), execution: vi.fn(), recon: vi.fn(), hunt: vi.fn(), log: vi.fn() }));
-vi.mock("@/lib/prisma", () => ({ prisma: { scanRun: { findUnique: mocks.find, update: mocks.update } } }));
+const mocks = vi.hoisted(() => ({ find: vi.fn(), update: vi.fn(), claim: vi.fn(), execution: vi.fn(), recon: vi.fn(), hunt: vi.fn(), log: vi.fn() }));
+vi.mock("@/lib/prisma", () => ({ prisma: { scanRun: { findUnique: mocks.find, update: mocks.update, updateMany: mocks.claim } } }));
 vi.mock("@/server/execution", () => ({ loadTargetExecution: mocks.execution, withTargetExecution: (_ctx: unknown, work: () => unknown) => work() }));
 vi.mock("@/server/scanners/recon", () => ({ runRecon: mocks.recon }));
 vi.mock("@/server/scanners/hunt", () => ({ runHunt: mocks.hunt }));
@@ -12,6 +12,7 @@ const target = { id: "target", host: "example.test", scope: { status: "APPROVED"
 const job = (type: ScanJobData["type"]) => ({ data: { scanRunId: "run", targetId: "target", type } }) as Job<ScanJobData>;
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.claim.mockResolvedValue({ count: 1 });
   mocks.execution.mockResolvedValue({ targetId: "target", requiredUserAgent: "Test/1" });
 });
 describe("worker execution outcome persistence", () => {
@@ -28,7 +29,7 @@ describe("worker execution outcome persistence", () => {
       const result = outcome === "SUCCESS" ? { outcome } : { outcome, reason: "analysis incomplete" };
       (type === "RECON" ? mocks.recon : mocks.hunt).mockResolvedValue(result);
       await processScan(job(type));
-      expect(mocks.update.mock.calls[0][0].data).toMatchObject({ status: "RUNNING", outcome: null, error: null });
+      expect(mocks.claim.mock.calls[0][0].data).toMatchObject({ status: "RUNNING", outcome: null, error: null });
       expect(mocks.update.mock.calls.at(-1)![0].data).toEqual({ status: outcome === "FAILED" ? "FAILED" : "COMPLETED", outcome, error: outcome === "SUCCESS" ? null : "analysis incomplete", finishedAt: expect.any(Date) });
     });
     it(`${type} blocking error fails the scan and the BullMQ job`, async () => {
@@ -38,6 +39,14 @@ describe("worker execution outcome persistence", () => {
       expect(mocks.update.mock.calls.at(-1)![0].data).toMatchObject({ status: "FAILED", outcome: "FAILED" });
     });
   }
+  it("an atomic DB claim prevents two workers from running the same scan", async () => {
+    mocks.find.mockResolvedValue({ status: "QUEUED", type: "RECON", target });
+    mocks.claim.mockResolvedValueOnce({ count: 1 }).mockResolvedValue({ count: 0 });
+    mocks.recon.mockResolvedValue({ outcome: "SUCCESS" });
+    await Promise.all([processScan(job("RECON")), processScan(job("RECON"))]);
+    expect(mocks.recon).toHaveBeenCalledOnce();
+    expect(mocks.claim.mock.calls[0][0].where).toEqual({ id: "run", status: "QUEUED" });
+  });
   it("revoked scope prevents all scan work", async () => {
     mocks.find.mockResolvedValue({ status: "QUEUED", type: "HUNT", target: { ...target, scope: { status: "REVOKED" } } });
     await processScan(job("HUNT"));

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import TargetAuthentication from "@/components/TargetAuthentication";
 import HuntRequirements from "@/components/HuntRequirements";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import ScanLogViewer from "@/components/ScanLogViewer";
 import {
   ScopePolicyView,
@@ -22,6 +22,7 @@ interface ScanRun {
   type: ScanType;
   status: string;
   outcome: string | null;
+  dispatch?: string | null;
   requiredUserAgent: string | null;
   createdAt: string;
 }
@@ -54,6 +55,7 @@ export default function TargetDetailPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState<ScanType | null>(null);
+  const pendingRequest = useRef<{ body: string; key: string } | null>(null);
   const [openRun, setOpenRun] = useState<string | null>(null);
 
   async function load() {
@@ -79,16 +81,19 @@ export default function TargetDetailPage({
     setStarting(type);
     setError(null);
     try {
+      const body = JSON.stringify({ targetId: id, type });
+      if (pendingRequest.current?.body !== body) pendingRequest.current = { body, key: crypto.randomUUID() };
       const res = await fetch("/api/scan-runs", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetId: id, type }),
+        headers: { "Content-Type": "application/json", "Idempotency-Key": pendingRequest.current.key },
+        body,
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error ?? `Failed to start scan (${res.status})`);
       }
       const run = await res.json();
+      pendingRequest.current = null;
       await load();
       setOpenRun(run.id);
     } catch (e) {
@@ -215,8 +220,8 @@ export default function TargetDetailPage({
                       <span className="text-sm font-medium text-foreground">
                         {run.type === "HUNT" ? <Link href={`/hunt/${run.id}`} className="text-brand">HUNT — open progress</Link> : run.type}
                       </span>
-                      <Badge tone={scanPresentation(run.status, run.outcome).tone}>
-                        {scanPresentation(run.status, run.outcome).label}
+                      <Badge tone={scanPresentation(run.status, run.outcome, run.dispatch).tone}>
+                        {scanPresentation(run.status, run.outcome, run.dispatch).label}
                       </Badge>
                     </div>
                     <span className="text-xs text-subtle">

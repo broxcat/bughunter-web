@@ -1,3 +1,5 @@
+import { withScanDispatch } from "@/lib/scanDispatch";
+import { dispatchSelect } from "@/server/queue/scanJobPublisher";
 import { scanRejection } from "@/server/execution";
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
@@ -20,7 +22,7 @@ export async function GET(
     include: {
       scope: true,
       program: true,
-      scanRuns: { orderBy: { createdAt: "desc" } },
+      scanRuns: { orderBy: { createdAt: "desc" }, include: { jobOutbox: { select: dispatchSelect } } },
       findings: { orderBy: { createdAt: "desc" } },
     },
   });
@@ -29,5 +31,5 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ ...target, scanRejection: scanRejection(target) });
+  return NextResponse.json({ ...target, scanRuns: target.scanRuns.map(withScanDispatch), scanRejection: scanRejection(target) });
 }

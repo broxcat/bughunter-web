@@ -29,6 +29,7 @@ model User {
   scopes           Scope[]
   targets          Target[]
   reports          Report[]
+  scanRequestKeys  ScanRequestKey[]
 }
 
 model Account {
@@ -281,9 +282,44 @@ model ScanRun {
   target   Target    @relation(fields: [targetId], references: [id], onDelete: Cascade)
   logs     ScanLog[]
   findings Finding[]
+  jobOutbox ScanJobOutbox?
+  requestKey ScanRequestKey?
 
   @@index([targetId])
   @@index([status])
+}
+
+// Durable publication intent. Redis failures never change ScanStatus/ScanOutcome.
+model ScanJobOutbox {
+  id            String                @id @default(cuid())
+  scanRunId     String                @unique
+  status        ScanJobDispatchStatus @default(PENDING)
+  attempts      Int                   @default(0)
+  lastError     String?               @db.Text
+  nextAttemptAt DateTime?
+  publishedAt   DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  scanRun       ScanRun               @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+}
+
+// Optional HTTP idempotence, scoped to the requesting user, enforced in SQL.
+model ScanRequestKey {
+  userId      String
+  key         String
+  requestHash String
+  scanRunId   String @unique
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scanRun     ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+
+  @@id([userId, key])
+}
+
+enum ScanJobDispatchStatus {
+  PENDING
+  PUBLISHED
 }
 
 // Append-only log lines streamed to the browser over SSE.

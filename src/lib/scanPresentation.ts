@@ -1,6 +1,8 @@
 import type { BadgeTone } from "@/components/ui/Badge";
 
-export function scanPresentation(status: string, outcome?: string | null): { label: string; tone: BadgeTone } {
+export function scanPresentation(status: string, outcome?: string | null, dispatch?: string | null): { label: string; tone: BadgeTone } {
+  if (status === "QUEUED" && dispatch === "PENDING") return { label: "En attente de publication", tone: "medium" };
+  if (status === "QUEUED" && dispatch === "PUBLISHED") return { label: "En file d’attente", tone: "neutral" };
   if (status === "QUEUED") return { label: "En attente", tone: "neutral" };
   if (status === "RUNNING") return { label: "En cours", tone: "info" };
   if (outcome === "UNSUPPORTED") return { label: "Non pris en charge", tone: "medium" };

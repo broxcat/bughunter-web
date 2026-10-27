@@ -47,6 +47,35 @@ the API rejects it before creating a run/job; legacy queued jobs become
 `FAILED` / `UNSUPPORTED`. Human finding evidence review is unchanged.
 Deploy the additive Prisma migration before restarting the web app and worker.
 
+Scan requests commit the run and a `ScanJobOutbox` delivery intent atomically in
+PostgreSQL. `QUEUED` alone does not mean Redis received the job: the additive API
+field `dispatch` is `PENDING`, `PUBLISHED`, or `null` for historical runs without
+an outbox. Redis outages return **202 Accepted** with `dispatch: "PENDING"`;
+confirmed delivery returns **201 Created**. `outcome` remains null until execution.
+
+The worker starts the durable dispatcher automatically. It retries only delivery,
+using bounded batches and a 1 second to 5 minute backoff. Each attempt uses a
+separate producer connection (500 ms connect/command timeouts, 1.5 second overall
+deadline, no reconnect/offline queue). PostgreSQL row locks with `SKIP LOCKED`
+serialize publication without a persistent `PUBLISHING` state. Every BullMQ job
+uses `jobId = scanRun.id`: a crash after Redis accepts the job is reconciled on
+republication. Already started/terminal scans settle their intents without
+re-enqueueing, and an atomic worker claim prevents duplicate network execution.
+Execution retries remain disabled (`attempts: 1`). Existing retention is unchanged.
+
+`POST /api/scan-runs` accepts an optional **Idempotency-Key** header (1–128 ASCII
+letters, digits, `.`, `_`, `~`, `-`). The database enforces uniqueness per user;
+replays, including concurrent requests, return the same run. Reusing a key with
+different parameters returns 409. The scan forms retain the key when retrying an
+unconfirmed request. No outbox or request keys are backfilled for historical runs.
+
+`npm run test:queue` provisions disposable PostgreSQL/Redis containers, runs the
+full test suite with real databases (including Redis stop/restart, stalled Redis,
+concurrent requests and crash recovery), then tests the additive migration.
+It requires Docker and removes only its own labelled containers afterwards.
+The public health endpoint retains its existing dependency checks; delivery
+attempts, backoff and overdue batches are logged server-side without raw errors.
+
 ## Run
 
 Next.js 16 / React 19, Prisma 6 / PostgreSQL, BullMQ / Redis, Auth.js, Tailwind 4.

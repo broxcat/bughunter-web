@@ -14,7 +14,8 @@
     "worker": "tsx src/server/queue/worker.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
-    "prisma:migrate:dev": "prisma migrate dev"
+    "prisma:migrate:dev": "prisma migrate dev",
+    "test:queue": "node tests/queue/runInfrastructure.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",

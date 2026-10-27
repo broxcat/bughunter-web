@@ -29,7 +29,7 @@ export async function GET(
   // owned by someone else are both reported as 404 so we never leak existence.
   const scanRun = await prisma.scanRun.findUnique({
     where: { id },
-    include: { target: true },
+    include: { target: true, jobOutbox: { select: { status: true } } },
   });
   if (!scanRun || scanRun.target.userId !== session.user.id) {
     return new Response("Not found", { status: 404 });
@@ -103,23 +103,14 @@ export async function GET(
         return;
       }
 
-      send("status", { status: scanRun.status, outcome: null });
+      send("status", { status: scanRun.status, outcome: null, dispatch: scanRun.jobOutbox?.status ?? null });
 
       // 3. Subscribe to live lines. If the bus is unavailable we still fall back
       //    to status polling below so the client eventually learns it's done.
-      try {
-        unsubscribe = await subscribeScanLog(id, (entry: LogEntry) => {
-          send("log", entry);
-        });
-      } catch {
-        // no live tail; polling still drives the terminal status event.
-      }
-
-      // The client may have disconnected while we awaited the subscription.
-      if (closed) {
-        cleanup();
-        return;
-      }
+      void subscribeScanLog(id, (entry: LogEntry) => send("log", entry)).then(stop => {
+        if (closed) stop();
+        else unsubscribe = stop;
+      }).catch(() => { /* DB polling remains available during a Redis outage. */ });
 
       // 4. Poll the run status; when it becomes terminal, send the final status
       //    event, unsubscribe and close. A comment line doubles as a heartbeat
@@ -136,7 +127,7 @@ export async function GET(
         try {
           const fresh = await prisma.scanRun.findUnique({
             where: { id },
-            select: { status: true, outcome: true },
+            select: { status: true, outcome: true, jobOutbox: { select: { status: true } } },
           });
           if (!fresh) {
             finish("FAILED");
@@ -145,7 +136,7 @@ export async function GET(
           if (TERMINAL.has(fresh.status)) {
             finish(fresh.status, fresh.outcome);
           } else {
-            send("status", { status: fresh.status, outcome: null });
+            send("status", { status: fresh.status, outcome: null, dispatch: fresh.jobOutbox?.status ?? null });
           }
         } catch {
           // transient DB hiccup; try again on the next tick.

@@ -86,7 +86,7 @@ try {
   await page.getByRole("button", { name: "Start Recon", exact: true }).click();
   await page.waitForURL(/\/hosts\/[^/]+$/);
   await page.getByRole("heading", { name: /www\.example\.test/ }).waitFor();
-  await page.getByText("QUEUED", { exact: true }).waitFor();
+  await page.getByText("En file d’attente", { exact: true }).waitFor();
   await page.getByRole("link", { name: /^Findings \(/ }).click();
   await page.getByRole("heading", { name: "Findings", level: 1, exact: true }).waitFor();
   await page.getByRole("link", { name: "← Host", exact: true }).click();

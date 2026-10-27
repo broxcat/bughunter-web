@@ -3,7 +3,7 @@ import Link from "next/link";
 import HuntRequirements from "@/components/HuntRequirements";
 import HuntFamilySelection from "@/components/HuntFamilySelection";
 import { resolveHuntFamilies } from "@/lib/hunt/policy";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -15,6 +15,7 @@ export default function ScanStart({ type }: { type: "RECON" | "HUNT" }) {
   const [host, setHost] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const pendingRequest = useRef<{ body: string; key: string } | null>(null);
   const [timing, setTiming] = useState<string[]>([]);
   useEffect(() => { fetch("/api/scan-hosts").then(async r => {
     if (!r.ok) throw new Error("Unable to load active scope hosts"); const p: Program[] = await r.json(); setPrograms(p);
@@ -26,9 +27,12 @@ export default function ScanStart({ type }: { type: "RECON" | "HUNT" }) {
   async function start(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setError("");
     try {
-      const r = await fetch("/api/scan-runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targetId: host, type, approvedTechniques: timing.flatMap(f => [`${f}.timing-screen`, `${f}.timing-confirm`]), ...(timing.length ? { approveBoundedTiming: true } : {}) }) });
+      const body = JSON.stringify({ targetId: host, type, approvedTechniques: timing.flatMap(f => [`${f}.timing-screen`, `${f}.timing-confirm`]), ...(timing.length ? { approveBoundedTiming: true } : {}) });
+      if (pendingRequest.current?.body !== body) pendingRequest.current = { body, key: crypto.randomUUID() };
+      const r = await fetch("/api/scan-runs", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": pendingRequest.current.key }, body });
       if (!r.ok) throw new Error((await r.json()).error);
       const run = await r.json();
+      pendingRequest.current = null;
       router.push(type === "HUNT" ? `/hunt/${run.id}` : `/hosts/${host}`);
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }

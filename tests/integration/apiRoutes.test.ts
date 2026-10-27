@@ -31,7 +31,7 @@ if (TEST_DB) process.env.DATABASE_URL = TEST_DB;
 const authMock = vi.hoisted(() => ({ auth: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ auth: authMock.auth }));
 vi.mock("@/server/queue/scanQueue", () => ({
-  scanQueue: { add: vi.fn(async () => ({ id: "job-test-1" })) },
+  deliverScanJob: vi.fn(async () => ({ alreadyPresent: false })),
 }));
 // Redis-backed rate limiter: mocked to "allowed" so the auth logic is exercised
 // without Redis. (It runs BEFORE the scope check in scan-runs; its connection
@@ -102,14 +102,14 @@ d("API route authorization (integration)", () => {
   }, 60_000);
 
   it("POST /api/scan-runs refuses VALIDATE without changing the database or queue", async () => {
-    const { scanQueue } = await import("@/server/queue/scanQueue");
+    const { deliverScanJob } = await import("@/server/queue/scanQueue");
     const before = await prisma.scanRun.count();
-    const queuedBefore = vi.mocked(scanQueue.add).mock.calls.length;
+    const queuedBefore = vi.mocked(deliverScanJob).mock.calls.length;
     const response = await scanRunsPost(req("http://localhost/api/scan-runs", { targetId: "legacy", type: "VALIDATE" }));
     expect(response.status).toBe(400);
     expect((await response.json()).error).toMatch(/not supported/);
     expect(await prisma.scanRun.count()).toBe(before);
-    expect(vi.mocked(scanQueue.add).mock.calls.length).toBe(queuedBefore);
+    expect(vi.mocked(deliverScanJob).mock.calls.length).toBe(queuedBefore);
   });
 
   it("POST /api/targets rejects (400) when the linked Scope is not APPROVED", async () => {

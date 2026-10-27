@@ -59,6 +59,11 @@ describe("scan presentation", () => {
   ])("renders %s / %s", (status, outcome, label, tone) => {
     expect(scanPresentation(status!, outcome)).toEqual({ label, tone });
   });
+  it("distinguishes delivery pending from confirmed queue acceptance", () => {
+    expect(scanPresentation("QUEUED", null, "PENDING")).toEqual({ label: "En attente de publication", tone: "medium" });
+    expect(scanPresentation("QUEUED", null, "PUBLISHED")).toEqual({ label: "En file d’attente", tone: "neutral" });
+    expect(scanPresentation("RUNNING", null, "PENDING").label).toBe("En cours");
+  });
   it("never shows live jobs as successful, even with an inconsistent outcome", () => {
     expect(scanPresentation("QUEUED", "SUCCESS").tone).not.toBe("passed");
     expect(scanPresentation("RUNNING", "SUCCESS").tone).not.toBe("passed");

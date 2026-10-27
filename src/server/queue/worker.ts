@@ -3,6 +3,7 @@
 import { Worker } from "bullmq";
 import { redis } from "./connection";
 import { SCAN_QUEUE_NAME, type ScanJobData } from "./scanQueue";
+import { startScanDispatcher } from "./scanDispatcher";
 import { processScan } from "./processScan";
 import { logger, scanLogger } from "@/lib/logger";
 
@@ -10,6 +11,8 @@ const worker = new Worker<ScanJobData>(SCAN_QUEUE_NAME, processScan, {
   connection: redis,
   concurrency: 1,
 });
+
+const dispatcher = startScanDispatcher();
 
 worker.on("failed", (job, err) => {
   const scanRunId = job?.data?.scanRunId;
@@ -23,7 +26,9 @@ worker.on("ready", () => {
 
 async function shutdown(signal: string) {
   logger.info(`worker ${signal} received, closing...`);
+  await dispatcher.close();
   await worker.close();
+  redis.disconnect();
   process.exit(0);
 }
 

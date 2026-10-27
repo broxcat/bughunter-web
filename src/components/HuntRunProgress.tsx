@@ -9,7 +9,7 @@ import type { HuntReport } from "@/lib/hunt/report";
 import type { HuntPolicySnapshot } from "@/lib/hunt/policy";
 import HuntFamilySelection from "./HuntFamilySelection";
 import { HUNT_REFERENCES } from "@/lib/hunt/references";
-type Run = { id: string; status: string; outcome?: string | null; error?: string | null; huntReport: HuntReport | null; huntSnapshot: HuntPolicySnapshot | null; target: { id: string; host: string; program: { companyName: string } | null } };
+type Run = { id: string; status: string; dispatch?: string | null; outcome?: string | null; error?: string | null; huntReport: HuntReport | null; huntSnapshot: HuntPolicySnapshot | null; target: { id: string; host: string; program: { companyName: string } | null } };
 export default function HuntRunProgress({ id }: { id: string }) {
   const [run, setRun] = useState<Run | null>(null);
   const [error, setError] = useState("");
@@ -27,7 +27,7 @@ export default function HuntRunProgress({ id }: { id: string }) {
     void poll(); return () => { controller.abort(); clearTimeout(timer); };
   }, [id]);
   const report = run?.huntReport;
-  const presentation = scanPresentation(run?.status ?? "CONNECTING", run?.outcome);
+  const presentation = scanPresentation(run?.status ?? "CONNECTING", run?.outcome, run?.dispatch);
   return <div className="space-y-6"><Link href="/hunt" className="text-brand">← Hunt</Link><h1 className="text-2xl font-semibold">HUNT</h1>
     {error && <p role="alert">{error}</p>}
     {!run ? <p>{error ? "No Hunt report available." : "Loading Hunt…"}</p> : <>
@@ -41,7 +41,7 @@ export default function HuntRunProgress({ id }: { id: string }) {
           <details><summary>Advanced techniques</summary><p className="text-sm text-muted">{f.reason}</p><ul className="space-y-2 mt-2">{report.techniques.filter(t => t.family === f.family).map(t => <li key={t.techniqueId}><p>{t.title} · {t.state} · {t.requests} requests</p><p className="text-sm text-muted">{t.reason}</p><ul>{t.referenceIds.map(ref => { const reference = Object.values(HUNT_REFERENCES).flat().find(r => r.id === ref); return reference ? <li key={ref}><a className="text-brand" href={reference.referenceUrl} target="_blank" rel="noreferrer">{reference.referenceTitle}</a></li> : null; })}</ul></li>)}</ul></details>
         </Card>)}
         <section className="space-y-3"><h2 className="text-xl">Evidence</h2><p className="text-sm text-muted">Signals and candidates need validation. Validated behavior is distinct from confirmed vulnerability impact.</p>{report.candidates.map(c => <Card key={c.id} className="p-4"><p className="font-semibold">{EVIDENCE_LABELS[c.evidenceLevel]} · {c.title}</p><p>{c.summary}</p>{c.findingId && <Link className="text-brand" href={`/targets/${run.target.id}/findings`}>Confirmed finding</Link>}<details><summary>Advanced evidence</summary><p>{c.techniqueId}</p><ul>{c.controls.map(control => <li key={control}>{control}</li>)}</ul></details></Card>)}{!report.candidates.length && <p>No evidence recorded.</p>}</section>
-      </> : <p>{run.status === "QUEUED" ? "Waiting for the scan worker. Readiness will be checked again before execution." : "No technique report available for this historical run."}</p>}
+      </> : <p>{run.status === "QUEUED" ? run.dispatch === "PENDING" ? "Waiting for queue delivery. Publication will resume automatically." : run.dispatch === "PUBLISHED" ? "Queued for the scan worker. Readiness will be checked again before execution." : "Queue delivery is unknown for this historical run." : "No technique report available for this historical run."}</p>}
       {run.huntSnapshot && <details><summary>Advanced — Hunt coverage</summary><HuntFamilySelection families={run.huntSnapshot.families} /></details>}
     </>}
   </div>;

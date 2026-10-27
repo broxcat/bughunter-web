@@ -46,10 +46,11 @@ export async function processScan(job: Job<ScanJobData>): Promise<void> {
   try {
     if (type !== scanRun.type || targetId !== target.id) throw new Error("Scan job does not match the stored target/type");
     const execution = await loadTargetExecution(target.id);
-    await prisma.scanRun.update({
-      where: { id: scanRunId },
+    const claimed = await prisma.scanRun.updateMany({
+      where: { id: scanRunId, status: "QUEUED" },
       data: { status: "RUNNING", outcome: null, startedAt: new Date(), finishedAt: null, error: null, requiredUserAgent: execution.requiredUserAgent },
     });
+    if (claimed.count !== 1) return; // Another worker won; never replay network execution.
     const result = await withTargetExecution(execution, async () => {
       switch (type) {
         case "RECON": return runRecon(target.host, scanRunId);

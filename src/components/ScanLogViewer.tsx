@@ -16,7 +16,8 @@ function ScanLogSession({ scanRunId }: { scanRunId: string }) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<string>("CONNECTING");
   const [outcome, setOutcome] = useState<string | null>(null);
-  const presentation = scanPresentation(status, outcome);
+  const [dispatch, setDispatch] = useState<string | null>(null);
+  const presentation = scanPresentation(status, outcome, dispatch);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -33,11 +34,12 @@ function ScanLogSession({ scanRunId }: { scanRunId: string }) {
 
     es.addEventListener("status", (event) => {
       try {
-        const { status: next, outcome: nextOutcome } = JSON.parse(
+        const { status: next, outcome: nextOutcome, dispatch: nextDispatch } = JSON.parse(
           (event as MessageEvent).data,
-        ) as { status: string; outcome?: string | null };
+        ) as { status: string; outcome?: string | null; dispatch?: string | null };
         setStatus(next);
         setOutcome(nextOutcome ?? null);
+        setDispatch(nextDispatch ?? null);
         if (TERMINAL.has(next)) {
           es.close();
         }
