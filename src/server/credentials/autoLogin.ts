@@ -1,6 +1,6 @@
 import { throwIfScanAborted } from "@/server/scanControl";
 import { assertExecutionUrl, currentTargetExecution, launchTargetBrowser, newTargetBrowserContext } from "@/server/execution";
-import { isSafeReadUrl } from "@/lib/hunt/safety";
+import { isSafeReadUrl } from "@/lib/observationSafety";
 import { type Browser, type BrowserContext } from "playwright-chromium";
 import { detectCsrf } from "./csrf";
 

@@ -2,9 +2,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import { chromium, type Browser } from "playwright-chromium";
-import { ScanAbortError, ScanControl, withScanControl } from "@/server/scanControl";
+import { ScanControl, withScanControl } from "@/server/scanControl";
 import { withTargetExecution, launchTargetBrowser, newTargetBrowserContext } from "@/server/execution";
-import { HuntBudget } from "@/server/hunt/budget";
 import { probe } from "@/server/scanners/http";
 const identity = { scanRunId: "run", attemptId: "attempt", workerId: "worker" };
 let server: Server, base: string, arrived: () => void, disconnected: () => void;
@@ -29,17 +28,7 @@ describe("scan AbortSignal propagation", () => {
     const work = withTargetExecution(target(), () => probe(base, { signal: controller.signal, timeoutMs: 60000 }));
     const rejected = expect(work).rejects.toThrow(); await received; controller.abort(); await rejected;
   });
-  it("HuntBudget distinguishes parent cancellation from timeout and closes its timer", async () => {
-    const control = new ScanControl(identity, async () => {});
-    await withScanControl(control, async () => {
-      const budget = new HuntBudget();
-      try {
-        control.abort("USER_CANCELLED"); expect(budget.controller.signal.aborted).toBe(true);
-        expect(() => budget.acquire(base, "GET")).toThrow(ScanAbortError);
-        expect(() => budget.acquire(base, "GET")).toThrow("USER_CANCELLED");
-      } finally { budget.close(); }
-    });
-  });
+
   it("closes Playwright context and browser on abort and awaits their cleanup", async () => {
     const control = new ScanControl(identity, async () => {});
     const context = { route: vi.fn(async () => {}), routeWebSocket: vi.fn(async () => {}), close: vi.fn(async () => {}), on: vi.fn() };

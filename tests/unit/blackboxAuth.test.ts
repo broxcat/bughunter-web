@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeCookies, sessionState, SESSION_TTL_MS, connectionInputSchema, readinessSummary } from "@/lib/targetAuth";
+import { normalizeCookies, sessionState, SESSION_TTL_MS, connectionInputSchema } from "@/lib/targetAuth";
 import { detectCsrf } from "@/server/credentials/csrf";
 import { findingReviewStatus, reviewDecision, evidenceReviewSchema } from "@/lib/evidenceReview";
 import { readFileSync, existsSync } from "node:fs";
@@ -28,11 +28,7 @@ describe("black-box authentication input and session state", () => {
     expect(connectionInputSchema.safeParse({ mode: "EMAIL_PASSWORD", username: "local-user", password: "fixture" }).success).toBe(true);
     expect(connectionInputSchema.safeParse({ mode: "BEARER", bearerToken: "fixture" }).success).toBe(false);
   });
-  it("keeps public Hunt ready with authenticated Hunt blocked until a session is verified", () => {
-    expect(readinessSummary(true, true, false)).toMatchObject({ publicReady: true, authenticatedReady: false });
-    expect(readinessSummary(true, true, true)).toMatchObject({ publicReady: true, authenticatedReady: true });
-    expect(readinessSummary(false, true, true)).toMatchObject({ publicReady: false, authenticatedReady: false });
-  });
+
 });
 describe("automatic ephemeral CSRF discovery", () => {
   it("discovers hidden inputs, meta, cookie and response headers", () => {
@@ -69,9 +65,6 @@ describe("evidence review replaces the questionnaire", () => {
     const ui = readFileSync("src/components/TargetAuthentication.tsx", "utf8");
     expect(ui).toContain("Username / password"); expect(ui).toContain("Session cookie"); expect(ui).toContain("Test connection");
     expect(ui).not.toMatch(/CSRF token|Login URL|login endpoint|Bearer token|Owned object URL|Credential purpose/);
-    const readiness = readFileSync("src/components/HuntRequirements.tsx", "utf8");
-    expect(readiness).toContain("Missing authenticated session"); expect(readiness).toContain("Ready for Hunt");
-    expect(readiness).not.toMatch(/PREREQUISITE_LABELS|families\.map|Hunt requirements/);
     expect(existsSync("src/lib/gate.ts")).toBe(false);
     expect(readFileSync("src/app/(dashboard)/targets/[id]/findings/page.tsx", "utf8")).not.toMatch(/7.Question|GATE_QUESTIONS|Run gate/);
   });

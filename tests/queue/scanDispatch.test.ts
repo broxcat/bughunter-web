@@ -180,7 +180,7 @@ describe.skipIf(!dbUrl || !redisUrl || !redisContainer)("real PostgreSQL + BullM
   });
   it("a replay with different parameters conflicts without creating work", async () => {
     await post("conflicting-key");
-    const response = await POST(new NextRequest("http://localhost/api/scan-runs", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": "conflicting-key" }, body: JSON.stringify({ targetId: owner.targetId, type: "HUNT" }) }));
+    const response = await POST(new NextRequest("http://localhost/api/scan-runs", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": "conflicting-key" }, body: JSON.stringify({ targetId: "different-owned-target", type: "RECON" }) }));
     expect(response.status).toBe(409);
   });
   it.each(["RUNNING", "COMPLETED", "FAILED", "CANCELLED"] as const)("never republishes a %s scan after its BullMQ job was removed", async status => {

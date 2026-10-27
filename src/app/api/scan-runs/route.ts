@@ -1,7 +1,4 @@
 import { executionSelect } from "@/server/queue/executionAttempts";
-import { APPROVABLE_HUNT_TECHNIQUES } from "@/lib/hunt/approvals";
-import { resolveHuntFamilies } from "@/lib/hunt/policy";
-import { HUNT_TECHNIQUES } from "@/lib/hunt/catalogData";
 import { scanRejection } from "@/server/execution";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -15,10 +12,8 @@ import { logger } from "@/lib/logger";
 import { RATE_LIMIT_POLICIES } from "@/lib/abusePolicy";
 
 const createRunSchema = z.object({
-  approvedTechniques: z.array(z.enum(APPROVABLE_HUNT_TECHNIQUES)).max(4).default([]),
-  approveBoundedTiming: z.literal(true).optional(),
   targetId: z.string().trim().min(1, "targetId is required"),
-  type: z.enum(["RECON", "HUNT"]),
+  type: z.literal("RECON"),
 });
 
 // GET /api/scan-runs?targetId=... — list runs for one owned target, newest first.
@@ -59,6 +54,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => null);
+  if (body?.type === "HUNT") return NextResponse.json({ error: "Legacy HUNT is retired. Create a Codex Research Workspace instead." }, { status: 410 });
   if (body?.type === "VALIDATE") {
     return NextResponse.json({ error: "VALIDATE scans are not supported: the validation engine is not implemented." }, { status: 400 });
   }
@@ -113,10 +109,6 @@ export async function POST(req: NextRequest) {
     const rejection = scanRejection(target);
     if (rejection) return NextResponse.json({ error: rejection }, { status: 400 });
 
-    if (parsed.data.approvedTechniques.length) {
-      const selected = new Set(resolveHuntFamilies(target.program!).filter(f => f.selected).map(f => f.family));
-      if (parsed.data.type !== "HUNT" || parsed.data.approveBoundedTiming !== true || parsed.data.approvedTechniques.some(id => !selected.has(HUNT_TECHNIQUES.find(t => t.id === id)?.family ?? ""))) return NextResponse.json({ error: "Explicit approval is required for selected bounded timing techniques" }, { status: 400 });
-    }
     const run = await createScanRequest(session.user.id, parsed.data, key);
     return await respond(run);
   } catch (err) {

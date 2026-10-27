@@ -1,3 +1,6 @@
+> Historical documentation: the vulnerability-family Hunt engine is retired.
+> See [Codex Research](CODEX-RESEARCH.md) for the current workflow.
+
 # Target HTTP execution audit
 
 Hunt catalogue update: this table documents the lower-level wrappers. Current

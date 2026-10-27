@@ -1,6 +1,6 @@
 import { currentScanControl, throwIfScanAborted, beforeScanNetwork, recordUsefulScanWork } from "@/server/scanControl";
 import { commandStepResult, reconExecutionResult, type ReconStepResult, type ScanExecutionResult } from "./result";
-import { analyzeCorpus, persistableCorpus } from "@/server/hunt/corpus";
+import { analyzeCorpus, persistableCorpus } from "@/server/recon/corpus";
 import { discoverCorpus, clearDiscoveryCorpus } from "./discovery";
 import { prisma } from "@/lib/prisma";
 import { currentTargetExecution } from "@/server/execution";

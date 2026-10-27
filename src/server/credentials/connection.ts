@@ -2,11 +2,11 @@ import { throwIfScanAborted } from "@/server/scanControl";
 import { prisma } from "@/lib/prisma";
 import { createHash, randomUUID } from "node:crypto";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
-import { sessionState, SESSION_TTL_MS, type SessionState } from "@/lib/targetAuth";
+import { SESSION_TTL_MS, type SessionState } from "@/lib/targetAuth";
 import { assertExecutionUrl } from "@/server/execution";
 import { probe, type ProbeResult } from "@/server/scanners/http";
-import { isSafeReadUrl, safeObservationUrl } from "@/lib/hunt/safety";
-import { bodyHash } from "@/server/hunt/evidence";
+import { isSafeReadUrl, safeObservationUrl } from "@/lib/observationSafety";
+import { bodyHash } from "@/server/credentials/responseFingerprint";
 import { decodeTargetCredential, credentialHeaders } from "./index";
 import { acquireSessionCookies } from "./autoLogin";
 import { withConnectionExecution } from "./guard";
@@ -114,10 +114,4 @@ export async function testStoredConnection(targetId: string, credentialId: strin
     if (!row) throw new Error("CREDENTIAL_NOT_FOUND");
     return checkRow(row, true, guard.allowLoginAction);
   }, signal);
-}
-/** Hunt preflight performs GET-only verification; it never logs in or refreshes. */
-export async function revalidateTargetSessions(targetId: string): Promise<void> {
-  const rows = await prisma.targetCredential.findMany({ where: { targetId }, orderBy: { createdAt: "asc" } });
-  throwIfScanAborted();
-  for (const row of rows.filter(r => sessionState(r) === "VALID" && r.validationUrl).slice(0, 2)) await checkRow(row, false);
 }

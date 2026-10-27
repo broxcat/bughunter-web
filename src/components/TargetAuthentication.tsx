@@ -24,7 +24,7 @@ export default function TargetAuthentication({ targetId, disabled = false }: { t
   }
   return <Card className="space-y-4 p-4" id="authentication">
     <h2 className="font-semibold">Authentication</h2>
-    <p className="text-sm text-muted">Test connection saves this authentication for future Hunts.</p>
+    <p className="text-sm text-muted">Test connection saves this authentication for future Recon scans. Credentials are not exported to Research.</p>
     <form onSubmit={e => { e.preventDefault(); void test(); }} className="space-y-3">
       <fieldset disabled={disabled || busy} className="space-y-3"><legend>Authentication method</legend>
         <label className="block"><input type="radio" name="authentication-method" checked={mode === "EMAIL_PASSWORD"} onChange={() => { setMode("EMAIL_PASSWORD"); setPassword(""); setCookie(""); }} /> Username / password</label>

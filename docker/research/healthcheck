@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+kill -0 "$(cat /run/sshd.pid)"
+/usr/sbin/sshd -t
+su -s /bin/sh researcher -c 'codex --version >/dev/null; test -w /workspaces'

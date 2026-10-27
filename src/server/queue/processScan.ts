@@ -3,14 +3,13 @@ import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { loadTargetExecution, withTargetExecution } from "@/server/execution";
 import { runRecon } from "@/server/scanners/recon";
-import { runHunt } from "@/server/scanners/hunt";
 import { ScanAbortError, settlesWithin, withScanControl, type ScanStopReason } from "@/server/scanControl";
 import type { ScanExecutionResult } from "@/server/scanners/result";
 import { beginScanExecution, finishScanExecution, monitorScanExecution, workerIdentity, type ExecutionCompletion } from "./executionAttempts";
 import type { ScanJobData } from "./scanQueue";
 
 type Executor = (type: ScanJobData["type"], host: string, scanRunId: string) => Promise<ScanExecutionResult>;
-const execute: Executor = (type, host, id) => type === "RECON" ? runRecon(host, id) : runHunt(host, id);
+const execute: Executor = (type, host, id) => type === "RECON" ? runRecon(host, id) : Promise.resolve({ outcome: "UNSUPPORTED", reason: "Legacy Hunt is retired" });
 export const SHUTDOWN_GRACE_MS = 5000;
 
 /** A process owns controllers, PostgreSQL owns execution identity/exclusion.
@@ -54,6 +53,7 @@ export function createScanProcessor(workerId: string, executor: Executor = execu
         await monitor.ready;
         control.assertActive();
         const run = await prisma.scanRun.findUniqueOrThrow({ where: { id: scanRunId }, include: { target: { include: { scope: true } } } });
+        if (type === "HUNT" || run.type === "HUNT") return { outcome: "UNSUPPORTED" as const, reason: "Legacy HUNT is retired. Create a Codex Research Workspace instead." };
         if (type === "VALIDATE" || run.type === "VALIDATE") return { outcome: "UNSUPPORTED" as const, reason: "VALIDATE scan type is not supported: validation engine is not implemented." };
         if (run.type !== type || run.targetId !== targetId) throw new Error("Scan job identity mismatch");
         // Scope/policy are revalidated on every real start, after winning the claim.

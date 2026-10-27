@@ -1,20 +1,8 @@
 import { throwIfScanAborted } from "@/server/scanControl";
-import { isSafeReadUrl } from "@/lib/hunt/safety";
-// Shared, authenticated, depth-limited crawl used by ALL hunt families so they
-// discover candidate URLs/params from the real app — including pages that need a
-// session — instead of each re-parsing only the public root page.
-//
-// Before this, every family independently fetched ctx.baseUrl (root only,
-// anonymous), so IDOR/SSRF/CSRF/SQLi/CmdI/SSTI never saw authenticated routes
-// like /dashboard, /courses, /profile. Here we crawl once per scan run (cached),
-// authenticated with the target's first TargetCredential when one exists (reusing
-// loadTargetCredentials, which auto-logs-in for EMAIL_PASSWORD mode), to a small
-// depth, and expose:
-//   - html: the concatenated page bodies PLUS a synthetic <a href> appendix of
-//     every discovered absolute URL, so each family's existing HTML extractors
-//     (links, GET-form fields) work on the richer corpus with resolved URLs.
-//   - urls: the deduped same-origin URL inventory.
-// Never throws; degrades to an anonymous root fetch (or empty) on any failure.
+import { isSafeReadUrl } from "@/lib/observationSafety";
+// Authenticated, depth-limited Recon observation collection. Discovered URLs
+// remain confined to the selected host and never expand authorization.
+// Bodies are transient only; the persisted corpus contains sanitized metadata.
 
 import { probe } from "./http";
 import { loadTargetCredentials, credentialHeaders } from "@/server/credentials";
@@ -43,8 +31,7 @@ export interface DiscoveryCorpus {
   authenticated: boolean;
 }
 
-// One crawl per scan run, shared across the ~6 families that run sequentially in
-// the worker. Keyed by scanRunId; stores the in-flight promise so concurrent
+// One cached crawl per Recon run. Keyed by scanRunId; stores the in-flight promise so concurrent
 // callers coalesce onto a single crawl.
 const cache = new Map<string, Promise<DiscoveryCorpus>>();
 

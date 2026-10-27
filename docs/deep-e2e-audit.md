@@ -1,3 +1,6 @@
+> Historical documentation: the vulnerability-family Hunt engine is retired.
+> See [Codex Research](CODEX-RESEARCH.md) for the current workflow.
+
 # Deep end-to-end functional audit
 
 ## Environment / baseline

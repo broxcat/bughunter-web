@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import TargetAuthentication from "@/components/TargetAuthentication";
-import HuntRequirements from "@/components/HuntRequirements";
+import CreateResearchButton from "@/components/CreateResearchButton";
 import { use, useEffect, useRef, useState } from "react";
 import ScanCancelButton from "@/components/ScanCancelButton";
 import ScanLogViewer from "@/components/ScanLogViewer";
@@ -152,13 +152,7 @@ export default function TargetDetailPage({
         >
           {starting === "RECON" ? "Starting…" : "Run recon"}
         </Button>
-        <Button
-          variant="primary"
-          onClick={() => startScan("HUNT")}
-          disabled={!scopeApproved || starting !== null}
-        >
-          {starting === "HUNT" ? "Starting…" : "Run hunt"}
-        </Button>
+        <CreateResearchButton targetId={id} disabled={!scopeApproved} />
         <div className="ml-auto flex gap-4 text-sm">
           <Link
             href={`/targets/${id}/findings`}
@@ -221,12 +215,12 @@ export default function TargetDetailPage({
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-medium text-foreground">
-                        {run.type === "HUNT" ? <Link href={`/hunt/${run.id}`} className="text-brand">HUNT — open progress</Link> : run.type}
+                        {run.type === "HUNT" ? <Link href={`/hunt/${run.id}`} className="text-brand">Legacy Hunt — history</Link> : run.type}
                       </span>
                       <Badge tone={scanPresentation(run.status, run.outcome, run.dispatch, run.execution?.state, Boolean(run.cancelRequestedAt)).tone}>
                         {scanPresentation(run.status, run.outcome, run.dispatch, run.execution?.state, Boolean(run.cancelRequestedAt)).label}
                       </Badge>
-                      <ScanCancelButton scanRunId={run.id} status={run.status} requested={Boolean(run.cancelRequestedAt)} onRequested={() => void load()} />
+                      {run.type === "RECON" && <ScanCancelButton scanRunId={run.id} status={run.status} requested={Boolean(run.cancelRequestedAt)} onRequested={() => void load()} />}
                       {run.execution?.state === "INTERRUPTED" && <span className="text-sm text-muted">Relance automatique désactivée.</span>}
                     </div>
                     <span className="text-xs text-subtle">
@@ -246,7 +240,6 @@ export default function TargetDetailPage({
         )}
       </div>
 
-      <HuntRequirements hosts={[{ id, host: target.host }]} />
       <TargetAuthentication targetId={id} disabled={!scopeApproved} />
     </div>
   );

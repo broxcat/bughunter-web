@@ -10,18 +10,22 @@ import { GET, POST } from "@/app/api/scan-runs/route";
 beforeEach(() => { vi.resetAllMocks(); mocks.auth.mockResolvedValue({ user: { id: "owner" } }); mocks.find.mockResolvedValue(null); });
 const post = (type: string, key?: string) => POST(new NextRequest("http://localhost/api/scan-runs", { method: "POST", headers: { "Content-Type": "application/json", ...(key !== undefined ? { "Idempotency-Key": key } : {}) }, body: JSON.stringify({ targetId: "target", type }) }));
 describe("scan creation and legacy compatibility", () => {
+  it("refuses legacy HUNT before creating or publishing anything", async () => {
+    expect((await post("HUNT")).status).toBe(410);
+    expect(mocks.accept).not.toHaveBeenCalled(); expect(mocks.publish).not.toHaveBeenCalled();
+  });
   it("rejects VALIDATE explicitly without creating a scan or adding a job", async () => {
     const response = await post("VALIDATE");
     expect(response.status).toBe(400); expect((await response.json()).error).toMatch(/VALIDATE.*not supported/);
     expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.accept).not.toHaveBeenCalled(); expect(mocks.publish).not.toHaveBeenCalled(); expect(mocks.target).not.toHaveBeenCalled();
   });
-  it.each(["RECON", "HUNT"])("continues to create %s with a null live outcome", async type => {
+  it.each(["RECON"])("continues to create %s with a null live outcome", async type => {
     mocks.target.mockResolvedValue({ id: "target", userId: "owner", host: "example.test", active: true, scope: { status: "APPROVED" }, program: { ownerId: "owner", requiredUserAgent: "Test/1", outOfScope: [] } });
     mocks.accept.mockResolvedValue({ id: "run", targetId: "target", type, status: "QUEUED", outcome: null, jobId: null });
     mocks.publish.mockResolvedValue({ dispatch: "PUBLISHED" });
     const response = await post(type);
     expect(response.status).toBe(201); expect(await response.json()).toMatchObject({ type, status: "QUEUED", outcome: null });
-    expect(mocks.accept).toHaveBeenCalledWith("owner", { targetId: "target", type, approvedTechniques: [] }, null);
+    expect(mocks.accept).toHaveBeenCalledWith("owner", { targetId: "target", type }, null);
     expect(mocks.publish).toHaveBeenCalledWith("run");
   });
   it("returns accepted work as 202 while queue delivery is pending", async () => {

@@ -52,6 +52,10 @@ services:
       TAILSCALE_BUGHUNTER_AUTHKEY: ""
       # Auth.js must use the browser-visible origin, not a container hostname.
       AUTH_URL: "${AUTH_URL:?Set AUTH_URL to the public origin used in your browser}"
+      RESEARCH_WORKSPACE_ROOT: /research-workspaces
+      RESEARCH_WORKSPACE_GID: "2000"
+    volumes:
+      - research-workspaces:/research-workspaces
     networks:
       default:
         gw_priority: 1
@@ -118,6 +122,34 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Independent local research environment: no app env_file, backend network or socket.
+  research-runner:
+    build:
+      context: .
+      dockerfile: docker/research/Dockerfile
+    image: bughunter-research
+    ports:
+      - "127.0.0.1:${RESEARCH_SSH_PORT:-2222}:22"
+    networks: [research_egress]
+    volumes:
+      - research-workspaces:/workspaces
+      - research-codex:/home/researcher/.codex
+      - research-host-keys:/etc/ssh/host-keys
+      - type: bind
+        source: ./data/research/authorized_keys
+        target: /run/research-keys/authorized_keys
+        read_only: true
+        bind:
+          create_host_path: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    # sshd needs these only to authenticate and drop to the non-root user.
+    cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID, SYS_CHROOT]
+    pids_limit: 256
+    mem_limit: 2g
+    restart: unless-stopped
+
   # Explicit profile for this project identity. Only Serve's HTTPS listener is exposed
   # inside the tailnet. No host ports, subnet routing, Funnel or egress proxy.
   tailscale-bughunter:
@@ -150,7 +182,9 @@ services:
     restart: unless-stopped
 
 networks:
-  # Keep the original default network and its egress for Recon/Hunt/Ollama.
+  research_egress:
+    driver: bridge
+  # Keep the original default network and its egress for Recon/Ollama.
   # The frontend also needs internet egress for Tailscale control/DERP.
   tailscale_frontend:
     driver: bridge
@@ -159,3 +193,6 @@ volumes:
   pgdata:
   redisdata:
   tailscale-bughunter-state:
+  research-workspaces:
+  research-codex:
+  research-host-keys:

@@ -1,9 +1,9 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { assertExecutionUrl, loadTargetExecution, withTargetExecution, type TargetExecution, type TargetRequestGuard } from "@/server/execution";
-import { isSafeReadUrl } from "@/lib/hunt/safety";
+import { isSafeReadUrl } from "@/lib/observationSafety";
 
 export const CONNECTION_LIMITS = { requests: 30, timeoutMs: 35000, intervalMs: 100, concurrency: 1 };
-/** Login is an explicit action; Hunt's GET-only guard remains unchanged. */
+/** Login is an explicit action, confined to the detected credential submission. */
 export class ConnectionGuard implements TargetRequestGuard {
   readonly controller = new AbortController();
   readonly signal = this.controller.signal;

@@ -1,2 +1,2 @@
 import ScanStart from "@/components/ScanStart";
-export default function ReconPage() { return <ScanStart type="RECON" />; }
+export default function ReconPage() { return <ScanStart />; }

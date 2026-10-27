@@ -17,7 +17,8 @@
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
     "test:queue": "node tests/queue/runInfrastructure.mjs",
-    "test:auth": "node tests/queue/runInfrastructure.mjs --auth-browser"
+    "test:auth": "node tests/queue/runInfrastructure.mjs --auth-browser",
+    "test:research": "node tests/research/runInfrastructure.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",

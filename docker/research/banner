@@ -1,0 +1,7 @@
+BugHunter Codex Research Runner
+
+Read AGENTS.md and scope.md before doing anything.
+Discovery does not grant authorization. Use the program's required User-Agent.
+
+List sessions: bughunter-workspaces
+Start: cd /workspaces/<id> && bughunter-codex

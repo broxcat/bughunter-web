@@ -2,7 +2,7 @@
 
 License: AGPL-3.0-only ([LICENSE](LICENSE))
 
-Bug bounty workflow: **Targets → Scope → Recon → Hunt → Findings → Report**.
+Bug bounty workflow: **Targets → Scope → Recon → Research → Findings → Report**.
 
 A Target is a company or bug bounty program.
 Create it at `/targets` with a company name and an explicit **Required User-Agent**.
@@ -16,12 +16,11 @@ paths and queries are rejected. Wildcards remain rules: add a concrete FQDN befo
 scanning it. Discovery never automatically adds a new host to your authorized Scope.
 
 The **Out of scope** tab supports add/edit/remove. Explicit exclusions always win,
-even against a broader wildcard. Recon and Hunt let you choose a company, then an
+even against a broader wildcard. Recon and Research let you choose a company, then an
 active concrete host that has not been excluded. Removed hosts cannot start scans.
 
-Qualifying and non-qualifying vulnerability families are optional. Empty qualifying
-allows all supported Hunt families; an explicit non-qualifying family always wins.
-Unsupported families do not enable new scanner capabilities. Monetary values use
+Qualifying and non-qualifying vulnerability families are optional program rules
+exported into Research; they do not select an automated vulnerability checklist. Monetary values use
 PostgreSQL `DECIMAL(18,2)` and decimal strings in the API, never binary floats.
 
 Program edits apply to future executions. The backend injects the current program
@@ -42,7 +41,8 @@ non-applicable techniques do not count as failures; finding nothing is a success
 Queued/running scans have no outcome. Historical scans retain `outcome = null`
 and are displayed with an unknown historical result, without inferring success.
 
-Only `RECON` and `HUNT` can be started. `VALIDATE` has no implemented scan engine:
+Only `RECON` can be started as a scan. `HUNT` is retired (HTTP 410);
+Codex Research uses separate ResearchSession records. `VALIDATE` has no implemented scan engine:
 the API rejects it before creating a run/job; legacy queued jobs become
 `FAILED` / `UNSUPPORTED`. Human finding evidence review is unchanged.
 Deploy the additive Prisma migration before restarting the web app and worker.
@@ -93,8 +93,8 @@ no attempts are backfilled. A new scan is required for any explicit rerun.
 or failed scans return 409. The worker polls the request with its heartbeat.
 Queued cancellation is confirmed only after a DB claim proves no attempt started;
 a late BullMQ delivery then exits without tools, even if Redis removal failed.
-Active cancellation propagates an AbortSignal to fetch/body reads, DNS, Hunt's
-budget, command process groups and Playwright contexts. Commands receive SIGTERM,
+Active cancellation propagates an AbortSignal to fetch/body reads, DNS,
+command process groups and Playwright contexts. Commands receive SIGTERM,
 then SIGKILL after 500 ms if needed. A Unix IPC supervisor also kills the whole
 tool group if the owning worker dies unexpectedly. `CANCELLED` with `outcome = null` is recorded
 only after resource cleanup is confirmed. Reports, corpus, findings and logs stay
@@ -118,6 +118,7 @@ Next.js 16 / React 19, Prisma 6 / PostgreSQL, BullMQ / Redis, Auth.js, Tailwind 
 ```sh
 cp .env.example .env
 # Fill AUTH_URL, AUTH_SECRET, CREDENTIALS_ENCRYPTION_KEY and database/Redis settings.
+# Prepare data/research/authorized_keys as described under Codex Research first.
 docker compose up --build -d
 docker compose exec web npx prisma migrate deploy
 ```
@@ -273,40 +274,58 @@ or host list APIs. Findings undergo an evidence review before they
 can be included in reports.
 
 
-## Qualified Hunt workflow
+## Codex Research
 
-Target qualifying vulnerabilities select supported Hunt families; non-qualifying
-exclusions always win. Target detail shows a compact Hunt readiness summary: scope,
-User-Agent, public testing and authenticated session availability. Provide only
-username/password or a session cookie, then use Test connection. Login forms and
-CSRF are discovered automatically; a protected-resource comparison must prove a
-session valid. Public Hunt remains available without authentication. Technical
-family requirements remain internal or under collapsed Advanced diagnostics.
-Hunt progress separates Signal, Candidate, Validated and Confirmed evidence.
+The former vulnerability-family Hunt engine is retired. Existing Hunt runs
+remain available as historical read-only records at `/hunt` and `/hunt/<id>`.
+Their findings, reports, policy snapshots and stored technique approvals survive.
+New `HUNT` requests return 410; old queued jobs cannot execute that engine.
 
-Findings follow `CANDIDATE → EVIDENCE_REVIEW → CONFIRMED / REJECTED / INCONCLUSIVE`.
-The former questionnaire is removed. Existing ciphertext, finding IDs and reports
-are preserved by an additive migration. See [black-box authentication and evidence
-review](docs/BLACKBOX-AUTH-UX.md) for session states, security limits and compatibility.
+Create a workspace at `/research` or from a host's **Create Research Workspace**
+button. Ownership, concrete authorized scope, exclusions and required User-Agent
+are checked server-side. Recon observations and existing finding metadata are
+exported without target credentials, raw HTTP bodies, AI keys or application
+secrets. The detail page provides the workspace ID, source Recon, exported files,
+initial-bundle ZIP and SSH commands. No web API executes shell commands.
 
-Run the isolated browser workflow against a built local app and the dedicated
-disposable database (no worker or Internet target is used):
+The dedicated runner uses an independent image/network with Internet egress,
+no backend network, no Docker socket and no application env_file. Only the
+workspace volume is shared with web. SSH is bound to host loopback only;
+public-key authentication and the non-root `researcher` user are required.
 
-```sh
-TEST_APP_URL=http://127.0.0.1:3315 \
-TEST_DATABASE_URL=postgresql://.../bughunter_blackbox_e2e \
-node tests/e2e/blackboxUx.mjs
-```
-Fixed bounded timing checks require explicit per-run approval; stateful business
-actions and destructive exploit techniques remain unsupported.
-
-See [readiness and limits](docs/hunt-readiness.md), the
-[versioned technique catalogue](docs/hunt-technique-catalog.md), and the
-[validation report](docs/hunt-validation-report.md). No worker is needed for UI tests:
+Before starting the stack, set up the public key (private key stays outside Git):
 
 ```sh
-TEST_APP_URL=http://127.0.0.1:3102 TEST_DATABASE_URL=postgresql://hunt:hunt@127.0.0.1:55441/hunt_clean node tests/e2e/huntWorkflow.mjs
+ssh-keygen -t ed25519 -f ~/.ssh/bughunter_research
+install -d -m 0700 data/research
+install -m 0644 ~/.ssh/bughunter_research.pub data/research/authorized_keys
+docker compose build research-runner
+docker compose up -d research-runner
+ssh -i ~/.ssh/bughunter_research -p 2222 researcher@127.0.0.1
+# Inside SSH:
+codex login --device-auth
+bughunter-workspaces
+cd /workspaces/<workspace-id>
+bughunter-codex
 ```
 
-Use disposable services only. The UI test enqueues a Hunt without executing it;
-its completed report is a labelled database fixture for progression/evidence UI.
+Codex CLI **0.164.0** is pinned, with `--yolo` verified as an alias of
+`--dangerously-bypass-approvals-and-sandbox`. The wrapper checks the workspace
+root and AGENTS.md/scope.md before `exec codex --yolo`. Inputs are read-only;
+research/, evidence/ and scripts/ are writable. Codex credentials are configured
+independently inside SSH. Scope is authoritative; discovery never grants access.
+`127.0.0.1` inside the runner refers to that container, not the host.
+
+Migration `20261027170000_research_sessions` is additive. Deploy it before using
+the updated web app and worker. No remote model inference/authentication is part
+of automated tests. Tests cover export secrets/traversal/atomicity/concurrency,
+ZIP ownership/integrity, legacy history, actual Docker/SSH/Codex and browser UX:
+
+```sh
+npm run test:research
+npm run test:queue -- --research-browser
+```
+
+See [docs/CODEX-RESEARCH.md](docs/CODEX-RESEARCH.md) for complete deployment steps,
+permissions, version sources, SSH/isolation checks, file structure, troubleshooting
+and the Hunt dependency audit. Tests exclusively use local synthetic fixtures.

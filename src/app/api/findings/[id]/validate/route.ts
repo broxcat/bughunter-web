@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { evidenceReviewSchema, reviewDecision } from "@/lib/evidenceReview";
 import { scanRejection } from "@/server/execution";
-import { redactHuntText } from "@/lib/hunt/safety";
+import { redactObservationText } from "@/lib/observationSafety";
 
 /** Evidence review replaces the retired questionnaire, preserving old columns. */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -25,10 +25,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const updated = await prisma.finding.updateMany({
     where: { id, reviewStatus: finding.reviewStatus, updatedAt: finding.updatedAt },
     data: { reviewStatus: status, reviewedAt: status === "EVIDENCE_REVIEW" ? null : new Date(),
-      reviewEvidence: { notes: redactHuntText(notes), reproduction: redactHuntText(notes), baseline: controls.filter(c => /BASELINE|AUTHENTICATED.*CONTROL/i.test(c)), probe: { observationAvailable: Boolean(finding.evidence?.trim()) }, control: controls, scope: inScope ? "IN_SCOPE" : "UNAVAILABLE", authContext: corpus?.authenticated === true ? "VERIFIED_SESSION" : corpus?.authenticated === false ? "ANONYMOUS" : "UNKNOWN", scannerEvidenceLevel: metadata?.evidenceLevel ?? "UNKNOWN", impact: finding.impact ? "Impact section available" : "See reproduction and impact notes" },
+      reviewEvidence: { notes: redactObservationText(notes), reproduction: redactObservationText(notes), baseline: controls.filter(c => /BASELINE|AUTHENTICATED.*CONTROL/i.test(c)), probe: { observationAvailable: Boolean(finding.evidence?.trim()) }, control: controls, scope: inScope ? "IN_SCOPE" : "UNAVAILABLE", authContext: corpus?.authenticated === true ? "VERIFIED_SESSION" : corpus?.authenticated === false ? "ANONYMOUS" : "UNKNOWN", scannerEvidenceLevel: metadata?.evidenceLevel ?? "UNKNOWN", impact: finding.impact ? "Impact section available" : "See reproduction and impact notes" },
       // Compatibility for historical reports/readers; no question answers written.
       gateStatus: status === "CONFIRMED" ? "PASSED" : status === "REJECTED" ? "KILLED" : "UNVALIDATED",
-      killedReason: status === "REJECTED" ? redactHuntText(notes) : null,
+      killedReason: status === "REJECTED" ? redactObservationText(notes) : null,
     },
   });
   if (!updated.count) return NextResponse.json({ error: "This finding changed; reload before reviewing" }, { status: 409 });

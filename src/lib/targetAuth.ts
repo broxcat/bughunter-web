@@ -31,7 +31,3 @@ export const connectionInputSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("EMAIL_PASSWORD"), username: z.string().trim().min(1).max(320), password: z.string().min(1).max(1024) }),
   z.object({ mode: z.literal("COOKIES"), cookies: z.string().min(1).max(8192) }),
 ]);
-export interface AuthenticationSummary { scopeValid: boolean; userAgentConfigured: boolean; publicReady: boolean; authenticatedReady: boolean }
-export function readinessSummary(scopeValid: boolean, userAgentConfigured: boolean, authenticatedSession: boolean): AuthenticationSummary {
-  return { scopeValid, userAgentConfigured, publicReady: scopeValid && userAgentConfigured, authenticatedReady: scopeValid && userAgentConfigured && authenticatedSession };
-}

@@ -1,3 +1,6 @@
+> Historical documentation: the vulnerability-family Hunt engine is retired.
+> See [Codex Research](CODEX-RESEARCH.md) for the current workflow.
+
 # Target / Scope validation
 
 Validated locally on 2026-10-26, starting at `6d3bd11`, with isolated Postgres 16,

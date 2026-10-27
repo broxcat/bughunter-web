@@ -3,10 +3,8 @@ import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import type { TargetCredential } from "@prisma/client";
 import { encryptSecret } from "@/lib/crypto";
-import { testStoredConnection, revalidateTargetSessions } from "@/server/credentials/connection";
+import { testStoredConnection } from "@/server/credentials/connection";
 import { loadTargetCredentials } from "@/server/credentials";
-import { withTargetExecution } from "@/server/execution";
-import { HuntBudget } from "@/server/hunt/budget";
 import { ConnectionGuard } from "@/server/credentials/guard";
 import { POST } from "@/app/api/targets/[id]/credentials/test/route";
 const state = vi.hoisted(() => ({ rows: new Map<string, TargetCredential>(), host: "", active: true, excluded: false, authorized: true, serial: 0 }));
@@ -119,15 +117,7 @@ describe("real black-box connection on controlled local fixtures", () => {
     expect((await testStoredConnection(row.targetId, row.id)).status).toBe("UNKNOWN");
     expect(await loadTargetCredentials(row.targetId)).toEqual([]);
   });
-  it("invalidates a remotely expired session during GET-only Hunt preflight", async () => {
-    const row = store(); expect((await testStoredConnection(row.targetId, row.id)).status).toBe("VALID");
-    behavior = "expired";
-    const budget = new HuntBudget();
-    try { await withTargetExecution({ targetId: row.targetId, host: state.host, requiredUserAgent: "BlackBox-Required/1", qualifying: [], nonQualifying: [] }, () => budget.run(() => revalidateTargetSessions(row.targetId))); }
-    finally { budget.close(); }
-    expect(state.rows.get(row.id)!.sessionStatus).toBe("EXPIRED");
-    expect(await loadTargetCredentials(row.targetId)).toEqual([]);
-  });
+
   it.each(["removed", "excluded"])("refuses %s scope before any target request", async reason => {
     state.active = reason !== "removed"; state.excluded = reason === "excluded";
     const row = store(); await expect(testStoredConnection(row.targetId, row.id)).rejects.toThrow(); expect(seen).toHaveLength(0);

@@ -35,3 +35,6 @@ yarn-error.log*
 
 # Docs — not needed for the build
 *.md
+
+# Research data / public key configuration must never enter image layers.
+data/research

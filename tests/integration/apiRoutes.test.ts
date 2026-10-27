@@ -410,7 +410,7 @@ d("API route authorization (integration)", () => {
     expect((await create("stolen.example.com")).status).toBe(404);
   });
 
-  it("Recon/Hunt selectors and enqueue only allow active, owned, non-excluded concrete hosts", async () => {
+  it("Recon/Research selectors and enqueue only allow active, owned, non-excluded concrete hosts", async () => {
     const { GET } = await import("@/app/api/scan-hosts/route");
     const { POST: add } = await import("@/app/api/programs/[id]/hosts/route");
     const { loadTargetExecution } = await import("@/server/execution");
@@ -428,12 +428,12 @@ d("API route authorization (integration)", () => {
       expect((await scanRunsPost(req("http://localhost", { targetId: h.id, type: "RECON" }))).status).toBe(400);
       await expect(loadTargetExecution(h.id)).rejects.toThrow();
     }
-    expect((await scanRunsPost(req("http://localhost", { targetId: active.id, type: "HUNT", requiredUserAgent: "untrusted" }))).status).toBe(201);
+    expect((await scanRunsPost(req("http://localhost", { targetId: active.id, type: "RECON", requiredUserAgent: "untrusted" }))).status).toBe(201);
     expect((await loadTargetExecution(active.id)).requiredUserAgent).toBe("ScanLab/1");
     await prisma.bountyProgram.update({ where: { id: p.id }, data: { requiredUserAgent: "ScanLab/2" } });
     expect((await loadTargetExecution(active.id)).requiredUserAgent).toBe("ScanLab/2");
     authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
-    expect((await scanRunsPost(req("http://localhost", { targetId: active.id, type: "HUNT" }))).status).toBe(404);
+    expect((await scanRunsPost(req("http://localhost", { targetId: active.id, type: "RECON" }))).status).toBe(404);
     expect(await prisma.target.count({ where: { programId: p.id, host: "discovered.other.example" } })).toBe(0);
     await prisma.bountyProgram.update({ where: { id: p.id }, data: { outOfScope: ["*.scan.example"] } });
     await expect(loadTargetExecution(active.id)).rejects.toThrow(/out of scope/);
@@ -481,56 +481,11 @@ d("API route authorization (integration)", () => {
     expect((await prisma.scanRun.findUniqueOrThrow({ where: { id: run.id } })).requiredUserAgent).toBe("Race/1");
   });
 
-  it("persists a Hunt policy once and rejects a different host's run", async () => {
-    const { startHuntSnapshot } = await import("@/server/hunt/snapshot");
-    const { loadTargetExecution } = await import("@/server/execution");
-    const program = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Hunt snapshot", requiredUserAgent: "Hunt/1", qualifying: ["XSS", "IDOR", "CSRF"], nonQualifying: ["CSRF"] } });
-    const scope = await prisma.scope.create({ data: { userId, hostPattern: "hunt.example.test", status: "APPROVED" } });
-    const target = await prisma.target.create({ data: { userId, programId: program.id, scopeId: scope.id, host: "hunt.example.test" } });
-    const run = await prisma.scanRun.create({ data: { targetId: target.id, type: "HUNT", status: "RUNNING" } });
-    const execution = await loadTargetExecution(target.id);
-    const first = await startHuntSnapshot(run.id, execution);
-    expect([...first.selectedFamilies].sort()).toEqual(["bola", "idor", "xss"]);
-    expect(first.families.find(f => f.family === "csrf")?.reason).toBe("NON_QUALIFYING_EXCLUDED");
-    await prisma.bountyProgram.update({ where: { id: program.id }, data: { qualifying: ["SSRF"], nonQualifying: ["XSS"] } });
-    expect(await startHuntSnapshot(run.id, await loadTargetExecution(target.id))).toEqual(first);
-    await expect(startHuntSnapshot(run.id, { ...execution, targetId: "another-host" })).rejects.toThrow(/belong/);
-    const { GET } = await import("@/app/api/scan-hosts/route");
-    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
-    expect(await (await GET()).json()).toEqual([]);
-  });
 
-  it("readiness exposes only safe credential metadata and rejects cross-user access", async () => {
-    process.env.CREDENTIALS_ENCRYPTION_KEY ??= "0".repeat(64);
-    const { encryptSecret } = await import("@/lib/crypto");
-    const { GET } = await import("@/app/api/targets/[id]/hunt-readiness/route");
-    const { loadReadinessFacts } = await import("@/server/hunt/readiness");
-    const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Readiness", requiredUserAgent: "Ready/1" } });
-    const scope = await prisma.scope.create({ data: { userId, hostPattern: "ready.example.test", status: "APPROVED" } });
-    const t = await prisma.target.create({ data: { userId, programId: p.id, scopeId: scope.id, host: "ready.example.test" } });
-    const token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature";
-    for (const label of ["Account A", "Duplicate A"]) await prisma.targetCredential.create({ data: { targetId: t.id, label, mode: "BEARER", sessionStatus: "VALID", sessionCheckedAt: new Date(), headerCipher: encryptSecret(token) } });
-    const context = { params: Promise.resolve({ id: t.id }) };
-    const res = await GET(req("http://localhost", {}), context);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.facts.jwt).toBe(true);
-    expect(body.facts.secondCredential).toBe(false);
-    expect(JSON.stringify(body)).not.toContain(token);
-    expect(JSON.stringify(body)).not.toContain("Cipher");
-    expect(JSON.stringify(body)).not.toContain("fingerprint");
-    expect(body.credentials[0].label).toBe("Account A");
-    await prisma.targetCredential.deleteMany({ where: { targetId: t.id } });
-    await prisma.targetCredential.create({ data: { targetId: t.id, label: "Expired login", mode: "EMAIL_PASSWORD", loginUrl: "https://ready.example.test/login", emailCipher: encryptSecret("test@example.test"), passwordCipher: encryptSecret("never-return-password"), sessionCookiesCipher: encryptSecret(JSON.stringify({ sessionid: "expired-secret-cookie" })), sessionRefreshedAt: new Date(0) } });
-    expect((await loadReadinessFacts(t.id)).facts.authenticatedSession).toBe(false);
-    authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
-    expect((await GET(req("http://localhost", {}), context)).status).toBe(404);
-  });
 
   it("uses existing encrypted credentials for account readiness and only edits owned metadata", async () => {
     process.env.CREDENTIALS_ENCRYPTION_KEY ??= "0".repeat(64);
     const { POST, PATCH } = await import("@/app/api/targets/[id]/credentials/route");
-    const { loadReadinessFacts } = await import("@/server/hunt/readiness");
     const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Accounts", requiredUserAgent: "Accounts/1" } });
     const scope = await prisma.scope.create({ data: { userId, hostPattern: "accounts.example.test", status: "APPROVED" } });
     const t = await prisma.target.create({ data: { userId, programId: p.id, scopeId: scope.id, host: "accounts.example.test" } });
@@ -541,7 +496,6 @@ d("API route authorization (integration)", () => {
     const b = await (await add({ label: "Account B", cookies: { sid: "b-secret" }, purpose: "ACCOUNT_B", ownedObjectUrl: "https://accounts.example.test/documents/123" })).json();
     await prisma.targetCredential.update({ where: { id: a.credential.id }, data: { sessionStatus: "VALID", sessionCheckedAt: new Date(), sessionIdentityHash: "verified-test-account-a" } });
     await prisma.targetCredential.update({ where: { id: b.credential.id }, data: { sessionStatus: "VALID", sessionCheckedAt: new Date(), sessionIdentityHash: "verified-test-account-b" } });
-    expect((await loadReadinessFacts(t.id)).facts).toMatchObject({ primaryCredential: true, secondCredential: true, secondUserObjectReference: true });
     expect(JSON.stringify([a, b])).not.toContain("a-secret");
     expect(JSON.stringify([a, b])).not.toContain("b-secret");
     const before = await prisma.targetCredential.findUniqueOrThrow({ where: { id: b.credential.id } });
@@ -553,23 +507,6 @@ d("API route authorization (integration)", () => {
     expect((await refresh(req("http://localhost", { credentialId: a.credential.id }), context)).status).toBe(400);
   });
 
-  it("requires explicit bounded timing approval and refuses unsupported or excluded approvals", async () => {
-    const program = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Approved timing", requiredUserAgent: "Timing/1", qualifying: ["SQL_INJECTION", "RCE"] } });
-    const scope = await prisma.scope.create({ data: { userId, hostPattern: "timing.example.test", status: "APPROVED" } });
-    const target = await prisma.target.create({ data: { userId, programId: program.id, scopeId: scope.id, host: "timing.example.test" } });
-    const create = (extra: object) => scanRunsPost(req("http://localhost", { targetId: target.id, type: "HUNT", ...extra }));
-    expect((await create({ approvedTechniques: ["sqli.timing-screen"] })).status).toBe(400);
-    expect((await create({ approvedTechniques: ["business.race-replay"], approveBoundedTiming: true })).status).toBe(400);
-    const res = await create({ approvedTechniques: ["sqli.timing-screen", "sqli.timing-confirm"], approveBoundedTiming: true });
-    expect(res.status).toBe(201);
-    const run = await res.json();
-    expect(run.approvedHuntTechniques).toEqual(["sqli.timing-screen", "sqli.timing-confirm"]);
-    const { startHuntSnapshot } = await import("@/server/hunt/snapshot");
-    const { loadTargetExecution } = await import("@/server/execution");
-    expect((await startHuntSnapshot(run.id, await loadTargetExecution(target.id))).approvedTechniques).toEqual(run.approvedHuntTechniques);
-    await prisma.bountyProgram.update({ where: { id: program.id }, data: { nonQualifying: ["RCE"] } });
-    expect((await create({ approvedTechniques: ["cmdi.timing-screen"], approveBoundedTiming: true })).status).toBe(400);
-  });
 
   it("reviews evidence through draft and final decisions without the retired questionnaire", async () => {
     const { POST: review } = await import("@/app/api/findings/[id]/validate/route");

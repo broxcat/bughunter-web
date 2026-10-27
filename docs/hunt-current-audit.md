@@ -1,3 +1,6 @@
+> Historical documentation: the vulnerability-family Hunt engine is retired.
+> See [Codex Research](CODEX-RESEARCH.md) for the current workflow.
+
 # Existing Hunt audit — baseline 7645938
 
 Inspected 2026-10-26 before implementation. `BountyProgram.qualifying` and

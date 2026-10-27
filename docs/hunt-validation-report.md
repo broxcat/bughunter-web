@@ -1,3 +1,6 @@
+> Historical documentation: the vulnerability-family Hunt engine is retired.
+> See [Codex Research](CODEX-RESEARCH.md) for the current workflow.
+
 # Qualified technique-driven Hunt validation
 
 Validation date: 2026-10-26. Starting main: `76459386a0be23b2c2446cfe2432070d796b92b2`.

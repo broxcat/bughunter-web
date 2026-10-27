@@ -109,10 +109,9 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 px-4 py-8">
-      <Card id="hunt-oob" className="space-y-2 p-4"><h2 className="font-semibold">Hunt OOB callback</h2><p>Use the existing OOB catcher on infrastructure you operate and authorize. Configure OOB_PUBLIC_BASE_URL in the deployment environment, then restart the worker. Hunt checks callbacks through that catcher; no arbitrary third-party collaborator is used.</p><p className="text-sm text-muted">Callback availability is assessed automatically by Hunt.</p></Card>
       <h1 className="text-2xl font-semibold">AI Provider Settings</h1>
       <p className="mt-1 text-sm text-muted">
-        Configure the AI provider used for hunting. API keys are encrypted at
+        Configure the AI provider used for finding assistance. API keys are encrypted at
         rest and never returned to the browser. Only one provider is active at a
         time.
       </p>

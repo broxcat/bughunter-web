@@ -1,3 +1,6 @@
+> Historical documentation: the vulnerability-family Hunt engine is retired.
+> See [Codex Research](CODEX-RESEARCH.md) for the current workflow.
+
 # Black-box authentication and evidence review
 
 Baseline: `a4866b22db037943a8c24ddd92e726509baa6071`, clean `main`.

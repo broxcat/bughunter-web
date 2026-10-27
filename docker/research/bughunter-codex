@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+workspace=$(pwd -P)
+case "$workspace" in
+  /workspaces/*) ;;
+  *) echo 'Enter a BugHunter workspace under /workspaces first.' >&2; exit 1 ;;
+esac
+# Launch only at a session root, never from an arbitrary nested directory.
+test "$(dirname "$workspace")" = /workspaces && test -f AGENTS.md && test -f scope.md && test -f target.json || {
+  echo 'Missing workspace root, AGENTS.md, scope.md or target.json.' >&2; exit 1;
+}
+printf 'Workspace: %s\nTarget: %s\nRead AGENTS.md and scope.md before doing anything.\n' "$(basename "$workspace")" "$(jq -r '.host' target.json)"
+exec codex --yolo "$@"

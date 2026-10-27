@@ -9,7 +9,7 @@ const NAV = [
   { href: "/targets", label: "Targets" },
   { href: "/scopes", label: "Scopes" },
   { href: "/recon", label: "Recon" },
-  { href: "/hunt", label: "Hunt" },
+  { href: "/research", label: "Research" },
   { href: "/settings", label: "Settings" },
 ];
 

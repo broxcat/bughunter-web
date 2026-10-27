@@ -34,8 +34,22 @@ try {
   for (const status of ["QUEUED", "RUNNING", "FAILED", "CANCELLED"]) {
     await client.$executeRaw`INSERT INTO "ScanRun" (id, "targetId", type, status) VALUES (${`upgrade-${status}`}, 'upgrade-host', 'RECON', ${status}::"ScanStatus")`;
   }
+  await client.$executeRaw`INSERT INTO "ScanRun" (id, "targetId", type, status) VALUES ('upgrade-hunt', 'upgrade-host', 'HUNT', 'COMPLETED')`;
   const historicalRuns = await client.$queryRaw`SELECT id, status, error, "createdAt", "startedAt", "finishedAt" FROM "ScanRun" ORDER BY id`;
+  // Upgrade first to the actual pre-Research schema and seed old Hunt JSON.
+  for (const entry of await readdir("prisma/migrations")) {
+    if (entry < "20261027170000_research_sessions" && entry >= migration) await cp(join("prisma/migrations", entry), join(temp, "migrations", entry), { recursive: true });
+  }
+  migrate(join(temp, "schema.prisma"));
+  const huntReport = { version: 1, archivedEvidence: "Synthetic historical observation" };
+  const huntSnapshot = { version: 1, selectedFamilies: ["xss"] };
+  await client.scanRun.update({ where: { id: "upgrade-hunt" }, data: { huntReport, huntSnapshot, approvedHuntTechniques: ["legacy-approved-technique"] } });
   migrate(schema);
+  const hunt = await client.scanRun.findUniqueOrThrow({ where: { id: "upgrade-hunt" } });
+  assert.equal(hunt.type, "HUNT"); assert.equal(hunt.status, "COMPLETED");
+  assert.deepEqual(hunt.huntReport, huntReport); assert.deepEqual(hunt.huntSnapshot, huntSnapshot);
+  assert.deepEqual(hunt.approvedHuntTechniques, ["legacy-approved-technique"]);
+  assert.equal(await client.researchSession.count(), 0, "Never invent Research Sessions for historical scans");
   assert.deepEqual(await client.$queryRaw`SELECT id, status, error, "createdAt", "startedAt", "finishedAt" FROM "ScanRun" ORDER BY id`, historicalRuns);
   assert.equal(await client.scanExecutionAttempt.count(), 0, "Do not invent historical execution attempts");
   assert((await client.scanRun.findMany()).every(run => run.cancelRequestedAt === null));

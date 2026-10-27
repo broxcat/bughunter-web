@@ -1,5 +1,5 @@
 import { normalizeCookies, sessionState } from "@/lib/targetAuth";
-import { credentialMetadataSchema, ownedReferenceUrl } from "@/lib/hunt/credentialMetadata";
+import { credentialMetadataSchema, ownedReferenceUrl } from "@/lib/credentialMetadata";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";

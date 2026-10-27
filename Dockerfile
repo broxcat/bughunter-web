@@ -104,6 +104,8 @@ RUN npm run build
 # Stage 4: runtime — built app + scanner binaries + nmap, for web AND worker
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm AS runtime
+# Seed the shared research volume correctly even when web starts before the runner.
+RUN install -d -o 0 -g 2000 -m 3770 /research-workspaces
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \

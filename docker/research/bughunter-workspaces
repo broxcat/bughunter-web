@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+import json
+from pathlib import Path
+print('Available workspaces (ID / host / created):')
+for entry in sorted(Path('/workspaces').iterdir()):
+    if entry.name.startswith('.') or entry.is_symlink() or not entry.is_dir():
+        continue
+    try:
+        target = json.loads((entry / 'target.json').read_text())
+        session = json.loads((entry / 'research/session.json').read_text())
+        print(entry.name, target['host'], session['createdAt'])
+    except (OSError, ValueError, KeyError):
+        continue
+print('\nUsage: cd /workspaces/<id> && bughunter-codex')

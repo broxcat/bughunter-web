@@ -1,3 +1,6 @@
+> Historical documentation: the vulnerability-family Hunt engine is retired.
+> See [Codex Research](CODEX-RESEARCH.md) for the current workflow.
+
 # Hunt readiness and execution policy
 
 Reviewed 2026-10-26. Business Target is `BountyProgram`; technical `Target` remains

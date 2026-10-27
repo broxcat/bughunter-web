@@ -20,7 +20,7 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "BugHunter",
-  description: "Targets, scope, Recon, Hunt and findings",
+  description: "Targets, scope, Recon, Research and findings",
 };
 
 // Runs before hydration/first paint: applies the persisted theme (or the OS

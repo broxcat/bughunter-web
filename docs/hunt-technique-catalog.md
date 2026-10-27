@@ -1,3 +1,6 @@
+> Historical documentation: the vulnerability-family Hunt engine is retired.
+> See [Codex Research](CODEX-RESEARCH.md) for the current workflow.
+
 # Hunt technique catalogue — version 1
 
 Reviewed 2026-10-26 against all four requested sources for every current family.

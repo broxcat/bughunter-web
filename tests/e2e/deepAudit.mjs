@@ -38,13 +38,13 @@ try {
   }
   await page.setViewportSize({ width: 1366, height: 768 }); await login(); record("Authentication", "provided E2E credentials", "PASS");
   const cookies = await context.cookies(app); const session = cookies.find(c => c.name.includes("session-token")); assert(session); assert(session.httpOnly); assert.equal(session.sameSite, "Lax"); record("Authentication", "session cookie attributes", "PASS", `HTTP-only; SameSite=Lax; Secure=${session.secure} on local HTTP`);
-  for (const route of ["/targets", "/scopes", "/recon", "/hunt", "/settings"]) {
+  for (const route of ["/targets", "/scopes", "/recon", "/research", "/settings"]) {
     await page.goto(app + route); await page.getByRole("navigation").waitFor();
     await page.reload(); await page.getByRole("navigation").waitFor();
     for (const size of [{ width: 1920, height: 1080 }, { width: 1366, height: 768 }, { width: 390, height: 844 }]) { await page.setViewportSize(size); if (!await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)) record("Responsive", `${route} ${size.width}`, "FAIL", "horizontal overflow"); }
     record("Navigation", route, "PASS", "direct URL, refresh, three viewport widths");
   }
-  for (const label of ["Targets", "Scopes", "Recon", "Hunt", "Settings"]) { await page.getByRole("navigation").getByRole("link", { name: label, exact: true }).click(); await page.waitForURL(app + (label === "Targets" ? "/targets" : `/${label.toLowerCase()}`)); record("Menus", label, "PASS"); }
+  for (const label of ["Targets", "Scopes", "Recon", "Research", "Settings"]) { await page.getByRole("navigation").getByRole("link", { name: label, exact: true }).click(); await page.waitForURL(app + (label === "Targets" ? "/targets" : `/${label.toLowerCase()}`)); record("Menus", label, "PASS"); }
   for (const route of ["/dashboard", "/findings", "/reports"]) { const res = await page.goto(app + route); record("Legacy/global route", route, res.status() === 404 ? "NOT_TESTED" : "PASS", res.status() === 404 ? "No implemented global page; findings/reports currently accessed via host" : `HTTP ${res.status()}`); }
   const tab = await context.newPage(); await tab.goto(`${app}/targets`); await tab.getByRole("heading", { name: "Targets", exact: true }).waitFor();
   await page.goto(`${app}/targets`); await page.getByRole("button", { name: "Sign out", exact: true }).click(); await page.waitForURL(`${app}/login`);

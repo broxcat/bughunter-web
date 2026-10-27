@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({ tx: vi.fn(), find: vi.fn(), update: vi.fn(), c
 vi.mock("@/lib/prisma", () => ({ prisma: { $transaction: mocks.tx, scanRun: { findUnique: mocks.find, findUniqueOrThrow: mocks.find, update: mocks.update, updateMany: mocks.claim }, scanExecutionAttempt: { findUnique: mocks.attemptFind, findUniqueOrThrow: mocks.attemptFind, create: mocks.attemptCreate, updateMany: mocks.attemptUpdate, findMany: mocks.attemptList }, scanLog: { create: mocks.log } } }));
 vi.mock("@/server/execution", () => ({ loadTargetExecution: mocks.execution, withTargetExecution: (_ctx: unknown, work: () => unknown) => work() }));
 vi.mock("@/server/scanners/recon", () => ({ runRecon: mocks.recon }));
-vi.mock("@/server/scanners/hunt", () => ({ runHunt: mocks.hunt }));
 vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), warn: vi.fn() } }));
 import { prisma } from "@/lib/prisma";
 import { createScanProcessor } from "@/server/queue/processScan";
@@ -51,13 +50,20 @@ async function previous(stale: boolean, useful = false) {
   if (useful) attempts[0].usefulWorkAt = new Date();
 }
 describe("worker execution outcome persistence", () => {
+  it("refuses a queued legacy Hunt without network or target credentials", async () => {
+    run.type = "HUNT";
+    await processor.process(job("HUNT"));
+    expect(run).toMatchObject({ status: "FAILED", outcome: "UNSUPPORTED" });
+    expect(mocks.recon).not.toHaveBeenCalled(); expect(mocks.execution).not.toHaveBeenCalled();
+    expect(run.reconCorpus).toEqual({ observed: true });
+  });
   it.each(["QUEUED", "RUNNING"])("rejects legacy %s VALIDATE without tools", async status => {
     Object.assign(run, { status, type: "VALIDATE" });
     await processor.process(job("VALIDATE"));
     expect(run).toMatchObject({ status: "FAILED", outcome: "UNSUPPORTED", finishedAt: expect.any(Date), error: expect.stringContaining("not implemented") });
     expect(mocks.recon).not.toHaveBeenCalled(); expect(mocks.hunt).not.toHaveBeenCalled(); expect(mocks.execution).not.toHaveBeenCalled();
   });
-  for (const type of ["RECON", "HUNT"] as const) {
+  for (const type of ["RECON"] as const) {
     it.each(["SUCCESS", "PARTIAL", "FAILED"] as const)(`${type} persists %s and clears the live outcome`, async outcome => {
       run.type = type;
       (type === "RECON" ? mocks.recon : mocks.hunt).mockResolvedValue(outcome === "SUCCESS" ? { outcome } : { outcome, reason: "analysis incomplete" });

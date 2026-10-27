@@ -6,6 +6,7 @@ export async function requestScanCancellation(scanRunId: string, userId: string)
     await tx.$queryRaw`SELECT id FROM "ScanRun" WHERE id = ${scanRunId} FOR UPDATE`;
     const run = await tx.scanRun.findFirst({ where: { id: scanRunId, target: { userId, OR: [{ program: null }, { program: { ownerId: userId } }] } } });
     if (!run) return { kind: "NOT_FOUND" as const };
+    if (run.type === "HUNT") return { kind: "TERMINAL" as const, run };
     if (run.status === "CANCELLED") return { kind: "CANCELLED" as const, run };
     if (["COMPLETED", "FAILED"].includes(run.status)) return { kind: "TERMINAL" as const, run };
     if (run.cancelRequestedAt) return { kind: "REQUESTED" as const, run };

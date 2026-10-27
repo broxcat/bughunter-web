@@ -34,27 +34,19 @@ try {
   const context = await browser.newContext(); const page = await context.newPage();
   await context.route("**/*", route => new URL(route.request().url()).origin === app ? route.continue() : route.abort());
   await page.goto(`${app}/login`); await page.getByLabel("Email", { exact: true }).fill(email); await page.getByLabel("Password", { exact: true }).fill(fixturePassword); await page.getByRole("button", { name: "Sign in", exact: true }).click(); await page.waitForURL(`${app}/targets`); pass("fixture user signs in locally");
-  await page.goto(`${app}/targets/${program.id}`); const readiness = page.getByRole("region", { name: "Hunt readiness" });
-  // The semantic section is a section with an accessible name (region).
-  await readiness.getByText("Missing authenticated session", { exact: true }).waitFor();
-  assert.equal(await readiness.getByText(/SQLi needs|CSRF.*token|SECOND_CREDENTIAL|prerequisites/i).count(), 0); pass("minimal readiness with no per-family requirements");
-  await page.goto(`${app}/hunt?program=${program.id}`); await page.getByText("Missing authenticated session", { exact: true }).waitFor(); assert(await page.getByRole("button", { name: "Start Hunt", exact: true }).isEnabled()); pass("public Hunt stays available without authentication");
   await page.goto(`${app}/hosts/${target.id}#authentication`); await page.getByRole("heading", { name: "Authentication", exact: true }).waitFor();
   assert.equal(await page.getByLabel(/login endpoint|login URL|CSRF token|auth header|bearer token|owned object/i).count(), 0); pass("only black-box authentication inputs are exposed");
   await page.getByRole("radio", { name: "Session cookie", exact: true }).check(); await page.getByLabel("Session cookie value", { exact: true }).fill("Cookie: session=ux-fixture-session");
   const tested = page.waitForResponse(r => new URL(r.url()).pathname.endsWith("/credentials/test") && r.request().method() === "POST");
   await page.getByRole("button", { name: "Test connection", exact: true }).first().click(); const response = await tested; assert.equal(response.status(), 200); const result = await response.json(); assert.equal(result.status, "VALID"); assert(!JSON.stringify(result).includes("ux-fixture-session"));
   await page.getByText("✓ Connected — Session valid", { exact: true }).waitFor(); assert.equal(await page.getByLabel("Session cookie value", { exact: true }).inputValue(), ""); pass("real connection validates session and clears saved cookie");
-  await page.getByText("✓ Ready for Hunt", { exact: true }).waitFor(); pass("host readiness refreshes immediately after connection");
   assert(targetRequests.length > 0 && targetRequests.every(r => r.ua === requiredUa && r.method === "GET")); pass("required User-Agent is captured on every target request");
-  await page.reload(); await page.getByText("✓ Ready for Hunt", { exact: true }).waitFor(); assert.equal(await page.getByLabel("Password", { exact: true }).inputValue(), ""); pass("validated status survives refresh without revealing credentials");
   await page.goto(`${app}/targets/${target.id}/findings`); assert.equal(await page.getByText(/7.Question|Run gate/).count(), 0);
   await page.getByRole("button", { name: "Review evidence", exact: true }).click(); await page.getByLabel("Reproduction and impact", { exact: true }).fill("The local synthetic observation reproduces under baseline and control with read-only fixture impact."); await page.getByRole("button", { name: "Confirm", exact: true }).click(); await page.getByText("CONFIRMED", { exact: true }).waitFor(); pass("candidate moves through evidence review to confirmation without questions");
   const saved = await prisma.finding.findUniqueOrThrow({ where: { id: finding.id } }); assert.equal(saved.reviewStatus, "CONFIRMED"); assert.equal(saved.gateAnswers, null); pass("evidence decision persists without question answers");
   await page.goto(`${app}/targets/${target.id}/report`); await page.getByPlaceholder("Report title", { exact: true }).fill("Synthetic reviewed report"); await page.getByRole("checkbox", { name: /Synthetic controlled finding/ }).check(); await page.getByRole("button", { name: "Generate report", exact: true }).click(); await page.getByRole("heading", { name: "Generated markdown", exact: true }).waitFor(); pass("confirmed finding remains reportable");
   for (const width of [390, 1366]) { await page.setViewportSize({ width, height: 900 }); await page.goto(`${app}/hosts/${target.id}`); await page.getByRole("heading", { name: "Authentication", exact: true }).waitFor(); assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)); pass(`authentication layout fits ${width}px`); }
   await prisma.targetCredential.updateMany({ where: { targetId: target.id }, data: { sessionStatus: "EXPIRED" } });
-  await page.goto(`${app}/targets/${program.id}`); await page.getByText("Missing authenticated session", { exact: true }).waitFor(); pass("session invalidation returns readiness to public coverage");
   console.log(`Black-box UX: ${checks} checks passed`);
 } finally {
   await browser?.close();

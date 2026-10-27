@@ -30,6 +30,7 @@ model User {
   targets          Target[]
   reports          Report[]
   scanRequestKeys  ScanRequestKey[]
+  researchSessions ResearchSession[]
 }
 
 model Account {
@@ -189,6 +190,7 @@ model Target {
   findings    Finding[]
   reports     Report[]
   credentials TargetCredential[]
+  researchSessions ResearchSession[]
 
   @@index([userId])
   @@index([scopeId])
@@ -286,6 +288,7 @@ model ScanRun {
   jobOutbox ScanJobOutbox?
   requestKey ScanRequestKey?
   executionAttempts ScanExecutionAttempt[]
+  researchSessions ResearchSession[]
 
   @@index([targetId])
   @@index([status])
@@ -510,7 +513,7 @@ enum ScopeStatus {
 
 enum ScanType {
   RECON
-  HUNT
+  HUNT      // Legacy: read-only, execution retired
   VALIDATE
 }
 
@@ -560,4 +563,36 @@ enum ReportPlatform {
   YESWEHACK
   IMMUNEFI
   GENERIC
+}
+
+// Research is a local workspace, never a BullMQ scan or automatic Finding.
+enum ResearchSessionStatus {
+  CREATING
+  READY
+  ARCHIVED
+  FAILED
+}
+
+model ResearchSession {
+  id             String @id @default(cuid())
+  userId         String
+  targetId       String
+  workspaceId    String @unique
+  reconScanRunId String?
+  status         ResearchSessionStatus @default(CREATING)
+  targetHost     String
+  programName    String
+  scopeMarkdown  String @db.Text
+  files          String[] @default([])
+  exportSha256   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  target Target @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  recon  ScanRun? @relation(fields: [reconScanRunId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([targetId])
+  @@index([reconScanRunId])
 }
