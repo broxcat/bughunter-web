@@ -15,6 +15,13 @@ const HEX_64 = /^[0-9a-fA-F]{64}$/;
 export function assertRequiredEnv(): void {
   const errors: string[] = [];
 
+  for (const flag of ["TRUST_PROXY_HEADERS", "ALLOW_PUBLIC_REGISTRATION"]) {
+    const value = process.env[flag];
+    if (value !== undefined && value !== "true" && value !== "false") errors.push(`${flag} must be true or false.`);
+  }
+  const hops = process.env.TRUSTED_PROXY_HOPS ?? "1";
+  if (!/^[1-9][0-9]?$/.test(hops) || Number(hops) > 16) errors.push("TRUSTED_PROXY_HOPS must be an integer between 1 and 16.");
+
   const encKey = process.env.CREDENTIALS_ENCRYPTION_KEY;
   if (!encKey) {
     errors.push(

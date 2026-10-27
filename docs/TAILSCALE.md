@@ -97,4 +97,24 @@ accorder davantage d'accès ; ce déploiement ne modifie pas la policy du tailne
 En cas d'incident, corriger d'abord le backend ou Serve par opérations ciblées.
 Un retour arrière d'urgence peut rétablir la publication web `3000:3000` et
 l'ancienne origine Auth.js avec recréation de web seulement ; cela rouvre
-l'accès hôte et doit être une décision explicite de l'opérateur.
+l'accès hôte et doit être une décision explicite de l'opérateur. Remettre alors
+`TRUST_PROXY_HEADERS=false` avant de recréer web.
+
+## Confiance des headers pour les quotas
+
+La configuration fournie ne publie pas le port web sur l'hôte. Serve 1.104.2
+[remplace X-Forwarded-For par l'adresse source de la connexion](https://github.com/tailscale/tailscale/blob/v1.104.2/ipn/ipnlocal/serve.go#L1014-L1021),
+et non par une valeur déclarée par le client. Ce chemin à un proxy est compatible
+avec `TRUST_PROXY_HEADERS=true` et `TRUSTED_PROXY_HOPS=1`. Ces paramètres ne sont
+jamais activés automatiquement par AUTH_URL ni par le profil Tailscale.
+
+Avant de les activer, garantir que **tous** les accès non fiables passent par
+Serve : absence de publication hôte, aucun proxy alternatif ni accès direct à
+web:3000. Le réseau Docker `default` relie aussi web aux services internes :
+ces conteneurs et les administrateurs Docker appartiennent à la frontière de
+confiance. Le réseau frontend seul ne garantit donc pas l'exclusivité de Serve.
+Après changement de topologie/version, revérifier la réécriture et le nombre de
+proxies. Par défaut, `TRUST_PROXY_HEADERS=false` ignore XFF/X-Real-IP et applique
+un quota IP partagé `unknown`, sans possibilité de le fragmenter avec ces headers.
+En mode trusted, une chaîne absente/invalide refuse login et inscription (503),
+sans ouvrir un second quota `unknown`. Les headers d'identité Tailscale ne remplacent pas l'authentification BugHunter.

@@ -48,14 +48,8 @@ const OOB_PATH = /^\/oob\/([A-Za-z0-9_-]+)/;
 const MAX_BODY_BYTES = 64 * 1024;
 
 function clientIp(req: http.IncomingMessage): string | null {
-  const xff = req.headers["x-forwarded-for"];
-  if (typeof xff === "string" && xff.length > 0) {
-    // First hop in the chain is the original client.
-    return xff.split(",")[0]!.trim();
-  }
-  if (Array.isArray(xff) && xff.length > 0) {
-    return xff[0]!.split(",")[0]!.trim();
-  }
+  // The OOB catcher is a direct HTTP listener, independent of the web ingress.
+  // Forwarded headers are untrusted target input, never evidence of source IP.
   return req.socket.remoteAddress ?? null;
 }
 

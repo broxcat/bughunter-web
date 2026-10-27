@@ -9,7 +9,7 @@ import { Queue } from "bullmq";
 import { NextRequest } from "next/server";
 const auth = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/auth", () => ({ auth }));
-vi.mock("@/lib/rateLimit", () => ({ rateLimit: vi.fn(async () => ({ allowed: true })) }));
+vi.mock("@/lib/rateLimit", () => ({ rateLimit: vi.fn(async () => ({ status: "ALLOWED" })) }));
 const exec = promisify(execFile);
 const dbUrl = process.env.TEST_QUEUE_DATABASE_URL;
 const redisUrl = process.env.TEST_QUEUE_REDIS_URL;

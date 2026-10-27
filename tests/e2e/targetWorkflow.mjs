@@ -15,7 +15,7 @@ try {
   const email = `workflow-${suffix}@example.test`;
   const password = "Disposable-Workflow-Test-123";
   const registration = await context.request.post(`${app}/api/register`, { data: { name: "Workflow Test", email, password } });
-  assert.equal(registration.status(), 201);
+  assert.equal(registration.status(), 200);
   await page.goto(`${app}/login`);
   await page.getByLabel("Email", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);

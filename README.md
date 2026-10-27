@@ -129,12 +129,68 @@ localhost value redirects to localhost even when you browse through another host
 After changing it, apply the environment with `docker compose up -d --no-deps
 --force-recreate web`. A simple restart does not reload the container environment.
 
-The supplied Compose stack publishes Next.js directly and has no reverse proxy.
-If you add one, preserve the public `Host`, `X-Forwarded-Host` and
+The supplied Compose stack exposes Next.js only inside Docker; the optional
+Tailscale Serve ingress is described in [docs/TAILSCALE.md](docs/TAILSCALE.md).
+Any trusted ingress must supply the public `Host`, `X-Forwarded-Host` and
 `X-Forwarded-Proto` headers. The existing `trustHost: true` allows Auth.js to use
 these for server auth actions; explicit `AUTH_URL` takes priority and also avoids
 Next.js internal request URLs affecting authentication redirects. OAuth providers
 must register callbacks under the same public origin (`/api/auth/callback/<provider>`).
+
+### Authentication and anti-abuse
+
+Public registration is **disabled by default**. Set
+`ALLOW_PUBLIC_REGISTRATION=true` explicitly to expose the registration form/API
+and permit new OAuth accounts. Existing password accounts and already-linked
+OAuth accounts can sign in in private mode. Registration returns the same generic
+HTTP 200 confirmation for new/existing addresses (including concurrent duplicates),
+without auto-login or account fields. It never overwrites an existing password.
+Provision an account privately with the operator CLI; provide a 10-character
+minimum, 72-byte maximum password through stdin, not a command argument:
+
+```sh
+docker compose exec -T web npm run user:create -- admin@example.test "Administrator" < /secure/password-file
+```
+
+`TRUST_PROXY_HEADERS=false` ignores both XFF and X-Real-IP. Next.js does not expose
+a trusted connection address, so these clients share an `unknown` IP quota. This
+can restrict multiple legitimate users; configure a verified ingress for separate
+IP quotas. Never enable trust solely because `AUTH_URL` is set. To opt in, set
+`TRUST_PROXY_HEADERS=true` and `TRUSTED_PROXY_HOPS=1` (or the exact, fixed ingress
+hop count, up to 16). Every XFF element must be a valid IP; selection proceeds
+from the **right**, and IPv6/mapped IPv4 representations are canonicalized. No
+X-Real-IP fallback is used. Direct client access to Next.js must be prevented;
+variable-length proxy paths need a different ingress configuration. In trusted
+mode, missing/invalid proxy identity refuses login/registration with HTTP 503,
+so a malformed header cannot grant a second `unknown` quota.
+
+Policies are centralized in `src/lib/abusePolicy.ts`:
+
+| Operation | Quota | Anti-abuse backend unavailable |
+| --- | --- | --- |
+| Credentials login | 20/IP + 8/login per 15 minutes | HTTP 503; no password comparison |
+| Public registration | 5 attempts/IP/hour | HTTP 503; no account creation |
+| Scan creation | 20 attempts/user/hour in Redis; 20 created runs/user/rolling hour in PostgreSQL | Enforce PostgreSQL quota; accept via outbox, HTTP 202 while delivery is pending |
+
+The login quota covers existing and nonexistent accounts before bcrypt. Login
+identifiers are trimmed/lowercased and HMACed with `AUTH_SECRET` in Redis keys;
+rotating that secret starts new account counters. OAuth does not use the password
+limiter; private-mode account creation is still gated. Redis windows use an atomic
+increment/expiry script and a dedicated producer bounded to one second, with no
+unbounded offline queue. Exhausted quotas return HTTP 429 and `Retry-After`.
+Scan creation serializes on the PostgreSQL user row and checks the durable quota
+inside the same transaction as ScanRun/outbox creation, on every request, so Redis
+loss/recovery cannot reset the budget. Idempotent replays consume no new database
+slot. Database failure remains an error; scans/outcomes and scope checks retain
+their existing semantics. Server logs use fixed diagnostic codes, not credentials,
+email addresses, identity keys or raw Redis errors.
+
+`npm run test:queue` also exercises real limiter concurrency and login/signup/scan
+policies across a disposable Redis stop/restart. `npm run test:auth` additionally launches the built application and Chromium against
+those disposable services to verify private/public forms, forged headers, real
+429/503 responses and durable scan acceptance during Redis loss. Run
+`npm run build` first. Other browser registration tests require
+`ALLOW_PUBLIC_REGISTRATION=true` on their isolated application.
 
 Local development: provision Postgres and Redis, configure `.env`, then:
 

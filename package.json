@@ -12,10 +12,12 @@
     "test:ui": "node tests/e2e/targetWorkflow.mjs",
     "test:migration": "node tests/migrations/programUpgrade.mjs",
     "worker": "tsx src/server/queue/worker.ts",
+    "user:create": "node scripts/create-user.mjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
-    "test:queue": "node tests/queue/runInfrastructure.mjs"
+    "test:queue": "node tests/queue/runInfrastructure.mjs",
+    "test:auth": "node tests/queue/runInfrastructure.mjs --auth-browser"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",

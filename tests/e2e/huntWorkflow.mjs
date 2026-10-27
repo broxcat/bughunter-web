@@ -11,7 +11,7 @@ try {
   const context = await browser.newContext(); const page = await context.newPage(); const errors = [];
   page.on("pageerror", e => errors.push(e.message));
   const email = `hunt-ui-${Date.now()}@example.test`; const password = "Isolated-Hunt-Test-123";
-  assert.equal((await context.request.post(`${app}/api/register`, { data: { email, password, name: "Hunt UI" } })).status(), 201);
+  assert.equal((await context.request.post(`${app}/api/register`, { data: { email, password, name: "Hunt UI" } })).status(), 200);
   await page.goto(`${app}/login`); await page.getByLabel("Email", { exact: true }).fill(email); await page.getByLabel("Password", { exact: true }).fill(password); await page.getByRole("button", { name: "Sign in", exact: true }).click(); await page.waitForURL(`${app}/targets`);
   const created = await context.request.post(`${app}/api/programs`, { data: { companyName: "Hunt Readiness Lab", requiredUserAgent: "Hunt-UI/1", scopeHosts: ["hunt-ui.example.test"], qualifying: ["XSS", "IDOR", "SQL_INJECTION", "JWT"], nonQualifying: [] } });
   assert.equal(created.status(), 201); const program = await created.json();

@@ -39,7 +39,7 @@ vi.mock("@/server/queue/scanQueue", () => ({
 // forever rather than fail open.) This is infra isolation, not the logic under
 // test — the APPROVED/REVOKED decision below is still the real handler code.
 vi.mock("@/lib/rateLimit", () => ({
-  rateLimit: vi.fn(async () => ({ allowed: true, remaining: 99, resetSec: 3600 })),
+  rateLimit: vi.fn(async () => ({ status: "ALLOWED", remaining: 99, resetSec: 3600 })),
 }));
 
 const d = TEST_DB ? describe : describe.skip;

@@ -5,7 +5,7 @@ vi.mock("@/lib/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/prisma", () => ({ prisma: { target: { findFirst: mocks.target }, scanRun: { create: mocks.create, update: mocks.update, findMany: mocks.list, findUnique: mocks.find } } }));
 vi.mock("@/server/queue/scanJobPublisher", () => ({ publishScanJob: mocks.publish, dispatchSelect: { status: true } }));
 vi.mock("@/server/queue/scanRequest", async importOriginal => ({ ...await importOriginal<object>(), createScanRequest: mocks.accept, findScanRequest: mocks.replay }));
-vi.mock("@/lib/rateLimit", () => ({ rateLimit: vi.fn(async () => ({ allowed: true })) }));
+vi.mock("@/lib/rateLimit", () => ({ rateLimit: vi.fn(async () => ({ status: "ALLOWED" })) }));
 import { GET, POST } from "@/app/api/scan-runs/route";
 beforeEach(() => { vi.resetAllMocks(); mocks.auth.mockResolvedValue({ user: { id: "owner" } }); mocks.find.mockResolvedValue(null); });
 const post = (type: string, key?: string) => POST(new NextRequest("http://localhost/api/scan-runs", { method: "POST", headers: { "Content-Type": "application/json", ...(key !== undefined ? { "Idempotency-Key": key } : {}) }, body: JSON.stringify({ targetId: "target", type }) }));

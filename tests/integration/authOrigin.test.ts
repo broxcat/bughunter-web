@@ -4,10 +4,12 @@ import bcrypt from "bcryptjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ findUnique: vi.fn() }));
+vi.mock("@/lib/rateLimit", () => ({ rateLimit: vi.fn(async () => ({ status: "ALLOWED", resetSec: 900, remaining: 10 })) }));
 vi.mock("@/lib/prisma", () => ({ prisma: { user: { findUnique: mocks.findUnique } } }));
 
 beforeEach(() => {
   vi.resetModules();
+  vi.clearAllMocks();
   vi.stubEnv("AUTH_SECRET", "auth-origin-regression-test-secret-only");
   vi.stubEnv("AUTH_URL", "");
   vi.stubEnv("NEXTAUTH_URL", "");
@@ -86,5 +88,30 @@ describe("public authentication origin", () => {
     expect(logout.url).toBe(`${origin}/login`);
     if (!origin.includes("localhost")) expect(logout.url).not.toContain("localhost");
     expect(await request("session")).toBeNull();
+  });
+});
+
+
+describe("credential anti-abuse HTTP responses", () => {
+  it.each(["UNAVAILABLE", "BLOCKED"] as const)("returns a real refusal for %s through Auth.js", async status => {
+    const { rateLimit } = await import("@/lib/rateLimit");
+    vi.mocked(rateLimit).mockResolvedValueOnce(status === "UNAVAILABLE" ? { status } : { status, resetSec: 70, remaining: 0 });
+    vi.mocked(rateLimit).mockResolvedValueOnce({ status: "ALLOWED", resetSec: 900, remaining: 10 });
+    const { GET, POST } = await import("@/app/api/auth/[...nextauth]/route");
+    const origin = "http://localhost:3000";
+    const csrf = await GET(new NextRequest(`${origin}/api/auth/csrf`));
+    const cookies = csrf.headers.getSetCookie().map(cookie => cookie.split(";", 1)[0]).join("; ");
+    const { csrfToken } = await csrf.json();
+    const response = await POST(new NextRequest(`${origin}/api/auth/callback/credentials`, {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "X-Auth-Return-Redirect": "1", cookie: cookies },
+      body: new URLSearchParams({ csrfToken, email: "fixture@example.test", password: "fixture-password" }),
+    }));
+    expect(response.status).toBe(status === "UNAVAILABLE" ? 503 : 429);
+    const result = await response.json();
+    expect(result.error).not.toMatch(/Redis|fixture@example/);
+    expect(new URL(result.url).searchParams.get("code")).toBe(status === "UNAVAILABLE" ? "temporarily_unavailable" : "rate_limited");
+    expect(response.headers.get("Retry-After")).toBeTruthy();
+    expect(mocks.findUnique).not.toHaveBeenCalled();
+    expect(response.headers.getSetCookie().join(";")).not.toContain("session-token=");
   });
 });

@@ -6,6 +6,12 @@ import Google from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { guardCredentials } from "@/lib/credentialsGuard";
+import { normalizeLogin, publicRegistrationEnabled } from "@/lib/abusePolicy";
+
+// Same bcrypt work for missing accounts and OAuth-only users. This is a public
+// dummy hash, not an account credential.
+const DUMMY_PASSWORD_HASH = "$2b$12$ExphlMmvboiLb3SyPjF.oeFQvHlMMz.DHBKQ29IvrbzMPtC1z7p96";
 
 // Only enable an OAuth provider when its credentials are present, so the app
 // boots in dev/CI without GitHub/Google secrets configured.
@@ -16,21 +22,22 @@ const providers: NextAuthConfig["providers"] = [
       email: { label: "Email", type: "email" },
       password: { label: "Password", type: "password" },
     },
-    async authorize(raw) {
+    async authorize(raw, request) {
+      const emailInput = z.string().trim().max(254).email().safeParse(raw.email);
+      // Both quotas run before DB lookup/bcrypt, regardless of account existence.
+      await guardCredentials(request, emailInput.success ? normalizeLogin(emailInput.data) : undefined);
       const parsed = z
-        .object({ email: z.string().email(), password: z.string().min(1) })
+        .object({ email: z.string().trim().max(254).email(), password: z.string().min(1).max(1024) })
         .safeParse(raw);
       if (!parsed.success) return null;
 
       const { email, password } = parsed.data;
       const user = await prisma.user.findUnique({
-        where: { email: email.toLowerCase() },
+        where: { email: normalizeLogin(email) },
       });
       // OAuth-only users have no passwordHash; reject credentials login for them.
-      if (!user?.passwordHash) return null;
-
-      const ok = await bcrypt.compare(password, user.passwordHash);
-      if (!ok) return null;
+      const ok = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+      if (!user?.passwordHash || !ok) return null;
 
       return {
         id: user.id,
@@ -68,6 +75,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   pages: { signIn: "/login" },
   providers,
   callbacks: {
+    async signIn({ account }) {
+      if (account?.type === "credentials" || publicRegistrationEnabled()) return true;
+      // A private installation permits existing linked OAuth accounts only;
+      // merely configuring a provider must not reopen public registration.
+      if (!account) return false;
+      return Boolean(await prisma.account.findUnique({
+        where: { provider_providerAccountId: { provider: account.provider, providerAccountId: account.providerAccountId } },
+        select: { id: true },
+      }));
+    },
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;

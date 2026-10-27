@@ -8,10 +8,11 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { publishScanJob, dispatchSelect } from "@/server/queue/scanJobPublisher";
-import { createScanRequest, findScanRequest, ScanRequestConflict, ScanRequestNotFound } from "@/server/queue/scanRequest";
+import { createScanRequest, findScanRequest, ScanRequestConflict, ScanRequestNotFound, ScanRequestQuotaExceeded } from "@/server/queue/scanRequest";
 import { withScanDispatch } from "@/lib/scanDispatch";
 import { rateLimit } from "@/lib/rateLimit";
 import { logger } from "@/lib/logger";
+import { RATE_LIMIT_POLICIES } from "@/lib/abusePolicy";
 
 const createRunSchema = z.object({
   approvedTechniques: z.array(z.enum(APPROVABLE_HUNT_TECHNIQUES)).max(4).default([]),
@@ -19,12 +20,6 @@ const createRunSchema = z.object({
   targetId: z.string().trim().min(1, "targetId is required"),
   type: z.enum(["RECON", "HUNT"]),
 });
-
-// Per-user cap on how many scan-runs can be enqueued. The worker runs
-// concurrency:1 so execution is serialized, but that doesn't stop a client from
-// flooding the queue with thousands of QUEUED jobs — this does.
-const SCAN_RUN_LIMIT = 20; // per user
-const SCAN_RUN_WINDOW_SEC = 60 * 60; // per hour
 
 // GET /api/scan-runs?targetId=... — list runs for one owned target, newest first.
 export async function GET(req: NextRequest) {
@@ -92,18 +87,20 @@ export async function POST(req: NextRequest) {
     if (existing) return await respond(existing);
 
     // Throttle new requests; an idempotent replay does not consume the quota.
-    // Throttle enqueues per user BEFORE touching the queue, so a client can't
-    // flood it with jobs. Fails open if Redis is down (see rateLimit).
-    const { allowed, resetSec } = await rateLimit(
+    const policy = RATE_LIMIT_POLICIES.scanUser;
+    const limit = await rateLimit(
       `rl:scan-runs:${session.user.id}`,
-      SCAN_RUN_LIMIT,
-      SCAN_RUN_WINDOW_SEC,
+      policy.limit,
+      policy.windowSec,
     );
-    if (!allowed) {
+    if (limit.status === "BLOCKED") {
       return NextResponse.json(
         { error: "Too many scan runs. Please try again later." },
-        { status: 429, headers: { "Retry-After": String(resetSec) } },
+        { status: 429, headers: { "Retry-After": String(limit.resetSec) } },
       );
+    }
+    if (limit.status === "UNAVAILABLE") {
+      logger.warn({ operation: "scan-create", userId: session.user.id, policy: "POSTGRES_QUOTA" }, "scan anti-abuse using durable database quota");
     }
 
     const target = await prisma.target.findFirst({
@@ -123,6 +120,7 @@ export async function POST(req: NextRequest) {
     const run = await createScanRequest(session.user.id, parsed.data, key);
     return await respond(run);
   } catch (err) {
+    if (err instanceof ScanRequestQuotaExceeded) return NextResponse.json({ error: err.message }, { status: 429, headers: { "Retry-After": String(err.retrySec) } });
     if (err instanceof ScanRequestConflict) return NextResponse.json({ error: err.message }, { status: 409 });
     if (err instanceof ScanRequestNotFound) return NextResponse.json({ error: "Not found" }, { status: 404 });
     // Do not log connection strings or database error details.
