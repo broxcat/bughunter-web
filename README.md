@@ -118,7 +118,7 @@ Next.js 16 / React 19, Prisma 6 / PostgreSQL, BullMQ / Redis, Auth.js, Tailwind 
 ```sh
 cp .env.example .env
 # Fill AUTH_URL, AUTH_SECRET, CREDENTIALS_ENCRYPTION_KEY and database/Redis settings.
-# Prepare data/research/authorized_keys as described under Codex Research first.
+# Run the Research console setup helper below before first Compose startup.
 docker compose up --build -d
 docker compose exec web npx prisma migrate deploy
 ```
@@ -276,81 +276,56 @@ can be included in reports.
 
 ## Codex Research
 
-Research workflow: **Recon → Codex workspace → Hypotheses / tests / controls → human promotion → Finding draft → Evidence Review → Report**.
+**Recon → per-target Codex console → hypotheses/tests/controls → human Finding draft → Evidence Review → Report.**
 
-[Evidence-driven Research](docs/RESEARCH-HYPOTHESES.md) uses JSON v2 and manual sync,
-with OPEN / TESTING / BLOCKED / REJECTED / CONFIRMED, retained negative results and
-revisions. CONFIRMED is a research claim, not a confirmed Finding. The operator
-explicitly creates one idempotent CANDIDATE/UNVALIDATED draft; Evidence Review and
-Report eligibility remain independent. Legacy v1 records stay readable.
-
-Optional [Burp MCP integration](docs/BURP-MCP-RESEARCH.md) gives Codex a passive,
-workspace-scoped view of existing HTTP metadata via an installed gateway. Burp
-Suite and its official MCP extension run externally on host loopback, connected
-by an explicit restricted reverse SSH tunnel. Run `bughunter-burp-status` before
-`bughunter-codex`; Research displays the last diagnostic. No active scanner,
-credential export or automatic Finding is introduced. Manual Burp traffic still
-requires the operator's exact scope and required User-Agent configuration.
-
-Codex maintains `research/hypotheses.json` (v1) alongside the human-readable
-Markdown. Run `bughunter-validate-hypotheses` in SSH, then **Sync from workspace**
-in BugHunter. The read-only registry tracks evidence for/against, a distinct next
-test, expected signal, falsification and revision history. A CONFIRMED hypothesis
-is a research claim, never a reviewed Finding or report acceptance. Sync is manual,
-idempotent, and preserves omitted hypotheses; the runner never receives DB access.
-
-The former vulnerability-family Hunt engine is retired. Existing Hunt runs
-remain available as historical read-only records at `/hunt` and `/hunt/<id>`.
-Their findings, reports, policy snapshots and stored technique approvals survive.
-New `HUNT` requests return 410; old queued jobs cannot execute that engine.
-
-Create a workspace at `/research` or from a host's **Create Research Workspace**
-button. Ownership, concrete authorized scope, exclusions and required User-Agent
-are checked server-side. Recon observations and existing finding metadata are
-exported without target credentials, raw HTTP bodies, AI keys or application
-secrets. The detail page provides the workspace ID, source Recon, exported files,
-initial-bundle ZIP and SSH commands. The runner uses the optional `research`
-Compose profile; it needs a real operator public-key file. No web API executes shell commands.
-
-The dedicated runner uses an independent image/network with Internet egress,
-no backend network, no Docker socket and no application env_file. Only the
-workspace volume is shared with web. SSH is bound to host loopback only;
-public-key authentication and the non-root `researcher` user are required.
-
-Before starting the stack, set up the public key (private key stays outside Git):
+`/research` lists authorized concrete hosts. Open `/research/<Target.id>` for a
+full-screen xterm.js Codex TUI, attached to one persistent tmux session and
+`/workspaces/research_<Target.id>`. Refresh keeps the same session. The host root
+is static operator configuration, e.g. `/home/brokcat/bughunter-research`:
 
 ```sh
-ssh-keygen -t ed25519 -f ~/.ssh/bughunter_research
-install -d -m 0700 data/research
-install -m 0644 ~/.ssh/bughunter_research.pub data/research/authorized_keys
-docker compose build research-runner
-docker compose up -d research-runner
-ssh -i ~/.ssh/bughunter_research -p 2222 researcher@127.0.0.1
-# Inside SSH:
-codex login --device-auth
-bughunter-workspaces
-cd /workspaces/<workspace-id>
-bughunter-codex
+node scripts/setup-research-console.mjs --root /home/brokcat/bughunter-research
+# Set RESEARCH_HOST_ROOT and RESEARCH_WORKSPACE_UID/GID in .env.
+docker compose build
+docker compose up -d db redis
+docker compose run --rm --no-deps web npx prisma migrate deploy
+docker compose up -d
 ```
 
-Codex CLI **0.164.0** is pinned, with `--yolo` verified as an alias of
-`--dangerously-bypass-approvals-and-sandbox`. The wrapper checks the workspace
-root and AGENTS.md/scope.md before `exec codex --yolo`. Inputs are read-only;
-research/, evidence/ and scripts/ are writable. Codex credentials are configured
-independently inside SSH. Scope is authoritative; discovery never grants access.
-`127.0.0.1` inside the runner refers to that container, not the host.
+The dedicated research-console receives no app env_file, Auth.js/DB/Redis/AI keys,
+Docker socket or host home. Web signs short-lived Ed25519 terminal tickets; the
+console holds only the public key. A minimal ingress proxy strips browser cookies
+and Authorization; the terminal verifies dedicated tickets only. Tailscale provides same-origin WSS ingress;
+no terminal port is published. Optional SSH remains host-loopback only. Codex
+**0.165.0** is pinned and launches with verified **--yolo**. Operator login persists
+independently in the Codex volume; no BugHunter provider key is copied.
 
-Migrations `20261027170000_research_sessions` and
-`20261027190000_research_hypothesis_registry` are additive. Deploy them before using
-the updated web app and worker; rebuild research-runner for the validation helper. No remote model inference/authentication is part
-of automated tests. Tests cover export secrets/traversal/atomicity/concurrency,
-ZIP ownership/integrity, legacy history, actual Docker/SSH/Codex and browser UX:
+[Burp MCP](docs/BURP-MCP-RESEARCH.md) uses the official PortSwigger 1.3.0 extension
+externally and a pinned official STDIO proxy behind an exact-host/port/UA policy
+gateway. Playwright MCP **0.0.83** uses the loopback Burp proxy. Both are configured
+per project automatically. Burp offline does not prevent terminal startup.
+Four pinned, unchanged skills are installed; their internal confirmation gates
+remain intact. Details: [CODEX-RESEARCH.md](docs/CODEX-RESEARCH.md).
+
+The clean workspace has scope.md, recon/, requests/, scripts/ and findings/;
+source/ is optional. Scope never expands through discovery. Notes/captures belong
+to the configured local operator UID/GID; critical inputs remain read-only.
+[Hypothesis JSON v2](docs/RESEARCH-HYPOTHESES.md) remains an optional manual sync
+feature under findings/. Research confirmation does not confirm a Finding:
+explicit human promotion creates only CANDIDATE/UNVALIDATED, followed by existing
+Evidence Review and separately requested Report creation. Manual Findings work
+independently. No scanner/Hunt engine is reintroduced.
+
+Old UUID ResearchSession records/workspaces/ZIPs remain historical, with details
+at `/research/history/<sessionId>` and redirecting old bookmarks. Old Hunt runs
+remain read-only at `/hunt`; new HUNT requests return 410.
 
 ```sh
-npm run test:research
 npm run test:queue -- --research-browser
+npm run test:research
+# Actual locally configured final image, synthetic smoke only:
+docker compose exec -T -e BH_FINAL_STACK_SMOKE=1 web npm run test:research:final
 ```
 
-See [docs/CODEX-RESEARCH.md](docs/CODEX-RESEARCH.md) for complete deployment steps,
-permissions, version sources, SSH/isolation checks, file structure, troubleshooting
-and the Hunt dependency audit. Tests exclusively use local synthetic fixtures.
+Tests use disposable/local services. Real Burp GUI and remote Codex inference
+require operator setup and are never asserted from fixture/config checks alone.

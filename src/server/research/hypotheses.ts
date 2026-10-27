@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { hypothesesDocumentSchema, safeHypothesisIssues, type ResearchHypothesisInput, researchDataSchema, hypothesisSchema, hypothesisV2Schema, hypothesisEvidence, researchBindingError, hypothesisTransitionError, HYPOTHESIS_STATUSES, type HypothesisStatus } from "@/lib/research/hypotheses";
 import { exportText } from "./workspace";
-import { ownedResearch, researchRoot } from "./sessions";
+import { ownedResearch, researchRootFor } from "./sessions";
 import { HypothesisWorkspace, HypothesisSyncError } from "./hypothesisFiles";
 
 export { HypothesisSyncError };
@@ -44,7 +44,7 @@ export async function syncHypotheses(sessionId: string, userId: string) {
     if (session.status !== "READY") throw new HypothesisSyncError("SESSION_NOT_READY", "Only READY sessions can sync; archived sessions are read-only", 409);
     // Scope revocation does not prohibit importing historical notes. No target
     // request, scan, Finding, human review, Report or scope mutation occurs here.
-    const workspace = await HypothesisWorkspace.open(researchRoot(), session.workspaceId);
+    const workspace = await HypothesisWorkspace.open(researchRootFor(session.workspaceId), session.workspaceId);
     try {
       const raw = await workspace.readDocument();
       let input: unknown;

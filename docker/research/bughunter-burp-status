@@ -1,3 +1,6 @@
 #!/bin/sh
 set -eu
-exec node /opt/bughunter/docker/research/validator/burp-main.mjs status
+case "$(pwd -P)" in
+ /workspaces/research_*) exec node /opt/bughunter/docker/research/validator/console-burp-main.mjs status ;;
+ *) exec node /opt/bughunter/docker/research/validator/burp-main.mjs status ;;
+esac

@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+umask 027
+# SSH is optional operator access; absence of public keys never disables the web console.
+if [ -f /run/research-keys/authorized_keys ]; then
+  install -o root -g root -m 0644 /run/research-keys/authorized_keys /etc/ssh/authorized_keys
+else
+  install -o root -g root -m 0644 /dev/null /etc/ssh/authorized_keys
+fi
+if [ ! -f /etc/ssh/host-keys/ssh_host_ed25519_key ]; then
+  ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/host-keys/ssh_host_ed25519_key
+fi
+chmod 0700 /etc/ssh/host-keys
+chmod 0600 /etc/ssh/host-keys/ssh_host_ed25519_key
+# Only top-level volume initialization, never a recursive chown of operator data.
+if [ "$(stat -c %u /home/researcher/.codex)" != "$(id -u researcher)" ]; then
+  # One-time UID upgrade of this dedicated Codex volume only; never follow symlinks.
+  chown -hR researcher:research /home/researcher/.codex
+fi
+chown researcher:research /home/researcher/.codex
+setpriv --reuid=researcher --regid=research --init-groups chmod 0700 /home/researcher/.codex
+/usr/sbin/sshd -D -e &
+sshd_pid=$!
+printf '%s\n' "$sshd_pid" > /run/research-sshd.pid
+HOME=/home/researcher USER=researcher LOGNAME=researcher CODEX_HOME=/home/researcher/.codex setpriv --reuid=researcher --regid=research --init-groups --no-new-privs node /opt/bughunter/docker/research/console/server.mjs &
+console_pid=$!
+trap 'setpriv --reuid=researcher --regid=research --init-groups kill "$console_pid" 2>/dev/null || true; kill "$sshd_pid" 2>/dev/null || true; wait || true' TERM INT EXIT
+# Failure of either mandatory local process triggers Docker restart, not a silent half-service.
+while kill -0 "$sshd_pid" 2>/dev/null && setpriv --reuid=researcher --regid=research --init-groups kill -0 "$console_pid" 2>/dev/null; do sleep 1; done
+exit 1

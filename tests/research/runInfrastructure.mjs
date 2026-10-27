@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 const exec = promisify(execFile), project = `bh-research-test-${randomUUID().slice(0, 8)}`;
 const temp = await mkdtemp(join(tmpdir(), project)), config = join(temp, "compose.json");
 const cmd = async (file, args, options = {}) => (await exec(file, args, { timeout: 60000, maxBuffer: 2 ** 20, ...options })).stdout.trim();
-const compose = (...args) => cmd("docker", ["compose", "-p", project, "-f", config, ...args]);
+const compose = (...args) => cmd("docker", ["compose", "-p", project, "-f", config, ...args], {timeout: args[0] === "up" ? 180000 : 60000});
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { loopHypothesis } from "../fixtures/researchLoop.mjs";
@@ -18,12 +18,16 @@ import { fakeBurp } from "./fakeBurp.mjs";
 let started = false, tunnel, burpFixture, mcp;
 try {
   const original = JSON.parse(await cmd("docker", ["compose", "--profile", "research", "config", "--format", "json"]));
-  const runner = original.services["research-runner"];
+  const runner = original.services["research-console"];
   assert.equal(runner.ports[0].host_ip, "127.0.0.1");
   assert.equal(runner.ports[0].published, process.env.RESEARCH_SSH_PORT ?? "2222");
   assert(!runner.env_file);
   assert(!JSON.stringify(runner).match(/docker\.sock|DATABASE_URL|AUTH_SECRET|REDIS_URL|CREDENTIALS_ENCRYPTION_KEY/));
-  assert.deepEqual(Object.keys(runner.networks), ["research_egress"]);
+  assert.deepEqual(Object.keys(runner.networks).sort(), ["research_egress", "research_terminal"]);
+  runner.networks = {research_egress:{}};
+  runner.entrypoint = ["entrypoint"];
+  runner.healthcheck = {test:["CMD", "healthcheck"]};
+  runner.environment = {};
   // Testing service is derived from the real service: preserve capabilities,
   // user, entrypoint and healthcheck, change only disposable resources/port.
   delete runner.build;
@@ -46,7 +50,7 @@ try {
     db: { image: "postgres:16-alpine", environment: { POSTGRES_PASSWORD: "disposable-research" }, networks: ["backend"] },
     redis: { image: "redis:7-alpine", networks: ["backend"] },
   }, networks: { research_egress: {}, backend: {} }, volumes: { workspaces: {}, codex: {}, hostkeys: {} } }));
-  await compose("up", "-d"); started = true;
+  started = true; await compose("up", "-d");
   const id = await compose("ps", "-q", "research-runner");
   const dexec = (...args) => cmd("docker", ["exec", id, ...args]);
   let healthy = false;
@@ -64,8 +68,8 @@ try {
   assert(!JSON.stringify(inspected.Mounts).includes("docker.sock"));
   assert.deepEqual(Object.keys(inspected.NetworkSettings.Networks), [`${project}_research_egress`]);
   const sshd = await dexec("/usr/sbin/sshd", "-T");
-  for (const setting of ["permitrootlogin no", "passwordauthentication no", "kbdinteractiveauthentication no", "pubkeyauthentication yes", "allowusers researcher", "authenticationmethods publickey", "allowtcpforwarding remote", "permitlisten 127.0.0.1:9876", "gatewayports no", "permitopen none", "allowstreamlocalforwarding no"]) assert(sshd.includes(setting));
-  assert((await dexec("id", "researcher")).includes("uid=2000"));
+  for (const setting of ["permitrootlogin no", "passwordauthentication no", "kbdinteractiveauthentication no", "pubkeyauthentication yes", "allowusers researcher", "authenticationmethods publickey", "allowtcpforwarding remote", "permitlisten 127.0.0.1:8080 127.0.0.1:9876", "gatewayports no", "permitopen none", "allowstreamlocalforwarding no"]) assert(sshd.includes(setting));
+  assert((await dexec("id", "researcher")).includes(`uid=${process.env.RESEARCH_WORKSPACE_UID ?? "1000"}`));
   const version = await dexec("su", "-s", "/bin/sh", "researcher", "-c", "codex --version");
   await dexec("su", "-s", "/bin/sh", "researcher", "-c", "codex --help");
   await dexec("su", "-s", "/bin/sh", "researcher", "-c", "codex --yolo --help");

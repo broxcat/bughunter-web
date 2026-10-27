@@ -17,7 +17,8 @@ export async function POST(req: Request) {
   const parsed = input.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Provide only a targetId" }, { status: 400 });
   try {
-    return Response.json(await createResearchSession(session.user.id, parsed.data.targetId), { status: 201, headers: { "Cache-Control": "no-store" } });
+    // Archival compatibility export only. Active consoles use the per-Target ticket API.
+    return Response.json(await createResearchSession(session.user.id, parsed.data.targetId), { status: 201, headers: { "Cache-Control": "no-store", "Deprecation": "true" } });
   } catch (error) {
     const known = error instanceof ResearchError;
     const status = known ? error.status : 500;

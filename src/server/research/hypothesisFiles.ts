@@ -14,7 +14,7 @@ const fileFlags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLO
  * held directory, with O_NOFOLLOW. A concurrent rename/symlink replacement cannot
  * redirect the next open to an external path. realpath + open would race here. */
 export class HypothesisWorkspace {
-  private constructor(private directory: FileHandle) {}
+  private constructor(private directory: FileHandle, private consoleWorkspace = false) {}
   static async open(root: string, workspaceId: string) {
     workspacePath(root, workspaceId); // absolute configured root + server UUID only
     let directory = await open("/", directoryFlags);
@@ -25,7 +25,7 @@ export class HypothesisWorkspace {
       }
       const stat = await directory.stat();
       if (stat.uid !== process.getuid?.() || stat.mode & 0o002) throw new HypothesisSyncError("UNSAFE_WORKSPACE", "Unsafe workspace permissions");
-      return new HypothesisWorkspace(directory);
+      return new HypothesisWorkspace(directory, workspaceId.startsWith("research_"));
     } catch (error) {
       await directory.close();
       if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new HypothesisSyncError("WORKSPACE_MISSING", "Research workspace is missing", 409);
@@ -55,7 +55,7 @@ export class HypothesisWorkspace {
   }
   async readDocument() {
     let file: FileHandle;
-    try { file = await this.artifact("research/hypotheses.json"); }
+    try { file = await this.artifact(this.consoleWorkspace ? "findings/hypotheses.json" : "research/hypotheses.json"); }
     catch (error) {
       if (error instanceof HypothesisSyncError && error.code === "ARTIFACT_MISSING") throw new HypothesisSyncError("HYPOTHESES_MISSING", "research/hypotheses.json is missing. See the JSON contract for existing Phase 1 workspaces.", 409);
       throw error;

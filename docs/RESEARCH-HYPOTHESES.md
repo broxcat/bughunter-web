@@ -1,3 +1,12 @@
+> Current UI: `/research/<Target.id>` is a full-screen Codex console. The registry
+> described below is secondary/historical. New console workspaces keep the same
+> v2 contract under `findings/hypotheses.json`; captured artifacts belong under
+> `requests/` (passive Burp metadata under `requests/burp/`). Direct reproducibility
+> evidence can reference requests/ outside requests/burp/. Old paths and UUID
+> ZIPs remain unchanged. Registry/review UI is `/research/history/<sessionId>`.
+> See [current console setup](CODEX-RESEARCH.md); older optional-runner instructions
+> and passive-only architecture later in this historical guide are superseded.
+
 # Evidence-driven Research and human Finding review
 
 The Research workflow is:

@@ -580,6 +580,8 @@ model ResearchSession {
   userId         String
   targetId       String
   workspaceId    String @unique
+  // Null for historical UUID sessions. One persistent console per technical Target.
+  consoleTargetId String? @unique
   reconScanRunId String?
   status         ResearchSessionStatus @default(CREATING)
   targetHost     String

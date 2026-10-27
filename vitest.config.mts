@@ -12,6 +12,9 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    // Prisma advisory locks are database-wide even for isolated test schemas.
+    // Bound concurrent suites so additive migrations do not exceed the 10s lock deadline.
+    maxWorkers: process.env.TEST_DATABASE_URL ? 2 : undefined,
     // Auth.js imports extensionless Next entry points, resolved by the bundler.
     server: { deps: { inline: ["next-auth"] } },
     include: ["tests/**/*.test.ts"],

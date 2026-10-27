@@ -52,13 +52,11 @@ try {
   // Labelled synthetic Recon evidence; this test never contacts example.test.
   const recon = await prisma.scanRun.create({ data: { targetId: target.id, type: "RECON", status: "COMPLETED", reconCorpus: { version: 1, capturedAt: new Date().toISOString(), urls: ["https://app.example.test/search"], authenticated: false, surface: Object.fromEntries(["queryInputs", "objectReferences", "forms", "javascript", "cookies", "jwt", "oauth", "xml", "urlInputs", "fileInputs", "businessFlows", "apiEndpoints"].map(k => [k, false])) } } });
   await page.getByRole("navigation").getByRole("link", { name: "Research", exact: true }).click(); await page.waitForURL(origin + "/research");
-  await page.getByLabel("Target", { exact: true }).selectOption(program.id);
-  await page.getByLabel("Host", { exact: true }).selectOption(target.id);
-  await page.getByText(new RegExp(`Recon source: ${recon.id}`)).waitFor();
-  const response = page.waitForResponse(r => new URL(r.url()).pathname === "/api/research-sessions" && r.request().method() === "POST");
-  await page.getByRole("button", { name: "Create Research Workspace", exact: true }).click();
-  const research = await (await response).json(); assert.equal(research.status, "READY");
-  await page.waitForURL(origin + `/research/${research.id}`);
+  await page.getByRole("link", { name: "Open console — app.example.test", exact: true }).waitFor();
+  // Legacy API remains supported; the primary Research UI now opens a target console.
+  const research = await page.evaluate(async targetId => { const r = await fetch('/api/research-sessions', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({targetId})}); if(!r.ok) throw new Error('Legacy fixture export failed'); return r.json(); }, target.id);
+  assert.equal(research.status, 'READY');
+  await page.goto(origin + `/research/history/${research.id}`);
   await page.getByText("Status: READY", { exact: true }).waitFor();
   assert((await page.locator("body").innerText()).includes("researcher@127.0.0.1"));
   assert((await readFile(join(root, research.workspaceId, "recon/endpoints.json"), "utf8")).includes(recon.id));
@@ -131,7 +129,7 @@ try {
   await findingCard.getByText("CONFIRMED", { exact: true }).waitFor();
   assert.equal(await prisma.report.count({ where: { userId: user.id } }), 0);
   const report = await context.request.post(origin + "/api/reports", { data: { title: "Explicitly requested fixture report", platform: "GENERIC", findingIds: [draft.findingId] } }); assert.equal(report.status(), 201);
-  await page.goto(origin + `/research/${research.id}`);
+  await page.goto(origin + `/research/history/${research.id}`);
   // Invalid sync keeps the imported registry and READY workspace intact.
   await writeFile(join(root, research.workspaceId, "research/hypotheses.json"), "invalid");
   await page.getByRole("button", { name: "Sync from workspace", exact: true }).click();

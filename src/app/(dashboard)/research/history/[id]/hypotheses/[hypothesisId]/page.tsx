@@ -23,7 +23,7 @@ export default async function HypothesisPage({ params, searchParams }: { params:
   const h = data.hypothesis;
   const policyState = await researchPolicyState(data.session.targetId, session.user.id, data.session.authorizationSnapshot);
   const scopeActive = policyState !== "INACTIVE";
-  return <div className="space-y-5"><Link className="text-brand" href={`/research/${id}`}>← Research Session</Link><h1 className="text-2xl font-semibold">{h.externalId} — {h.title}</h1>
+  return <div className="space-y-5"><Link className="text-brand" href={`/research/history/${id}`}>← Research Session</Link><h1 className="text-2xl font-semibold">{h.externalId} — {h.title}</h1>
     {!scopeActive && <p role="alert">Scope no longer active. Do not continue active testing.</p>}
     {policyState === "CHANGED" && <p role="alert">Program or scope changed since export. Create a current workspace before promotion.</p>}
     <p>{h.status} · Revision {h.revision} · Source: {h.source}</p>

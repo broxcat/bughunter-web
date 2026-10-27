@@ -2,6 +2,9 @@
 set -eu
 workspace=$(pwd -P)
 case "$workspace" in
+  /workspaces/research_*) exec node /opt/bughunter/docker/research/validator/codex-launch.mjs "$@" ;;
+esac
+case "$workspace" in
   /workspaces/*) ;;
   *) echo 'Enter a BugHunter workspace under /workspaces first.' >&2; exit 1 ;;
 esac

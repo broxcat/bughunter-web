@@ -32,19 +32,20 @@ async function checkArtifact(ref) {
 }
 let research;
 try {
-  if (!/^\/workspaces\/[0-9a-f-]{36}$/.test(cwd)) throw new Error("cwd");
-  research = await promisify(open)(`${cwd}/research`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  const consoleWorkspace = /^\/workspaces\/research_[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(cwd);
+  if (!consoleWorkspace && !/^\/workspaces\/[0-9a-f-]{36}$/.test(cwd)) throw new Error("cwd");
+  research = await promisify(open)(`${cwd}/${consoleWorkspace ? "findings" : "research"}`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   const document = JSON.parse(await readBounded(`/proc/self/fd/${research}/hypotheses.json`, HYPOTHESES_MAX_BYTES));
   const parsed = hypothesesDocumentSchema.safeParse(document);
   if (!parsed.success) {
     for (const issue of safeHypothesisIssues(parsed.error)) console.error(`${issue.path || "document"}: ${issue.message}`);
     process.exitCode = 1;
   } else {
-    const session = JSON.parse(await readBounded(`/proc/self/fd/${research}/session.json`, 16384));
+    const session = JSON.parse(await readBounded(consoleWorkspace ? `${cwd}/.agents/bughunter/session.json` : `/proc/self/fd/${research}/session.json`, 16384));
     const sessionId = typeof session.source === "string" ? session.source.replace(/^ResearchSession /, "") : null;
     if (parsed.data.sessionId !== sessionId) { console.error("sessionId: does not match research/session.json"); process.exitCode = 1; }
     else {
-      const target = JSON.parse(await readBounded(`${cwd}/target.json`, 65536));
+      const target = JSON.parse(await readBounded(`${cwd}/${consoleWorkspace ? ".agents/bughunter/target.json" : "target.json"}`, 65536));
       const checked = new Set();
       for (const [index, hypothesis] of parsed.data.hypotheses.entries()) {
         if ('targetId' in hypothesis && researchBindingError(hypothesis, { id: target.id, host: target.host, scheme: target.scheme ?? 'https' })) {

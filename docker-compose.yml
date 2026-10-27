@@ -53,9 +53,23 @@ services:
       # Auth.js must use the browser-visible origin, not a container hostname.
       AUTH_URL: "${AUTH_URL:?Set AUTH_URL to the public origin used in your browser}"
       RESEARCH_WORKSPACE_ROOT: /research-workspaces
-      RESEARCH_WORKSPACE_GID: "2000"
+      RESEARCH_WORKSPACE_GID: "${RESEARCH_WORKSPACE_GID:-1000}"
+      RESEARCH_WORKSPACE_UID: "${RESEARCH_WORKSPACE_UID:-1000}"
+      RESEARCH_CONSOLE_ROOT: /research-target-workspaces
+      RESEARCH_TERMINAL_PRIVATE_KEY_FILE: /run/research-terminal/private.pem
     volumes:
       - research-workspaces:/research-workspaces
+      - type: bind
+        source: ${RESEARCH_HOST_ROOT:-/home/brokcat/bughunter-research}
+        target: /research-target-workspaces
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data/research-terminal/private.pem
+        target: /run/research-terminal/private.pem
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       default:
         gw_priority: 1
@@ -122,35 +136,64 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Independent local research environment: no app env_file, backend network or socket.
-  # Optional Burp MCP uses a restricted reverse SSH loopback tunnel, not a new published port.
-  research-runner:
-    # Public authorized_keys is operator configuration; web must boot without it.
-    profiles: [research]
+  # Permanent per-target PTY/tmux/Codex environment. No application env_file.
+  research-console:
     build:
       context: .
       dockerfile: docker/research/Dockerfile
+      args:
+        RESEARCH_WORKSPACE_UID: "${RESEARCH_WORKSPACE_UID:-1000}"
+        RESEARCH_WORKSPACE_GID: "${RESEARCH_WORKSPACE_GID:-1000}"
     image: bughunter-research
+    environment:
+      RESEARCH_TERMINAL_ORIGIN: "${AUTH_URL:?Set AUTH_URL to the browser origin}"
+      RESEARCH_TERMINAL_PUBLIC_KEY_FILE: /run/research-terminal/public.pem
+    expose: ["7681"]
     ports:
       - "127.0.0.1:${RESEARCH_SSH_PORT:-2222}:22"
-    networks: [research_egress]
+    networks: [research_egress, research_terminal]
     volumes:
-      - research-workspaces:/workspaces
+      - type: bind
+        source: ${RESEARCH_HOST_ROOT:-/home/brokcat/bughunter-research}
+        target: /workspaces
+        bind:
+          create_host_path: false
+      - research-workspaces:/legacy-workspaces
       - research-codex:/home/researcher/.codex
       - research-host-keys:/etc/ssh/host-keys
       - type: bind
-        source: ./data/research/authorized_keys
-        target: /run/research-keys/authorized_keys
+        source: ./data/research-ssh
+        target: /run/research-keys
+        read_only: true
+      - type: bind
+        source: ./data/research-terminal/public.pem
+        target: /run/research-terminal/public.pem
         read_only: true
         bind:
           create_host_path: false
-    security_opt:
-      - no-new-privileges:true
+    security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
-    # sshd needs these only to authenticate and drop to the non-root user.
+    # sshd/setpriv alone authenticate and drop to researcher; Codex/Node are non-root.
     cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID, SYS_CHROOT]
-    pids_limit: 256
-    mem_limit: 2g
+    pids_limit: 512
+    mem_limit: 3g
+    shm_size: 1g
+    restart: unless-stopped
+
+  # Same-origin cookie stripping before the isolated terminal. No secrets or host ports.
+  research-terminal-proxy:
+    build:
+      context: .
+      dockerfile: docker/research-terminal-proxy/Dockerfile
+    image: bughunter-research-terminal-proxy
+    networks: [research_terminal]
+    expose: ["8080"]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 32
+    mem_limit: 64m
     restart: unless-stopped
 
   # Explicit profile for this project identity. Only Serve's HTTPS listener is exposed
@@ -173,6 +216,7 @@ services:
       - ./docker/tailscale:/etc/bughunter-tailscale:ro
     networks:
       - tailscale_frontend
+      - research_terminal
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -185,6 +229,10 @@ services:
     restart: unless-stopped
 
 networks:
+  # Only ingress sidecar + console; web/worker/db/redis do not join this network.
+  research_terminal:
+    driver: bridge
+    internal: true
   research_egress:
     driver: bridge
   # Keep the original default network and its egress for Recon/Ollama.

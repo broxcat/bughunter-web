@@ -83,7 +83,7 @@ export function researchObservations(data: ResearchData) {
   return [...data.initialObservations, ...data.tests.flatMap(t => [...t.observations, ...(t.negativeControl.kind === "PERFORMED" ? t.negativeControl.observations : [])])];
 }
 export function hasReproducibleProof(data: ResearchData) {
-  const direct = (o: z.infer<typeof researchObservationSchema>) => ["MANUAL", "HTTP", "BROWSER"].includes(o.source) && o.evidence.some(e => e.ref.startsWith("evidence/") && !e.ref.startsWith("evidence/burp/") && !e.ref.endsWith("README.md"));
+  const direct = (o: z.infer<typeof researchObservationSchema>) => ["MANUAL", "HTTP", "BROWSER"].includes(o.source) && o.evidence.some(e => (e.ref.startsWith("evidence/") || e.ref.startsWith("requests/")) && !e.ref.startsWith("evidence/burp/") && !e.ref.startsWith("requests/burp/") && !e.ref.endsWith("README.md"));
   return data.tests.some(t => t.outcome === "SUPPORTS" && t.reproduced &&
     t.reproductionSteps.length >= 2 && t.reproducibility.length >= 40 && t.securityEffect.length >= 40 &&
     t.evidenceQuality !== "OBSERVATION" && t.negativeControl.kind !== "NOT_PERFORMED" &&

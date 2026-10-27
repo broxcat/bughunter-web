@@ -59,10 +59,10 @@ try {
   await page.goto(origin + `/research/${legacy.id}`); await page.getByText('Status: READY', { exact: true }).waitFor();
   assert.equal((await api(`/api/research-sessions/${legacy.id}`, undefined, 'GET')).status, 200);
   await page.goto(origin + '/research');
-  const creating = page.waitForResponse(r => new URL(r.url()).pathname === '/api/research-sessions' && r.request().method() === 'POST');
-  await page.getByRole('button', { name: 'Create Research Workspace', exact: true }).click();
-  const created = await creating; assert.equal(created.status(), 201); const session = await created.json(); clean(session); workspaces.push(session.workspaceId);
-  await page.waitForURL(origin + `/research/${session.id}`); assert.equal(session.reconScanRunId, recon.id);
+  await page.getByRole('link', {name: 'Open console — app.example.test', exact:true}).waitFor();
+  const exported = await api('/api/research-sessions', {targetId:target.id}); assert.equal(exported.status,201);
+  const session=exported.body; clean(session); workspaces.push(session.workspaceId);
+  await page.goto(origin + `/research/history/${session.id}`); assert.equal(session.reconScanRunId,recon.id);
   const path = join(root, session.workspaceId);
   for (const filename of session.files) clean(await readFile(join(path, filename), 'utf8'));
   const instructions = await readFile(join(path, 'AGENTS.md'), 'utf8'); assert(instructions.includes('UNTRUSTED DATA')); assert(instructions.includes('negative control')); assert(instructions.includes('User-Agent'));

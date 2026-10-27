@@ -25,11 +25,11 @@ export function redactObservationText(value: string): string {
   const plain = (text: string): string => text
     .replace(/\bBearer\s+[A-Za-z0-9_.~+\/-]+=*/gi, "[REDACTED BEARER]")
     .replace(/\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, "[REDACTED JWT]")
-    .replace(/\b(?:authorization|cookies?|set-cookie|password|secret|api[_ -]?key|access_token|refresh_token|session[_ -]?(?:id|token)|sid)["']?\s*[:=]\s*[^\r\n]+/gi, "[REDACTED CREDENTIAL]")
+    .replace(/\b(?:authorization|cookies?|set-cookie|password|secret|token|api[_ -]?key|access_token|refresh_token|session[_ -]?(?:id|token)|sid)["']?\s*[:=]\s*[^\r\n]+/gi, "[REDACTED CREDENTIAL]")
     .replace(/https?:\/\/[^\s<>"`]+/gi, url => safeObservationUrl(url));
   // When a summary is JSON, parse its structure instead of trying to match
   // quoted/escaped credential values with a text regex. No raw body ingestion.
-  const sensitiveKey = /^(?:authorization|cookies?|set-cookie|password|secret|api[_ -]?key|access_token|refresh_token|session[_ -]?(?:id|token)|sid|AUTH_SECRET|DATABASE_URL|REDIS_URL|CREDENTIALS_ENCRYPTION_KEY)$|cipher$/i;
+  const sensitiveKey = /^(?:authorization|cookies?|set-cookie|password|secret|token|api[_ -]?key|access_token|refresh_token|session[_ -]?(?:id|token)|sid|AUTH_SECRET|DATABASE_URL|REDIS_URL|CREDENTIALS_ENCRYPTION_KEY)$|cipher$/i;
   const scrub = (data: unknown, depth = 0): unknown => {
     if (depth > 16) return "[REDACTED NESTED DATA]";
     if (typeof data === "string") return plain(data);

@@ -51,7 +51,7 @@ export default function ResearchHypotheses({ sessionId, initial }: { sessionId: 
       <ResearchProof value={h.researchData} compact />
       {h.promotion && <p>Finding draft already created; Evidence Review remains independent.</p>}
       <p><strong>Next distinct test:</strong> {h.nextTest}</p><p><strong>Expected signal:</strong> {h.expectedSignal}</p><p><strong>Falsification condition:</strong> {h.falsificationCondition}</p>
-      <Link href={`/research/${sessionId}/hypotheses/${h.id}`} className="text-brand">View details — {h.externalId}</Link>
+      <Link href={`/research/history/${sessionId}/hypotheses/${h.id}`} className="text-brand">View details — {h.externalId}</Link>
     </Card>)}
     {!data.hypotheses.length && <p>No hypotheses in this view. Keep negative and rejected results in the registry.</p>}
     {data.total > data.pageSize && <div className="flex gap-3"><Button disabled={busy || data.page === 1} onClick={() => void filter(status, data.page - 1)}>Previous</Button><p>Page {data.page} / {Math.ceil(data.total / data.pageSize)}</p><Button disabled={busy || data.page * data.pageSize >= data.total} onClick={() => void filter(status, data.page + 1)}>Next</Button></div>}

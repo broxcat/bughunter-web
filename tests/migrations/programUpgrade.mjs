@@ -60,6 +60,7 @@ try {
   assert.equal(await client.researchFindingPromotion.count(), 0, "Never invent historical human promotions");
 
   assert.deepEqual(await client.$queryRaw`SELECT id, "workspaceId", status, "scopeMarkdown", files, "exportSha256", "createdAt", "updatedAt" FROM "ResearchSession"`, originalSession);
+  assert.deepEqual(await client.$queryRaw`SELECT "consoleTargetId" FROM "ResearchSession"`, [{consoleTargetId:null}]);
   const research = await client.researchSession.findUniqueOrThrow({ where: { id: "upgrade-research" } });
   assert.equal(research.hypothesesSyncedAt, null); assert.equal(research.hypothesesSourceSha256, null);
   assert.equal(research.authorizationSnapshot, null);

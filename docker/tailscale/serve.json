@@ -1,11 +1,18 @@
 {
   "TCP": {
-    "443": { "HTTPS": true }
+    "443": {
+      "HTTPS": true
+    }
   },
   "Web": {
     "${TS_CERT_DOMAIN}:443": {
       "Handlers": {
-        "/": { "Proxy": "http://web:3000" }
+        "/": {
+          "Proxy": "http://web:3000"
+        },
+        "/research-terminal/": {
+          "Proxy": "http://research-terminal-proxy:8080/research-terminal/"
+        }
       }
     }
   },

@@ -6,10 +6,11 @@ import { rm } from "node:fs/promises";
 import { assertResearchTarget, researchAuthorizationSnapshot, createResearchBundle, newWorkspaceId, researchTargetSelect, ResearchError, workspacePath, writeResearchWorkspace } from "./workspace";
 
 export const researchRoot = () => process.env.RESEARCH_WORKSPACE_ROOT ?? resolve("data/research/workspaces");
+export const researchRootFor = (workspaceId: string) => workspaceId.startsWith("research_") ? process.env.RESEARCH_CONSOLE_ROOT ?? resolve("data/research/targets") : researchRoot();
 export const ownedResearch = (userId: string) => ({ userId, target: { userId, OR: [{ program: null }, { program: { ownerId: userId } }] } });
 // The same bounded metadata response is used for list/detail; no paths or secrets.
 export const researchSessionSelect = {
-  id: true, workspaceId: true, targetId: true, targetHost: true, programName: true,
+  id: true, workspaceId: true, consoleTargetId: true, targetId: true, targetHost: true, programName: true,
   authorizationSnapshot: true, reconScanRunId: true, status: true, createdAt: true, updatedAt: true,
   scopeMarkdown: true, files: true, hypothesesSyncedAt: true, hypothesesSourceSha256: true,
 } as const;
