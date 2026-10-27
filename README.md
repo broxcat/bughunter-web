@@ -4,7 +4,7 @@ License: AGPL-3.0-only ([LICENSE](LICENSE))
 
 Bug bounty workflow: **Targets → Scope → Recon → Hunt → Findings → Report**.
 
-A Target is a company or bug bounty program (VINCI, Doctolib, a private lab).
+A Target is a company or bug bounty program.
 Create it at `/targets` with a company name and an explicit **Required User-Agent**.
 Platform, program URL, rewards, scope hosts and vulnerability families are optional.
 Enter `BugHunter/1.0` explicitly when the program has no special User-Agent.
