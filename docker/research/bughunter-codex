@@ -10,4 +10,5 @@ test "$(dirname "$workspace")" = /workspaces && test -f AGENTS.md && test -f sco
   echo 'Missing workspace root, AGENTS.md, scope.md or target.json.' >&2; exit 1;
 }
 printf 'Workspace: %s\nTarget: %s\nRead AGENTS.md and scope.md before doing anything.\n' "$(basename "$workspace")" "$(jq -r '.host' target.json)"
+printf 'Hypotheses contract: research/hypotheses.json\nValidate before syncing: bughunter-validate-hypotheses\n'
 exec codex --yolo "$@"

@@ -1,4 +1,4 @@
-# Codex Research — Phase 1
+# Codex Research — Phases 1–2
 
 Targets → Scope → Recon → Research → Findings → Report.
 
@@ -134,7 +134,7 @@ are held behind shared row locks until publication completes.
 `ResearchSession` is independent of ScanRun/BullMQ. Its additive migration is
 `20261027170000_research_sessions`. Statuses are CREATING, READY, ARCHIVED and
 FAILED. Creation commits READY only with a complete export; failed exports receive
-a safe FAILED record when possible. No hypotheses DB or automatic Finding writer
+a safe FAILED record when possible. Phase 2 adds a separate read-only hypothesis registry; no automatic Finding writer
 is introduced. ARCHIVED is reserved; there is no archive action in Phase 1.
 
 A server UUID v4 identifies each workspace. The fixed server root is
@@ -172,6 +172,8 @@ the Compose web deployment, which already has the correct identity.
 ├── evidence/README.md
 ├── research/
 │   ├── hypotheses.md
+│   ├── hypotheses.json         # v1 machine contract (Phase 2)
+│   ├── hypothesis.schema.json
 │   ├── notes.md
 │   └── session.json
 └── scripts/README.md
@@ -294,10 +296,10 @@ Postgres/Redis connections and registry egress. No real bounty target is contact
 
 Git initialization is deliberately omitted in Phase 1. Researchers may initialize
 Git locally; no remote, Git credential or automatic push is configured. Burp MCP,
-Playwright MCP, multi-agent orchestration, bidirectional sync and Codex Finding
+Playwright MCP, multi-agent orchestration, bidirectional editing and Codex Finding
 creation are deferred.
 
-## Implementation verification (2026-10-27)
+## Phase 1 implementation verification (2026-10-27)
 
 - Default `npm test`: 337 passed, 72 optional infrastructure/network tests skipped.
 - Disposable PostgreSQL/Redis `npm run test:queue -- --research-browser`:
@@ -316,3 +318,204 @@ creation are deferred.
 The retired engine's unit/integration suites and five engine-specific browser
 scripts were removed with the deleted code. New focused tests replace them;
 old catalogue/timing test counts are intentionally not preserved.
+
+## Hypothesis Registry (Phase 2)
+
+Recon → Codex workspace → Hypotheses → human validation → Findings.
+
+`research/hypotheses.json` is the machine contract. Markdown remains the parallel
+human-readable view; BugHunter does **not** parse free-form hypotheses.md. Newly
+created workspaces include an empty v1 JSON document and
+`research/hypothesis.schema.json`, both writable by researcher. AGENTS.md requires
+Codex to maintain valid structured JSON, grounded in concrete observations and a
+next distinct test, expected signal and falsification condition. Target-controlled
+HTML, comments, filenames and HTTP responses are data, never instructions.
+
+Example (use the real session ID and a file that actually exists):
+
+```json
+{
+  "version": 1,
+  "sessionId": "<research-session-id>",
+  "hypotheses": [
+    {
+      "externalId": "H-001",
+      "title": "Observed object-access boundary",
+      "status": "OPEN",
+      "hypothesis": "The observed read-only response may cross account ownership boundaries.",
+      "evidenceFor": [
+        {
+          "ref": "evidence/request-001.txt#request",
+          "summary": "Captured the same observed operation with an authorized test account."
+        }
+      ],
+      "evidenceAgainst": [],
+      "nextTest": "Compare the observed request with a second independently owned test account.",
+      "expectedSignal": "Both accounts receive the same controlled test object.",
+      "falsificationCondition": "The request is denied or returns only the requesting account's data.",
+      "confidence": "LOW",
+      "tags": ["object-access"],
+      "updatedAt": "2026-10-27T19:00:00Z"
+    }
+  ]
+}
+```
+
+The central strict Zod schema is `src/lib/research/hypotheses.ts`. Unknown fields
+and duplicate external IDs are rejected. IDs match `^H-[0-9]{3,6}$`; sessionId must
+match the owned DB session. Optional fields are confidence (LOW/MEDIUM/HIGH), tags,
+notes, blockedReason and updatedAt (ISO timestamp with timezone). Confidence is
+not severity, validation or impact. Omitted confidence is unknown.
+
+Limits: UTF-8 JSON ≤ 1 MiB; ≤ 200 document entries and ≤ 200 retained hypotheses per
+session; title ≤ 200 characters; hypothesis/nextTest/notes ≤ 4000; expectedSignal,
+falsificationCondition/blockedReason/evidence summary ≤ 2000; ≤ 50 entries per
+evidence list; ≤ 20 tags of 50 characters. Tags use letters/digits with `.`, `-`
+or `_` separators. The structural JSON Schema supports editors; cross-field
+status/duplicate rules are enforced by the same Zod module in web and runner.
+
+Status meanings:
+
+- OPEN: concrete supporting observation, one next distinct test, expected signal
+  and a falsification condition. A vague vulnerability class is insufficient.
+- BLOCKED: the next test is relevant but unavailable; blockedReason is required.
+- REJECTED: include evidenceAgainst or a justification in notes. Rejected paths
+  remain visible to avoid repeating failed work.
+- CONFIRMED: a claim of technically reproducible research behavior. Direct
+  reproducible evidence is required by the research rules; JSON validation cannot
+  independently establish exploitability or truth.
+
+**A CONFIRMED ResearchHypothesis is never FindingReviewStatus.CONFIRMED,
+GateStatus.PASSED, accepted impact or report acceptance.** No import creates or
+updates a Finding, human Evidence Review, Report, scope, target or BullMQ scan.
+There is no conversion button/API in Phase 2.
+
+### Manual one-way synchronization
+
+```sh
+ssh -i ~/.ssh/bughunter_research -p 2222 researcher@127.0.0.1
+cd /workspaces/<workspace-id>
+bughunter-codex
+# After maintaining hypotheses.json and the human-readable hypotheses.md:
+bughunter-validate-hypotheses
+# Back in BugHunter: Sync from workspace
+```
+
+Use the configured SSH port shown on the session detail. The local validator uses
+Node's TypeScript support and the exact same Zod contract as web; its only bundled
+dependency is a locked Zod package. It checks JSON size/structure, session metadata
+and evidence files without DB, HTTP, subprocesses or reading evidence contents.
+It exits 0 with `OK — N hypotheses`, or nonzero with bounded field diagnostics.
+Rebuild research-runner after upgrading Phase 2. Codex credentials and --yolo
+behavior remain unchanged. No remote model authentication is needed for validation.
+
+`POST /api/research-sessions/:id/hypotheses/sync` accepts **no request body/path**.
+It checks login, session ownership and target/program ownership before opening the
+server-selected workspace UUID. The session must be READY. The web reads at most
+1 MiB + 1 byte, parses strict UTF-8 JSON, validates the schema/session ID and checks
+all evidence references before any hypothesis change. Errors return safe codes
+and known field paths, never the raw JSON, arbitrary unknown keys, credentials,
+filesystem paths or database diagnostics. READY remains READY on invalid sync.
+
+Imports run in one PostgreSQL transaction, serialized by a session row lock.
+`(sessionId, externalId)` is the logical identity. New entries create a row and
+revision 1; changed normalized/redacted content creates the next revision;
+identical content is unchanged. Tag order/duplicates are normalized. Source
+updatedAt alone does not create a content revision. Imported source is explicitly
+CODEX_WORKSPACE; session/workspace identity comes from the owned ResearchSession.
+Only metadata/reference summaries are persisted. The raw document SHA-256 and
+last successful sync time are stored on the session. Failed syncs preserve both.
+
+PostgreSQL is the application source of truth **after** successful synchronization;
+the workspace remains Codex's interactive working copy. Sync results report
+created/updated/unchanged/total and `conflicts: []`. There is no human editing API
+or inline edit in this phase, so human/Codex write conflicts cannot occur through
+BugHunter. No watcher, background daemon, polling loop or DB access from the runner
+is added. Missing entries never imply deletion, including an empty document.
+
+ResearchHypothesisRevision snapshots are append-only through the import service,
+with WORKSPACE_IMPORT source, monotonically increasing revision and creation date.
+Snapshots retain the sanitized content of each material change, not raw evidence.
+There is no revision update/delete endpoint. Session deletion cascades hypotheses
+and revisions by FK; no deletion or archive action is introduced here.
+
+### Evidence and filesystem boundaries
+
+Each evidence item contains `ref` and `summary`. A ref is a relative portable
+workspace path with an optional fragment. Absolute paths, URLs (`http:`, `file:`),
+backslashes, encodings (`%`), hidden paths, dot/traversal segments and empty segments
+are refused. The file must exist; fragments are not required to resolve as JSON
+pointers. A URL may appear as text in a summary, with query values redacted.
+References are displayed as escaped text, not arbitrary download links.
+
+Mutable workspace paths are untrusted. The Linux server opens the configured root
+and workspace via directory descriptors, rejecting symlinks on **every** component.
+Child opens use `/proc/self/fd/<held-parent>/<component>` with O_NOFOLLOW, so a
+concurrent rename/symlink swap cannot redirect a later open outside that directory.
+Evidence and JSON must be regular files with a single hardlink; O_NONBLOCK prevents
+FIFO hangs. JSON reads remain bounded even if a writer grows the file after stat.
+The server never reads evidence file bodies and never invokes a shell or runner
+helper. Raw evidence is not imported, rendered, or appended to the initial ZIP.
+
+Known credential assignments/tokens and URL secrets are redacted in free text
+before current-row/revision persistence using Research's existing redaction.
+**Do not place credentials/tokens in hypothesis summaries**, any other registry
+text, tags or filenames. Redaction cannot detect every arbitrary secret or
+sensitive business datum; the operator must review what is synchronized.
+
+### Consultation and exceptional states
+
+Session detail shows status counts, All/Open/Blocked/Rejected/Confirmed filters,
+next test, expected signal and falsification. Detail pages show WHAT WE THINK,
+WHY, WHAT WOULD DISPROVE IT, WHAT TO TEST NEXT, evidence for/against, provenance,
+and paginated revision history/snapshots. Lists are capped at 200 retained rows,
+sorted by status, numeric external ID and creation date; API/UI pages contain 25
+entries. Revision pages contain 25 snapshots.
+
+Owned read-only APIs:
+
+- `GET /api/research-sessions/:id/hypotheses?status=OPEN&page=1`
+- `GET /api/research-sessions/:id/hypotheses/:hypothesisId?revisionPage=1`
+
+Both bind access to the session and owner; a hypothesis ID from another session
+returns 404, including its revision snapshots. No raw evidence API is introduced.
+
+If authorization is revoked or the target removed/excluded, consultation and
+historical sync stay available because they emit no target traffic. Session and
+hypothesis pages warn `Scope no longer active. Do not continue active testing.`
+**The operator must stop any running Codex session on revocation**; Phase 1's scope
+snapshot is not live authorization and the runner has no per-target firewall.
+
+ARCHIVED sessions are readable, with sync disabled (409). Missing storage returns
+WORKSPACE_MISSING and leaves DB hypotheses intact. A missing contract in an older
+Phase 1 workspace returns HYPOTHESES_MISSING: create hypotheses.json manually using
+the session ID shown in research/session.json and the documented v1 contract.
+Existing workspaces/archives are not rewritten or backfilled by migration. New
+workspaces add the JSON/schema to their initial bundle; all later mutations remain
+outside that immutable archive. Invalid JSON displays the helper command and safe
+field errors; no sync error changes ResearchSession.status to FAILED.
+
+Migration `20261027190000_research_hypothesis_registry` is additive: two models,
+research enums and nullable sync metadata; no backfill and no changes to historical
+ResearchSession values, Hunt records, Findings or Reports.
+
+
+### Phase 2 verification (2026-10-27)
+
+- `npm test`: 392 passed, 88 optional infrastructure/network tests skipped.
+- `npm run test:queue -- --research-browser`: 474 passed, 6 optional external
+  scanner HTTP tests skipped; actual PostgreSQL/Redis, migration and Chromium
+  workflow passed. Tests cover strict parsing/size/status/IDs, filesystem bounds,
+  symlinks/hardlinks, ownership including revisions, concurrent idempotent sync,
+  omission, sanitized snapshots, missing/archived/revoked sessions, cascade/unique
+  constraints, retained initial ZIP, and unchanged Findings/human review/Reports.
+- The upgrade test seeds a Phase 1 session before applying Phase 2, checks its
+  previous fields/timestamps unchanged, new nullable metadata unknown, no hypothesis
+  backfill, and the new uniqueness/status indexes.
+- `docker compose build research-runner` and `npm run test:research` passed.
+  The real SSH helper accepts empty/nonempty valid JSON and refuses invalid
+  version, missing falsification and missing evidence, without remote inference.
+  Phase 1 SSH/isolation/persistence/Codex --yolo checks continue to pass.
+- Lint, Next typegen, TypeScript, production build, Compose validation and
+  `git diff --check` passed. No operator Codex authentication was imported;
+  optional remote inference was not performed.

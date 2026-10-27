@@ -14,6 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && install -d -o root -g research -m 3770 /workspaces \
     && install -d -o researcher -g research -m 0700 /home/researcher/.codex \
     && rm -f /etc/ssh/ssh_host_*
+# Same central Zod contract as the web app; no application dependencies/secrets.
+COPY docker/research/validator/package*.json /opt/bughunter/
+RUN npm ci --omit=dev --ignore-scripts --prefix /opt/bughunter
+COPY src/lib/research/hypotheses.ts /opt/bughunter/hypotheses.ts
+COPY docker/research/validator/validate-hypotheses.mjs /opt/bughunter/validate-hypotheses.mjs
+COPY --chmod=755 docker/research/bughunter-validate-hypotheses /usr/local/bin/
 COPY docker/research/sshd_config /etc/ssh/sshd_config
 COPY --chmod=755 docker/research/entrypoint docker/research/healthcheck /usr/local/bin/
 COPY --chmod=755 docker/research/bughunter-codex docker/research/bughunter-workspaces /usr/local/bin/

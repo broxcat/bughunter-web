@@ -78,6 +78,23 @@ try {
   assert((await ssh("bughunter-workspaces")).includes("app.example.test"));
   const help = await ssh(`cd ${workspace} && bughunter-codex --help`);
   assert(help.includes("Codex CLI")); assert(help.includes(output.workspaceId));
+  const validate = () => ssh(`cd ${workspace} && bughunter-validate-hypotheses`);
+  assert((await validate()).includes("OK — 0 hypotheses"));
+  const writeHypotheses = value => ssh(`cd ${workspace} && printf '%s' '${Buffer.from(JSON.stringify(value)).toString("base64")}' | base64 -d > research/hypotheses.json`);
+  const validHypothesis = { externalId: "H-001", title: "Local fixture hypothesis", status: "OPEN", hypothesis: "An observed local boundary may differ.", evidenceFor: [{ ref: "scope.md", summary: "Local synthetic observation reference." }], evidenceAgainst: [], nextTest: "Compare two fixture observations.", expectedSignal: "Distinct controlled responses.", falsificationCondition: "Identical access enforcement." };
+  await writeHypotheses({ version: 1, sessionId: "session", hypotheses: [validHypothesis] });
+  assert((await validate()).includes("OK — 1 hypotheses"));
+  const invalidHypothesis = { ...validHypothesis }; delete invalidHypothesis.falsificationCondition;
+  await writeHypotheses({ version: 1, sessionId: "session", hypotheses: [invalidHypothesis] });
+  await assert.rejects(validate());
+  await writeHypotheses({ version: 1, sessionId: "session", hypotheses: [{ ...validHypothesis, evidenceFor: [{ ref: "evidence/missing.txt", summary: "Uncaptured observation" }] }] });
+  await assert.rejects(validate());
+
+  await ssh(`cd ${workspace} && printf '%s' '{"version":2,"sessionId":"session","hypotheses":[]}' > research/hypotheses.json`);
+  await assert.rejects(validate());
+  await ssh(`cd ${workspace} && printf '%s' '{"version":1,"sessionId":"session","hypotheses":[]}' > research/hypotheses.json`);
+  assert((await validate()).includes("OK — 0 hypotheses"));
+
   await assert.rejects(ssh("cd /home/researcher && bughunter-codex --help"));
   await assert.rejects(cmd("ssh", [...sshArgs, "root@127.0.0.1", "id"]));
   // Only publickey is accepted. A client explicitly refusing publickey cannot log in.
@@ -98,7 +115,7 @@ try {
   // Internet egress / registry connectivity, never an actual research target.
   await dexec("su", "-s", "/bin/sh", "researcher", "-c", "curl --fail --silent --max-time 20 https://registry.npmjs.org/@openai%2fcodex > /dev/null");
   assert(!(await readFile(resolve("src/app/api/research-sessions/route.ts"), "utf8")).match(/execFile|spawn|exec\(/));
-  console.log(`${version}; --yolo and bughunter-codex --help verified over SSH`);
+  console.log(`${version}; --yolo, bughunter-codex --help and hypotheses validator (valid/invalid) verified over SSH`);
   console.log(`SSH binding verified: 127.0.0.1:${port} only (production Compose: 127.0.0.1:${process.env.RESEARCH_SSH_PORT ?? "2222"})`);
   console.log("Public-key/non-root SSH, denied password/root login, immutable inputs, writable notes, restart persistence, absent app secrets/socket, backend isolation and Internet egress passed.");
 } catch (error) {

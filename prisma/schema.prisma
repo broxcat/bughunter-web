@@ -585,6 +585,9 @@ model ResearchSession {
   scopeMarkdown  String @db.Text
   files          String[] @default([])
   exportSha256   String?
+  hypothesesSyncedAt DateTime?
+  hypothesesSourceSha256 String?
+  hypotheses ResearchHypothesis[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -595,4 +598,71 @@ model ResearchSession {
   @@index([userId, createdAt])
   @@index([targetId])
   @@index([reconScanRunId])
+}
+
+// CONFIRMED here is technical research evidence, never Finding review/report acceptance.
+enum ResearchHypothesisStatus {
+  OPEN
+  BLOCKED
+  REJECTED
+  CONFIRMED
+}
+
+enum ResearchHypothesisConfidence {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ResearchHypothesisSource {
+  CODEX_WORKSPACE
+}
+
+enum ResearchHypothesisRevisionSource {
+  WORKSPACE_IMPORT
+}
+
+model ResearchHypothesis {
+  id                     String @id @default(cuid())
+  sessionId              String
+  externalId             String
+  title                  String @db.VarChar(200)
+  status                 ResearchHypothesisStatus
+  hypothesis             String @db.Text
+  evidenceFor            Json
+  evidenceAgainst        Json
+  nextTest               String @db.Text
+  expectedSignal         String @db.Text
+  falsificationCondition String @db.Text
+  blockedReason          String? @db.Text
+  notes                  String? @db.Text
+  confidence             ResearchHypothesisConfidence?
+  tags                   String[] @default([])
+  source                 ResearchHypothesisSource @default(CODEX_WORKSPACE)
+  sourceUpdatedAt        DateTime?
+  importedAt             DateTime @default(now())
+  contentSha256          String
+  revision               Int @default(1)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  session   ResearchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  revisions ResearchHypothesisRevision[]
+
+  @@unique([sessionId, externalId])
+  @@index([sessionId, status])
+}
+
+// Append-only through the import service. No mutation API or inline UI editing.
+model ResearchHypothesisRevision {
+  id           String @id @default(cuid())
+  hypothesisId String
+  revision     Int
+  snapshot     Json
+  source       ResearchHypothesisRevisionSource @default(WORKSPACE_IMPORT)
+  createdAt    DateTime @default(now())
+
+  hypothesis ResearchHypothesis @relation(fields: [hypothesisId], references: [id], onDelete: Cascade)
+
+  @@unique([hypothesisId, revision])
 }

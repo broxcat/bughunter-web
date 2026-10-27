@@ -276,6 +276,14 @@ can be included in reports.
 
 ## Codex Research
 
+Research workflow: **Recon → Codex workspace → Hypotheses → human validation → Findings**.
+Codex maintains `research/hypotheses.json` (v1) alongside the human-readable
+Markdown. Run `bughunter-validate-hypotheses` in SSH, then **Sync from workspace**
+in BugHunter. The read-only registry tracks evidence for/against, a distinct next
+test, expected signal, falsification and revision history. A CONFIRMED hypothesis
+is a research claim, never a reviewed Finding or report acceptance. Sync is manual,
+idempotent, and preserves omitted hypotheses; the runner never receives DB access.
+
 The former vulnerability-family Hunt engine is retired. Existing Hunt runs
 remain available as historical read-only records at `/hunt` and `/hunt/<id>`.
 Their findings, reports, policy snapshots and stored technique approvals survive.
@@ -316,8 +324,9 @@ research/, evidence/ and scripts/ are writable. Codex credentials are configured
 independently inside SSH. Scope is authoritative; discovery never grants access.
 `127.0.0.1` inside the runner refers to that container, not the host.
 
-Migration `20261027170000_research_sessions` is additive. Deploy it before using
-the updated web app and worker. No remote model inference/authentication is part
+Migrations `20261027170000_research_sessions` and
+`20261027190000_research_hypothesis_registry` are additive. Deploy them before using
+the updated web app and worker; rebuild research-runner for the validation helper. No remote model inference/authentication is part
 of automated tests. Tests cover export secrets/traversal/atomicity/concurrency,
 ZIP ownership/integrity, legacy history, actual Docker/SSH/Codex and browser UX:
 

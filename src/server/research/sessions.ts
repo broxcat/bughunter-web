@@ -11,7 +11,7 @@ export const ownedResearch = (userId: string) => ({ userId, target: { userId, OR
 export const researchSessionSelect = {
   id: true, workspaceId: true, targetId: true, targetHost: true, programName: true,
   reconScanRunId: true, status: true, createdAt: true, updatedAt: true,
-  scopeMarkdown: true, files: true,
+  scopeMarkdown: true, files: true, hypothesesSyncedAt: true, hypothesesSourceSha256: true,
 } as const;
 
 export async function createResearchSession(userId: string, targetId: string) {
@@ -51,4 +51,12 @@ export async function createResearchSession(userId: string, targetId: string) {
     logger.error({ operation: "research-create", code: "RESEARCH_EXPORT_FAILED" }, "Research workspace creation failed");
     throw new ResearchError("Unable to create research workspace", 500);
   }
+}
+
+/** Current scope check for warnings only. Historical registry reads/imports never
+ * depend on this flag and never emit traffic toward the selected target. */
+export async function researchScopeActive(targetId: string, userId: string) {
+  const target = await prisma.target.findUnique({ where: { id: targetId }, select: researchTargetSelect });
+  try { if (!target) return false; assertResearchTarget(target, userId); return true; }
+  catch { return false; }
 }

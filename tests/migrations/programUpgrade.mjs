@@ -44,12 +44,25 @@ try {
   const huntReport = { version: 1, archivedEvidence: "Synthetic historical observation" };
   const huntSnapshot = { version: 1, selectedFamilies: ["xss"] };
   await client.scanRun.update({ where: { id: "upgrade-hunt" }, data: { huntReport, huntSnapshot, approvedHuntTechniques: ["legacy-approved-technique"] } });
+  // Seed an existing Phase 1 session before adding the hypothesis registry.
+  await cp(join("prisma/migrations", "20261027170000_research_sessions"), join(temp, "migrations", "20261027170000_research_sessions"), { recursive: true });
+  migrate(join(temp, "schema.prisma"));
+  await client.$executeRaw`INSERT INTO "ResearchSession" (id, "userId", "targetId", "workspaceId", status, "targetHost", "programName", "scopeMarkdown", files, "exportSha256", "updatedAt") VALUES ('upgrade-research', 'upgrade-user', 'upgrade-host', '81b770fc-8937-48f4-82fc-30dbf4984cdf', 'READY', 'api.example.test', 'Existing research', 'Original scope snapshot', ARRAY['scope.md','research/hypotheses.md'], 'initial-export-hash', now())`;
+  const originalSession = await client.$queryRaw`SELECT id, "workspaceId", status, "scopeMarkdown", files, "exportSha256", "createdAt", "updatedAt" FROM "ResearchSession"`;
   migrate(schema);
+  assert.deepEqual(await client.$queryRaw`SELECT id, "workspaceId", status, "scopeMarkdown", files, "exportSha256", "createdAt", "updatedAt" FROM "ResearchSession"`, originalSession);
+  const research = await client.researchSession.findUniqueOrThrow({ where: { id: "upgrade-research" } });
+  assert.equal(research.hypothesesSyncedAt, null); assert.equal(research.hypothesesSourceSha256, null);
+  assert.equal(await client.researchHypothesis.count(), 0); assert.equal(await client.researchHypothesisRevision.count(), 0);
+  const indexes = await client.$queryRaw`SELECT indexname FROM pg_indexes WHERE tablename IN ('ResearchHypothesis', 'ResearchHypothesisRevision')`;
+  assert(indexes.some(i => i.indexname === 'ResearchHypothesis_sessionId_status_idx'));
+  assert(indexes.some(i => i.indexname === 'ResearchHypothesis_sessionId_externalId_key'));
+  assert(indexes.some(i => i.indexname === 'ResearchHypothesisRevision_hypothesisId_revision_key'));
   const hunt = await client.scanRun.findUniqueOrThrow({ where: { id: "upgrade-hunt" } });
   assert.equal(hunt.type, "HUNT"); assert.equal(hunt.status, "COMPLETED");
   assert.deepEqual(hunt.huntReport, huntReport); assert.deepEqual(hunt.huntSnapshot, huntSnapshot);
   assert.deepEqual(hunt.approvedHuntTechniques, ["legacy-approved-technique"]);
-  assert.equal(await client.researchSession.count(), 0, "Never invent Research Sessions for historical scans");
+  assert.equal(await client.researchSession.count(), 1, "Keep only the existing Phase 1 session; never backfill from scans");
   assert.deepEqual(await client.$queryRaw`SELECT id, status, error, "createdAt", "startedAt", "finishedAt" FROM "ScanRun" ORDER BY id`, historicalRuns);
   assert.equal(await client.scanExecutionAttempt.count(), 0, "Do not invent historical execution attempts");
   assert((await client.scanRun.findMany()).every(run => run.cancelRequestedAt === null));
@@ -87,5 +100,5 @@ try {
   await assert.rejects(client.bountyProgram.create({ data: { ownerId: "upgrade-user", companyName: "Invalid", requiredUserAgent: "" } }));
   const p = await client.bountyProgram.create({ data: { ownerId: "upgrade-user", companyName: "Rewards", requiredUserAgent: "Program/1", rewardCritical: "9999999999999999.99" } });
   assert.equal(p.rewardCritical.toString(), "9999999999999999.99");
-  console.log("Additive upgrade passed: scan/finding/report/item/credential identities preserved, legacy UA remains unknown, DB rejects empty UA, decimal money stays exact.");
+  console.log("Additive upgrade passed: scan/finding/report/item/credential identities preserved, legacy UA remains unknown, Phase 1 ResearchSession unchanged, additive hypothesis tables/indexes with no backfill, DB rejects empty UA, decimal money stays exact.");
 } finally { await client.$disconnect(); }
