@@ -49,11 +49,21 @@ try {
   migrate(join(temp, "schema.prisma"));
   await client.$executeRaw`INSERT INTO "ResearchSession" (id, "userId", "targetId", "workspaceId", status, "targetHost", "programName", "scopeMarkdown", files, "exportSha256", "updatedAt") VALUES ('upgrade-research', 'upgrade-user', 'upgrade-host', '81b770fc-8937-48f4-82fc-30dbf4984cdf', 'READY', 'api.example.test', 'Existing research', 'Original scope snapshot', ARRAY['scope.md','research/hypotheses.md'], 'initial-export-hash', now())`;
   const originalSession = await client.$queryRaw`SELECT id, "workspaceId", status, "scopeMarkdown", files, "exportSha256", "createdAt", "updatedAt" FROM "ResearchSession"`;
+  await cp(join("prisma/migrations", "20261027190000_research_hypothesis_registry"), join(temp, "migrations", "20261027190000_research_hypothesis_registry"), { recursive: true });
+  migrate(join(temp, "schema.prisma"));
+  await client.$executeRaw`INSERT INTO "ResearchHypothesis" (id, "sessionId", "externalId", title, status, hypothesis, "evidenceFor", "evidenceAgainst", "nextTest", "expectedSignal", "falsificationCondition", "contentSha256", "updatedAt") VALUES ('upgrade-hypothesis', 'upgrade-research', 'H-001', 'Historical Research claim', 'CONFIRMED', 'Original unreviewed hypothesis', '[]'::jsonb, '[]'::jsonb, 'Original next test', 'Original signal', 'Original falsification', 'original-content-hash', now())`;
+  await client.$executeRaw`INSERT INTO "ResearchHypothesisRevision" (id, "hypothesisId", revision, snapshot) VALUES ('upgrade-revision', 'upgrade-hypothesis', 1, '{"status":"CONFIRMED","legacy":true}'::jsonb)`;
+  const originalHypotheses = await client.$queryRaw`SELECT id, status, hypothesis, "contentSha256", "createdAt", "updatedAt" FROM "ResearchHypothesis"`;
   migrate(schema);
+  assert.deepEqual(await client.$queryRaw`SELECT id, status, hypothesis, "contentSha256", "createdAt", "updatedAt" FROM "ResearchHypothesis"`, originalHypotheses);
+  assert.equal((await client.researchHypothesis.findUniqueOrThrow({ where: { id: "upgrade-hypothesis" } })).researchData, null);
+  assert.equal(await client.researchFindingPromotion.count(), 0, "Never invent historical human promotions");
+
   assert.deepEqual(await client.$queryRaw`SELECT id, "workspaceId", status, "scopeMarkdown", files, "exportSha256", "createdAt", "updatedAt" FROM "ResearchSession"`, originalSession);
   const research = await client.researchSession.findUniqueOrThrow({ where: { id: "upgrade-research" } });
   assert.equal(research.hypothesesSyncedAt, null); assert.equal(research.hypothesesSourceSha256, null);
-  assert.equal(await client.researchHypothesis.count(), 0); assert.equal(await client.researchHypothesisRevision.count(), 0);
+  assert.equal(research.authorizationSnapshot, null);
+  assert.equal(await client.researchHypothesis.count(), 1); assert.equal(await client.researchHypothesisRevision.count(), 1);
   const indexes = await client.$queryRaw`SELECT indexname FROM pg_indexes WHERE tablename IN ('ResearchHypothesis', 'ResearchHypothesisRevision')`;
   assert(indexes.some(i => i.indexname === 'ResearchHypothesis_sessionId_status_idx'));
   assert(indexes.some(i => i.indexname === 'ResearchHypothesis_sessionId_externalId_key'));
@@ -100,5 +110,5 @@ try {
   await assert.rejects(client.bountyProgram.create({ data: { ownerId: "upgrade-user", companyName: "Invalid", requiredUserAgent: "" } }));
   const p = await client.bountyProgram.create({ data: { ownerId: "upgrade-user", companyName: "Rewards", requiredUserAgent: "Program/1", rewardCritical: "9999999999999999.99" } });
   assert.equal(p.rewardCritical.toString(), "9999999999999999.99");
-  console.log("Additive upgrade passed: scan/finding/report/item/credential identities preserved, legacy UA remains unknown, Phase 1 ResearchSession unchanged, additive hypothesis tables/indexes with no backfill, DB rejects empty UA, decimal money stays exact.");
+  console.log("Additive upgrade passed: scan/finding/report/item/credential identities preserved, legacy UA remains unknown, Phase 1 ResearchSession unchanged, legacy hypothesis/session/revision preserved, nullable proof/authorization and no promotion backfill, DB rejects empty UA, decimal money stays exact.");
 } finally { await client.$disconnect(); }

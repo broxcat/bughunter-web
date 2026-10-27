@@ -1,7 +1,7 @@
 import { open, constants, realpathSync } from "node:fs";
 import { open as openFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import { hypothesesDocumentSchema, HYPOTHESES_MAX_BYTES, safeHypothesisIssues } from "../../../src/lib/research/hypotheses.ts";
+import { hypothesesDocumentSchema, HYPOTHESES_MAX_BYTES, safeHypothesisIssues, hypothesisEvidence, researchBindingError } from "../../../src/lib/research/hypotheses.ts";
 // Local validation only; no HTTP, DB or subprocesses. Print field diagnostics,
 // never source text or credentials from the untrusted document.
 const cwd = realpathSync(process.cwd());
@@ -44,15 +44,18 @@ try {
     const sessionId = typeof session.source === "string" ? session.source.replace(/^ResearchSession /, "") : null;
     if (parsed.data.sessionId !== sessionId) { console.error("sessionId: does not match research/session.json"); process.exitCode = 1; }
     else {
+      const target = JSON.parse(await readBounded(`${cwd}/target.json`, 65536));
       const checked = new Set();
       for (const [index, hypothesis] of parsed.data.hypotheses.entries()) {
-        for (const kind of ["evidenceFor", "evidenceAgainst"]) {
-          for (const [entry, evidence] of hypothesis[kind].entries()) {
-            const path = evidence.ref.split("#")[0];
-            if (checked.has(path)) continue;
-            try { await checkArtifact(evidence.ref); checked.add(path); }
-            catch { console.error(`hypotheses.${index}.${kind}.${entry}.ref: artifact missing or unsafe`); process.exitCode = 1; }
-          }
+        if ('targetId' in hypothesis && researchBindingError(hypothesis, { id: target.id, host: target.host, scheme: target.scheme ?? 'https' })) {
+          console.error(`hypotheses.${index}: target/host/location differs from immutable target.json`); process.exitCode = 1;
+        }
+        for (const [entry, evidence] of hypothesisEvidence(hypothesis).entries()) {
+          const path = evidence.ref.split("#")[0];
+          if (checked.has(path)) continue;
+          if (checked.size >= 1000) throw new Error("reference limit");
+          try { await checkArtifact(evidence.ref); checked.add(path); }
+          catch { console.error(`hypotheses.${index}.evidence.${entry}.ref: artifact missing or unsafe`); process.exitCode = 1; }
         }
       }
       if (!process.exitCode) console.log(`OK — ${parsed.data.hypotheses.length} hypotheses`);

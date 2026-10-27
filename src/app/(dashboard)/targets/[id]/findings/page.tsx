@@ -225,7 +225,7 @@ export default function FindingsPage({
         ) : (
           <ul className="space-y-2">
             {findings.map((f) => (
-              <li key={f.id}>
+              <li key={f.id} id={`finding-${f.id}`}>
                 <Card className="p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>

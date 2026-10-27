@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { loopHypothesis } from "../fixtures/researchLoop.mjs";
 import { chromium } from "playwright-chromium";
 const exec = promisify(execFile);
 const db = process.env.TEST_ABUSE_DATABASE_URL, redis = process.env.TEST_ABUSE_REDIS_URL, container = process.env.TEST_ABUSE_REDIS_CONTAINER;
@@ -101,6 +102,36 @@ try {
   assert.equal(await prisma.finding.count(), findingsBefore);
   const zipAfterSync = await context.request.get(origin + `/api/research-sessions/${research.id}/zip`);
   assert.deepEqual(await zipAfterSync.body(), zipBeforeSync);
+  // V2 proof stays research until a deliberate, acknowledged human promotion.
+  for (const name of ["positive", "control"]) await writeFile(join(root, research.workspaceId, `evidence/${name}.txt`), "Synthetic redacted fixture observation only.");
+  const detailed = ["CONFIRMED", "REJECTED", "TESTING", "BLOCKED", "OPEN"].map((status, i) => ({ ...loopHypothesis({ targetId: target.id, status }), externalId: `H-00${i + 3}` }));
+  await writeFile(join(root, research.workspaceId, "research/hypotheses.json"), JSON.stringify({ version: 2, sessionId: research.id, hypotheses: detailed }));
+  await page.getByRole("button", { name: "Sync from workspace", exact: true }).click();
+  await page.getByText("Synced: 5 created, 0 updated, 0 unchanged.", { exact: true }).waitFor();
+  assert.equal(await page.getByLabel("TESTING hypotheses", { exact: true }).innerText(), "1");
+  await page.getByRole("link", { name: "View details — H-003", exact: true }).click();
+  await page.getByRole("heading", { name: "Performed tests and negative controls", exact: true }).waitFor();
+  const draftButton = page.getByRole("button", { name: "Create Finding Draft", exact: true });
+  assert(await draftButton.isDisabled());
+  await page.getByRole("checkbox", { name: /I reviewed this revision/ }).check();
+  let promotionRequests = 0;
+  page.on("request", req => { if (new URL(req.url()).pathname.endsWith("/finding-draft")) promotionRequests++; });
+  const creatingDraft = page.waitForResponse(r => new URL(r.url()).pathname.endsWith("/finding-draft"));
+  await draftButton.evaluate(button => { button.click(); button.click(); });
+  const draftResponse = await creatingDraft; assert.equal(draftResponse.status(), 201);
+  const draft = await draftResponse.json(); assert.equal(promotionRequests, 1);
+  const draftRecord = await prisma.finding.findUniqueOrThrow({ where: { id: draft.findingId } });
+  assert.equal(draftRecord.gateStatus, "UNVALIDATED"); assert.equal(draftRecord.reviewStatus, "CANDIDATE"); assert.equal(draftRecord.severity, "INFO");
+  assert.equal(await prisma.report.count({ where: { userId: user.id } }), 0);
+  await page.reload(); await page.getByRole("link", { name: "Open Finding draft", exact: true }).click();
+  const findingCard = page.locator(`#finding-${draft.findingId}`);
+  await findingCard.getByRole("button", { name: "Review evidence", exact: true }).click();
+  await findingCard.getByLabel("Reproduction and impact", { exact: true }).fill("Operator independently reproduced the controlled local fixture effect, verified scope, ownership and negative controls.");
+  await findingCard.getByRole("button", { name: "Confirm", exact: true }).click();
+  await findingCard.getByText("CONFIRMED", { exact: true }).waitFor();
+  assert.equal(await prisma.report.count({ where: { userId: user.id } }), 0);
+  const report = await context.request.post(origin + "/api/reports", { data: { title: "Explicitly requested fixture report", platform: "GENERIC", findingIds: [draft.findingId] } }); assert.equal(report.status(), 201);
+  await page.goto(origin + `/research/${research.id}`);
   // Invalid sync keeps the imported registry and READY workspace intact.
   await writeFile(join(root, research.workspaceId, "research/hypotheses.json"), "invalid");
   await page.getByRole("button", { name: "Sync from workspace", exact: true }).click();
@@ -117,7 +148,7 @@ try {
   assert([307, 401].includes(anonymous.status())); assert.notEqual(anonymous.headers()["content-type"], "application/zip");
   await foreign.close();
   assert.deepEqual(pageErrors, []);
-  console.log("Browser Research passed: Target creation, authorized host/Recon selection, workspace creation/detail/reload, ZIP download, optional Burp diagnostics (absent/available), hypothesis sync/counters/filter/detail/revisions, unchanged Findings/ZIP, scope revocation warning, retired Hunt API and read-only historical rendering.");
+  console.log("Browser Research passed: Target creation, authorized host/Recon selection, workspace creation/detail/reload, ZIP download, optional Burp diagnostics (absent/available), hypothesis sync/counters/filter/detail/revisions, legacy unchanged Findings/ZIP, v2 controls, double-click human promotion, independent Evidence Review and explicit Report, scope revocation warning, retired Hunt API and read-only historical rendering.");
 } finally {
   if (browser) await browser.close();
   if (web && web.exitCode === null) { const stopped = new Promise(r => web.once("exit", r)); web.kill("SIGTERM"); const timer = setTimeout(() => web.kill("SIGKILL"), 3000); await stopped; clearTimeout(timer); }

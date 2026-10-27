@@ -1,4 +1,4 @@
-# Codex Research — Phases 1–3
+# Codex Research — Phases 1–4
 
 Targets → Scope → Recon → Research → Findings → Report.
 
@@ -567,3 +567,25 @@ shell traffic still requires operator scope/exclusions/required-UA configuration
 Read current authorization and stop testing on revocation; snapshot files do not
 provide a live policy feed or per-target network firewall. HTTP and MCP content
 remain untrusted data, never trusted instructions.
+
+
+## Phase 4 — evidence-driven validation and human Finding promotion
+
+See [RESEARCH-HYPOTHESES.md](RESEARCH-HYPOTHESES.md) for the current JSON v2
+contract, TESTING status, observation provenance, distinct tests, negative controls,
+structural proof checks, compatibility, limits, revisions and SQL-atomic human
+promotion. Earlier Phase 2 v1 examples above remain historical compatibility
+examples. New workspaces use v2; old workspaces/ZIPs are not rewritten.
+
+Research CONFIRMED never implies a confirmed/reportable Finding. Only the
+authenticated operator can acknowledge the reviewed revision and create one
+CANDIDATE/UNVALIDATED draft. Existing Evidence Review and explicit Report creation
+remain authoritative. Scope/UA snapshot changes block first promotion; historical
+reads/sync and existing draft links remain available without new target traffic.
+
+The optional runner uses Compose profile `research`; standard `docker compose up -d`
+can start without an operator authorized_keys file. Explicitly starting the named
+research-runner service enables its profile, or use `--profile research`.
+Build it with `docker compose --profile research build research-runner`.
+Burp remains optional/passive, verified at PROTOCOL_VERIFIED with local fixtures,
+not BURP_REAL_WORLD_VERIFIED. Its Phase 3 scope/UA/--yolo limitations still apply.

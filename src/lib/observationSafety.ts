@@ -22,6 +22,21 @@ export function safeObservationUrl(value: string): string {
   } catch { return "[REDACTED URL]"; }
 }
 export function redactObservationText(value: string): string {
-  return value.replace(/\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, "[REDACTED JWT]")
-    .replace(/\b(?:authorization|cookie|set-cookie|password|secret|access_token|refresh_token)\s*[:=]\s*[^\r\n]+/gi, "[REDACTED CREDENTIAL]");
+  const plain = (text: string): string => text
+    .replace(/\bBearer\s+[A-Za-z0-9_.~+\/-]+=*/gi, "[REDACTED BEARER]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, "[REDACTED JWT]")
+    .replace(/\b(?:authorization|cookies?|set-cookie|password|secret|api[_ -]?key|access_token|refresh_token|session[_ -]?(?:id|token)|sid)["']?\s*[:=]\s*[^\r\n]+/gi, "[REDACTED CREDENTIAL]")
+    .replace(/https?:\/\/[^\s<>"`]+/gi, url => safeObservationUrl(url));
+  // When a summary is JSON, parse its structure instead of trying to match
+  // quoted/escaped credential values with a text regex. No raw body ingestion.
+  const sensitiveKey = /^(?:authorization|cookies?|set-cookie|password|secret|api[_ -]?key|access_token|refresh_token|session[_ -]?(?:id|token)|sid|AUTH_SECRET|DATABASE_URL|REDIS_URL|CREDENTIALS_ENCRYPTION_KEY)$|cipher$/i;
+  const scrub = (data: unknown, depth = 0): unknown => {
+    if (depth > 16) return "[REDACTED NESTED DATA]";
+    if (typeof data === "string") return plain(data);
+    if (Array.isArray(data)) return data.map(item => scrub(item, depth + 1));
+    if (data && typeof data === "object") return Object.fromEntries(Object.entries(data).map(([key, item]) => [key, sensitiveKey.test(key) ? "[REDACTED CREDENTIAL]" : scrub(item, depth + 1)]));
+    return data;
+  };
+  try { const data: unknown = JSON.parse(value); if (data && typeof data === "object") return JSON.stringify(scrub(data)); } catch { /* Free text uses the existing line redaction boundary. */ }
+  return plain(value);
 }

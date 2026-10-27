@@ -150,7 +150,7 @@ const row = () => prisma.researchHypothesis.findFirstOrThrow({ where: { sessionI
   it("enforces logical uniqueness in PostgreSQL and cascades revisions only with session deletion", async () => {
     await importFile(); const h = await row();
     const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...copy } = h; void _id; void _createdAt; void _updatedAt;
-    await expect(prisma.researchHypothesis.create({ data: { ...copy, evidenceFor: [], evidenceAgainst: [] } })).rejects.toMatchObject({ code: "P2002" });
+    await expect(prisma.researchHypothesis.create({ data: { ...copy, researchData: undefined, evidenceFor: [], evidenceAgainst: [] } })).rejects.toMatchObject({ code: "P2002" });
     await expect(prisma.researchHypothesisRevision.create({ data: { hypothesisId: h.id, revision: 1, snapshot: {} } })).rejects.toMatchObject({ code: "P2002" });
     await prisma.researchSession.delete({ where: { id: session.id } });
     expect(await prisma.researchHypothesis.findUnique({ where: { id: h.id } })).toBeNull();

@@ -303,3 +303,20 @@ typegen, TypeScript, production build, Compose validation and diff whitespace
 checks passed. Real Burp GUI/extension and remote Codex inference were not run:
 no installed Burp GUI or operator authentication was available. No schema change
 was necessary in Stage 3.
+
+
+## Stage 4 — research loop and verification levels
+
+[RESEARCH-HYPOTHESES.md](RESEARCH-HYPOTHESES.md) defines JSON v2 observations,
+distinct tests, falsification, negative controls and explicit human draft promotion.
+A saved Burp metadata observation can support an initial hypothesis, but cannot
+alone satisfy direct reproducible confirmation proof. The MCP tool surface stays
+passive and cannot promote/review Findings or create Reports.
+
+Report CONFIGURED, PROTOCOL_VERIFIED and BURP_REAL_WORLD_VERIFIED separately.
+Automated local SSE/stdio fixtures establish PROTOCOL_VERIFIED. They do not prove
+a real Burp GUI/extension session or remote Codex inference. No Stage 4 change
+removes the network-destination, scope/UA, raw-upstream/--yolo and Docker limits
+described above. The runner's new optional `research` Compose profile requires
+a real operator authorized_keys file before local deployment; disposable tests
+supply only their own temporary key and remove it afterwards.

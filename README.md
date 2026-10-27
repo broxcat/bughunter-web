@@ -276,7 +276,13 @@ can be included in reports.
 
 ## Codex Research
 
-Research workflow: **Recon → Codex workspace → Hypotheses → human validation → Findings**.
+Research workflow: **Recon → Codex workspace → Hypotheses / tests / controls → human promotion → Finding draft → Evidence Review → Report**.
+
+[Evidence-driven Research](docs/RESEARCH-HYPOTHESES.md) uses JSON v2 and manual sync,
+with OPEN / TESTING / BLOCKED / REJECTED / CONFIRMED, retained negative results and
+revisions. CONFIRMED is a research claim, not a confirmed Finding. The operator
+explicitly creates one idempotent CANDIDATE/UNVALIDATED draft; Evidence Review and
+Report eligibility remain independent. Legacy v1 records stay readable.
 
 Optional [Burp MCP integration](docs/BURP-MCP-RESEARCH.md) gives Codex a passive,
 workspace-scoped view of existing HTTP metadata via an installed gateway. Burp
@@ -303,7 +309,8 @@ button. Ownership, concrete authorized scope, exclusions and required User-Agent
 are checked server-side. Recon observations and existing finding metadata are
 exported without target credentials, raw HTTP bodies, AI keys or application
 secrets. The detail page provides the workspace ID, source Recon, exported files,
-initial-bundle ZIP and SSH commands. No web API executes shell commands.
+initial-bundle ZIP and SSH commands. The runner uses the optional `research`
+Compose profile; it needs a real operator public-key file. No web API executes shell commands.
 
 The dedicated runner uses an independent image/network with Internet egress,
 no backend network, no Docker socket and no application env_file. Only the

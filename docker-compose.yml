@@ -125,6 +125,8 @@ services:
   # Independent local research environment: no app env_file, backend network or socket.
   # Optional Burp MCP uses a restricted reverse SSH loopback tunnel, not a new published port.
   research-runner:
+    # Public authorized_keys is operator configuration; web must boot without it.
+    profiles: [research]
     build:
       context: .
       dockerfile: docker/research/Dockerfile

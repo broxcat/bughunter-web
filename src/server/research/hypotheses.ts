@@ -1,17 +1,27 @@
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import { hypothesesDocumentSchema, safeHypothesisIssues, type WorkspaceHypothesis, HYPOTHESIS_STATUSES, type HypothesisStatus } from "@/lib/research/hypotheses";
+import { hypothesesDocumentSchema, safeHypothesisIssues, type ResearchHypothesisInput, researchDataSchema, hypothesisSchema, hypothesisV2Schema, hypothesisEvidence, researchBindingError, hypothesisTransitionError, HYPOTHESIS_STATUSES, type HypothesisStatus } from "@/lib/research/hypotheses";
 import { exportText } from "./workspace";
 import { ownedResearch, researchRoot } from "./sessions";
 import { HypothesisWorkspace, HypothesisSyncError } from "./hypothesisFiles";
 
 export { HypothesisSyncError };
+/** Redact again at read time so legacy snapshots benefit without rewriting history. */
+function safeResearchRead<T>(value: T): T {
+  if (typeof value === "string") return exportText(value) as T;
+  if (value instanceof Date || value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(safeResearchRead) as T;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, safeResearchRead(item)])) as T;
+}
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 
 /** Explicit normalized/sanitized snapshot, also used as the revision payload.
  * Source timestamps are provenance, not content edits. No raw evidence content. */
-export function hypothesisSnapshot(h: WorkspaceHypothesis) {
+export function hypothesisSnapshot(h: ResearchHypothesisInput) {
+  const sanitize = (value: unknown): unknown => typeof value === "string" ? exportText(value) : Array.isArray(value) ? value.map(sanitize) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, sanitize(v)])) : value;
+  const researchData = "targetId" in h ? researchDataSchema.parse(sanitize(Object.fromEntries(Object.keys(researchDataSchema.shape).map(key => [key, h[key as keyof typeof h]])))) : undefined;
   return {
+    ...(researchData ? { researchData } : {}),
     externalId: h.externalId, title: exportText(h.title), status: h.status,
     hypothesis: exportText(h.hypothesis),
     evidenceFor: h.evidenceFor.map(e => ({ ref: e.ref, summary: exportText(e.summary) })),
@@ -29,7 +39,7 @@ export async function syncHypotheses(sessionId: string, userId: string) {
     // One import per session at a time; revision increment and all snapshots are
     // committed atomically. No filesystem watcher or workspace writes.
     await tx.$queryRaw`SELECT "id" FROM "ResearchSession" WHERE "id" = ${sessionId} AND "userId" = ${userId} FOR UPDATE`;
-    const session = await tx.researchSession.findFirst({ where: { id: sessionId, ...ownedResearch(userId) }, select: { id: true, workspaceId: true, status: true } });
+    const session = await tx.researchSession.findFirst({ where: { id: sessionId, ...ownedResearch(userId) }, select: { id: true, workspaceId: true, status: true, targetId: true, targetHost: true, authorizationSnapshot: true, target: { select: { scheme: true } } } });
     if (!session) throw new HypothesisSyncError("NOT_FOUND", "Research session not found", 404);
     if (session.status !== "READY") throw new HypothesisSyncError("SESSION_NOT_READY", "Only READY sessions can sync; archived sessions are read-only", 409);
     // Scope revocation does not prohibit importing historical notes. No target
@@ -45,23 +55,38 @@ export async function syncHypotheses(sessionId: string, userId: string) {
       if (parsed.data.sessionId !== session.id) throw new HypothesisSyncError("SESSION_MISMATCH", "hypotheses.json sessionId does not match this Research Session");
       const checked = new Set<string>();
       for (const [index, h] of parsed.data.hypotheses.entries()) {
-        for (const kind of ["evidenceFor", "evidenceAgainst"] as const) {
-          for (const [entry, evidence] of h[kind].entries()) {
-            if (checked.has(evidence.ref.split("#")[0])) continue;
-            try { await workspace.checkReference(evidence.ref); }
-            catch { throw new HypothesisSyncError("INVALID_REFERENCE", "An evidence artifact is missing or unsafe", 400, [{ path: `hypotheses.${index}.${kind}.${entry}.ref`, message: "Artifact must exist inside this workspace without symlinks or hardlinks" }]); }
-            checked.add(evidence.ref.split("#")[0]);
-          }
+        if ("targetId" in h) {
+          const binding = researchBindingError(h, { id: session.targetId, host: session.targetHost, scheme: (session.authorizationSnapshot as { scheme?: string } | null)?.scheme ?? session.target.scheme ?? "https" });
+          if (binding) throw new HypothesisSyncError("SCOPE_MISMATCH", binding);
+        }
+        for (const [entry, evidence] of hypothesisEvidence(h).entries()) {
+          if (checked.has(evidence.ref.split("#")[0])) continue;
+          if (checked.size >= 1000) throw new HypothesisSyncError("REFERENCE_LIMIT", "At most 1000 distinct evidence artifacts per import");
+          try { await workspace.checkReference(evidence.ref); }
+          catch { throw new HypothesisSyncError("INVALID_REFERENCE", "An evidence artifact is missing or unsafe", 400, [{ path: `hypotheses.${index}.evidence.${entry}.ref`, message: "Artifact must exist inside this workspace without symlinks or hardlinks" }]); }
+          checked.add(evidence.ref.split("#")[0]);
         }
       }
       let created = 0, updated = 0, unchanged = 0;
-      const existing = await tx.researchHypothesis.findMany({ where: { sessionId }, select: { id: true, externalId: true, contentSha256: true, revision: true } });
+      const existing = await tx.researchHypothesis.findMany({ where: { sessionId }, select: { id: true, externalId: true, contentSha256: true, revision: true, status: true, researchData: true } });
       const byId = new Map(existing.map(h => [h.externalId, h]));
       const newCount = parsed.data.hypotheses.filter(h => !byId.has(h.externalId)).length;
       if (existing.length + newCount > 200) throw new HypothesisSyncError("REGISTRY_LIMIT", "A session can retain at most 200 hypotheses; omitted hypotheses are never deleted");
       const importedAt = new Date();
       for (const h of parsed.data.hypotheses) {
-        const snapshot = hypothesisSnapshot(h), contentSha256 = hash(JSON.stringify(snapshot)), previous = byId.get(h.externalId);
+        let snapshot: ReturnType<typeof hypothesisSnapshot>;
+        try { snapshot = hypothesisSnapshot(h); }
+        catch { throw new HypothesisSyncError("SANITIZED_PROOF_INCOMPLETE", "Proof fields exceed their limits after redaction. Remove credentials from summaries."); }
+        const contentSha256 = hash(JSON.stringify(snapshot)), previous = byId.get(h.externalId);
+        const { researchData: _container, ...base } = snapshot;
+        void _container;
+        const candidate = { ...h, ...base, ...snapshot.researchData, notes: base.notes ?? undefined, blockedReason: base.blockedReason ?? undefined, confidence: base.confidence ?? undefined };
+        const validSnapshot = ("targetId" in h ? hypothesisV2Schema : hypothesisSchema).safeParse(candidate);
+        if (!validSnapshot.success) throw new HypothesisSyncError("SANITIZED_PROOF_INCOMPLETE", "Proof fields are incomplete after redaction. Keep secrets out of research summaries.");
+        if ("targetId" in h) {
+          const transition = previous ? hypothesisTransitionError(previous, h) : null;
+          if (transition) throw new HypothesisSyncError("INVALID_TRANSITION", transition, 409);
+        } else if (previous?.researchData) throw new HypothesisSyncError("CONTRACT_DOWNGRADE", "A v2 hypothesis cannot be replaced by a legacy v1 entry", 409);
         if (previous?.contentSha256 === contentSha256) { unchanged++; continue; }
         const revision = (previous?.revision ?? 0) + 1;
         const data = { ...snapshot, contentSha256, revision, sourceUpdatedAt: h.updatedAt ? new Date(h.updatedAt) : null, importedAt };
@@ -78,7 +103,7 @@ export async function syncHypotheses(sessionId: string, userId: string) {
 }
 
 export async function ownedHypothesisSession(sessionId: string, userId: string) {
-  const session = await prisma.researchSession.findFirst({ where: { id: sessionId, ...ownedResearch(userId) }, select: { id: true, workspaceId: true, targetId: true, status: true, hypothesesSyncedAt: true } });
+  const session = await prisma.researchSession.findFirst({ where: { id: sessionId, ...ownedResearch(userId) }, select: { id: true, workspaceId: true, targetId: true, status: true, hypothesesSyncedAt: true, authorizationSnapshot: true } });
   if (!session) throw new HypothesisSyncError("NOT_FOUND", "Research session not found", 404);
   return session;
 }
@@ -87,14 +112,22 @@ export function sortHypotheses<T extends { status: HypothesisStatus; externalId:
 }
 export async function listHypotheses(sessionId: string, userId: string, status?: HypothesisStatus, page = 1) {
   const session = await ownedHypothesisSession(sessionId, userId);
-  const rows = sortHypotheses(await prisma.researchHypothesis.findMany({ where: { sessionId }, take: 200 }));
-  const counts = Object.fromEntries(HYPOTHESIS_STATUSES.map(s => [s, rows.filter(h => h.status === s).length]));
-  const filtered = status ? rows.filter(h => h.status === status) : rows;
-  return { session, counts, total: filtered.length, page, pageSize: 25, hypotheses: filtered.slice((page - 1) * 25, page * 25) };
+  const grouped = await prisma.researchHypothesis.groupBy({ by: ["status"], where: { sessionId }, _count: { _all: true } });
+  const counts = Object.fromEntries(HYPOTHESIS_STATUSES.map(s => [s, grouped.find(g => g.status === s)?._count._all ?? 0]));
+  const selectedStatus = status ?? null;
+  // Fetch only the current page's payloads, never every structured proof blob.
+  // CASE order is explicit: PostgreSQL adds TESTING at the enum's end.
+  const ids = await prisma.$queryRaw<{ id: string }[]>`SELECT "id" FROM "ResearchHypothesis"
+    WHERE "sessionId" = ${sessionId} AND (${selectedStatus}::text IS NULL OR "status"::text = ${selectedStatus}::text)
+    ORDER BY CASE "status"::text WHEN 'OPEN' THEN 0 WHEN 'TESTING' THEN 1 WHEN 'BLOCKED' THEN 2 WHEN 'REJECTED' THEN 3 ELSE 4 END,
+      CASE WHEN "externalId" ~ '^H-[0-9]{3,6}$' THEN substring("externalId" from 3)::integer ELSE 2147483647 END, "createdAt"
+    LIMIT 25 OFFSET ${(page - 1) * 25}`;
+  const rows = sortHypotheses(await prisma.researchHypothesis.findMany({ where: { id: { in: ids.map(i => i.id) }, sessionId }, include: { promotion: { select: { findingId: true, hypothesisRevision: true } } } }));
+  return { session, counts, total: status ? counts[status] : grouped.reduce((sum, g) => sum + g._count._all, 0), page, pageSize: 25, hypotheses: safeResearchRead(rows) };
 }
 export async function hypothesisDetail(sessionId: string, hypothesisId: string, userId: string, revisionPage = 1) {
   const session = await ownedHypothesisSession(sessionId, userId);
-  const hypothesis = await prisma.researchHypothesis.findFirst({ where: { id: hypothesisId, sessionId }, include: { revisions: { orderBy: { revision: "desc" }, take: 25, skip: (revisionPage - 1) * 25 } } });
+  const hypothesis = await prisma.researchHypothesis.findFirst({ where: { id: hypothesisId, sessionId }, include: { promotion: { select: { findingId: true, hypothesisRevision: true } }, revisions: { orderBy: { revision: "desc" }, take: 25, skip: (revisionPage - 1) * 25 } } });
   if (!hypothesis) throw new HypothesisSyncError("NOT_FOUND", "Research hypothesis not found", 404);
-  return { session, hypothesis, revisionPage, revisionPageSize: 25 };
+  return { session, hypothesis: safeResearchRead(hypothesis), revisionPage, revisionPageSize: 25 };
 }

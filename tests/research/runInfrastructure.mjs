@@ -13,10 +13,11 @@ const cmd = async (file, args, options = {}) => (await exec(file, args, { timeou
 const compose = (...args) => cmd("docker", ["compose", "-p", project, "-f", config, ...args]);
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { loopHypothesis } from "../fixtures/researchLoop.mjs";
 import { fakeBurp } from "./fakeBurp.mjs";
 let started = false, tunnel, burpFixture, mcp;
 try {
-  const original = JSON.parse(await cmd("docker", ["compose", "config", "--format", "json"]));
+  const original = JSON.parse(await cmd("docker", ["compose", "--profile", "research", "config", "--format", "json"]));
   const runner = original.services["research-runner"];
   assert.equal(runner.ports[0].host_ip, "127.0.0.1");
   assert.equal(runner.ports[0].published, process.env.RESEARCH_SSH_PORT ?? "2222");
@@ -26,6 +27,7 @@ try {
   // Testing service is derived from the real service: preserve capabilities,
   // user, entrypoint and healthcheck, change only disposable resources/port.
   delete runner.build;
+  delete runner.profiles;
   runner.restart = "no";
   const listener = createServer();
   await new Promise(r => listener.listen(0, "127.0.0.1", r));
@@ -133,11 +135,20 @@ try {
   await writeHypotheses({ version: 1, sessionId: "session", hypotheses: [{ ...validHypothesis, evidenceFor: [{ ref: "evidence/missing.txt", summary: "Uncaptured observation" }] }] });
   await assert.rejects(validate());
 
-  await ssh(`cd ${workspace} && printf '%s' '{"version":2,"sessionId":"session","hypotheses":[]}' > research/hypotheses.json`);
+  await ssh(`cd ${workspace} && printf '%s' '{"version":99,"sessionId":"session","hypotheses":[]}' > research/hypotheses.json`);
   await assert.rejects(validate());
   await ssh(`cd ${workspace} && printf '%s' '{"version":1,"sessionId":"session","hypotheses":[]}' > research/hypotheses.json`);
   assert((await validate()).includes("OK — 0 hypotheses"));
 
+  for (const name of ["positive", "control"]) await ssh(`printf 'Synthetic local observation only' > ${workspace}/evidence/${name}.txt`);
+  const loop = loopHypothesis({ status: "CONFIRMED" });
+  await writeHypotheses({ version: 2, sessionId: "session", hypotheses: [loop] });
+  assert((await validate()).includes("OK — 1 hypotheses"));
+  loop.tests[0].observations[0].evidence = [{ ref, summary: "Burp status metadata alone cannot confirm a security effect." }];
+  await writeHypotheses({ version: 2, sessionId: "session", hypotheses: [loop] }); await assert.rejects(validate());
+  loop.host = "discovered.example.test";
+  await writeHypotheses({ version: 2, sessionId: "session", hypotheses: [loop] }); await assert.rejects(validate());
+  await writeHypotheses({ version: 2, sessionId: "session", hypotheses: [] });
   await assert.rejects(ssh("cd /home/researcher && bughunter-codex --help"));
   await assert.rejects(cmd("ssh", [...sshArgs, "root@127.0.0.1", "id"]));
   // Only publickey is accepted. A client explicitly refusing publickey cannot log in.

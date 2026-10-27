@@ -55,7 +55,7 @@ network("real HTTP tools and Chromium capture", () => {
           tool === "nuclei" ? ["-silent", "-duc", "-u", base, "-t", NUCLEI_TEMPLATE, "-H", "User-Agent: Tool-Wrong"] :
           ["url", `${base}/?q=hello`, "--silence", "--no-color", "--worker", "2", "--skip-mining-all", "--timeout", "2", "--user-agent", "Tool-Wrong"];
         const result = await runCommand(tool, args, { scanRunId: "fixture", timeoutMs: 45000 });
-        expect(result).toEqual({ code: 0, timedOut: false });
+        expect(result).toEqual({ code: 0, timedOut: false, cancelled: false });
         const output = vi.mocked(prisma.scanLog.create).mock.calls.map(call => call[0].data.line).join("\n");
         expect(output).not.toMatch(/Error parsing config file|invalid character '#'/i);
       });
