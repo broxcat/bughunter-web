@@ -1,3 +1,4 @@
+import { throwIfScanAborted } from "@/server/scanControl";
 import { prisma } from "@/lib/prisma";
 import { createHash, randomUUID } from "node:crypto";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
@@ -93,7 +94,7 @@ async function checkRow(row: TargetCredential, login: boolean, allowLoginAction?
       if (proof.valid && proof.subject) identityHash = createHash("sha256").update(proof.subject).digest("hex");
       if (proof.valid) discoveredOwned = await ownedObject(base, headers, proof.observedUrls, proof.subject);
     }
-  } catch { status = "UNKNOWN"; }
+  } catch { throwIfScanAborted(); status = "UNKNOWN"; }
   const saved = await prisma.targetCredential.updateMany({ where: { id: row.id, sessionCheckId: checkId }, data: {
     sessionStatus: status, sessionCheckedAt: checked,
     sessionIdentityHash: identityHash,
@@ -117,5 +118,6 @@ export async function testStoredConnection(targetId: string, credentialId: strin
 /** Hunt preflight performs GET-only verification; it never logs in or refreshes. */
 export async function revalidateTargetSessions(targetId: string): Promise<void> {
   const rows = await prisma.targetCredential.findMany({ where: { targetId }, orderBy: { createdAt: "asc" } });
+  throwIfScanAborted();
   for (const row of rows.filter(r => sessionState(r) === "VALID" && r.validationUrl).slice(0, 2)) await checkRow(row, false);
 }

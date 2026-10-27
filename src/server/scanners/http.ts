@@ -1,3 +1,4 @@
+import { beforeScanNetwork, currentScanControl, recordUsefulScanWork, throwIfScanAborted } from "@/server/scanControl";
 import { assertExecutionUrl, executionHeaders, currentTargetExecution } from "@/server/execution";
 // Minimal HTTP probe helper for the vuln-class scanners. Uses global fetch with
 // a hard per-request timeout and manual redirect handling (so a 30x is observed,
@@ -8,6 +9,7 @@ import { assertExecutionUrl, executionHeaders, currentTargetExecution } from "@/
 // an authorized scan (the worker has already confirmed the Scope is APPROVED).
 
 export interface ProbeOptions {
+  signal?: AbortSignal;
   method?: string;
   headers?: Record<string, string>;
   /** Optional request body (e.g. an XML/SOAP document for an XXE probe). */
@@ -42,17 +44,26 @@ export async function probe(
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT);
   const started = Date.now();
   let release: (() => void) | undefined;
+  let resourceDone!: () => void;
+  const done = new Promise<void>(resolve => { resourceDone = resolve; });
+  const scan = currentScanControl();
+  const releaseResource = scan?.track(async () => { controller.abort(); await done; });
   try {
+    throwIfScanAborted();
+    opts.signal?.throwIfAborted();
     assertExecutionUrl(url);
     const guard = currentTargetExecution().requestGuard;
     guard?.assertRequest?.(url, method, opts.body);
     release = await guard?.acquire(url, method);
+    await beforeScanNetwork();
+    throwIfScanAborted();
+    opts.signal?.throwIfAborted();
     const res = await fetch(url, {
       method,
       headers: executionHeaders(opts.headers),
       body: opts.body,
       redirect: "manual",
-      signal: AbortSignal.any([controller.signal, ...(guard ? [guard.signal, AbortSignal.timeout(Math.max(1, Math.min(5000, guard.remainingMs())))] : [])]),
+      signal: AbortSignal.any([controller.signal, ...(scan ? [scan.signal] : []), ...(opts.signal ? [opts.signal] : []), ...(guard ? [guard.signal, AbortSignal.timeout(Math.max(1, Math.min(5000, guard.remainingMs())))] : [])]),
     });
     const reader = res.body?.getReader();
     const chunks: Uint8Array[] = []; let bytes = 0;
@@ -70,6 +81,7 @@ export async function probe(
     res.headers.forEach((v, k) => {
       headers[k] = v;
     });
+    await recordUsefulScanWork();
     return {
       url,
       method,
@@ -80,6 +92,8 @@ export async function probe(
       headers,
     };
   } catch (err) {
+    throwIfScanAborted();
+    opts.signal?.throwIfAborted();
     return {
       url,
       method,
@@ -93,5 +107,6 @@ export async function probe(
   } finally {
     release?.();
     clearTimeout(timer);
+    resourceDone(); releaseResource?.();
   }
 }

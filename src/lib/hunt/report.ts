@@ -16,7 +16,7 @@ export interface HuntReport {
   // Optional for compatibility with historical reports.
   execution?: { successfulRequests: number; failedRequests: number; issues: string[] };
   version: 1; startedAt: string; finishedAt?: string;
-  status: "RUNNING" | "COMPLETED" | "LIMIT_REACHED" | "FAILED";
+  status: "RUNNING" | "COMPLETED" | "LIMIT_REACHED" | "FAILED" | "CANCELLED" | "INTERRUPTED";
   requests: number;
   limits: Record<string, number>;
   families: (Omit<HuntFamilySelection, "reason"> & { selectionReason: HuntFamilySelection["reason"]; readiness: ReadinessState; state: TechniqueState; completedTechniques: number; applicableTechniques: number; requests: number; reason: string })[];

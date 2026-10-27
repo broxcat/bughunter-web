@@ -11,7 +11,7 @@ describe("scan SSE result", () => {
   it.each(["SUCCESS", "PARTIAL", null])("replays terminal outcome %s including historical unknown", async outcome => {
     mocks.find.mockResolvedValue({ status: "COMPLETED", outcome, target: { userId: "owner" } });
     const response = await get();
-    expect(await response.text()).toContain(`data: ${JSON.stringify({ status: "COMPLETED", outcome })}`);
+    expect(await response.text()).toContain(`data: ${JSON.stringify({ status: "COMPLETED", outcome, dispatch: null, cancelRequestedAt: null, execution: null, error: null })}`);
     expect(mocks.subscribe).not.toHaveBeenCalled();
   });
   it("polls publication even when a Redis subscription never connects", async () => {

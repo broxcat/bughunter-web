@@ -1,5 +1,7 @@
+import { beforeScanNetwork, currentScanControl, recordUsefulScanWork, throwIfScanAborted } from "./scanControl";
+import { logger } from "@/lib/logger";
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Browser, Route } from "playwright-chromium";
+import { chromium, type Browser, type Route } from "playwright-chromium";
 import { prisma } from "@/lib/prisma";
 import { isExcluded, programSchema } from "@/lib/bountyProgram";
 
@@ -54,11 +56,46 @@ export function executionHeaders(headers?: HeadersInit): Headers {
   result.set("User-Agent", ctx.requiredUserAgent);
   return result;
 }
+/** Register launch itself before awaiting it, so cancellation also waits for a
+ * browser that is still starting and closes it before confirming cleanup. */
+export async function launchTargetBrowser(options: Parameters<typeof chromium.launch>[0]) {
+  throwIfScanAborted();
+  const pending = chromium.launch(options);
+  const control = currentScanControl();
+  let closing: Promise<void> | undefined;
+  const stop = () => closing ??= pending.then(browser => browser.close(), () => {});
+  const release = control?.track(stop);
+  try {
+    const browser = await pending;
+    browser.on?.("disconnected", () => release?.());
+    if (control?.signal.aborted) { await stop(); control.assertActive(); }
+    return browser;
+  } catch (error) { release?.(); throw error; }
+}
+
 /** All browser traffic, including redirects, scripts, forms and subresources. */
 export async function newTargetBrowserContext(browser: Browser, syntheticPage?: { url: string; html: string }) {
   const ctx = currentTargetExecution();
+  throwIfScanAborted();
+  const control = currentScanControl();
+  const signals = [ctx.requestGuard?.signal, control?.signal].filter((s): s is AbortSignal => Boolean(s));
+  const signal = AbortSignal.any(signals);
+  signal.throwIfAborted();
   const context = await browser.newContext({ userAgent: ctx.requiredUserAgent, serviceWorkers: "block" });
+  let closing: Promise<void> | undefined;
+  const stop = () => closing ??= (async () => {
+    await context.close();
+    await browser.close();
+    logger.info({ ...control?.identity, reason: "BROWSER_ABORTED" }, "scan browser context closed");
+  })();
+  const untrack = control?.track(stop);
+  const onAbort = () => { void stop().catch(() => {}); };
+  signal.addEventListener("abort", onAbort, { once: true });
+  // Release normal contexts too; an abort during creation is checked below.
+  context.on?.("close", () => { signal.removeEventListener("abort", onAbort); if (!closing) untrack?.(); });
+  if (signal.aborted) { await stop(); untrack?.(); signal.throwIfAborted(); }
   await context.route("**/*", async (route: Route) => {
+    if (signal.aborted) { await route.abort("aborted").catch(() => {}); return; }
     const url = route.request().url();
     if (syntheticPage && url === syntheticPage.url) {
       await route.fulfill({ contentType: "text/html", body: syntheticPage.html }); return;
@@ -72,7 +109,11 @@ export async function newTargetBrowserContext(browser: Browser, syntheticPage?: 
     try {
       ctx.requestGuard?.assertRequest?.(url, route.request().method(), route.request().postData() ?? undefined);
       release = await ctx.requestGuard?.acquire(url, route.request().method());
+      signal.throwIfAborted();
+      await beforeScanNetwork();
+      signal.throwIfAborted();
       const response = await route.fetch({ headers: Object.fromEntries(headers), maxRedirects: 0, timeout: Math.min(5000, ctx.requestGuard?.remainingMs() ?? 5000) });
+      await recordUsefulScanWork();
       const responseHeaders = { ...response.headers() };
       if (response.status() >= 300 && response.status() < 400 && responseHeaders.location) {
         responseHeaders["x-bughunter-redirect-location"] = responseHeaders.location;
@@ -81,7 +122,6 @@ export async function newTargetBrowserContext(browser: Browser, syntheticPage?: 
       await route.fulfill({ response, headers: responseHeaders });
     } catch { await route.abort("failed").catch(() => {}); } finally { release?.(); }
   });
-  ctx.requestGuard?.signal.addEventListener("abort", () => { void context.close().catch(() => {}); }, { once: true });
   // Browser WebSocket traffic has no HTTP scan capability in BugHunter.
   await context.routeWebSocket("**/*", socket => socket.close());
   return context;

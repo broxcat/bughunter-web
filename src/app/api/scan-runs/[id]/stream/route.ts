@@ -1,3 +1,4 @@
+import { executionSelect } from "@/server/queue/executionAttempts";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { subscribeScanLog } from "@/server/queue/logBus";
@@ -29,7 +30,7 @@ export async function GET(
   // owned by someone else are both reported as 404 so we never leak existence.
   const scanRun = await prisma.scanRun.findUnique({
     where: { id },
-    include: { target: true, jobOutbox: { select: { status: true } } },
+    include: { executionAttempts: executionSelect, target: true, jobOutbox: { select: { status: true } } },
   });
   if (!scanRun || scanRun.target.userId !== session.user.id) {
     return new Response("Not found", { status: 404 });
@@ -72,9 +73,13 @@ export async function GET(
         }
       };
 
-      const finish = (status: string, outcome: string | null = null) => {
+      const state = (run: { status: string; outcome?: string | null; error?: string | null; cancelRequestedAt?: Date | null; jobOutbox?: { status: string } | null; executionAttempts?: unknown[] }) => ({
+        status: run.status, outcome: run.outcome ?? null, dispatch: run.jobOutbox?.status ?? null,
+        cancelRequestedAt: run.cancelRequestedAt?.toISOString() ?? null, execution: run.executionAttempts?.[0] ?? null, error: run.error ?? null,
+      });
+      const finish = (run: Parameters<typeof state>[0]) => {
         if (closed) return;
-        send("status", { status, outcome });
+        send("status", state(run));
         cleanup();
         closed = true;
         try {
@@ -99,11 +104,11 @@ export async function GET(
 
       // 2. Already finished: emit the terminal status once and close.
       if (TERMINAL.has(scanRun.status)) {
-        finish(scanRun.status, scanRun.outcome);
+        finish(scanRun);
         return;
       }
 
-      send("status", { status: scanRun.status, outcome: null, dispatch: scanRun.jobOutbox?.status ?? null });
+      send("status", state(scanRun));
 
       // 3. Subscribe to live lines. If the bus is unavailable we still fall back
       //    to status polling below so the client eventually learns it's done.
@@ -127,16 +132,16 @@ export async function GET(
         try {
           const fresh = await prisma.scanRun.findUnique({
             where: { id },
-            select: { status: true, outcome: true, jobOutbox: { select: { status: true } } },
+            select: { status: true, outcome: true, error: true, cancelRequestedAt: true, executionAttempts: executionSelect, jobOutbox: { select: { status: true } } },
           });
           if (!fresh) {
-            finish("FAILED");
+            finish({ status: "FAILED" });
             return;
           }
           if (TERMINAL.has(fresh.status)) {
-            finish(fresh.status, fresh.outcome);
+            finish(fresh);
           } else {
-            send("status", { status: fresh.status, outcome: null, dispatch: fresh.jobOutbox?.status ?? null });
+            send("status", state(fresh));
           }
         } catch {
           // transient DB hiccup; try again on the next tick.

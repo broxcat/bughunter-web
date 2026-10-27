@@ -37,6 +37,8 @@ try {
   const historicalRuns = await client.$queryRaw`SELECT id, status, error, "createdAt", "startedAt", "finishedAt" FROM "ScanRun" ORDER BY id`;
   migrate(schema);
   assert.deepEqual(await client.$queryRaw`SELECT id, status, error, "createdAt", "startedAt", "finishedAt" FROM "ScanRun" ORDER BY id`, historicalRuns);
+  assert.equal(await client.scanExecutionAttempt.count(), 0, "Do not invent historical execution attempts");
+  assert((await client.scanRun.findMany()).every(run => run.cancelRequestedAt === null));
   assert.equal(await client.scanJobOutbox.count(), 0, "Do not invent historical publication intents");
   assert.equal(await client.scanRequestKey.count(), 0, "Do not invent historical idempotency keys");
   const outcomes = await client.scanRun.findMany({ select: { outcome: true } });

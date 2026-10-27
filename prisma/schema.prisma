@@ -278,15 +278,43 @@ model ScanRun {
   createdAt              DateTime   @default(now())
   startedAt              DateTime?
   finishedAt             DateTime?
+  cancelRequestedAt      DateTime?
 
   target   Target    @relation(fields: [targetId], references: [id], onDelete: Cascade)
   logs     ScanLog[]
   findings Finding[]
   jobOutbox ScanJobOutbox?
   requestKey ScanRequestKey?
+  executionAttempts ScanExecutionAttempt[]
 
   @@index([targetId])
   @@index([status])
+}
+
+// Real starts only: historical scans have no invented execution attempts.
+model ScanExecutionAttempt {
+  id               String                    @id @default(cuid())
+  scanRunId        String
+  workerId         String
+  state            ScanExecutionAttemptState @default(RUNNING)
+  startedAt        DateTime                  @default(now())
+  heartbeatAt      DateTime                  @default(now())
+  finishedAt       DateTime?
+  networkStartedAt DateTime?
+  usefulWorkAt     DateTime?
+  reason           String?                   @db.Text
+  scanRun          ScanRun                   @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+
+  @@index([scanRunId])
+  @@index([state, heartbeatAt])
+}
+
+enum ScanExecutionAttemptState {
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+  INTERRUPTED
 }
 
 // Durable publication intent. Redis failures never change ScanStatus/ScanOutcome.

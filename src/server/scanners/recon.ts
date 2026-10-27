@@ -1,9 +1,10 @@
+import { currentScanControl, throwIfScanAborted, beforeScanNetwork, recordUsefulScanWork } from "@/server/scanControl";
 import { commandStepResult, reconExecutionResult, type ReconStepResult, type ScanExecutionResult } from "./result";
 import { analyzeCorpus, persistableCorpus } from "@/server/hunt/corpus";
 import { discoverCorpus, clearDiscoveryCorpus } from "./discovery";
 import { prisma } from "@/lib/prisma";
 import { currentTargetExecution } from "@/server/execution";
-import { resolveAny } from "node:dns/promises";
+import { Resolver } from "node:dns/promises";
 import { logLine } from "./context";
 // Minimal recon port: run the core discovery tools in sequence against one host.
 // Every invocation goes through runCommand (argv arrays only, shell: false) so
@@ -27,13 +28,17 @@ export async function runRecon(_host: string, scanRunId: string): Promise<ScanEx
     await logLine(scanRunId, `[recon] ${step.step}: ${step.state === "SUCCESS" ? "completed" : step.reason}`, step.state === "FAILED" || step.state === "PARTIAL" ? "STDERR" : "STDOUT");
   };
   const command = async (name: string, args: string[], timeoutMs: number) => {
+    throwIfScanAborted();
     try {
-      await record(commandStepResult(name, await runCommand(name, args, { scanRunId, timeoutMs }), timeoutMs));
+      await record(commandStepResult(name, await runCommand(name, args, { scanRunId, timeoutMs, signal: currentScanControl()?.signal }), timeoutMs));
+      throwIfScanAborted();
     } catch {
+      throwIfScanAborted();
       await record({ step: name, state: "FAILED", reason: "command execution failed" });
     }
   };
 
+  throwIfScanAborted();
   const execution = currentTargetExecution();
   const ctx = await loadScanContext(scanRunId);
   if (!ctx || execution.targetId !== ctx.targetId || execution.host !== ctx.host) throw new Error("Missing authorized scan context");
@@ -74,10 +79,18 @@ export async function runRecon(_host: string, scanRunId: string): Promise<ScanEx
   // DNS-only resolution performs no HTTP and does not authorize discovered hosts.
   await record({ step: "subfinder", state: "SKIPPED", reason: "disabled: provider HTTP cannot guarantee Target User-Agent; DNS resolution USER_AGENT_NOT_APPLICABLE" });
   try {
-    const records = await resolveAny(domain);
+    throwIfScanAborted();
+    await beforeScanNetwork();
+    const resolver = new Resolver();
+    const pending = resolver.resolveAny(domain);
+    const release = currentScanControl()?.track(async () => { resolver.cancel(); await pending.catch(() => {}); });
+    let records;
+    try { records = await pending; } finally { release?.(); }
+    await recordUsefulScanWork();
     await logLine(scanRunId, `[dns] ${JSON.stringify(records)}`);
     await record({ step: "dns", state: "SUCCESS" });
   } catch (err) {
+    throwIfScanAborted();
     // No DNS records is a successful empty result. Resolver failures reduce coverage.
     await record((err as NodeJS.ErrnoException).code === "ENODATA"
       ? { step: "dns", state: "SUCCESS" }
@@ -97,6 +110,7 @@ export async function runRecon(_host: string, scanRunId: string): Promise<ScanEx
     ["-silent", "-u", url, "-d", "3", "-jc", ...headerArgs],
     10 * MINUTE,
   );
+  throwIfScanAborted();
   const result = reconExecutionResult(steps);
   await logLine(scanRunId, `[recon] result: ${result.outcome}`);
   return result;

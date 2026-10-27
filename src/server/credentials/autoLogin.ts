@@ -1,6 +1,7 @@
-import { assertExecutionUrl, currentTargetExecution, newTargetBrowserContext } from "@/server/execution";
+import { throwIfScanAborted } from "@/server/scanControl";
+import { assertExecutionUrl, currentTargetExecution, launchTargetBrowser, newTargetBrowserContext } from "@/server/execution";
 import { isSafeReadUrl } from "@/lib/hunt/safety";
-import { chromium, type Browser, type BrowserContext } from "playwright-chromium";
+import { type Browser, type BrowserContext } from "playwright-chromium";
 import { detectCsrf } from "./csrf";
 
 export interface AutoLoginInput {
@@ -24,6 +25,7 @@ export interface AutoLoginResult {
 const usernameSelector = 'input[autocomplete="username"], input[type="email"], input[name="username"], input[name="email"], input[name="login"], input[name="user"], input[type="text"]';
 /** Discover a visible password form, preserve hidden inputs and browser cookies. */
 export async function acquireSessionCookies(input: AutoLoginInput): Promise<AutoLoginResult> {
+  throwIfScanAborted();
   const base = input.baseUrl ?? input.loginUrl;
   if (!base) return { cookies: {}, error: "Login form unavailable" };
   let browser: Browser | null = null, context: BrowserContext | null = null;
@@ -31,7 +33,7 @@ export async function acquireSessionCookies(input: AutoLoginInput): Promise<Auto
   try {
     const execution = currentTargetExecution();
     assertExecutionUrl(base);
-    browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"], timeout: 5000 });
+    browser = await launchTargetBrowser({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"], timeout: 5000 });
     context = await newTargetBrowserContext(browser);
     const page = await context.newPage();
     const candidates = [base];
@@ -96,6 +98,6 @@ export async function acquireSessionCookies(input: AutoLoginInput): Promise<Auto
     const cookies = Object.fromEntries(raw.map(c => [c.name, c.value]));
     const expiries = raw.filter(c => c.expires > 0 && !/csrf|xsrf/i.test(c.name)).map(c => c.expires * 1000);
     return { cookies, bearerToken, loginUrl, candidateUrls: [...new Set(urls)].slice(0, 8), expiresAt: expiries.length ? new Date(Math.min(...expiries)) : undefined, csrfSources: csrf.sources };
-  } catch { return { cookies: {}, error: "Unable to establish a verified session" }; }
+  } catch { throwIfScanAborted(); return { cookies: {}, error: "Unable to establish a verified session" }; }
   finally { await context?.close().catch(() => {}); await browser?.close().catch(() => {}); }
 }

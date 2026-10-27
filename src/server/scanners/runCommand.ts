@@ -12,6 +12,9 @@ import { enforcedToolArgs, safeCommandSummary } from "./toolPolicy";
 // live log bus for SSE. The call never throws on a non-zero exit — it resolves
 // with the exit code — so a tool that "fails" is a normal, recordable outcome.
 
+import { beforeScanNetwork, currentScanControl, recordUsefulScanWork } from "@/server/scanControl";
+import { logger } from "@/lib/logger";
+import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { prisma } from "@/lib/prisma";
 import { publishScanLog } from "@/server/queue/logBus";
@@ -19,6 +22,7 @@ import { publishScanLog } from "@/server/queue/logBus";
 export type RunCommandOptions = {
   scanRunId: string;
   timeoutMs: number;
+  signal?: AbortSignal;
 };
 
 export type RunCommandResult = {
@@ -26,6 +30,7 @@ export type RunCommandResult = {
   code: number | null;
   /** True if the run was terminated because it hit the timeout. */
   timedOut: boolean;
+  cancelled?: boolean;
   /** Spawn failed before a process could execute (e.g. missing binary). */
   spawnFailed?: boolean;
 };
@@ -52,12 +57,17 @@ async function record(
  * output line-by-line into ScanLog + the live bus, enforcing a hard timeout.
  * Resolves with the exit code; does not throw on non-zero exit.
  */
-export function runCommand(
+export async function runCommand(
   cmd: string,
   args: string[],
   opts: RunCommandOptions,
 ): Promise<RunCommandResult> {
   const { scanRunId, timeoutMs } = opts;
+  const control = currentScanControl();
+  const signal = AbortSignal.any([...(opts.signal ? [opts.signal] : []), ...(control ? [control.signal] : [])]);
+  if (signal.aborted) return { code: null, timedOut: false, cancelled: true };
+  await beforeScanNetwork();
+  if (signal.aborted) return { code: null, timedOut: false, cancelled: true };
   args = enforcedToolArgs(cmd, args);
   const secrets = args.flatMap((arg, i) => {
     if (!["-H", "-header", "-headers", "--header"].includes(args[i - 1]) || /^user-agent\s*:/i.test(arg)) return [];
@@ -67,15 +77,55 @@ export function runCommand(
   });
   const redact = (line: string) => secrets.reduce((text, secret) => text.replaceAll(secret, "[REDACTED]"), line);
 
-  return new Promise<RunCommandResult>((resolve) => {
+  const result = await new Promise<RunCommandResult>((resolve) => {
     void record(scanRunId, safeCommandSummary(cmd, args), "STDOUT");
 
     // shell: false is the whole point — argv array, no shell interpretation.
-    const child = spawn(cmd, args, { shell: false });
-    child.stdin.end(); // argv-only tools must receive EOF, not wait on an open pipe.
+    const grouped = process.platform !== "win32";
+    const child = grouped
+      ? spawn(process.execPath, [join(process.cwd(), "src/server/scanners/toolProcess.mjs"), cmd, ...args], { shell: false, detached: true, stdio: ["pipe", "pipe", "pipe", "ipc"] })
+      : spawn(cmd, args, { shell: false });
+    let toolExit: { code: number | null } | undefined;
+    let toolSpawnFailed = false;
+    child.on("message", message => {
+      if (typeof message !== "object" || message === null) return;
+      const data = message as { type?: string; code?: number | null };
+      if (data.type === "spawnFailed") {
+        toolSpawnFailed = true;
+        void record(scanRunId, `[runCommand] failed to spawn ${cmd}: tool unavailable`, "STDERR");
+      }
+      if (data.type === "toolExit" && (typeof data.code === "number" || data.code === null)) toolExit = { code: data.code };
+    });
+    child.stdin!.end(); // argv-only tools must receive EOF, not wait on an open pipe.
 
     let settled = false;
     let timedOut = false;
+    let cancelled = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let closed!: () => void;
+    const stopped = new Promise<void>(resolve => { closed = resolve; });
+    const kill = (signal: NodeJS.Signals) => {
+      try {
+        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch { /* Process/group already exited. */ }
+    };
+    const stop = (force: boolean) => {
+      if (force) kill("SIGKILL");
+      else {
+        kill("SIGTERM");
+        killTimer ??= setTimeout(() => kill("SIGKILL"), 500);
+      }
+      return stopped;
+    };
+    const onAbort = () => {
+      cancelled = !timedOut;
+      logger.info({ scanRunId, ...control?.identity, reason: "PROCESS_ABORTED", tool: cmd }, "scan subprocess interrupted");
+      void stop(false);
+    };
+    const releaseResource = control?.track(stop);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
 
     // Buffer partial lines per stream so we only emit complete lines.
     const buffers: Record<"STDOUT" | "STDERR", string> = {
@@ -102,8 +152,8 @@ export function runCommand(
       });
     };
 
-    child.stdout.on("data", (c: Buffer) => pump(c, "STDOUT"));
-    child.stderr.on("data", (c: Buffer) => pump(c, "STDERR"));
+    child.stdout!.on("data", (c: Buffer) => pump(c, "STDOUT"));
+    child.stderr!.on("data", (c: Buffer) => pump(c, "STDERR"));
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -112,15 +162,19 @@ export function runCommand(
         `[runCommand] timeout after ${timeoutMs}ms — killing ${cmd}`,
         "STDERR",
       );
-      child.kill("SIGKILL");
+      kill("SIGKILL");
     }, timeoutMs);
 
     const finish = (code: number | null, spawnFailed = false) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(killTimer);
+      signal.removeEventListener("abort", onAbort);
+      kill("SIGKILL"); // Also reap descendants when a parent exits before them.
+      closed(); releaseResource?.();
       flush();
-      resolve({ code, timedOut, ...(spawnFailed ? { spawnFailed: true } : {}) });
+      resolve({ code, timedOut, cancelled, ...(spawnFailed ? { spawnFailed: true } : {}) });
     };
 
     child.on("error", (err) => {
@@ -130,7 +184,9 @@ export function runCommand(
     });
 
     child.on("close", (code) => {
-      finish(code);
+      finish(toolSpawnFailed ? null : toolExit ? toolExit.code : code, toolSpawnFailed);
     });
   });
+  if (result.code === 0 && !result.timedOut && !result.cancelled) await recordUsefulScanWork();
+  return result;
 }

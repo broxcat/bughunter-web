@@ -32,7 +32,7 @@ export function huntExecutionResult(report: HuntReport): ScanExecutionResult {
   if (report.execution?.issues.includes("SCOPE_REVOKED") || report.techniques.some(t => t.reason === "SCOPE_REVOKED")) {
     return { outcome: "FAILED", reason: "Hunt authorization is no longer valid" };
   }
-  if (report.status === "FAILED" || report.status === "RUNNING") return { outcome: "FAILED", reason: "Hunt execution failed before normal completion" };
+  if (["FAILED", "RUNNING", "CANCELLED", "INTERRUPTED"].includes(report.status)) return { outcome: "FAILED", reason: "Hunt execution failed before normal completion" };
   const interrupted = report.status === "LIMIT_REACHED"
     || report.techniques.some(t => ["ERROR", "LIMIT_REACHED", "WAITING", "RUNNING", "VALIDATING"].includes(t.state) || t.reason === "HUNT_FINISHED_OR_LIMIT_REACHED")
     || report.families.some(f => f.state === "LIMIT_REACHED" || f.state === "ERROR" || f.reason === "HUNT_FINISHED_OR_LIMIT_REACHED")

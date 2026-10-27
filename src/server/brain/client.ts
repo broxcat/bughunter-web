@@ -1,3 +1,4 @@
+import { currentScanControl, throwIfScanAborted } from "@/server/scanControl";
 // BrainClient — fetch-based multi-provider LLM client, ported from the CLI
 // brain.py LLMClient. Three request/response shapes: Anthropic Messages API,
 // OpenAI-compatible chat/completions, and Ollama. Timeout per request (abort),
@@ -88,6 +89,7 @@ export class BrainClient {
     const retries = opts.retries ?? DEFAULT_RETRIES;
     let lastErr: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {
+      throwIfScanAborted();
       try {
         switch (this.spec.kind) {
           case "anthropic":
@@ -98,6 +100,7 @@ export class BrainClient {
             return await this.chatOllama(system, user, opts);
         }
       } catch (err) {
+        throwIfScanAborted();
         lastErr = err;
         const retryable =
           err instanceof BrainError
@@ -132,22 +135,23 @@ export class BrainClient {
     body: unknown,
     opts: ChatOptions,
   ): Promise<unknown> {
+    throwIfScanAborted();
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
       opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     );
-    // Chain the caller's abort signal, if any.
-    if (opts.signal) {
-      if (opts.signal.aborted) controller.abort();
-      else opts.signal.addEventListener("abort", () => controller.abort(), { once: true });
-    }
+    const scan = currentScanControl();
+    let finished!: () => void;
+    const done = new Promise<void>(resolve => { finished = resolve; });
+    const release = scan?.track(async () => { controller.abort(); await done; });
+    const signal = AbortSignal.any([controller.signal, ...(opts.signal ? [opts.signal] : []), ...(scan ? [scan.signal] : [])]);
     try {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal,
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
@@ -160,6 +164,7 @@ export class BrainClient {
       return await res.json();
     } finally {
       clearTimeout(timeout);
+      finished(); release?.();
     }
   }
 
@@ -283,7 +288,7 @@ export class BrainClient {
 
   private async firstOllamaModel(host: string): Promise<string | null> {
     try {
-      const res = await fetch(`${host}/api/tags`);
+      const res = await fetch(`${host}/api/tags`, { signal: AbortSignal.any([AbortSignal.timeout(5000), ...(currentScanControl() ? [currentScanControl()!.signal] : [])]) });
       if (!res.ok) return null;
       const json = (await res.json()) as { models?: Array<{ name?: string }> };
       return json.models?.[0]?.name ?? null;

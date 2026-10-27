@@ -1,3 +1,4 @@
+import { throwIfScanAborted } from "@/server/scanControl";
 import { isSafeReadUrl } from "@/lib/hunt/safety";
 // Shared, authenticated, depth-limited crawl used by ALL hunt families so they
 // discover candidate URLs/params from the real app — including pages that need a
@@ -95,6 +96,7 @@ async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryC
   const queue: Array<{ url: string; depth: number }> = [...new Set([ctx.baseUrl, ...seeds])].slice(0, MAX_PAGES).filter(isSafeReadUrl).map(url => ({ url, depth: 0 }));
 
   while (queue.length > 0 && visited.size < MAX_PAGES) {
+    throwIfScanAborted();
     const { url, depth } = queue.shift()!;
     const norm = new URL(url.replace(/#.*$/, "")).toString();
     if (visited.has(norm) || !isSafeReadUrl(norm)) continue;
@@ -138,7 +140,10 @@ async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryC
 export function discoverCorpus(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryCorpus> {
   const cached = cache.get(ctx.scanRunId);
   if (cached) return cached;
-  const p = crawl(ctx, seeds).catch(() => ({ html: "", urls: [], authenticated: false, execution: { successfulRequests: 0, failedRequests: 1, issues: ["DISCOVERY_FAILED"] } }));
+  const p = crawl(ctx, seeds).catch(() => {
+    throwIfScanAborted();
+    return { html: "", urls: [], authenticated: false, execution: { successfulRequests: 0, failedRequests: 1, issues: ["DISCOVERY_FAILED"] } };
+  });
   cache.set(ctx.scanRunId, p);
   return p;
 }

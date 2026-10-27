@@ -4,6 +4,7 @@ import Link from "next/link";
 import TargetAuthentication from "@/components/TargetAuthentication";
 import HuntRequirements from "@/components/HuntRequirements";
 import { use, useEffect, useRef, useState } from "react";
+import ScanCancelButton from "@/components/ScanCancelButton";
 import ScanLogViewer from "@/components/ScanLogViewer";
 import {
   ScopePolicyView,
@@ -22,6 +23,8 @@ interface ScanRun {
   type: ScanType;
   status: string;
   outcome: string | null;
+  cancelRequestedAt?: string | null;
+  execution?: { state: string } | null;
   dispatch?: string | null;
   requiredUserAgent: string | null;
   createdAt: string;
@@ -220,9 +223,11 @@ export default function TargetDetailPage({
                       <span className="text-sm font-medium text-foreground">
                         {run.type === "HUNT" ? <Link href={`/hunt/${run.id}`} className="text-brand">HUNT — open progress</Link> : run.type}
                       </span>
-                      <Badge tone={scanPresentation(run.status, run.outcome, run.dispatch).tone}>
-                        {scanPresentation(run.status, run.outcome, run.dispatch).label}
+                      <Badge tone={scanPresentation(run.status, run.outcome, run.dispatch, run.execution?.state, Boolean(run.cancelRequestedAt)).tone}>
+                        {scanPresentation(run.status, run.outcome, run.dispatch, run.execution?.state, Boolean(run.cancelRequestedAt)).label}
                       </Badge>
+                      <ScanCancelButton scanRunId={run.id} status={run.status} requested={Boolean(run.cancelRequestedAt)} onRequested={() => void load()} />
+                      {run.execution?.state === "INTERRUPTED" && <span className="text-sm text-muted">Relance automatique désactivée.</span>}
                     </div>
                     <span className="text-xs text-subtle">
                       {openRun === run.id ? "Hide logs" : "View live logs"}

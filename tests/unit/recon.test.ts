@@ -6,7 +6,7 @@ vi.mock("@/server/scanners/context", () => ({ loadScanContext: mocks.context, lo
 vi.mock("@/server/scanners/discovery", () => ({ discoverCorpus: mocks.discovery, clearDiscoveryCorpus: vi.fn() }));
 vi.mock("@/server/scanners/runCommand", () => ({ runCommand: mocks.command }));
 vi.mock("@/server/credentials", () => ({ loadTargetCredentials: mocks.credentials, credentialHeaders: () => ({}) }));
-vi.mock("node:dns/promises", () => ({ resolveAny: mocks.dns }));
+vi.mock("node:dns/promises", () => ({ Resolver: class { resolveAny = mocks.dns; cancel() {} } }));
 import { runRecon } from "@/server/scanners/recon";
 beforeEach(() => {
   vi.resetAllMocks();

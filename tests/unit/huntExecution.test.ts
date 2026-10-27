@@ -1,3 +1,4 @@
+import { ScanControl, withScanControl } from "@/server/scanControl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { analyzeCorpus } from "@/server/hunt/corpus";
 import { EMPTY_READINESS_FACTS, resolveHuntReadiness } from "@/lib/hunt/readiness";
@@ -71,4 +72,11 @@ describe("Hunt runtime returns its actual execution result", () => {
     mocks.corpus.mockResolvedValue(analyzeCorpus({ html: "", urls: [], authenticated: false, execution: { successfulRequests: 0, failedRequests: 1, issues: ["DISCOVERY_TRANSPORT_ERROR"] } }, ctx.baseUrl));
     expect((await run()).outcome).toBe("FAILED");
   });
+  it("user cancellation stops Hunt without reporting SUCCESS or generic FAILED", async () => {
+    const control = new ScanControl({ scanRunId: "run", attemptId: "attempt", workerId: "worker" }, async () => {});
+    mocks.execute.mockImplementationOnce(async () => { control.abort("USER_CANCELLED"); control.assertActive(); });
+    await expect(withScanControl(control, () => run())).rejects.toMatchObject({ reason: "USER_CANCELLED" });
+    expect(lastReport().status).toBe("CANCELLED"); expect(mocks.execute).toHaveBeenCalledOnce();
+  });
+
 });

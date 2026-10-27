@@ -1,3 +1,4 @@
+import { executionSelect } from "@/server/queue/executionAttempts";
 import { APPROVABLE_HUNT_TECHNIQUES } from "@/lib/hunt/approvals";
 import { resolveHuntFamilies } from "@/lib/hunt/policy";
 import { HUNT_TECHNIQUES } from "@/lib/hunt/catalogData";
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
   const runs = await prisma.scanRun.findMany({
     where: { targetId: target.id },
     orderBy: { createdAt: "desc" },
-    include: { jobOutbox: { select: dispatchSelect } },
+    include: { executionAttempts: executionSelect, jobOutbox: { select: dispatchSelect } },
   });
 
   return NextResponse.json(runs.map(withScanDispatch));
@@ -82,7 +83,7 @@ export async function POST(req: NextRequest) {
     const { dispatch } = await publishScanJob(run.id);
     // A worker may already have started. If DB reads fail after acceptance, keep
     // the committed response rather than falsely reporting that creation failed.
-    const fresh = await prisma.scanRun.findUnique({ where: { id: run.id }, include: { jobOutbox: { select: dispatchSelect } } }).catch(() => null);
+    const fresh = await prisma.scanRun.findUnique({ where: { id: run.id }, include: { executionAttempts: executionSelect, jobOutbox: { select: dispatchSelect } } }).catch(() => null);
     const confirmedDispatch = fresh?.jobOutbox?.status ?? dispatch;
     return NextResponse.json({ ...withScanDispatch(fresh ?? run), jobId: fresh?.jobId ?? (confirmedDispatch === "PUBLISHED" ? run.id : run.jobId), dispatch: confirmedDispatch }, { status: confirmedDispatch === "PUBLISHED" ? 201 : 202 });
   };

@@ -1,3 +1,4 @@
+import { throwIfScanAborted } from "@/server/scanControl";
 import { loadTargetExecution } from "@/server/execution";
 // Shared scanner context + helpers used by the vuln-class modules.
 //
@@ -126,6 +127,7 @@ export async function recordFinding(
     // Enrichment is strictly best-effort; never block a finding on it.
   }
 
+  throwIfScanAborted();
   await prisma.finding.create({
     data: {
       targetId: ctx.targetId,

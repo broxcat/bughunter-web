@@ -76,6 +76,41 @@ It requires Docker and removes only its own labelled containers afterwards.
 The public health endpoint retains its existing dependency checks; delivery
 attempts, backoff and overdue batches are logged server-side without raw errors.
 
+Execution starts are recorded in `ScanExecutionAttempt` under an atomic PostgreSQL
+claim. Each attempt records a distinct worker identity, heartbeat and durable
+network/useful-work timestamps. BullMQ may invoke a stalled job again despite
+`attempts: 1`; BugHunter refuses all implicit network replay. A recent attempt
+remains owned by its live worker. Heartbeats run every **2 seconds**; attempts
+older than **30 seconds** become `INTERRUPTED` at startup and during periodic
+maintenance. A worker unable to confirm its DB lease for **10 seconds** stops
+traffic before that expiry. These heartbeats are independent of BullMQ locks.
+An interrupted scan is `FAILED`, with outcome `PARTIAL` only when useful work was
+recorded durably, otherwise `FAILED`. Old scans without attempts remain unknown;
+no attempts are backfilled. A new scan is required for any explicit rerun.
+
+`POST /api/scan-runs/:id/cancel` is owned and idempotent: 202 records
+`cancelRequestedAt`, repeated confirmed cancellation returns 200, and completed
+or failed scans return 409. The worker polls the request with its heartbeat.
+Queued cancellation is confirmed only after a DB claim proves no attempt started;
+a late BullMQ delivery then exits without tools, even if Redis removal failed.
+Active cancellation propagates an AbortSignal to fetch/body reads, DNS, Hunt's
+budget, command process groups and Playwright contexts. Commands receive SIGTERM,
+then SIGKILL after 500 ms if needed. A Unix IPC supervisor also kills the whole
+tool group if the owning worker dies unexpectedly. `CANCELLED` with `outcome = null` is recorded
+only after resource cleanup is confirmed. Reports, corpus, findings and logs stay
+intact. UI cancellation is a request until confirmed by server state.
+
+SIGTERM/SIGINT stops acquisition and dispatch, aborts active work and allows a
+**5 second** grace period, followed by bounded forced cleanup/finalization.
+Administrative shutdown or lost ownership becomes `INTERRUPTED`, not user
+cancellation. If cleanup cannot be confirmed, it is also interrupted rather than
+claiming cancellation. Stale recovery never requeues a started scan. Unstarted
+queued jobs and the durable outbox continue normally after restart. A job acquired
+concurrently with shutdown is returned to wait only when PostgreSQL proves it has
+no start or attempt; it is never falsely acknowledged as completed. The queue
+infrastructure suite also kills/restarts a real worker against a local HTTP target
+and verifies there is no second network execution.
+
 ## Run
 
 Next.js 16 / React 19, Prisma 6 / PostgreSQL, BullMQ / Redis, Auth.js, Tailwind 4.

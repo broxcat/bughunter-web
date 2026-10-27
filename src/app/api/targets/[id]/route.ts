@@ -1,3 +1,4 @@
+import { executionSelect } from "@/server/queue/executionAttempts";
 import { withScanDispatch } from "@/lib/scanDispatch";
 import { dispatchSelect } from "@/server/queue/scanJobPublisher";
 import { scanRejection } from "@/server/execution";
@@ -22,7 +23,7 @@ export async function GET(
     include: {
       scope: true,
       program: true,
-      scanRuns: { orderBy: { createdAt: "desc" }, include: { jobOutbox: { select: dispatchSelect } } },
+      scanRuns: { orderBy: { createdAt: "desc" }, include: { executionAttempts: executionSelect, jobOutbox: { select: dispatchSelect } } },
       findings: { orderBy: { createdAt: "desc" } },
     },
   });

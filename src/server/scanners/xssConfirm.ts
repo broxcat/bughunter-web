@@ -1,4 +1,5 @@
-import { newTargetBrowserContext } from "@/server/execution";
+import { currentScanControl, throwIfScanAborted } from "@/server/scanControl";
+import { launchTargetBrowser, newTargetBrowserContext } from "@/server/execution";
 import { payloadVariant } from "@/lib/hunt/payloads";
 // Headless DOM-XSS confirmation (web2-vuln-classes SKILL §3, confirmation stage).
 //
@@ -24,7 +25,6 @@ import { payloadVariant } from "@/lib/hunt/payloads";
 //     confirmer must never crash the hunt.
 
 import {
-  chromium,
   type Browser,
   type BrowserContext,
   type Dialog,
@@ -163,10 +163,10 @@ async function tryCandidate(
 
 /** Resolve once `predicate()` is true or `timeoutMs` elapses. Never rejects. */
 function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
-  if (predicate() || timeoutMs <= 0) return Promise.resolve();
+  if (predicate() || timeoutMs <= 0 || currentScanControl()?.signal.aborted) return Promise.resolve();
   return new Promise<void>((resolve) => {
     const interval = setInterval(() => {
-      if (predicate()) {
+      if (predicate() || currentScanControl()?.signal.aborted) {
         clearInterval(interval);
         clearTimeout(timer);
         resolve();
@@ -188,6 +188,7 @@ export async function confirmXssSink(
   url: string,
   sinkInfo: XssSinkInfo,
 ): Promise<XssConfirmResult> {
+  throwIfScanAborted();
   const started = Date.now();
   const deadline = started + OVERALL_DEADLINE_MS;
 
@@ -216,7 +217,7 @@ export async function confirmXssSink(
   let overallTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     // A fresh context per call — no cookies/state shared between targets.
-    browser = await chromium.launch({ headless: true, args: [...LAUNCH_ARGS], timeout: Math.max(1, Math.min(5000, deadline - Date.now())) });
+    browser = await launchTargetBrowser({ headless: true, args: [...LAUNCH_ARGS], timeout: Math.max(1, Math.min(5000, deadline - Date.now())) });
     context = await newTargetBrowserContext(browser);
     if (sinkInfo.authentication?.cookies) await context.addCookies(Object.entries(sinkInfo.authentication.cookies).map(([name, value]) => ({ name, value, url: parsed.origin })));
     if (sinkInfo.authentication?.bearerToken) await context.setExtraHTTPHeaders({ Authorization: `Bearer ${sinkInfo.authentication.bearerToken}` });
@@ -240,6 +241,7 @@ export async function confirmXssSink(
 
     return await Promise.race([confirm, overall]);
   } catch (err) {
+    throwIfScanAborted();
     return {
       confirmed: false,
       executionIncomplete: true,
@@ -264,6 +266,7 @@ async function runCandidates(
   const reasons: string[] = [];
   let executionIncomplete = false;
   for (const candidate of candidates) {
+    throwIfScanAborted();
     const remaining = deadline - Date.now();
     if (remaining < MIN_CANDIDATE_BUDGET_MS) {
       executionIncomplete = true;

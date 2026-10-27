@@ -46,6 +46,6 @@ describe("scan creation and legacy compatibility", () => {
     const rows = [{ id: "old", status: "COMPLETED", outcome: null }, { id: "new", status: "COMPLETED", outcome: "PARTIAL" }];
     mocks.list.mockResolvedValue(rows);
     const response = await GET(new NextRequest("http://localhost/api/scan-runs?targetId=target"));
-    expect(response.status).toBe(200); expect(await response.json()).toEqual(rows.map(row => ({ ...row, dispatch: null })));
+    expect(response.status).toBe(200); expect(await response.json()).toEqual(rows.map(row => ({ ...row, dispatch: null, execution: null })));
   });
 });

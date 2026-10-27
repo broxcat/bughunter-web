@@ -1,3 +1,4 @@
+import { throwIfScanAborted } from "@/server/scanControl";
 import type { ScanExecutionResult } from "./result";
 import { currentTargetExecution } from "@/server/execution";
 import { withHuntSession, runFamilyTechniques } from "@/server/hunt/runtime";
@@ -51,6 +52,7 @@ const FAMILIES: ReadonlyArray<readonly [string, (ctx: ScanContext) => Promise<vo
 
 
 export async function runHunt(_host: string, scanRunId: string): Promise<ScanExecutionResult> {
+  throwIfScanAborted();
   const ctx = await loadScanContext(scanRunId);
   if (!ctx) throw new Error("Missing scan context");
   const execution = currentTargetExecution();
@@ -60,6 +62,7 @@ export async function runHunt(_host: string, scanRunId: string): Promise<ScanExe
   return withHuntSession(ctx, snapshot, async readiness => {
     const selected = new Set(readiness.families.filter(f => f.selected && f.safeSubset).map(f => f.family));
     for (const [name, run] of FAMILIES) {
+      throwIfScanAborted();
       if (!selected.has(name)) continue;
       await run(ctx);
     }

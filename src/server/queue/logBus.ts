@@ -3,12 +3,12 @@
 // to the browser. Persistence of lines is separate (the worker also writes a
 // ScanLog row) — this bus is only the realtime fan-out.
 //
-// Channel: `scanlog:<scanRunId>`. Publishing uses the shared command connection;
+// Channel: `scanlog:<scanRunId>`. Publishing uses a bounded command connection;
 // subscribing uses a dedicated connection (a client in subscriber mode cannot
 // run ordinary commands), one per subscription, torn down by the returned
 // unsubscribe function.
 
-import { redis, createRedisConnection } from "./connection";
+import { createRedisConnection } from "./connection";
 
 export type ScanLogEntry = {
   line: string;
@@ -16,6 +16,9 @@ export type ScanLogEntry = {
   createdAt: string;
 };
 
+// Fan-out must not stall scanner cleanup during a Redis outage. The blocking
+// worker keeps its persistent policy; log publication has a finite command budget.
+const logPublisher = createRedisConnection({ maxRetriesPerRequest: 1, commandTimeout: 500 });
 function channelFor(scanRunId: string): string {
   return `scanlog:${scanRunId}`;
 }
@@ -25,7 +28,7 @@ export async function publishScanLog(
   scanRunId: string,
   entry: ScanLogEntry,
 ): Promise<void> {
-  await redis.publish(channelFor(scanRunId), JSON.stringify(entry));
+  await logPublisher.publish(channelFor(scanRunId), JSON.stringify(entry));
 }
 
 /**

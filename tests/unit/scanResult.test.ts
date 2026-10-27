@@ -64,6 +64,11 @@ describe("scan presentation", () => {
     expect(scanPresentation("QUEUED", null, "PUBLISHED")).toEqual({ label: "En file d’attente", tone: "neutral" });
     expect(scanPresentation("RUNNING", null, "PENDING").label).toBe("En cours");
   });
+  it("shows interruption and cancellation request explicitly without claiming cancellation", () => {
+    expect(scanPresentation("FAILED", "PARTIAL", "PUBLISHED", "INTERRUPTED")).toEqual({ label: "Exécution interrompue", tone: "killed" });
+    expect(scanPresentation("RUNNING", null, "PUBLISHED", "RUNNING", true)).toEqual({ label: "Annulation demandée", tone: "medium" });
+    expect(scanPresentation("CANCELLED", null, "PUBLISHED", "CANCELLED", true)).toEqual({ label: "Annulé", tone: "neutral" });
+  });
   it("never shows live jobs as successful, even with an inconsistent outcome", () => {
     expect(scanPresentation("QUEUED", "SUCCESS").tone).not.toBe("passed");
     expect(scanPresentation("RUNNING", "SUCCESS").tone).not.toBe("passed");

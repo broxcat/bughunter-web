@@ -1,3 +1,4 @@
+import { currentScanControl, recordUsefulScanWork, ScanAbortError, throwIfScanAborted } from "@/server/scanControl";
 import { huntExecutionResult, type ScanExecutionResult } from "@/server/scanners/result";
 import { loadTargetExecution } from "@/server/execution";
 import { revalidateTargetSessions } from "@/server/credentials/connection";
@@ -71,13 +72,20 @@ export async function withHuntSession(ctx: ScanContext, snapshot: HuntPolicySnap
       await storage.run(session, () => work({ families: readiness.families }));
       if (budget.controller.signal.reason === "SCOPE_REVOKED") throw new HuntLimitError("SCOPE_REVOKED");
     });
+    throwIfScanAborted();
     report.status = budget.requests >= HUNT_LIMITS.maxTotalRequests || !budget.remainingMs() ? "LIMIT_REACHED" : "COMPLETED";
   } catch (e) {
+    if (e instanceof ScanAbortError || currentScanControl()?.signal.aborted) {
+      const reason = currentScanControl()?.signal.reason ?? e;
+      report.status = reason instanceof ScanAbortError && reason.reason === "USER_CANCELLED" ? "CANCELLED" : "INTERRUPTED";
+      throw reason;
+    }
     report.status = e instanceof HuntLimitError ? "LIMIT_REACHED" : "FAILED";
     if (!(e instanceof HuntLimitError) || e.code === "SCOPE_REVOKED") { report.status = "FAILED"; throw e; }
   } finally {
-    for (const f of report.families.filter(f => f.state === "WAITING")) { f.state = "SKIPPED"; f.reason = "HUNT_FINISHED_OR_LIMIT_REACHED"; }
-    for (const t of report.techniques.filter(t => t.state === "WAITING")) { t.state = "SKIPPED"; t.reason = "HUNT_FINISHED_OR_LIMIT_REACHED"; }
+    const unfinishedReason = report.status === "CANCELLED" ? "USER_CANCELLED" : report.status === "INTERRUPTED" ? "EXECUTION_INTERRUPTED" : "HUNT_FINISHED_OR_LIMIT_REACHED";
+    for (const f of report.families.filter(f => ["WAITING", "RUNNING", "VALIDATING"].includes(f.state))) { f.state = "SKIPPED"; f.reason = unfinishedReason; }
+    for (const t of report.techniques.filter(t => ["WAITING", "RUNNING", "VALIDATING"].includes(t.state))) { t.state = "SKIPPED"; t.reason = unfinishedReason; }
     report.finishedAt = new Date().toISOString();
     budget.close(); clearDiscoveryCorpus(ctx.scanRunId);
     await persist();
@@ -97,6 +105,7 @@ export async function runFamilyTechniques(ctx: ScanContext, family: HuntFamily):
   if (!decisions.length) f.reason = "NO_APPLICABLE_SAFE_TECHNIQUES";
   await session.persist();
   for (const decision of decisions) {
+    throwIfScanAborted();
     const technique = decision.technique;
     const progress = session.report.techniques.find(v => v.techniqueId === technique.id)!;
     if (session.report.candidates.filter(c => c.family === family && c.evidenceLevel === "CONFIRMED").length >= HUNT_LIMITS.maxConfirmationsPerFamily) { progress.state = "SKIPPED"; progress.reason = "FAMILY_ALREADY_CONFIRMED"; continue; }
@@ -120,8 +129,10 @@ export async function runFamilyTechniques(ctx: ScanContext, family: HuntFamily):
       if (session.cache.has(`transport-failure:${technique.id}`) || session.cache.has(`execution-incomplete:${technique.id}`)) {
         progress.state = "ERROR"; progress.reason = "TECHNIQUE_CONTROLS_INCOMPLETE";
         await logLine(ctx.scanRunId, `[hunt] ${technique.id}: ${progress.reason}`, "STDERR");
-      } else { progress.state = "COMPLETED"; f.completedTechniques++; }
+      } else { await recordUsefulScanWork(); progress.state = "COMPLETED"; f.completedTechniques++; }
     } catch (e) {
+      throwIfScanAborted();
+      if (e instanceof ScanAbortError) throw e;
       if (e instanceof HuntLimitError && e.code === "SCOPE_REVOKED") throw e;
       progress.state = e instanceof HuntLimitError ? e.code === "STATE_CHANGING_REQUEST_UNSUPPORTED" ? "SKIPPED" : "LIMIT_REACHED" : "ERROR";
       progress.reason = e instanceof HuntLimitError ? e.code : "TECHNIQUE_FAILED_WITHOUT_CONFIRMATION";

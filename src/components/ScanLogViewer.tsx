@@ -1,5 +1,6 @@
 "use client";
 
+import ScanCancelButton from "./ScanCancelButton";
 import { useEffect, useRef, useState } from "react";
 import { scanPresentation } from "@/lib/scanPresentation";
 import { Badge } from "@/components/ui/Badge";
@@ -17,7 +18,9 @@ function ScanLogSession({ scanRunId }: { scanRunId: string }) {
   const [status, setStatus] = useState<string>("CONNECTING");
   const [outcome, setOutcome] = useState<string | null>(null);
   const [dispatch, setDispatch] = useState<string | null>(null);
-  const presentation = scanPresentation(status, outcome, dispatch);
+  const [cancelRequestedAt, setCancelRequestedAt] = useState<string | null>(null);
+  const [execution, setExecution] = useState<{ state: string } | null>(null);
+  const presentation = scanPresentation(status, outcome, dispatch, execution?.state, Boolean(cancelRequestedAt));
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -34,12 +37,14 @@ function ScanLogSession({ scanRunId }: { scanRunId: string }) {
 
     es.addEventListener("status", (event) => {
       try {
-        const { status: next, outcome: nextOutcome, dispatch: nextDispatch } = JSON.parse(
+        const { status: next, outcome: nextOutcome, dispatch: nextDispatch, cancelRequestedAt: cancelledAt, execution: nextExecution } = JSON.parse(
           (event as MessageEvent).data,
-        ) as { status: string; outcome?: string | null; dispatch?: string | null };
+        ) as { status: string; outcome?: string | null; dispatch?: string | null; cancelRequestedAt?: string | null; execution?: { state: string } | null };
         setStatus(next);
         setOutcome(nextOutcome ?? null);
         setDispatch(nextDispatch ?? null);
+        setCancelRequestedAt(cancelledAt ?? null);
+        setExecution(nextExecution ?? null);
         if (TERMINAL.has(next)) {
           es.close();
         }
@@ -76,10 +81,9 @@ function ScanLogSession({ scanRunId }: { scanRunId: string }) {
         <span className="font-mono text-xs font-medium uppercase tracking-wide text-neutral-400">
           Scan output
         </span>
-        <Badge tone={presentation.tone} mono>
-          {presentation.label}
-        </Badge>
+        <div className="flex items-center gap-2"><Badge tone={presentation.tone} mono>{presentation.label}</Badge><ScanCancelButton scanRunId={scanRunId} status={status} requested={Boolean(cancelRequestedAt)} onRequested={setCancelRequestedAt} /></div>
       </div>
+      {execution?.state === "INTERRUPTED" && <p role="status" className="px-4 py-2 text-sm text-neutral-300">Exécution interrompue · relance automatique désactivée.</p>}
       <div className="h-96 overflow-y-auto bg-neutral-950 px-4 py-3 font-mono text-xs leading-relaxed">
         {logs.length === 0 ? (
           <p className="text-neutral-600">Waiting for scan output…</p>

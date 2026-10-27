@@ -35,6 +35,7 @@ export async function publishScanJob(scanRunId: string, source: "http" | "dispat
         logger.info(fields, "scan delivery reconciled from execution state");
         return { dispatch: "PUBLISHED" as const };
       }
+      if (run.cancelRequestedAt) return { dispatch: "PENDING" as const }; // Maintenance/processor settles cancellation without publishing new work.
       const attempts = intent.attempts + 1;
       logger.info({ ...fields, attempts }, "scan delivery attempt");
       try {
