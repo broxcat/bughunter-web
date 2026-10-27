@@ -38,3 +38,6 @@ yarn-error.log*
 
 # Research data / public key configuration must never enter image layers.
 data/research
+
+# Runner-only locked MCP dependencies
+docker/research/validator/node_modules/

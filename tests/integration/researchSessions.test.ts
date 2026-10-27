@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, readFile, symlink } from "node:fs/promises";
+import { mkdtemp, rm, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), log: vi.fn() }));
@@ -15,6 +15,7 @@ let POST: typeof import("@/app/api/research-sessions/route").POST;
 let GET: typeof import("@/app/api/research-sessions/route").GET;
 let detail: typeof import("@/app/api/research-sessions/[id]/route").GET;
 let zip: typeof import("@/app/api/research-sessions/[id]/zip/route").GET;
+let burp: typeof import("@/app/api/research-sessions/[id]/burp/route").GET;
 let userId: string, otherId: string, targetId: string, root: string;
 const context = (id: string) => ({ params: Promise.resolve({ id }) });
 const create = (extra = {}) => POST(new Request("http://app.example.test/api/research-sessions", { method: "POST", body: JSON.stringify({ targetId, ...extra }) }));
@@ -26,6 +27,7 @@ const create = (extra = {}) => POST(new Request("http://app.example.test/api/res
     ({ POST, GET } = await import("@/app/api/research-sessions/route"));
     ({ GET: detail } = await import("@/app/api/research-sessions/[id]/route"));
     ({ GET: zip } = await import("@/app/api/research-sessions/[id]/zip/route"));
+    ({ GET: burp } = await import("@/app/api/research-sessions/[id]/burp/route"));
     root = await mkdtemp(join(tmpdir(), "research-api-")); process.env.RESEARCH_WORKSPACE_ROOT = root;
     const owner = await prisma.user.create({ data: { email: "research-owner@example.test" } }); userId = owner.id;
     otherId = (await prisma.user.create({ data: { email: "research-other@example.test" } })).id;
@@ -55,6 +57,24 @@ const create = (extra = {}) => POST(new Request("http://app.example.test/api/res
     expect(download.status).toBe(200); expect(download.headers.get("Content-Type")).toBe("application/zip");
     expect((await download.arrayBuffer()).byteLength).toBeGreaterThan(100);
     expect((await (await GET()).json()).some((s: { id: string }) => s.id === data.id)).toBe(true);
+  });
+  it("reads optional Burp diagnostics only for the owner without touching Findings, Reports, scans or ZIP", async () => {
+    const data = await (await create()).json(), req = new Request("http://app.example.test");
+    const counts = () => Promise.all([prisma.finding.count(), prisma.report.count(), prisma.scanRun.count()]);
+    const before = await counts();
+    const archive = Buffer.from(await (await zip(req, context(data.id))).arrayBuffer());
+    expect(await (await burp(req, context(data.id))).json()).toEqual({ diagnostic: null });
+    const diagnostic = { version: 1, workspaceId: data.workspaceId, checkedAt: new Date().toISOString(), runner: "AVAILABLE", configuration: "CONFIGURED", upstream: "AVAILABLE", mode: "PASSIVE_METADATA_ONLY" };
+    await writeFile(join(root, data.workspaceId, "research/burp-status.json"), JSON.stringify(diagnostic));
+    expect(await (await burp(req, context(data.id))).json()).toEqual({ diagnostic });
+    await prisma.scope.update({ where: { id: (await prisma.target.findUniqueOrThrow({ where: { id: targetId } })).scopeId }, data: { status: "REVOKED" } });
+    expect((await burp(req, context(data.id))).status).toBe(200); // historical diagnostic emits no traffic
+    expect(await counts()).toEqual(before);
+    expect(Buffer.from(await (await zip(req, context(data.id))).arrayBuffer())).toEqual(archive);
+    mocks.auth.mockResolvedValue({ user: { id: otherId } });
+    expect((await burp(req, context(data.id))).status).toBe(404);
+    mocks.auth.mockResolvedValue(null);
+    expect((await burp(req, context(data.id))).status).toBe(401);
   });
   it("returns 404 for foreign targets, sessions, and ZIPs", async () => {
     const data = await (await create()).json();

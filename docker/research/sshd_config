@@ -13,7 +13,12 @@ AuthorizedKeysFile /etc/ssh/authorized_keys
 StrictModes yes
 UsePAM no
 X11Forwarding no
-AllowTcpForwarding no
+# Burp on the Docker host is relayed ONLY to runner loopback:9876.
+AllowTcpForwarding remote
+PermitListen 127.0.0.1:9876
+GatewayPorts no
+PermitOpen none
+AllowStreamLocalForwarding no
 AllowAgentForwarding no
 PermitTunnel no
 PermitUserEnvironment no

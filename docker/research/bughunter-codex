@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -eu
 workspace=$(pwd -P)
 case "$workspace" in
@@ -11,4 +11,13 @@ test "$(dirname "$workspace")" = /workspaces && test -f AGENTS.md && test -f sco
 }
 printf 'Workspace: %s\nTarget: %s\nRead AGENTS.md and scope.md before doing anything.\n' "$(basename "$workspace")" "$(jq -r '.host' target.json)"
 printf 'Hypotheses contract: research/hypotheses.json\nValidate before syncing: bughunter-validate-hypotheses\n'
-exec codex --yolo "$@"
+printf 'Optional Burp MCP: passive workspace gateway; run bughunter-burp-status.\n'
+# Never execute a config supplied by the workspace/target. This installed helper
+# emits NUL-delimited Codex overrides. No eval; operator CLI arguments stay intact.
+config_args=$(mktemp)
+trap 'rm -f "$config_args"' EXIT
+node /opt/bughunter/docker/research/validator/burp-main.mjs config-args > "$config_args"
+mapfile -d '' -t overrides < "$config_args"
+rm -f "$config_args"
+trap - EXIT
+exec codex --yolo "${overrides[@]}" "$@"

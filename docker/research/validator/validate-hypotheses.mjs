@@ -1,7 +1,7 @@
 import { open, constants, realpathSync } from "node:fs";
 import { open as openFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import { hypothesesDocumentSchema, HYPOTHESES_MAX_BYTES, safeHypothesisIssues } from "./hypotheses.ts";
+import { hypothesesDocumentSchema, HYPOTHESES_MAX_BYTES, safeHypothesisIssues } from "../../../src/lib/research/hypotheses.ts";
 // Local validation only; no HTTP, DB or subprocesses. Print field diagnostics,
 // never source text or credentials from the untrusted document.
 const cwd = realpathSync(process.cwd());

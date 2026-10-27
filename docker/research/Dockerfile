@@ -17,8 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Same central Zod contract as the web app; no application dependencies/secrets.
 COPY docker/research/validator/package*.json /opt/bughunter/
 RUN npm ci --omit=dev --ignore-scripts --prefix /opt/bughunter
-COPY src/lib/research/hypotheses.ts /opt/bughunter/hypotheses.ts
-COPY docker/research/validator/validate-hypotheses.mjs /opt/bughunter/validate-hypotheses.mjs
+COPY src/lib/research/hypotheses.ts src/lib/research/burp.ts /opt/bughunter/src/lib/research/
+COPY src/lib/observationSafety.ts src/lib/httpPolicy.mjs /opt/bughunter/src/lib/
+COPY docker/research/validator/*.mjs /opt/bughunter/docker/research/validator/
+COPY --chmod=755 docker/research/bughunter-burp-mcp docker/research/bughunter-burp-status /usr/local/bin/
 COPY --chmod=755 docker/research/bughunter-validate-hypotheses /usr/local/bin/
 COPY docker/research/sshd_config /etc/ssh/sshd_config
 COPY --chmod=755 docker/research/entrypoint docker/research/healthcheck /usr/local/bin/

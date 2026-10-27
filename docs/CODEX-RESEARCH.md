@@ -1,4 +1,4 @@
-# Codex Research — Phases 1–2
+# Codex Research — Phases 1–3
 
 Targets → Scope → Recon → Research → Findings → Report.
 
@@ -72,7 +72,9 @@ SSH publishes **`127.0.0.1:2222:22`** by default. `sshd` listens on the containe
 interfaces, while Docker publishes only the host loopback. It is not published on
 `0.0.0.0`, IPv6 wildcard, LAN, Internet, or Tailscale. Root, password and keyboard
 interactive login are disabled; public keys only, `AllowUsers researcher`.
-SSH agent/TCP/X11 forwarding and tunnels are disabled.
+SSH agent/X11 forwarding and network tunnels are disabled. Stage 3 permits only
+remote TCP listen on runner 127.0.0.1:9876 for the optional Burp relay; local TCP,
+other listen addresses/ports and Unix socket forwarding remain disabled.
 
 ```sh
 ssh -i ~/.ssh/bughunter_research -p 2222 researcher@127.0.0.1
@@ -102,10 +104,11 @@ The image build executes `codex --version`, `codex --help` and
 `codex --yolo --help`. The infrastructure test repeats these as `researcher` and
 executes `bughunter-codex --help` over a real SSH connection. The wrapper resolves
 its physical working directory, requires a direct child of `/workspaces` with
-AGENTS.md, scope.md and target.json, displays only workspace ID/host, then uses:
+AGENTS.md, scope.md and target.json, displays only workspace ID/host, then uses
+the installed workspace MCP overrides (see Phase 3):
 
-```sh
-exec codex --yolo "$@"
+```bash
+exec codex --yolo "${overrides[@]}" "$@"
 ```
 
 No Codex account credential is imported from BugHunter or the host. In the SSH
@@ -162,6 +165,7 @@ the Compose web deployment, which already has the correct identity.
 ├── scope.md
 ├── target.json
 ├── program-policy.md
+├── burp-policy.json             # immutable authorization/adapter contract
 ├── recon/                       # only if valid stored evidence exists
 │   ├── corpus.json
 │   ├── endpoints.json           # only observed URLs
@@ -170,10 +174,12 @@ the Compose web deployment, which already has the correct identity.
 │   └── observations.json        # only observed technologies
 ├── findings/existing-findings.json  # only if findings exist
 ├── evidence/README.md
+├── evidence/burp/README.md      # subsequent captures excluded from initial ZIP
 ├── research/
 │   ├── hypotheses.md
 │   ├── hypotheses.json         # v1 machine contract (Phase 2)
 │   ├── hypothesis.schema.json
+│   ├── burp-mcp.example.toml     # reference only, never executed
 │   ├── notes.md
 │   └── session.json
 └── scripts/README.md
@@ -295,7 +301,7 @@ Postgres/Redis connections and registry egress. No real bounty target is contact
   research data without reviewing it.
 
 Git initialization is deliberately omitted in Phase 1. Researchers may initialize
-Git locally; no remote, Git credential or automatic push is configured. Burp MCP,
+Git locally; no remote, Git credential or automatic push is configured.
 Playwright MCP, multi-agent orchestration, bidirectional editing and Codex Finding
 creation are deferred.
 
@@ -402,9 +408,11 @@ bughunter-validate-hypotheses
 ```
 
 Use the configured SSH port shown on the session detail. The local validator uses
-Node's TypeScript support and the exact same Zod contract as web; its only bundled
-dependency is a locked Zod package. It checks JSON size/structure, session metadata
-and evidence files without DB, HTTP, subprocesses or reading evidence contents.
+Node's TypeScript support and the exact same Zod contract as web; its contract
+dependency is a locked Zod package. The validator checks JSON size/structure,
+session metadata and evidence files without DB, HTTP, subprocesses or reading
+evidence contents. Stage 3 also installs a locked MCP SDK used only by the
+separate optional Burp helper.
 It exits 0 with `OK — N hypotheses`, or nonzero with bounded field diagnostics.
 Rebuild research-runner after upgrading Phase 2. Codex credentials and --yolo
 behavior remain unchanged. No remote model authentication is needed for validation.
@@ -519,3 +527,43 @@ ResearchSession values, Hunt records, Findings or Reports.
 - Lint, Next typegen, TypeScript, production build, Compose validation and
   `git diff --check` passed. No operator Codex authentication was imported;
   optional remote inference was not performed.
+
+
+## Phase 3 — optional Burp MCP
+
+See [BURP-MCP-RESEARCH.md](BURP-MCP-RESEARCH.md) for the complete audit, supported
+extension, installation, operator setup, network boundaries and verification.
+
+`bughunter-codex` now configures an installed workspace-specific stdio gateway.
+It exposes only `burp_status`, `burp_history` and `burp_save_observation`; no active
+HTTP, scanner, Intruder, Collaborator, Burp configuration or Finding tool.
+External Burp Suite with PortSwigger MCP Server 1.3.0 stays on host
+127.0.0.1:9876, relayed to runner loopback through one explicitly opened reverse
+SSH tunnel. No new Docker port, backend network access, credentials or database
+migration is required. Burp absence leaves normal Research/Codex and the app usable.
+
+New exports contain immutable `burp-policy.json` (exact host, scheme snapshot,
+required UA, session/workspace and authorization provenance), a reference
+`research/burp-mcp.example.toml`, and `evidence/burp/README.md`. Critical inputs
+remain read-only; observations/diagnostics are writable. Old exports are not
+rewritten: create a new workspace to obtain the Burp contract.
+
+Run `bughunter-burp-status` inside a workspace. Its bounded initialize/list check
+writes a small diagnostic; the Research UI only reads the last recent snapshot on
+an explicit Refresh. Web never executes the helper or calls MCP. The diagnostic
+is mutable operator data, not live attestation. Runner health is independent.
+
+The gateway returns sanitized HTTP **metadata**, never raw bodies/header values,
+credentials, notes or upstream instructions. Explicit saves are bounded and stay
+under evidence/burp with generated names and descriptor-relative symlink-safe I/O.
+The initial ZIP promise is unchanged: later evidence/diagnostics are excluded.
+Neither MCP observations nor hypothesis CONFIRMED create or review a Finding.
+
+**Scope/UA limits:** discovery never grants authorization. The gateway emits no
+active target traffic, filters the declared Host and reports UA matches. The
+upstream does not provide actual HTTP service identity; Host is not proof of
+network destination (`networkDestinationVerified: false`). Manual Burp/other
+shell traffic still requires operator scope/exclusions/required-UA configuration.
+Read current authorization and stop testing on revocation; snapshot files do not
+provide a live policy feed or per-target network firewall. HTTP and MCP content
+remain untrusted data, never trusted instructions.

@@ -78,4 +78,18 @@ export class HypothesisWorkspace {
     const file = await this.artifact(ref);
     await file.close(); // Contents are never read, interpreted or imported.
   }
+  /** Fixed diagnostic only; the web never connects to MCP or executes a helper. */
+  async readBurpDiagnostic() {
+    const file = await this.artifact("research/burp-status.json");
+    try {
+      const buffer = Buffer.alloc(4097); let size = 0;
+      while (size < buffer.length) {
+        const result = await file.read(buffer, size, buffer.length - size, size);
+        if (!result.bytesRead) break;
+        size += result.bytesRead;
+      }
+      if (size > 4096) throw new HypothesisSyncError("DOCUMENT_TOO_LARGE", "Diagnostic exceeds its limit");
+      return buffer.subarray(0, size);
+    } finally { await file.close(); }
+  }
 }

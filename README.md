@@ -277,6 +277,15 @@ can be included in reports.
 ## Codex Research
 
 Research workflow: **Recon → Codex workspace → Hypotheses → human validation → Findings**.
+
+Optional [Burp MCP integration](docs/BURP-MCP-RESEARCH.md) gives Codex a passive,
+workspace-scoped view of existing HTTP metadata via an installed gateway. Burp
+Suite and its official MCP extension run externally on host loopback, connected
+by an explicit restricted reverse SSH tunnel. Run `bughunter-burp-status` before
+`bughunter-codex`; Research displays the last diagnostic. No active scanner,
+credential export or automatic Finding is introduced. Manual Burp traffic still
+requires the operator's exact scope and required User-Agent configuration.
+
 Codex maintains `research/hypotheses.json` (v1) alongside the human-readable
 Markdown. Run `bughunter-validate-hypotheses` in SSH, then **Sync from workspace**
 in BugHunter. The read-only registry tracks evidence for/against, a distinct next

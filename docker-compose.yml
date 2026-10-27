@@ -123,6 +123,7 @@ services:
     restart: unless-stopped
 
   # Independent local research environment: no app env_file, backend network or socket.
+  # Optional Burp MCP uses a restricted reverse SSH loopback tunnel, not a new published port.
   research-runner:
     build:
       context: .

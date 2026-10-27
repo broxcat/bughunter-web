@@ -53,3 +53,6 @@ next-env.d.ts
 .next/
 
 /data/research/
+
+# Runner-only locked MCP dependencies
+docker/research/validator/node_modules/

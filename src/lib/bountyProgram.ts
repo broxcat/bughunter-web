@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requiredUserAgentSchema } from "./httpPolicy.mjs";
 
 export const BOUNTY_PLATFORMS = ["YESWEHACK", "HACKERONE", "INTIGRITI", "BUGCROWD", "OTHER", "PRIVATE"] as const;
 export const VULNERABILITY_FAMILIES = ["XSS", "SQL_INJECTION", "IDOR", "ACCESS_CONTROL", "AUTHENTICATION", "SSRF", "XXE", "LFI", "RFI", "CORS", "CSRF", "RCE", "BUSINESS_LOGIC", "INFORMATION_DISCLOSURE", "OPEN_REDIRECT", "SSTI", "JWT", "OAUTH", "DESERIALIZATION"] as const;
@@ -27,7 +28,7 @@ export const programSchema = z.object({
   programUrl: z.url().refine(v => /^https?:\/\//.test(v), "HTTP(S) URL required").nullable().optional(),
   rewardCurrency: z.string().regex(/^[A-Z]{3}$/).default("EUR"),
   rewardLow: money, rewardMedium: money, rewardHigh: money, rewardCritical: money,
-  requiredUserAgent: z.string().trim().min(1, "User-Agent is required").max(512).regex(/^[\x20-\x7e]+$/, "User-Agent must contain printable ASCII only"),
+  requiredUserAgent: requiredUserAgentSchema,
   scopeHosts: hosts.default([]),
   outOfScope: hosts.default([]),
   qualifying: z.array(z.enum(VULNERABILITY_FAMILIES)).default([]),
