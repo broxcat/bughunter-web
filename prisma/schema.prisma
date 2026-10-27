@@ -269,6 +269,8 @@ model ScanRun {
   targetId               String
   type                   ScanType
   status                 ScanStatus @default(QUEUED)
+  // Execution result; null for live jobs and historical runs of unknown outcome.
+  outcome                ScanOutcome?
   // BullMQ job id, set once enqueued.
   jobId                  String?
   error                  String?    @db.Text
@@ -446,6 +448,13 @@ enum ScanType {
   RECON
   HUNT
   VALIDATE
+}
+
+enum ScanOutcome {
+  SUCCESS
+  PARTIAL
+  FAILED
+  UNSUPPORTED
 }
 
 enum ScanStatus {

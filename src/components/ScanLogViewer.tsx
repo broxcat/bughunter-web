@@ -1,20 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Badge, type BadgeTone } from "@/components/ui/Badge";
+import { scanPresentation } from "@/lib/scanPresentation";
+import { Badge } from "@/components/ui/Badge";
 
 // Mirrors the SSE route's log payload.
 type LogEntry = { line: string; stream: "STDOUT" | "STDERR"; createdAt: string };
 
 const TERMINAL = new Set<string>(["COMPLETED", "FAILED", "CANCELLED"]);
-
-// Status → semantic Badge tone (same scale as the rest of the app):
-// green when done, red when failed, amber for every live/transitional state.
-function statusTone(status: string): BadgeTone {
-  if (status === "COMPLETED") return "passed";
-  if (status === "FAILED") return "killed";
-  return "medium";
-}
 
 export default function ScanLogViewer({ scanRunId }: { scanRunId: string }) {
   return <ScanLogSession key={scanRunId} scanRunId={scanRunId} />;
@@ -22,16 +15,12 @@ export default function ScanLogViewer({ scanRunId }: { scanRunId: string }) {
 function ScanLogSession({ scanRunId }: { scanRunId: string }) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<string>("CONNECTING");
+  const [outcome, setOutcome] = useState<string | null>(null);
+  const presentation = scanPresentation(status, outcome);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const es = new EventSource(`/api/scan-runs/${scanRunId}/stream`);
-
-    es.addEventListener("open", () => {
-      // The server only emits an explicit status event once the run is terminal,
-      // so until then we show a live/streaming state (rendered amber).
-      setStatus((prev) => (TERMINAL.has(prev) ? prev : "RUNNING"));
-    });
 
     es.addEventListener("log", (event) => {
       try {
@@ -44,10 +33,11 @@ function ScanLogSession({ scanRunId }: { scanRunId: string }) {
 
     es.addEventListener("status", (event) => {
       try {
-        const { status: next } = JSON.parse(
+        const { status: next, outcome: nextOutcome } = JSON.parse(
           (event as MessageEvent).data,
-        ) as { status: string };
+        ) as { status: string; outcome?: string | null };
         setStatus(next);
+        setOutcome(nextOutcome ?? null);
         if (TERMINAL.has(next)) {
           es.close();
         }
@@ -84,8 +74,8 @@ function ScanLogSession({ scanRunId }: { scanRunId: string }) {
         <span className="font-mono text-xs font-medium uppercase tracking-wide text-neutral-400">
           Scan output
         </span>
-        <Badge tone={statusTone(status)} mono>
-          {status}
+        <Badge tone={presentation.tone} mono>
+          {presentation.label}
         </Badge>
       </div>
       <div className="h-96 overflow-y-auto bg-neutral-950 px-4 py-3 font-mono text-xs leading-relaxed">

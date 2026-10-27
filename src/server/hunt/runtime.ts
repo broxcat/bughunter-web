@@ -1,3 +1,4 @@
+import { huntExecutionResult, type ScanExecutionResult } from "@/server/scanners/result";
 import { loadTargetExecution } from "@/server/execution";
 import { revalidateTargetSessions } from "@/server/credentials/connection";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -32,12 +33,12 @@ interface Session extends TechniqueContext {
 }
 const storage = new AsyncLocalStorage<Session>();
 const limitCodes = new Set(["HUNT_TIMEOUT", "TOTAL_REQUEST_LIMIT", "FAMILY_REQUEST_LIMIT", "TECHNIQUE_REQUEST_LIMIT", "PARAMETER_PROBE_LIMIT", "DISCOVERY_REQUEST_LIMIT", "CONCURRENCY_LIMIT", "STATE_CHANGING_REQUEST_UNSUPPORTED", "SCOPE_REVOKED"]);
-export async function withHuntSession(ctx: ScanContext, snapshot: HuntPolicySnapshot, work: (readiness: { families: HuntReadiness }) => Promise<void>) {
+export async function withHuntSession(ctx: ScanContext, snapshot: HuntPolicySnapshot, work: (readiness: { families: HuntReadiness }) => Promise<void>): Promise<ScanExecutionResult> {
   const budget = new HuntBudget(async () => {
     const execution = await loadTargetExecution(ctx.targetId);
     if (execution.host !== ctx.host) throw new Error("SCOPE_IDENTITY_CHANGED");
   });
-  const report: HuntReport = { version: 1, startedAt: new Date().toISOString(), status: "RUNNING", requests: 0, limits: { ...HUNT_LIMITS }, families: [], techniques: [], candidates: [] };
+  const report: HuntReport = { version: 1, startedAt: new Date().toISOString(), status: "RUNNING", requests: 0, limits: { ...HUNT_LIMITS }, families: [], techniques: [], candidates: [], execution: { successfulRequests: 0, failedRequests: 0, issues: [] } };
   const persist = async () => {
     report.requests = budget.requests;
     await prisma.scanRun.updateMany({ where: { id: ctx.scanRunId, targetId: ctx.targetId, type: "HUNT" }, data: { huntReport: JSON.parse(JSON.stringify(report)) } });
@@ -47,6 +48,8 @@ export async function withHuntSession(ctx: ScanContext, snapshot: HuntPolicySnap
     await budget.run(async () => {
       await revalidateTargetSessions(ctx.targetId);
       const corpus = await collectHuntCorpus(ctx);
+      if (corpus.raw.execution) report.execution = structuredClone(corpus.raw.execution);
+      if (report.execution?.issues.includes("SCOPE_REVOKED")) throw new HuntLimitError("SCOPE_REVOKED");
       const credentials = await loadTargetCredentials(ctx.targetId);
       const readiness = await loadHuntReadiness(ctx.targetId, snapshot, { publicXssSurface: corpus.publicXssSurface, discoveryComplete: Boolean(corpus.raw.pages?.length), objectReference: corpus.surface.objectReferences, jwt: corpus.jwtPresent, xmlEndpoint: corpus.surface.xml, oauthFlow: corpus.surface.oauth, stateChangingEndpoint: corpus.forms.some(f => f.method !== "GET") });
       const surface = { ...corpus.surface, apiEndpoints: corpus.surface.apiEndpoints || credentials.some(c => Boolean(c.ownedObjectUrl)), jwt: readiness.facts.jwt, cookies: corpus.surface.cookies || readiness.facts.sessionCookie, objectReferences: corpus.surface.objectReferences || readiness.facts.secondUserObjectReference };
@@ -58,11 +61,15 @@ export async function withHuntSession(ctx: ScanContext, snapshot: HuntPolicySnap
       const session: Session = { ctx, corpus, credentials, approvedTechniques: snapshot.approvedTechniques, cache: new Map(), budget, report, readiness: readiness.families, plan, persist, remainingMs: budget.remainingMs, request: async (url, opts = {}) => {
         const r = await probe(url, { ...opts, timeoutMs: HUNT_LIMITS.requestTimeoutMs, maxBodyBytes: HUNT_LIMITS.maxBodyBytes });
         if (r.error && limitCodes.has(r.error)) throw new HuntLimitError(r.error);
-        if (r.error) session.cache.set(`transport-failure:${budget.technique?.id}`, true);
+        if (r.error) {
+          report.execution!.failedRequests++;
+          session.cache.set(`transport-failure:${budget.technique?.id}`, true);
+        } else report.execution!.successfulRequests++;
         return r;
       } };
       await persist();
       await storage.run(session, () => work({ families: readiness.families }));
+      if (budget.controller.signal.reason === "SCOPE_REVOKED") throw new HuntLimitError("SCOPE_REVOKED");
     });
     report.status = budget.requests >= HUNT_LIMITS.maxTotalRequests || !budget.remainingMs() ? "LIMIT_REACHED" : "COMPLETED";
   } catch (e) {
@@ -75,6 +82,9 @@ export async function withHuntSession(ctx: ScanContext, snapshot: HuntPolicySnap
     budget.close(); clearDiscoveryCorpus(ctx.scanRunId);
     await persist();
   }
+  const result = huntExecutionResult(report);
+  await logLine(ctx.scanRunId, `[hunt] result: ${result.outcome}${result.reason ? ` — ${result.reason}` : ""}`, result.outcome === "SUCCESS" ? "STDOUT" : "STDERR");
+  return result;
 }
 export async function runFamilyTechniques(ctx: ScanContext, family: HuntFamily): Promise<void> {
   const session = storage.getStore();
@@ -107,10 +117,13 @@ export async function runFamilyTechniques(ctx: ScanContext, family: HuntFamily):
         } else candidate.severity = undefined;
         session.report.candidates.push(candidate);
       }
-      progress.state = "COMPLETED"; f.completedTechniques++;
+      if (session.cache.has(`transport-failure:${technique.id}`) || session.cache.has(`execution-incomplete:${technique.id}`)) {
+        progress.state = "ERROR"; progress.reason = "TECHNIQUE_CONTROLS_INCOMPLETE";
+        await logLine(ctx.scanRunId, `[hunt] ${technique.id}: ${progress.reason}`, "STDERR");
+      } else { progress.state = "COMPLETED"; f.completedTechniques++; }
     } catch (e) {
       if (e instanceof HuntLimitError && e.code === "SCOPE_REVOKED") throw e;
-      progress.state = e instanceof HuntLimitError ? "LIMIT_REACHED" : "ERROR";
+      progress.state = e instanceof HuntLimitError ? e.code === "STATE_CHANGING_REQUEST_UNSUPPORTED" ? "SKIPPED" : "LIMIT_REACHED" : "ERROR";
       progress.reason = e instanceof HuntLimitError ? e.code : "TECHNIQUE_FAILED_WITHOUT_CONFIRMATION";
       await logLine(ctx.scanRunId, `[hunt] ${technique.id}: ${progress.reason}`);
     } finally {

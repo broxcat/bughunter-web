@@ -1,3 +1,4 @@
+import { commandStepResult, reconExecutionResult, type ReconStepResult, type ScanExecutionResult } from "./result";
 import { analyzeCorpus, persistableCorpus } from "@/server/hunt/corpus";
 import { discoverCorpus, clearDiscoveryCorpus } from "./discovery";
 import { prisma } from "@/lib/prisma";
@@ -19,14 +20,29 @@ import { loadTargetCredentials, credentialHeaders } from "@/server/credentials";
 
 const MINUTE = 60_000;
 
-export async function runRecon(_host: string, scanRunId: string): Promise<void> {
-  const opts = (timeoutMs: number) => ({ scanRunId, timeoutMs });
+export async function runRecon(_host: string, scanRunId: string): Promise<ScanExecutionResult> {
+  const steps: ReconStepResult[] = [];
+  const record = async (step: ReconStepResult) => {
+    steps.push(step);
+    await logLine(scanRunId, `[recon] ${step.step}: ${step.state === "SUCCESS" ? "completed" : step.reason}`, step.state === "FAILED" || step.state === "PARTIAL" ? "STDERR" : "STDOUT");
+  };
+  const command = async (name: string, args: string[], timeoutMs: number) => {
+    try {
+      await record(commandStepResult(name, await runCommand(name, args, { scanRunId, timeoutMs }), timeoutMs));
+    } catch {
+      await record({ step: name, state: "FAILED", reason: "command execution failed" });
+    }
+  };
 
   const execution = currentTargetExecution();
   const ctx = await loadScanContext(scanRunId);
-  if (!ctx || execution.targetId !== ctx.targetId) throw new Error("Missing authorized scan context");
+  if (!ctx || execution.targetId !== ctx.targetId || execution.host !== ctx.host) throw new Error("Missing authorized scan context");
   await logLine(scanRunId, `[recon] User-Agent: ${execution.requiredUserAgent}`);
   const corpus = analyzeCorpus(await discoverCorpus(ctx), ctx.baseUrl);
+  const discovery = corpus.raw.execution;
+  await record(discovery?.issues.length
+    ? { step: "discovery", state: discovery.successfulRequests ? "PARTIAL" : "FAILED", reason: discovery.issues.join(", ") }
+    : { step: "discovery", state: "SUCCESS" });
   await prisma.scanRun.updateMany({ where: { id: scanRunId, targetId: ctx.targetId }, data: { reconCorpus: persistableCorpus(corpus) } });
   clearDiscoveryCorpus(scanRunId);
   const bareHost = ctx.host;
@@ -38,17 +54,15 @@ export async function runRecon(_host: string, scanRunId: string): Promise<void> 
   // for broad URL discovery. Passed as argv -H flags (never a shell string).
   // EMAIL_PASSWORD credentials auto-login here via loadTargetCredentials.
   const headerArgs: string[] = [];
-  if (ctx) {
-    try {
-      const creds = await loadTargetCredentials(ctx.targetId);
-      if (creds.length > 0) {
-        for (const [k, v] of Object.entries(credentialHeaders(creds[0]))) {
-          headerArgs.push("-H", `${k}: ${v}`);
-        }
+  try {
+    const creds = await loadTargetCredentials(ctx.targetId);
+    if (creds.length > 0) {
+      for (const [k, v] of Object.entries(credentialHeaders(creds[0]))) {
+        headerArgs.push("-H", `${k}: ${v}`);
       }
-    } catch {
-      /* anonymous recon on failure */
     }
+  } catch {
+    await record({ step: "authentication", state: "FAILED", reason: "authenticated crawl unavailable; continuing anonymously" });
   }
   if (headerArgs.length > 0) {
     // (no cookie/token values logged — only that auth is in use)
@@ -58,21 +72,32 @@ export async function runRecon(_host: string, scanRunId: string): Promise<void> 
   // DNS records only: discovered identities are never auto-authorized.
   // Passive provider HTTP has no reliable per-program UA control in subfinder.
   // DNS-only resolution performs no HTTP and does not authorize discovered hosts.
-  await logLine(scanRunId, "[recon] subfinder disabled: provider HTTP cannot guarantee Target User-Agent; DNS resolution USER_AGENT_NOT_APPLICABLE");
-  const records = await resolveAny(domain).catch(() => []);
-  await logLine(scanRunId, `[dns] ${JSON.stringify(records)}`);
+  await record({ step: "subfinder", state: "SKIPPED", reason: "disabled: provider HTTP cannot guarantee Target User-Agent; DNS resolution USER_AGENT_NOT_APPLICABLE" });
+  try {
+    const records = await resolveAny(domain);
+    await logLine(scanRunId, `[dns] ${JSON.stringify(records)}`);
+    await record({ step: "dns", state: "SUCCESS" });
+  } catch (err) {
+    // No DNS records is a successful empty result. Resolver failures reduce coverage.
+    await record((err as NodeJS.ErrnoException).code === "ENODATA"
+      ? { step: "dns", state: "SUCCESS" }
+      : { step: "dns", state: "FAILED", reason: "DNS resolution failed" });
+  }
 
   // Live host probing — full URL (authenticated when a credential exists).
-  await runCommand("httpx", ["-silent", "-u", url, ...headerArgs], opts(5 * MINUTE));
+  await command("httpx", ["-silent", "-u", url, ...headerArgs], 5 * MINUTE);
 
   // TCP connect scan only: no service/version detection or HTTP probes.
-  await runCommand("nmap", ["-sT", "-Pn", "-n", domain], opts(10 * MINUTE));
+  await command("nmap", ["-sT", "-Pn", "-n", domain], 10 * MINUTE);
 
   // URL crawling — full URL, depth 3 to reach dashboard sub-pages, authenticated
   // when a credential exists.
-  await runCommand(
+  await command(
     "katana",
     ["-silent", "-u", url, "-d", "3", "-jc", ...headerArgs],
-    opts(10 * MINUTE),
+    10 * MINUTE,
   );
+  const result = reconExecutionResult(steps);
+  await logLine(scanRunId, `[recon] result: ${result.outcome}`);
+  return result;
 }

@@ -13,8 +13,10 @@ describe("owned historical Hunt reports", () => {
     expect(mocks.findFirst.mock.calls[0][0].where).toEqual({ id: "run", type: "HUNT", target: { userId: "owner", OR: [{ program: null }, { program: { ownerId: "owner" } }] } });
   });
   it("keeps removed host history available without selecting credential columns", async () => {
-    mocks.auth.mockResolvedValue({ user: { id: "owner" } }); mocks.findFirst.mockResolvedValue({ id: "run", status: "COMPLETED", huntReport: { version: 1 } });
+    mocks.auth.mockResolvedValue({ user: { id: "owner" } }); mocks.findFirst.mockResolvedValue({ id: "run", status: "COMPLETED", outcome: null, huntReport: { version: 1 } });
     const response = await get(); expect(response.status).toBe(200); expect(response.headers.get("cache-control")).toBe("no-store");
+    expect((await response.json()).outcome).toBeNull();
+    expect(mocks.findFirst.mock.calls[0][0].select).toMatchObject({ outcome: true });
     expect(JSON.stringify(mocks.findFirst.mock.calls[0][0])).not.toMatch(/credentials|encrypted|password|active/);
   });
 });

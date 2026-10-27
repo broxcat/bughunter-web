@@ -1,9 +1,10 @@
+import type { ScanExecutionResult } from "./result";
 import { currentTargetExecution } from "@/server/execution";
 import { withHuntSession, runFamilyTechniques } from "@/server/hunt/runtime";
 import { startHuntSnapshot } from "@/server/hunt/snapshot";
-// Hunt orchestrator. Runs the nuclei sweep, then the ported vuln-class families.
+// Hunt orchestrator. Runs the selected catalogue families.
 //
-// Signature stays runHunt(host, scanRunId) so the QUEUE worker needs no change;
+// Returns the aggregate execution result to the queue worker;
 // the families load their own context (targetId/userId) from the scanRunId. Each
 // family is best-effort — one throwing must never abort the others or the run.
 
@@ -49,14 +50,14 @@ const FAMILIES: ReadonlyArray<readonly [string, (ctx: ScanContext) => Promise<vo
 ];
 
 
-export async function runHunt(_host: string, scanRunId: string): Promise<void> {
+export async function runHunt(_host: string, scanRunId: string): Promise<ScanExecutionResult> {
   const ctx = await loadScanContext(scanRunId);
   if (!ctx) throw new Error("Missing scan context");
   const execution = currentTargetExecution();
-  if (execution.targetId !== ctx.targetId) throw new Error("Target execution mismatch");
+  if (execution.targetId !== ctx.targetId || execution.host !== ctx.host) throw new Error("Target execution mismatch");
   await logLine(scanRunId, `[hunt] User-Agent: ${execution.requiredUserAgent}`);
   const snapshot = await startHuntSnapshot(scanRunId, execution);
-  await withHuntSession(ctx, snapshot, async readiness => {
+  return withHuntSession(ctx, snapshot, async readiness => {
     const selected = new Set(readiness.families.filter(f => f.selected && f.safeSubset).map(f => f.family));
     for (const [name, run] of FAMILIES) {
       if (!selected.has(name)) continue;

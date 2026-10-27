@@ -31,6 +31,22 @@ See the [complete tool audit and HTTP guarantees](docs/scanner-http-audit.md),
 including deliberate limitations on passive provider enumeration, arbitrary Nuclei
 templates and browser redirects.
 
+## Scan results
+
+`ScanStatus` describes the job lifecycle (queued, running, completed, failed or
+cancelled). The additive `ScanRun.outcome` field describes its execution result:
+`SUCCESS`, `PARTIAL`, `FAILED` or `UNSUPPORTED`. A completed job is only successful
+when its outcome is `SUCCESS`. `PARTIAL` means useful work completed but errors,
+timeouts or request limits reduced the planned coverage. Policy exclusions and
+non-applicable techniques do not count as failures; finding nothing is a success.
+Queued/running scans have no outcome. Historical scans retain `outcome = null`
+and are displayed with an unknown historical result, without inferring success.
+
+Only `RECON` and `HUNT` can be started. `VALIDATE` has no implemented scan engine:
+the API rejects it before creating a run/job; legacy queued jobs become
+`FAILED` / `UNSUPPORTED`. Human finding evidence review is unchanged.
+Deploy the additive Prisma migration before restarting the web app and worker.
+
 ## Run
 
 Next.js 16 / React 19, Prisma 6 / PostgreSQL, BullMQ / Redis, Auth.js, Tailwind 4.

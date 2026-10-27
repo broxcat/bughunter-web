@@ -14,7 +14,7 @@ const createRunSchema = z.object({
   approvedTechniques: z.array(z.enum(APPROVABLE_HUNT_TECHNIQUES)).max(4).default([]),
   approveBoundedTiming: z.literal(true).optional(),
   targetId: z.string().trim().min(1, "targetId is required"),
-  type: z.enum(["RECON", "HUNT", "VALIDATE"]),
+  type: z.enum(["RECON", "HUNT"]),
 });
 
 // Per-user cap on how many scan-runs can be enqueued. The worker runs
@@ -61,6 +61,9 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => null);
+  if (body?.type === "VALIDATE") {
+    return NextResponse.json({ error: "VALIDATE scans are not supported: the validation engine is not implemented." }, { status: 400 });
+  }
   const parsed = createRunSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(

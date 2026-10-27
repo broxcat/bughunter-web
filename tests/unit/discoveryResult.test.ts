@@ -1,0 +1,29 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => ({ probe: vi.fn(), credentials: vi.fn() }));
+vi.mock("@/server/scanners/http", () => ({ probe: mocks.probe }));
+vi.mock("@/server/credentials", () => ({ loadTargetCredentials: mocks.credentials, credentialHeaders: () => ({}) }));
+import { discoverCorpus, clearDiscoveryCorpus } from "@/server/scanners/discovery";
+const ctx = { scanRunId: "run", targetId: "target", userId: "owner", host: "example.test", baseUrl: "https://example.test" };
+beforeEach(() => { vi.resetAllMocks(); clearDiscoveryCorpus(ctx.scanRunId); mocks.credentials.mockResolvedValue([]); });
+describe("structured discovery diagnostics", () => {
+  it("an empty response is a successful request", async () => {
+    mocks.probe.mockResolvedValue({ status: 204, body: "", headers: {} });
+    expect((await discoverCorpus(ctx)).execution).toEqual({ successfulRequests: 1, failedRequests: 0, issues: [] });
+  });
+  it("retains successful discovery when another request fails and never retains the error text", async () => {
+    mocks.probe.mockResolvedValueOnce({ status: 200, body: '<a href="/next">next</a>', headers: {} }).mockResolvedValue({ error: "token secret", status: 0 });
+    const corpus = await discoverCorpus(ctx);
+    expect(corpus.execution).toEqual({ successfulRequests: 1, failedRequests: 1, issues: ["DISCOVERY_TRANSPORT_ERROR"] });
+    expect(JSON.stringify(corpus)).not.toContain("token secret");
+  });
+  it.each(["HUNT_TIMEOUT", "SCOPE_REVOKED", "TOTAL_REQUEST_LIMIT"])("stops on %s and preserves the code", async error => {
+    mocks.probe.mockResolvedValue({ error, status: 0 });
+    expect((await discoverCorpus(ctx, [ctx.baseUrl + "/other"])).execution).toEqual({ successfulRequests: 0, failedRequests: 1, issues: [error] });
+    expect(mocks.probe).toHaveBeenCalledOnce();
+  });
+  it("auth failure remains visible while anonymous crawling continues", async () => {
+    mocks.credentials.mockRejectedValue(new Error("secret"));
+    mocks.probe.mockResolvedValue({ status: 200, body: "", headers: {} });
+    expect((await discoverCorpus(ctx)).execution?.issues).toEqual(["AUTHENTICATED_DISCOVERY_UNAVAILABLE"]);
+  });
+});

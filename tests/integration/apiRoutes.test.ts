@@ -101,6 +101,17 @@ d("API route authorization (integration)", () => {
     authMock.auth.mockResolvedValue({ user: { id: userId } });
   }, 60_000);
 
+  it("POST /api/scan-runs refuses VALIDATE without changing the database or queue", async () => {
+    const { scanQueue } = await import("@/server/queue/scanQueue");
+    const before = await prisma.scanRun.count();
+    const queuedBefore = vi.mocked(scanQueue.add).mock.calls.length;
+    const response = await scanRunsPost(req("http://localhost/api/scan-runs", { targetId: "legacy", type: "VALIDATE" }));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/not supported/);
+    expect(await prisma.scanRun.count()).toBe(before);
+    expect(vi.mocked(scanQueue.add).mock.calls.length).toBe(queuedBefore);
+  });
+
   it("POST /api/targets rejects (400) when the linked Scope is not APPROVED", async () => {
     const scope = await prisma.scope.create({
       data: { userId, hostPattern: "*.pending.com", status: "PENDING" },

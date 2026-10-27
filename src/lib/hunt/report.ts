@@ -13,6 +13,8 @@ export interface HuntCandidate extends HuntObservation {
   referenceIds: string[]; findingId?: string;
 }
 export interface HuntReport {
+  // Optional for compatibility with historical reports.
+  execution?: { successfulRequests: number; failedRequests: number; issues: string[] };
   version: 1; startedAt: string; finishedAt?: string;
   status: "RUNNING" | "COMPLETED" | "LIMIT_REACHED" | "FAILED";
   requests: number;

@@ -10,7 +10,8 @@ import {
   hasPolicy,
   type ScopePolicyData,
 } from "@/components/ScopePolicy";
-import { Badge, type BadgeTone } from "@/components/ui/Badge";
+import { scanPresentation } from "@/lib/scanPresentation";
+import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
@@ -20,6 +21,7 @@ interface ScanRun {
   id: string;
   type: ScanType;
   status: string;
+  outcome: string | null;
   requiredUserAgent: string | null;
   createdAt: string;
 }
@@ -40,14 +42,6 @@ interface TargetDetail {
   scanRuns: ScanRun[];
   findings: { id: string }[];
 }
-
-const STATUS_TONE: Record<string, BadgeTone> = {
-  QUEUED: "neutral",
-  RUNNING: "info",
-  COMPLETED: "passed",
-  FAILED: "killed",
-  CANCELLED: "unvalidated",
-};
 
 export default function TargetDetailPage({
   params,
@@ -221,8 +215,8 @@ export default function TargetDetailPage({
                       <span className="text-sm font-medium text-foreground">
                         {run.type === "HUNT" ? <Link href={`/hunt/${run.id}`} className="text-brand">HUNT — open progress</Link> : run.type}
                       </span>
-                      <Badge tone={STATUS_TONE[run.status] ?? "neutral"}>
-                        {run.status}
+                      <Badge tone={scanPresentation(run.status, run.outcome).tone}>
+                        {scanPresentation(run.status, run.outcome).label}
                       </Badge>
                     </div>
                     <span className="text-xs text-subtle">

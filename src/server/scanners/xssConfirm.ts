@@ -56,6 +56,8 @@ export interface XssSinkInfo {
 }
 
 export interface XssConfirmResult {
+  /** A required browser control could not execute (distinct from no vulnerability). */
+  executionIncomplete?: boolean;
   confirmed: boolean;
   evidence?: string;
   reason?: string;
@@ -229,6 +231,7 @@ export async function confirmXssSink(
         () =>
           resolve({
             confirmed: false,
+            executionIncomplete: true,
             reason: `no dialog/canary observed within ${OVERALL_DEADLINE_MS / 1000}s`,
           }),
         Math.max(0, deadline - Date.now()),
@@ -239,6 +242,7 @@ export async function confirmXssSink(
   } catch (err) {
     return {
       confirmed: false,
+      executionIncomplete: true,
       reason: `browser launch/run failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   } finally {
@@ -258,16 +262,18 @@ async function runCandidates(
   deadline: number,
 ): Promise<XssConfirmResult> {
   const reasons: string[] = [];
+  let executionIncomplete = false;
   for (const candidate of candidates) {
     const remaining = deadline - Date.now();
     if (remaining < MIN_CANDIDATE_BUDGET_MS) {
+      executionIncomplete = true;
       reasons.push("budget exhausted before all sources tried");
       break;
     }
     const control = await tryCandidate(context, { ...candidate, url: candidate.controlUrl, via: "inert canary control" }, canaryId, remaining);
     if (control.fired) return { confirmed: false, reason: "inert canary control also triggered a dialog; application dialog echo is not injected execution" };
-    if (control.reason !== "no dialog/canary observed") { reasons.push("inert control unavailable"); continue; }
-    if (deadline - Date.now() < MIN_CANDIDATE_BUDGET_MS) break;
+    if (control.reason !== "no dialog/canary observed") { executionIncomplete = true; reasons.push("inert control unavailable"); continue; }
+    if (deadline - Date.now() < MIN_CANDIDATE_BUDGET_MS) { executionIncomplete = true; break; }
     const result = await tryCandidate(context, candidate, canaryId, deadline - Date.now());
     if (result.fired) {
       const where = sinkInfo.location ? ` (sink seen at ${sinkInfo.location})` : "";
@@ -279,6 +285,7 @@ async function runCandidates(
           `Dialog message: ${result.message}`,
       };
     }
+    if (result.reason !== "no dialog/canary observed") executionIncomplete = true;
     reasons.push(`${candidate.via}: ${result.reason}`);
   }
 
@@ -286,6 +293,7 @@ async function runCandidates(
   // the finding stays a CANDIDATE rather than being silently dropped or inflated.
   return {
     confirmed: false,
+    executionIncomplete,
     reason:
       `no dialog/canary observed within ${OVERALL_DEADLINE_MS / 1000}s for sink ` +
       `"${sinkInfo.sink}" [${reasons.join("; ") || "no candidates attempted"}]`,

@@ -31,18 +31,29 @@ try {
   await client.$executeRaw`INSERT INTO "Report" (id, "userId", "targetId", title, "updatedAt") VALUES ('upgrade-report', 'upgrade-user', 'upgrade-host', 'Historical report', now())`;
   await client.$executeRaw`INSERT INTO "ReportItem" (id, "reportId", "findingId") VALUES ('upgrade-item', 'upgrade-report', 'upgrade-finding')`;
   await client.$executeRaw`INSERT INTO "Finding" (id, "targetId", title, "gateStatus", "updatedAt") VALUES ('upgrade-passed', 'upgrade-host', 'Previously accepted', 'PASSED', now()), ('upgrade-killed', 'upgrade-host', 'Previously rejected', 'KILLED', now())`;
+  for (const status of ["QUEUED", "RUNNING", "FAILED", "CANCELLED"]) {
+    await client.$executeRaw`INSERT INTO "ScanRun" (id, "targetId", type, status) VALUES (${`upgrade-${status}`}, 'upgrade-host', 'RECON', ${status}::"ScanStatus")`;
+  }
+  const historicalRuns = await client.$queryRaw`SELECT id, status, error, "createdAt", "startedAt", "finishedAt" FROM "ScanRun" ORDER BY id`;
   migrate(schema);
+  assert.deepEqual(await client.$queryRaw`SELECT id, status, error, "createdAt", "startedAt", "finishedAt" FROM "ScanRun" ORDER BY id`, historicalRuns);
+  const outcomes = await client.scanRun.findMany({ select: { outcome: true } });
+  assert(outcomes.every(run => run.outcome === null), "Migration must not infer outcomes for existing scans");
   const host = await client.target.findUniqueOrThrow({ where: { id: "upgrade-host" }, include: { scanRuns: true, findings: true, reports: { include: { items: true } }, credentials: true, scope: true } });
   assert.equal(host.programId, null);
   assert.equal(host.active, true);
   assert.equal(host.host, "api.example.test");
   assert.equal(host.scope.status, "APPROVED");
-  assert.equal(host.scanRuns[0].id, "upgrade-run");
-  assert.equal(host.scanRuns[0].requiredUserAgent, null);
-  assert.equal(host.scanRuns[0].huntSnapshot, null);
-  assert.equal(host.scanRuns[0].huntReport, null);
-  assert.equal(host.scanRuns[0].reconCorpus, null);
-  assert.deepEqual(host.scanRuns[0].approvedHuntTechniques, []);
+  const historicalRun = host.scanRuns.find(run => run.id === "upgrade-run");
+  assert(historicalRun);
+  assert.equal(historicalRun.id, "upgrade-run");
+  assert.equal(historicalRun.requiredUserAgent, null);
+  assert.equal(historicalRun.status, "COMPLETED");
+  assert.equal(historicalRun.outcome, null);
+  assert.equal(historicalRun.huntSnapshot, null);
+  assert.equal(historicalRun.huntReport, null);
+  assert.equal(historicalRun.reconCorpus, null);
+  assert.deepEqual(historicalRun.approvedHuntTechniques, []);
   const originalFinding = host.findings.find(f => f.id === "upgrade-finding");
   assert.equal(originalFinding.huntMetadata, null);
   assert.equal(originalFinding.reviewStatus, "CANDIDATE");

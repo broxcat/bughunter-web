@@ -26,6 +26,8 @@ export type RunCommandResult = {
   code: number | null;
   /** True if the run was terminated because it hit the timeout. */
   timedOut: boolean;
+  /** Spawn failed before a process could execute (e.g. missing binary). */
+  spawnFailed?: boolean;
 };
 
 async function record(
@@ -113,18 +115,18 @@ export function runCommand(
       child.kill("SIGKILL");
     }, timeoutMs);
 
-    const finish = (code: number | null) => {
+    const finish = (code: number | null, spawnFailed = false) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       flush();
-      resolve({ code, timedOut });
+      resolve({ code, timedOut, ...(spawnFailed ? { spawnFailed: true } : {}) });
     };
 
     child.on("error", (err) => {
       // e.g. ENOENT: the tool isn't installed. Record and resolve — not fatal.
       void record(scanRunId, `[runCommand] failed to spawn ${cmd}: ${err.message}`, "STDERR");
-      finish(null);
+      finish(null, true);
     });
 
     child.on("close", (code) => {

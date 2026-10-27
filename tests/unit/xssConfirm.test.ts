@@ -82,6 +82,7 @@ describe("confirmXssSink — dialog carrying the canary", () => {
     });
 
     expect(result.confirmed).toBe(true);
+    expect(result.executionIncomplete).not.toBe(true);
     expect(result.evidence).toBeDefined();
     expect(result.evidence).toContain("testcanaryABC123");
     expect(result.reason).toBeUndefined();
@@ -129,6 +130,7 @@ describe("confirmXssSink — navigation/launch failures", () => {
 
     expect(result.confirmed).toBe(false);
     expect(result.reason).toBeDefined();
+    expect(result.executionIncomplete).toBe(true);
   });
 
   it("launch throw -> confirmed:false, reason mentions the failure, no throw", async () => {
@@ -142,6 +144,7 @@ describe("confirmXssSink — navigation/launch failures", () => {
     });
 
     expect(result.confirmed).toBe(false);
+    expect(result.executionIncomplete).toBe(true);
     expect(result.reason).toContain("browser launch/run failed");
   });
 });

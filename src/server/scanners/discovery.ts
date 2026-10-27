@@ -23,7 +23,16 @@ const MAX_PAGES = 25;
 const MAX_DEPTH = 2; // root = depth 0; reaches dashboard sub-pages without exploding
 const PAGE_TIMEOUT_MS = 10_000;
 
+export interface DiscoveryExecution {
+  successfulRequests: number;
+  failedRequests: number;
+  // Fixed codes only; never retain transport messages or credential values.
+  issues: string[];
+}
+const interruptionCodes = new Set(["SCOPE_REVOKED", "HUNT_TIMEOUT", "TOTAL_REQUEST_LIMIT", "DISCOVERY_REQUEST_LIMIT", "CONCURRENCY_LIMIT"]);
+
 export interface DiscoveryCorpus {
+  execution?: DiscoveryExecution;
   /** Concatenated crawled page bodies + a synthetic anchor appendix of all URLs. */
   html: string;
   pages?: { url: string; body: string; headers: Record<string, string>; status: number }[];
@@ -57,6 +66,7 @@ function sameOriginLinks(html: string, baseUrl: string, host: string): string[] 
 }
 
 async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryCorpus> {
+  const execution: DiscoveryExecution = { successfulRequests: 0, failedRequests: 0, issues: [] };
   let host: string;
   try {
     host = new URL(ctx.baseUrl).host;
@@ -75,7 +85,7 @@ async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryC
       authenticated = Object.keys(headers).length > 0;
     }
   } catch {
-    /* anonymous crawl on failure */
+    execution.issues.push("AUTHENTICATED_DISCOVERY_UNAVAILABLE");
   }
 
   const bodies: string[] = [];
@@ -91,7 +101,14 @@ async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryC
     visited.add(norm);
 
     const res = await probe(norm, { headers, timeoutMs: PAGE_TIMEOUT_MS });
-    if (res.error || !res.body) continue;
+    if (res.error) {
+      execution.failedRequests++;
+      const code = interruptionCodes.has(res.error) ? res.error : "DISCOVERY_TRANSPORT_ERROR";
+      if (!execution.issues.includes(code)) execution.issues.push(code);
+      if (interruptionCodes.has(code)) break;
+      continue;
+    }
+    execution.successfulRequests++;
     bodies.push(res.body);
     pages.push({ url: norm, body: res.body, headers: res.headers, status: res.status });
     discovered.add(norm);
@@ -111,7 +128,7 @@ async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryC
   // extractors pick them up with URLs already resolved (no relative-path drift
   // from concatenating sub-page bodies).
   const appendix = urls.map((u) => `<a href="${u}"></a>`).join("\n");
-  return { html: bodies.join("\n") + "\n" + appendix, urls, authenticated, pages };
+  return { html: bodies.join("\n") + "\n" + appendix, urls, authenticated, pages, execution };
 }
 
 /**
@@ -121,7 +138,7 @@ async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryC
 export function discoverCorpus(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryCorpus> {
   const cached = cache.get(ctx.scanRunId);
   if (cached) return cached;
-  const p = crawl(ctx, seeds).catch(() => ({ html: "", urls: [], authenticated: false }));
+  const p = crawl(ctx, seeds).catch(() => ({ html: "", urls: [], authenticated: false, execution: { successfulRequests: 0, failedRequests: 1, issues: ["DISCOVERY_FAILED"] } }));
   cache.set(ctx.scanRunId, p);
   return p;
 }

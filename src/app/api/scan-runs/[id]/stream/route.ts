@@ -72,9 +72,9 @@ export async function GET(
         }
       };
 
-      const finish = (status: string) => {
+      const finish = (status: string, outcome: string | null = null) => {
         if (closed) return;
-        send("status", { status });
+        send("status", { status, outcome });
         cleanup();
         closed = true;
         try {
@@ -99,9 +99,11 @@ export async function GET(
 
       // 2. Already finished: emit the terminal status once and close.
       if (TERMINAL.has(scanRun.status)) {
-        finish(scanRun.status);
+        finish(scanRun.status, scanRun.outcome);
         return;
       }
+
+      send("status", { status: scanRun.status, outcome: null });
 
       // 3. Subscribe to live lines. If the bus is unavailable we still fall back
       //    to status polling below so the client eventually learns it's done.
@@ -134,14 +136,16 @@ export async function GET(
         try {
           const fresh = await prisma.scanRun.findUnique({
             where: { id },
-            select: { status: true },
+            select: { status: true, outcome: true },
           });
           if (!fresh) {
             finish("FAILED");
             return;
           }
           if (TERMINAL.has(fresh.status)) {
-            finish(fresh.status);
+            finish(fresh.status, fresh.outcome);
+          } else {
+            send("status", { status: fresh.status, outcome: null });
           }
         } catch {
           // transient DB hiccup; try again on the next tick.
