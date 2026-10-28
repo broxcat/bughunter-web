@@ -14,6 +14,7 @@ import WebSocket from 'ws';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { issueTerminalTicket } from '../../src/lib/research/terminal.ts';
+import { portSwiggerAcceptance } from './portSwiggerAcceptance.mjs';
 import { fakeBurp } from './fakeBurp.mjs';
 const execute = promisify(execFile), prefix = `bh-console-${randomUUID().slice(0,8)}`, temp = await mkdtemp(join(tmpdir(),prefix));
 const run = async (file,args,options={}) => (await execute(file,args,{timeout:60000,maxBuffer:2**20,...options})).stdout.trim();
@@ -78,6 +79,21 @@ try {
  const sshArgs=['-i',join(temp,'ssh'),'-p',String(sshPort),'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','StrictHostKeyChecking=accept-new','-o',`UserKnownHostsFile=${join(temp,'known_hosts')}`];
  tunnel=spawn('ssh',[...sshArgs,'-NT','-o','ExitOnForwardFailure=yes','-R',`127.0.0.1:9876:127.0.0.1:${fixture.port}`,'-R',`127.0.0.1:8080:127.0.0.1:${proxyFixture.address().port}`,'researcher@127.0.0.1'],{stdio:'ignore'});await wait(600);
  const connectMcp=async(id,command)=>{const client=new Client({name:'local-console-verification',version:'1.0.0'});await client.connect(new StdioClientTransport({command:'ssh',args:[...sshArgs,'researcher@127.0.0.1',`cd /workspaces/research_${id} && ${command}`],stderr:'pipe'}));return client;};
+ // Separate official inventory: reconnect must replace Java and rediscover tools.
+ let official=await connectMcp(data.ids[1],'bughunter-portswigger-mcp');
+ const expectedInventory=[...fixture.inventory]; assert.equal((await official.listTools()).tools.length,5);
+ for(const inventory of [[],['burp_status','burp_history','burp_save_observation']]) {
+   fixture.inventory.splice(0,fixture.inventory.length,...inventory);
+   await page.getByRole('button',{name:'Reconnect',exact:true}).click();
+   await page.getByText('Burp MCP: incompatible',{exact:true}).waitFor({timeout:45000});
+   assert.equal((await official.listTools()).tools.length,0);
+ }
+ fixture.inventory.splice(0,fixture.inventory.length,...expectedInventory);
+ await page.getByRole('button',{name:'Reconnect',exact:true}).click();
+ await page.getByText('Burp MCP: connected',{exact:true}).waitFor({timeout:45000});
+ assert.equal((await official.listTools()).tools.length,5);
+ await official.close();
+ console.log('PortSwigger diagnostics verified: absent, zero tools, internal wrappers incompatible; reconnect rediscovers official inventory without replacing tmux.');
  mcp=await connectMcp(data.ids[1],'bughunter-burp-mcp');let tools=await mcp.listTools();assert(tools.tools.some(t=>t.name==='send_http2_request'));
  const base={targetHostname:'browser.example.test',targetPort:80,usesHttps:false};
  for(const ua of ['', 'User-Agent: incorrect\r\n']){const sent=await mcp.callTool({name:'send_http1_request',arguments:{...base,content:`GET /active HTTP/1.1\r\nHost: browser.example.test\r\n${ua}\r\n`}});assert(!sent.isError,JSON.stringify(sent));assert(!JSON.stringify(sent).includes('LOCAL_SENSITIVE_COOKIE'));}
@@ -144,6 +160,7 @@ try {
  assert((await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','tmux','list-panes','-t','bughunter-'+data.ids[1]+':0','-F','#{pane_current_path}')).endsWith('/workspaces/research_'+data.ids[1]));
  console.log('Restart verified: persisted workspace/Codex home, new tmux on attach, same Target CWD; no browser refresh killed the prior session.');
  console.log('MCP PROTOCOL_VERIFIED: scoped gateway → pinned official Java proxy → fake Burp SSE, rejected discovered host, HTTP/1 UA add/replace, HTTP/2 UA force, redacted response, and real Playwright → loopback proxy bridge → local target with enforced UA and blocked cross-host redirect. No real Burp GUI/model inference.');
+ if (process.env.RESEARCH_REAL_BURP_IMAGE) await portSwiggerAcceptance({image:process.env.RESEARCH_REAL_BURP_IMAGE,runnerImage:service.image,prefix,consoleId,run,dexec,connectMcp,page,origin,hostId:data.ids[1],wait,webScript});
  console.log(await run(process.execPath,['tests/e2e/targetWorkflow.mjs'],{env:{...process.env,TEST_APP_URL:origin},timeout:90000}));
 } finally {
  reconWorker?.kill('SIGTERM');

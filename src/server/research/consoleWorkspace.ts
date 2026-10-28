@@ -21,7 +21,7 @@ export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, find
     `\n## Target identity\n\nTarget ID: ${target.id}\nScheme: ${target.scheme ?? 'https'}\nPort: ${target.scheme === 'http' ? 80 : 443}\n\n${old['program-policy.md']}\n`;
   const policy = consolePolicySchema.parse({ version: 2, sessionId: session.id, workspaceId: session.workspaceId, targetId: target.id, targetHost: target.host,
     scheme: target.scheme ?? 'https', port: target.scheme === 'http' ? 80 : 443, requiredUserAgent: target.program!.requiredUserAgent,
-    authorizationSource: `Scope ${target.scope.id}; Program ${target.program!.id}`, generatedAt: session.createdAt.toISOString(), scopeSha256: sha256(scope), mode: passive ? 'PROGRAM_PASSIVE' : 'SCOPED_ACTIVE_HTTP', ...(passive ? { programScope: {rules:target.program!.scopeRules,exclusions:target.program!.outOfScope} } : {}) });
+    authorizationSource: `Scope ${target.scope.id}; Program ${target.program!.id}`, generatedAt: session.createdAt.toISOString(), scopeSha256: sha256(scope), mode: passive ? 'PROGRAM_PASSIVE' : 'SCOPED_ACTIVE_HTTP', programScope: {rules:target.program!.scopeRules,exclusions:target.program!.outOfScope} });
   const files: Record<string, string> = {
     'scope.md': scope,
     '.codex/config.toml': consoleCodexConfig(session.workspaceId, instructions, passive),

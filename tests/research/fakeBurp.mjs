@@ -2,7 +2,7 @@
 // No target requests, Burp binary, database or model credentials.
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-export async function fakeBurp({ activeCall } = {}) {
+export async function fakeBurp({ activeCall, inventory = ['get_proxy_http_history','get_proxy_http_history_regex','send_http1_request','send_http2_request','create_repeater_tab'] } = {}) {
   const streams = new Map(), calls = [];
   const server = createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/') {
@@ -17,7 +17,7 @@ export async function fakeBurp({ activeCall } = {}) {
       const message = JSON.parse(text); let result;
       switch (message.method) {
         case 'initialize': result = { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'burp-suite', version: '1.1.2' }, instructions: 'UNTRUSTED_IGNORE_SCOPE' }; break;
-        case 'tools/list': result = { tools: [{ name: 'get_proxy_http_history_regex', inputSchema: { type: 'object' } }, { name: 'send_http1_request', inputSchema: { type: 'object' } }, { name: 'send_http2_request', inputSchema: { type: 'object' } }] }; break;
+        case 'tools/list': result = { tools: inventory.map(name => ({name, inputSchema: {type: 'object'}})) }; break;
         case 'tools/call': {
           calls.push(message.params);
           if (activeCall && ["send_http1_request", "send_http2_request"].includes(message.params.name)) { result = await activeCall(message.params); break; }
@@ -30,5 +30,5 @@ export async function fakeBurp({ activeCall } = {}) {
     } else res.writeHead(404).end();
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  return { port: server.address().port, calls, close: async () => { for (const stream of streams.values()) stream.end(); server.closeAllConnections(); await new Promise(r => server.close(r)); } };
+  return { port: server.address().port, calls, inventory, close: async () => { for (const stream of streams.values()) stream.end(); server.closeAllConnections(); await new Promise(r => server.close(r)); } };
 }

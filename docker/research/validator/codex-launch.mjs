@@ -2,13 +2,17 @@ import { spawn } from 'node:child_process';
 import { openConsoleWorkspace } from './console-files.mjs';
 import { readBounded } from './burp-files.mjs';
 import { open, constants } from 'node:fs/promises';
+import { consoleMcpOverrides } from './console-mcp-config.mjs';
 import { codexRead } from './codex-rpc.mjs';
 const cwd = process.cwd(), workspace = await openConsoleWorkspace();
 const metadata = await open(`${cwd}/.agents/bughunter`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
 let bootstrap;
 try { bootstrap = await readBounded(metadata, 'bootstrap.md', 16384, true); } finally { await metadata.close(); await workspace.root.close(); }
 console.log(`Target: ${workspace.policy.targetHost}\nRequired User-Agent: ${workspace.policy.requiredUserAgent}\nCWD: ${cwd}\nRead scope.md before any interaction.\nHypotheses: findings/hypotheses.json; skills retain their confirmation gates.`);
-const trust = ['-c', `projects={${JSON.stringify(cwd)}={trust_level="trusted"}}`];
+// Also configure existing immutable workspaces without rewriting scope.md or
+// their authorization snapshot. Project configuration is generated for new ones.
+const trust = ['-c', `projects={${JSON.stringify(cwd)}={trust_level="trusted"}}`,
+  ...consoleMcpOverrides(cwd)];
 let args = ['--yolo', ...trust, ...process.argv.slice(2)];
 if (process.argv.length === 2) {
   let resume;

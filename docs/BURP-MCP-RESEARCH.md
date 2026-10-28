@@ -1,5 +1,7 @@
 # Burp + Playwright MCP for a Target console
 
+Current target/host console integration and the optional real Community service are documented in [PORTSWIGGER-MCP.md](PORTSWIGGER-MCP.md). This guide retains the external-host bridge and legacy workspace setup.
+
 Burp Suite is an optional **external operator GUI**. It is not installed in web,
 worker or research-console. Opening `/research/<Target.id>` starts/reuses Codex;
 Burp offline does not prevent terminal startup or web/Recon/Findings/Reports.

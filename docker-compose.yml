@@ -149,6 +149,10 @@ services:
     environment:
       RESEARCH_TERMINAL_ORIGIN: "${AUTH_URL:?Set AUTH_URL to the browser origin}"
       RESEARCH_TERMINAL_PUBLIC_KEY_FILE: /run/research-terminal/public.pem
+      BURP_MCP_HOST: "${BURP_MCP_HOST:-127.0.0.1}"
+      BURP_MCP_PORT: "${BURP_MCP_PORT:-9876}"
+      BURP_PROXY_HOST: "${BURP_PROXY_HOST:-127.0.0.1}"
+      BURP_PROXY_PORT: "${BURP_PROXY_PORT:-8080}"
     expose: ["7681"]
     ports:
       - "127.0.0.1:${RESEARCH_SSH_PORT:-2222}:22"
@@ -179,6 +183,35 @@ services:
     pids_limit: 512
     mem_limit: 3g
     shm_size: 1g
+    restart: unless-stopped
+
+  # Optional dedicated real Community instance. Loopback is shared with Codex,
+  # not the host; separate PID namespace protects Burp from target deletion.
+  # Existing external Burp + SSH bridge remains supported without this profile.
+  burp:
+    profiles: [burp]
+    build:
+      context: .
+      dockerfile: docker/burp/Dockerfile
+    image: bughunter-burp
+    network_mode: service:research-console
+    depends_on:
+      research-console:
+        condition: service_healthy
+    environment:
+      BURP_ACCEPT_TERMS: "${BURP_ACCEPT_TERMS:-no}"
+    volumes:
+      - burp-home:/home/burp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; from pathlib import Path; assert Path('/tmp/bughunter-burp-ready').exists(); socket.create_connection(('127.0.0.1',9876),2).close()"]
+      interval: 15s
+      start_period: 90s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   # Same-origin cookie stripping before the isolated terminal. No secrets or host ports.
@@ -248,3 +281,4 @@ volumes:
   research-workspaces:
   research-codex:
   research-host-keys:
+  burp-home:

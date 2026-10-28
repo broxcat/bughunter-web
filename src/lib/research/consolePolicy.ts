@@ -19,6 +19,7 @@ export function consoleCodexConfig(workspaceId: string, instructions: string, pa
   return `# Generated BugHunter project config. No account credentials.\n` +
     `developer_instructions = ${JSON.stringify(instructions)}\n` +
     `[features]\nmulti_agent = true\n[agents]\nmax_threads = 4\n` +
+    `[mcp_servers.burp]\ncommand = "/usr/local/bin/bughunter-portswigger-mcp"\ncwd = "/workspaces/${workspaceId}"\nrequired = false\nstartup_timeout_sec = 15\ntool_timeout_sec = 30\n` +
     `[mcp_servers.bughunter_burp]\ncommand = "/usr/local/bin/bughunter-burp-mcp"\ncwd = "/workspaces/${workspaceId}"\nrequired = false\nstartup_timeout_sec = 5\ntool_timeout_sec = 20\n` +
     (passive ? `enabled_tools = ["burp_status", "burp_history", "burp_save_observation"]\n` : `enabled_tools = ["burp_status", "burp_history", "burp_save_observation", "send_http1_request", "send_http2_request"]\n`) +
     (passive ? "" : `[mcp_servers.playwright]\ncommand = "/usr/local/bin/bughunter-playwright-mcp"\ncwd = "/workspaces/${workspaceId}"\nrequired = false\nstartup_timeout_sec = 5\ntool_timeout_sec = 30\nenabled_tools = ["browser_navigate", "browser_snapshot", "browser_click", "browser_type", "browser_fill_form", "browser_press_key", "browser_select_option", "browser_wait_for", "browser_navigate_back", "browser_tabs", "browser_network_requests", "browser_console_messages", "browser_take_screenshot", "browser_evaluate", "browser_close"]\n`);

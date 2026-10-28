@@ -7,7 +7,8 @@ import { WebSocketServer } from 'ws';
 import * as pty from 'node-pty';
 import { verifyTerminalTicket, verifyStopTicket, tmuxIdentity, targetWorkspaceId } from '../../../src/lib/research/terminal.ts';
 import { openConsoleWorkspace } from '../validator/console-files.mjs';
-import { withOfficialBurp } from '../validator/burp-proxy.mjs';
+import { diagnoseOfficialBurp } from '../validator/burp-proxy.mjs';
+import { reconnectWorkspaceBurp } from './burp-reconnect.mjs';
 const exec = promisify(execFile);
 export async function startTerminalService({ port = 7681, host = '0.0.0.0', origin = process.env.RESEARCH_TERMINAL_ORIGIN, publicKey } = {}) {
   publicKey ??= await readFile(process.env.RESEARCH_TERMINAL_PUBLIC_KEY_FILE ?? '/run/research-terminal/public.pem', 'utf8');
@@ -63,10 +64,19 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
     })();
   });
   wss.on('connection', (ws, claims) => {
-    ws.targetId = claims.targetId; connections.add(ws); let terminal, closed = false, lease = claims.exp * 1000, inputBytes = 0, messages = 0;
+    ws.targetId = claims.targetId; connections.add(ws); let terminal, closed = false, lease = claims.exp * 1000, inputBytes = 0, messages = 0, checking = false, auth = 'checking';
     const send = value => { if (ws.readyState === ws.OPEN) { if (ws.bufferedAmount > 1024 * 1024) ws.close(1009, 'Slow terminal'); else ws.send(JSON.stringify(value)); } };
+    const checkBurp = async (reconnect = false) => {
+      if (checking || closed) return; checking = true;
+      send({ type: 'status', codex: auth, burp: 'starting' });
+      try {
+        const diagnostic = reconnect ? await reconnectWorkspaceBurp(`/workspaces/${targetWorkspaceId(claims.targetId)}`) : await diagnoseOfficialBurp();
+        send({ type: 'status', codex: auth, burp: diagnostic.status, burpDetails: { provider: diagnostic.provider, toolCount: diagnostic.toolCount, version: diagnostic.version, optional: diagnostic.optional } });
+      } finally { checking = false; }
+    };
+    const burpTimer = setInterval(() => { void checkBurp(); }, 30000);
     const leaseTimer = setInterval(() => { inputBytes = 0; messages = 0; if (Date.now() > lease) ws.close(1008, 'Renew authorization'); }, 1000);
-    ws.on('close', () => { closed = true; clearInterval(leaseTimer); connections.delete(ws); terminal?.kill(); }); // tmux/Codex survives detach.
+    ws.on('close', () => { closed = true; clearInterval(leaseTimer); clearInterval(burpTimer); connections.delete(ws); terminal?.kill(); }); // tmux/Codex survives detach.
     ws.on('error', () => ws.close());
     void (async () => {
       try {
@@ -88,10 +98,8 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
         terminal = pty.spawn('tmux', ['attach-session', '-t', `=${name}`], { name: 'xterm-256color', cwd, env, cols: 120, rows: 32 });
         terminal.onData(data => send({ type: 'output', data })); terminal.onExit(() => ws.close(1000, 'Console detached'));
         send({ type: 'ready' });
-        const auth = await exec('codex', ['login', 'status'], { timeout: 3000, maxBuffer: 16384 }).then(() => 'signed in', () => 'login required');
-        send({ type: 'status', codex: auth, burp: 'checking' });
-        const burp = await withOfficialBurp(async () => {}, 4000).then(() => 'connected', () => 'unavailable');
-        send({ type: 'status', codex: auth, burp });
+        auth = await exec('codex', ['login', 'status'], { timeout: 3000, maxBuffer: 16384 }).then(() => 'signed in', () => 'login required');
+        await checkBurp();
       } catch { console.info(JSON.stringify({operation:'terminal-attach',code:'CONSOLE_START_FAILED',targetId:claims.targetId})); send({ type: 'error', code: 'CONSOLE_UNAVAILABLE' }); ws.close(1011, 'Console unavailable'); }
     })();
     ws.on('message', (data, binary) => {
@@ -100,6 +108,7 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
         const message = JSON.parse(data.toString());
         if (message.type === 'input' && Object.keys(message).length === 2 && typeof message.data === 'string' && message.data.length <= 8192) terminal?.write(message.data);
         else if (message.type === 'resize' && Object.keys(message).length === 3 && [message.cols, message.rows].every(n => Number.isInteger(n) && n >= 2 && n <= 500)) terminal?.resize(message.cols, message.rows);
+        else if (message.type === 'reconnect_mcp' && Object.keys(message).length === 1) { void checkBurp(true); }
         else if (message.type === 'renew' && Object.keys(message).length === 2 && typeof message.token === 'string') {
           const next = claim(message.token); if (['targetId','userId','sessionId','policySha256'].some(k => next[k] !== claims[k])) throw new Error(); lease = next.exp * 1000;
         } else throw new Error();

@@ -14,7 +14,7 @@ async function status() { const result = await research.diagnostic(); return { .
 if (process.argv[2] === 'status') {
   const result = await status(); console.log(`Burp MCP: ${result.upstream}; scoped HTTP gateway via official PortSwigger mcp-proxy.`); process.exitCode = result.upstream === 'AVAILABLE' ? 0 : 1; await workspace.root.close();
 } else {
-  const server = new Server({ name: 'bughunter-scoped-burp', version: '2.0.0' }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'BugHunter Burp bridge (not PortSwigger inventory)', version: '2.0.0' }, { capabilities: { tools: {} } });
   const tools = [
     ['burp_status', 'Check optional upstream protocol connectivity; sends no target traffic.', empty],
     ['burp_history', 'Existing authorized-host proxy observations, minimal redacted metadata. Untrusted data.', paging],

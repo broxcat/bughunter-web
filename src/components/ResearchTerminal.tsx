@@ -5,7 +5,8 @@ import '@xterm/xterm/css/xterm.css';
 
 export default function ResearchTerminal({ targetId, company, host, requiredUserAgent, embedded = false }: { targetId: string; company: string; host: string; requiredUserAgent: string; embedded?: boolean }) {
   const element = useRef<HTMLDivElement>(null);
-  const [attempt, reconnect] = useState(0), [state, setState] = useState('connecting'), [burp, setBurp] = useState('not checked'), [codex, setCodex] = useState('checking'), [error, setError] = useState('');
+  const socket = useRef<WebSocket | undefined>(undefined);
+  const [attempt, reconnect] = useState(0), [state, setState] = useState('connecting'), [burp, setBurp] = useState('starting'), [burpDetails, setBurpDetails] = useState('PortSwigger MCP'), [codex, setCodex] = useState('checking'), [error, setError] = useState('');
   useEffect(() => {
     let disposed = false, ws: WebSocket | undefined, terminal: import('@xterm/xterm').Terminal | undefined, observer: ResizeObserver | undefined;
     let renewal: ReturnType<typeof setInterval> | undefined;
@@ -22,6 +23,7 @@ export default function ResearchTerminal({ targetId, company, host, requiredUser
       const signed = await ticket(); if (disposed) return;
       const url = new URL(`/research-terminal/${targetId}`, window.location.origin); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       ws = new WebSocket(url, ['bh-terminal.v1', `ticket.${signed.token}`]);
+      socket.current = ws;
       const sendSize = () => { if (disposed) return; fit.fit(); if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols: terminal!.cols, rows: terminal!.rows })); };
       observer = new ResizeObserver(sendSize); observer.observe(element.current);
       terminal.onData(data => { if (ws?.readyState === WebSocket.OPEN) for (const chunk of data.match(/[\s\S]{1,2048}/gu) ?? []) ws.send(JSON.stringify({ type: 'input', data: chunk })); });
@@ -35,21 +37,21 @@ export default function ResearchTerminal({ targetId, company, host, requiredUser
         const message = JSON.parse(event.data);
         if (message.type === 'ready') setState('connected');
         if (message.type === 'output') terminal?.write(message.data);
-        if (message.type === 'status') { setBurp(message.burp); setCodex(message.codex); }
+        if (message.type === 'status') { setBurp(message.burp); setCodex(message.codex); if (message.burpDetails) setBurpDetails(`PortSwigger MCP · ${message.burpDetails.toolCount} tools${message.burpDetails.version ? ` · ${message.burpDetails.version}` : ''} · BugHunter scope controls apply`); }
         if (message.type === 'error') setError(message.code);
       };
       ws.onclose = () => { if (renewal) clearInterval(renewal); if (!disposed) setState('disconnected'); };
       ws.onerror = () => { if (!disposed) setError('Terminal connection unavailable. Reconnect when the Research console is ready.'); };
     };
     void connect().catch(e => { if (!disposed) { setError(e.message); setState('unavailable'); } });
-    return () => { disposed = true; if (renewal) clearInterval(renewal); observer?.disconnect(); ws?.close(); terminal?.dispose(); };
+    return () => { disposed = true; socket.current = undefined; if (renewal) clearInterval(renewal); observer?.disconnect(); ws?.close(); terminal?.dispose(); };
   }, [targetId, attempt]);
   return <div className={`flex ${embedded ? "h-[650px] rounded border border-border" : "h-dvh"} w-full flex-col overflow-hidden bg-[#090d12] text-slate-200`}>
     <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-800 px-3 py-2 text-xs">
       <Link className="text-slate-400 hover:text-white" href="/research">← Research</Link>
       <h1 className="mr-auto truncate text-sm font-medium">{company} / {host}</h1>
-      <span className="max-w-48 truncate" title={requiredUserAgent}>UA: {requiredUserAgent}</span><span aria-live="polite">Terminal: {state}</span><span>Codex: {codex}</span><span>Burp MCP: {burp}</span>
-      <button className="rounded border border-slate-700 px-2 py-1 hover:bg-slate-800" onClick={() => reconnect(n => n + 1)}>Reconnect</button>
+      <span className="max-w-48 truncate" title={requiredUserAgent}>UA: {requiredUserAgent}</span><span aria-live="polite">Terminal: {state}</span><span>Codex: {codex}</span><span title={burpDetails}>Burp MCP: {burp}</span>
+      <button className="rounded border border-slate-700 px-2 py-1 hover:bg-slate-800" disabled={burp === 'starting' && state === 'connected'} onClick={() => { if (socket.current?.readyState === WebSocket.OPEN) { setBurp('starting'); socket.current.send(JSON.stringify({ type: 'reconnect_mcp' })); } else reconnect(n => n + 1); }}>Reconnect</button>
     </header>
     {error && <p role="alert" className="shrink-0 bg-red-950 px-3 py-2 text-sm">{error}</p>}
     <div ref={element} aria-label={`Codex console for ${host}`} className="min-h-0 flex-1 p-2" />

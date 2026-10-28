@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+umask 077
+rm -f /tmp/bughunter-burp-ready
+# This container owns a temporary Community project, never a user's project
+# file. Remove its previous JVM scratch directories before a restart so Burp's
+# old-temporary-files modal cannot block the private startup wizard.
+python3 - <<'PY'
+import glob, os, shutil
+for path in glob.glob('/tmp/burp*.tmp'):
+    if os.lstat(path).st_uid == os.getuid() and os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path)
+PY
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+# Explicit first-install acknowledgement, never infer a Professional licence.
+if [ "${BURP_ACCEPT_TERMS:-no}" != yes ]; then
+  echo 'Set BURP_ACCEPT_TERMS=yes after reviewing https://portswigger.net/burp/eula to run the dedicated Community instance.' >&2
+  exit 1
+fi
+mkdir -p /home/burp/.java/.userPrefs/burp
+if [ ! -f /home/burp/.java/.userPrefs/burp/prefs.xml ]; then
+  cat > /home/burp/.java/.userPrefs/burp/prefs.xml <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE map SYSTEM "http://java.sun.com/dtd/preferences.dtd">
+<map MAP_XML_VERSION="1.0"><entry key="burp.eula" value="13"/><entry key="use_community_edition" value="true"/></map>
+XML
+fi
+Xvfb :99 -screen 0 1280x900x24 -nolisten tcp &
+xvfb_pid=$!
+java -Xms128m -Xmx1536m -jar /opt/burp/burpsuite.jar --disable-auto-update --user-config-file=/opt/burp/user-options.json &
+burp_pid=$!
+trap 'kill "$burp_pid" "$xvfb_pid" 2>/dev/null || true; wait || true' TERM INT EXIT
+python3 /opt/burp/bootstrap.py
+wait "$burp_pid"
