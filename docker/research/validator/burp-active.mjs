@@ -1,12 +1,15 @@
 import { z } from 'zod';
 import { safeObservationUrl, redactObservationText } from '../../../src/lib/observationSafety.ts';
+import { matchesHost, normalizeFqdn } from '../../../src/lib/bountyProgram.ts';
 const text = max => z.string().max(max);
 const destination = { targetHostname: text(253), targetPort: z.number().int().min(1).max(65535), usesHttps: z.boolean() };
 export const http1Arguments = z.strictObject({ ...destination, content: text(65536) });
 export const http2Arguments = z.strictObject({ ...destination, pseudoHeaders: z.record(text(100), text(4096)), headers: z.record(text(100), text(4096)), requestBody: text(65536) });
 function destinationCheck(a, p) {
   if (p.mode === 'PROGRAM_PASSIVE') throw new Error('TOOL_NOT_ALLOWED');
+  a.targetHostname = normalizeFqdn(a.targetHostname);
   if (a.targetHostname !== p.targetHost || a.targetPort !== p.port || a.usesHttps !== (p.scheme === 'https')) throw new Error('OUT_OF_SCOPE');
+  if (p.programScope?.exclusions.some(rule => matchesHost(a.targetHostname, rule))) throw new Error('OUT_OF_SCOPE');
 }
 function authority(value, p) { return value === p.targetHost || value === `${p.targetHost}:${p.port}`; }
 function pathCheck(value, p) {
@@ -51,7 +54,7 @@ export function enforceHttp2(input, p) {
   if (Object.keys(a.headers).length > 100) throw new Error('UNSAFE_REQUEST');
   for (const [key, value] of Object.entries(a.headers)) {
     const name = key.toLowerCase();
-    if (!/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(name) || /[\r\n\0]/.test(value) || ['connection','transfer-encoding','upgrade'].includes(name) || name in headers) throw new Error('UNSAFE_REQUEST');
+    if (!/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(name) || /[\x00-\x08\x0a-\x1f\x7f]/.test(value) || ['connection','transfer-encoding','upgrade'].includes(name) || name in headers) throw new Error('UNSAFE_REQUEST');
     if (name === 'host' && !authority(value, p)) throw new Error('OUT_OF_SCOPE');
     if (!['user-agent','host','content-length'].includes(name)) headers[name] = value;
   }
@@ -63,7 +66,9 @@ export function enforceHttp2(input, p) {
 export function activeObservation(result, p) {
   const raw = result.content?.filter(c => c.type === 'text').map(c => c.text).join('\n') ?? '';
   if (Buffer.byteLength(raw) > 1024 * 1024) throw new Error('UPSTREAM_LIMIT');
+  const status = /^HTTP\/(?:1\.[01]|2) ([1-5][0-9]{2})(?: |\r|\n|$)/.exec(raw);
   return { source: 'BURP_MCP', targetHost: p.targetHost, observedAt: new Date().toISOString(), classification: 'OBSERVATION', findingCreated: false,
+    transportResult: result.isError ? 'BURP_TOOL_ERROR' : status ? 'TARGET_HTTP_RESPONSE' : 'BURP_TOOL_RESPONSE', remoteStatus: result.isError ? null : status ? Number(status[1]) : null,
     networkDestinationVerified: false, untrustedData: true, response: redactObservationText(raw).replace(/https?:\/\/[^\s<>"`]+/gi, u => safeObservationUrl(u)).slice(0, 16384),
     truncated: raw.length > 16384, upstreamError: Boolean(result.isError), note: 'A response/status/reflection is not a vulnerability. Retain only minimal redacted reproducible evidence under requests/. No redirect was automatically replayed by this gateway.' };
 }

@@ -6,6 +6,7 @@ import { chmod, rm, access } from 'node:fs/promises';
 import { openConsoleWorkspace } from './console-files.mjs';
 import { OfficialBurpConnection } from './burp-proxy.mjs';
 import { toolPolicy, callScopedPortSwigger } from './portswigger-policy.mjs';
+import { BurpTransportError } from './burp-transport.mjs';
 const workspace = await openConsoleWorkspace(), connection = new OfficialBurpConnection();
 const server = new Server({ name: 'PortSwigger MCP (BugHunter scope relay)', version: '3.0.0' }, { capabilities: { tools: { listChanged: true } } });
 let busy, stopped = false, signature = '';
@@ -35,8 +36,8 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
     const result = await callScopedPortSwigger(connection, request.params.name, request.params.arguments ?? {}, workspace.policy);
     return result.content ? result : { content: [{ type: 'text', text: JSON.stringify(result) }] };
   } catch (error) {
-    const code = ['OUT_OF_SCOPE','TOOL_NOT_ALLOWED','UNSAFE_REQUEST','UPSTREAM_LIMIT','HISTORY_ACCESS_DENIED'].includes(error.message) ? error.message : 'UPSTREAM_ERROR';
-    return { isError: true, content: [{ type: 'text', text: code }] };
+    const code = error instanceof BurpTransportError ? error.message : ['OUT_OF_SCOPE','TOOL_NOT_ALLOWED','UNSAFE_REQUEST','UPSTREAM_LIMIT','HISTORY_ACCESS_DENIED'].includes(error.message) ? error.message : 'BURP_MCP_UNAVAILABLE';
+    return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, ...(error.details ?? {transportResult:code,remoteStatus:null}) }) }] };
   }
 });
 // A private per-process control socket allows the authenticated terminal to

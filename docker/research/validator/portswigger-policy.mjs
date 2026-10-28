@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { normalizeFqdn, matchesHost } from '../../../src/lib/bountyProgram.ts';
 import { enforceHttp1, enforceHttp2, activeObservation } from './burp-active.mjs';
 import { sanitizeHistoryItem } from './burp-http.mjs';
+import { BurpTransportError, sendViaBurpProxy } from './burp-transport.mjs';
 const paging = z.object({ count: z.number().int().min(1).max(20), offset: z.number().int().min(0).max(10000), regex: z.string().max(500).optional() }).strict();
 const histories = new Set(['get_proxy_http_history', 'get_proxy_http_history_regex', 'get_organizer_items', 'get_organizer_items_regex']);
 const utilities = new Set(['url_encode', 'url_decode', 'base64_encode', 'base64_decode', 'generate_random_string']);
@@ -15,7 +16,7 @@ export function toolPolicy(name, p) {
   if (['send_http1_request', 'send_http2_request', 'create_repeater_tab', 'create_repeater_tab_http2'].includes(name) && p.mode !== 'PROGRAM_PASSIVE') return 'Exact authorized host only; enforced User-Agent; no automatic retry';
   return 'Blocked by BugHunter policy: no applicable permission or no independently verifiable per-target attribution';
 }
-export async function callScopedPortSwigger(connection, name, input, p) {
+export async function callScopedPortSwigger(connection, name, input, p, { send = sendViaBurpProxy } = {}) {
   if (toolPolicy(name, p).startsWith('Blocked')) throw new Error('TOOL_NOT_ALLOWED');
   if (histories.has(name)) {
     const args = paging.parse(input);
@@ -53,6 +54,9 @@ export async function callScopedPortSwigger(connection, name, input, p) {
   if (tabName !== undefined && tabName !== null && (typeof tabName !== 'string' || tabName.length > 100 || /[\x00-\x1f]/.test(tabName))) throw new Error('UNSAFE_REQUEST');
   const args = http2 ? enforceHttp2(request, p) : enforceHttp1(request, p);
   if (!allowedHistoryHost(args.targetHostname, p)) throw new Error('OUT_OF_SCOPE');
+  if (!repeater && !(http2 && p.scheme === 'http')) return send(name, args, p);
   if (repeater && tabName != null) args.tabName = tabName;
-  return activeObservation(await connection.call(name, args), p);
+  const result = await connection.call(name, args);
+  if (result.isError) throw new BurpTransportError('BURP_TOOL_ERROR');
+  return activeObservation(result, p);
 }

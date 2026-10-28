@@ -1,9 +1,10 @@
 // Adapter for PortSwigger/mcp-server v1.3.0. Never expose raw upstream text.
 import { safeObservationUrl } from '../../../src/lib/observationSafety.ts';
 const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-export function historyArguments(policy, count, offset) {
+export function historyArguments(policy, count, offset, requestId) {
   // This prefilter is an optimization, NOT proof of the actual HTTP destination.
-  return { count, offset, regex: `(?im)^Host:[ \\t]*${escapeRegex(policy.targetHost)}(?::(?:80|443))?[ \\t]*\\r?$` };
+  if (requestId !== undefined && !/^[a-f0-9-]{36}$/i.test(requestId)) throw new Error('INVALID_INPUT');
+  return { count, offset, regex: requestId ? `(?im)^X-BugHunter-Request-Id:[ \\t]*${escapeRegex(requestId)}[ \\t]*\\r?$` : `(?im)^Host:[ \\t]*${escapeRegex(policy.targetHost)}(?::(?:80|443))?[ \\t]*\\r?$` };
 }
 function headers(message) {
   if (typeof message !== 'string' || message.length > 6000) return null;
@@ -38,6 +39,7 @@ export function sanitizeHistoryItem(raw, policy) {
     if (url.hostname !== policy.targetHost || url.port || url.protocol !== `${policy.scheme}:` || url.username || url.password) return null;
   } catch { return null; }
   const ua = req.values.get('user-agent') ?? [];
+  const ids = req.values.get('x-bughunter-request-id') ?? [];
   const locations = res.values.get('location') ?? [];
   let crossHostRedirect = false;
   for (const location of locations) {
@@ -50,6 +52,7 @@ export function sanitizeHistoryItem(raw, policy) {
     contentType: ['application/json', 'text/html', 'text/plain', 'application/javascript', 'text/css', 'application/xml'].includes(mime) ? mime : 'other',
     authenticatedMaterialPresent: req.values.has('authorization') || req.values.has('cookie'),
     setsCookie: res.values.has('set-cookie'), requiredUserAgentMatches: ua.length === 1 && ua[0] === policy.requiredUserAgent,
+    ...(ids.length === 1 && /^[a-f0-9-]{36}$/i.test(ids[0]) ? {requestId:ids[0]} : {}),
     crossHostRedirect, networkDestinationVerified: false,
   };
 }

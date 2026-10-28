@@ -7,10 +7,10 @@ export async function portSwiggerAcceptance({ image, runnerImage, prefix, consol
   let client;
   const probe = () => dexec('node','--input-type=module','-e',`import {diagnoseOfficialBurp} from '/opt/bughunter/docker/research/validator/burp-proxy.mjs';console.log(JSON.stringify(await diagnoseOfficialBurp()));`);
   const javaPids = async () => JSON.parse(await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','node','--input-type=module','-e',`import {readdir,readlink,readFile} from 'node:fs/promises';const ids=[];for(const id of await readdir('/proc')){if(!/^\\d+$/.test(id))continue;try{if(await readlink('/proc/'+id+'/cwd')===process.argv[1]&&(await readFile('/proc/'+id+'/cmdline','utf8')).includes('/opt/portswigger/mcp-proxy-all.jar'))ids.push(Number(id));}catch{}}console.log(JSON.stringify(ids));`,`/workspaces/research_${hostId}`));
-  const codex = (method, params) => dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','sh','-c',`cd /workspaces/research_${hostId} && node --input-type=module -e 'import {codexRead} from "/opt/bughunter/docker/research/validator/codex-rpc.mjs";console.log(JSON.stringify(await codexRead(${JSON.stringify(method)},${JSON.stringify(params)},process.cwd(),45000,true)));'`);
+  const codex = (method, params, id=hostId) => dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','sh','-c',`cd /workspaces/research_${id} && node --input-type=module -e 'import {codexRead} from "/opt/bughunter/docker/research/validator/codex-rpc.mjs";console.log(JSON.stringify(await codexRead(${JSON.stringify(method)},${JSON.stringify(params)},process.cwd(),45000,true)));'`);
   try {
     await run('docker',['run','-d','--name',fixture,'--network',`container:${consoleId}`,'--entrypoint','node',runnerImage,'-e',`require('http').createServer((q,r)=>r.writeHead(200,{'content-type':'text/html'}).end('<html><h1>Actual Burp local proof</h1></html>')).listen(80,'0.0.0.0');`]);
-    await dexec('sh','-c',"printf '\\n127.0.0.1 browser.example.test\\n' >> /etc/hosts");
+    await dexec('sh','-c',"printf '\\n127.0.0.1 browser.example.test tls.example.test\\n' >> /etc/hosts");
     await run('docker',['run','-d','--name',burp,'--network',`container:${consoleId}`,'-e','BURP_ACCEPT_TERMS=yes',image]);
     for(let i=0;i<180;i++) {
       try { await run('docker',['exec',burp,'test','-f','/tmp/bughunter-burp-ready']); break; }
@@ -33,6 +33,19 @@ export async function portSwiggerAcceptance({ image, runnerImage, prefix, consol
     const server=discovered.data.find(s=>s.name==='burp');assert(server);assert(JSON.stringify(server.tools).includes('get_proxy_http_history'));assert(Object.keys(server.tools).length>3);
     const throughCodex=JSON.parse(await codex('mcpServer/tool/call',{server:'burp',tool:'get_proxy_http_history',arguments:{count:20,offset:0}}));
     assert(!throughCodex.isError,JSON.stringify(throughCodex));assert(JSON.stringify(throughCodex).includes(marker),'Native Codex tool call must see the real captured browser request');
+    // A genuine HTTP/2 TLS origin, reached exclusively through real Burp.
+    await run('docker',['exec',fixture,'openssl','req','-x509','-newkey','rsa:2048','-nodes','-days','1','-keyout','/tmp/fixture.key','-out','/tmp/fixture.crt','-subj','/CN=tls.example.test','-addext','subjectAltName=DNS:tls.example.test']);
+    await run('docker',['exec','-d',fixture,'node','-e',`const f=require('fs');require('http2').createSecureServer({key:f.readFileSync('/tmp/fixture.key'),cert:f.readFileSync('/tmp/fixture.crt'),allowHTTP1:true},(q,r)=>r.writeHead(200,{'content-type':'text/plain','x-fixture-protocol':q.httpVersion}).end('Controlled TLS origin')).listen(443,'0.0.0.0');`]);
+    const tls=await webScript(`import {PrismaClient} from '@prisma/client';import {ensureTargetConsole} from './src/server/research/consoleWorkspace.ts';const p=new PrismaClient(),parent=await p.target.findUniqueOrThrow({where:{id:${JSON.stringify(hostId)}}});const scope=await p.scope.create({data:{userId:parent.userId,hostPattern:'tls.example.test',status:'APPROVED'}});const t=await p.target.create({data:{userId:parent.userId,scopeId:scope.id,programId:parent.programId,host:'tls.example.test',scheme:'https'}});await ensureTargetConsole(t.userId,t.id);console.log(JSON.stringify({id:t.id}));await p.$disconnect();`);
+    for(const tool of ['send_http1_request','send_http2_request']) {
+      const base={targetHostname:'tls.example.test',targetPort:443,usesHttps:true};
+      const args=tool==='send_http1_request'?{...base,content:'GET / HTTP/1.1\r\nHost: tls.example.test\r\nUser-Agent: wrong\r\n\r\n'}:{...base,pseudoHeaders:{':method':'GET',':scheme':'https',':authority':'tls.example.test',':path':'/'},headers:{'user-agent':'wrong'},requestBody:''};
+      const sent=JSON.parse(await codex('mcpServer/tool/call',{server:'bughunter_burp',tool,arguments:args},tls.id));assert(!sent.isError,JSON.stringify(sent));
+      const result=JSON.parse(sent.content[0].text);assert.equal(result.remoteStatus,200);assert.equal(result.transport,'BURP_PROXY');assert.equal(result.protocol,tool==='send_http1_request'?'HTTP/1.1':'HTTP/2');
+      const captured=JSON.parse(await codex('mcpServer/tool/call',{server:'bughunter_burp',tool:'burp_history',arguments:{count:10,offset:0,requestId:result.requestId}},tls.id));assert(!captured.isError,JSON.stringify(captured));
+      const record=JSON.parse(captured.content[0].text).items.find(i=>i.requestId===result.requestId);assert(record,'The exact active request must appear in official Proxy History');assert.equal(record.status,200);assert(record.requiredUserAgentMatches);
+      console.log('REAL ACTIVE BURP VERIFIED:',JSON.stringify({tool,protocol:result.protocol,requestId:result.requestId,remoteStatus:200,historyStatus:record.status,requiredUserAgentMatches:record.requiredUserAgentMatches,nativeCodex:true}));
+    }
     // Real global target console, without any pre-existing host, sees the same
     // upstream inventory and scoped history while rejecting active calls.
     const program=await page.evaluate(async()=>{const r=await fetch('/api/programs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({companyName:'Real Burp isolated program',requiredUserAgent:'Research-Test/1',scopeRules:['*.example.test'],outOfScope:['admin.example.test']})});if(!r.ok)throw new Error(await r.text());return r.json();});

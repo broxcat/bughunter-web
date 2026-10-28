@@ -42,9 +42,9 @@ describe('PortSwigger scope relay', () => {
     await expect(callScopedPortSwigger(connection,'create_repeater_tab',args,{...policy,programScope:{rules:[],exclusions:['app.example.test']}})).rejects.toThrow('OUT_OF_SCOPE'); expect(connection.call).not.toHaveBeenCalled();
   });
   it('does not retry a failed active call', async () => {
-    const connection = {call:vi.fn(async()=>{throw new Error('disconnect');})};
-    await expect(callScopedPortSwigger(connection,'send_http1_request',{targetHostname:'app.example.test',targetPort:443,usesHttps:true,content:'GET / HTTP/1.1\r\nHost: app.example.test\r\n\r\n'},policy)).rejects.toThrow('disconnect');
-    expect(connection.call).toHaveBeenCalledTimes(1);
+    const send=vi.fn(async()=>{throw new Error('disconnect');});const connection = {call:vi.fn()};
+    await expect(callScopedPortSwigger(connection,'send_http1_request',{targetHostname:'app.example.test',targetPort:443,usesHttps:true,content:'GET / HTTP/1.1\r\nHost: app.example.test\r\n\r\n'},policy,{send})).rejects.toThrow('disconnect');
+    expect(send).toHaveBeenCalledTimes(1);expect(connection.call).not.toHaveBeenCalled();
   });
   it('retains wildcard boundaries and fails closed for unattributable global tools',()=>{
     expect(allowedHistoryHost('notexample.test',program)).toBe(false); expect(allowedHistoryHost('api.example.test',program)).toBe(true);

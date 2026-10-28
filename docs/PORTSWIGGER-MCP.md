@@ -1,5 +1,7 @@
 # PortSwigger MCP in the target and host consoles
 
+For active-request transport, typed errors and correlated Proxy History, see [BURP-TRANSPORT.md](BURP-TRANSPORT.md). The original integration audit below predates that correction.
+
 ## Diagnosis
 
 Before this change the Codex project configuration declared only `bughunter_burp`.

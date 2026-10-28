@@ -12,16 +12,16 @@ export class BurpResearch {
     catch (error) { upstream = ['TIMEOUT', 'INCOMPATIBLE'].includes(error.message) ? error.message : 'UNAVAILABLE'; }
     return { version: 1, workspaceId: this.policy.workspaceId, checkedAt: new Date().toISOString(), runner: 'AVAILABLE', configuration: 'CONFIGURED', upstream, mode: 'PASSIVE_METADATA_ONLY' };
   }
-  async history(count, offset, host) {
+  async history(count, offset, host, requestId) {
     let policy = this.policy;
     if (policy.mode === 'PROGRAM_PASSIVE') {
       if (!host || normalizeFqdn(host) !== host || host.includes('*') || !policy.programScope?.rules.some(r => matchesHost(host, r)) || policy.programScope.exclusions.some(r => matchesHost(host, r))) throw new Error('OUT_OF_SCOPE');
       policy = { ...policy, targetHost: host };
     } else if (host && host !== policy.targetHost) throw new Error('OUT_OF_SCOPE');
-    const result = await this.upstream(client => client.callTool({ name: 'get_proxy_http_history_regex', arguments: historyArguments(policy, count, offset) }, undefined, { timeout: 4000 }), 5000);
+    const result = await this.upstream(client => client.callTool({ name: 'get_proxy_http_history_regex', arguments: historyArguments(policy, count, offset, requestId) }, undefined, { timeout: 4000 }), 5000);
     const { observations, skipped } = parseHistory(result, policy);
     const observedAt = new Date().toISOString();
-    const items = observations.map(metadata => ({ observationId: randomUUID(), observedAt, ...metadata }));
+    const items = observations.filter(item=>!requestId || item.requestId===requestId).map(metadata => ({ observationId: randomUUID(), observedAt, ...metadata }));
     for (const item of items) {
       this.observations.set(item.observationId, item);
       if (this.observations.size > 100) this.observations.delete(this.observations.keys().next().value);

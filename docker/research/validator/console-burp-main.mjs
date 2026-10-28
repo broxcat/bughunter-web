@@ -3,13 +3,19 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { openConsoleWorkspace } from './console-files.mjs';
-import { withOfficialBurp } from './burp-proxy.mjs';
+import { burpEndpoint } from './burp-proxy.mjs';
+import { withBurp } from './burp-upstream.mjs';
+import { BurpTransportError, sendViaBurpProxy } from './burp-transport.mjs';
 import { BurpResearch } from './burp-service.mjs';
-import { http1Arguments, http2Arguments, enforceHttp1, enforceHttp2, activeObservation } from './burp-active.mjs';
+import { http1Arguments, http2Arguments, enforceHttp2, activeObservation } from './burp-active.mjs';
 import { saveConsoleObservation } from './console-evidence.mjs';
 const workspace = await openConsoleWorkspace();
-const research = new BurpResearch(workspace.policy, withOfficialBurp);
-const empty = z.strictObject({}), paging = z.strictObject({ count: z.number().int().min(1).max(20).default(10), offset: z.number().int().min(0).max(10000).default(0), host: z.string().max(253).optional() }), save = z.strictObject({ observationId: z.uuid() });
+// Reuse the bounded official SSE client for bridge diagnostics/history; avoid
+// spawning a Java client for every read. Codex's burp server retains its official
+// Java proxy for inventory, utilities and Repeater.
+const upstream = (action, timeout = 8000) => withBurp(action, timeout, burpEndpoint().url);
+const research = new BurpResearch(workspace.policy, upstream);
+const empty = z.strictObject({}), paging = z.strictObject({ count: z.number().int().min(1).max(20).default(10), offset: z.number().int().min(0).max(10000).default(0), host: z.string().max(253).optional(), requestId: z.uuid().optional() }), save = z.strictObject({ observationId: z.uuid() });
 async function status() { const result = await research.diagnostic(); return { ...result, mode: workspace.policy.mode }; }
 if (process.argv[2] === 'status') {
   const result = await status(); console.log(`Burp MCP: ${result.upstream}; scoped HTTP gateway via official PortSwigger mcp-proxy.`); process.exitCode = result.upstream === 'AVAILABLE' ? 0 : 1; await workspace.root.close();
@@ -29,19 +35,25 @@ if (process.argv[2] === 'status') {
       let result;
       switch (req.params.name) {
         case 'burp_status': empty.parse(req.params.arguments ?? {}); result = await status(); break;
-        case 'burp_history': { const a = paging.parse(req.params.arguments ?? {}); result = await research.history(a.count, a.offset, a.host); break; }
+        case 'burp_history': { const a = paging.parse(req.params.arguments ?? {}); result = await research.history(a.count, a.offset, a.host, a.requestId); break; }
         case 'burp_save_observation': result = { ref: await saveConsoleObservation(workspace.root, research.evidence(save.parse(req.params.arguments).observationId)) }; break;
         case 'send_http1_request': case 'send_http2_request': {
-          const args = req.params.name === 'send_http1_request' ? enforceHttp1(req.params.arguments, workspace.policy) : enforceHttp2(req.params.arguments, workspace.policy);
-          const upstream = await withOfficialBurp(client => client.callTool({ name: req.params.name, arguments: args }, undefined, { timeout: 12000 }), 15000);
-          result = activeObservation(upstream, workspace.policy); break;
+          if (req.params.name === 'send_http2_request' && workspace.policy.scheme === 'http') {
+            // Preserve the existing cleartext HTTP/2 Montoya capability. It does
+            // not traverse Proxy History; never claim that it does.
+            const args = enforceHttp2(req.params.arguments, workspace.policy);
+            const response = await upstream(client => client.callTool({ name: req.params.name, arguments: args }, undefined, { timeout: 12000 }), 15000);
+            if (response.isError) throw new BurpTransportError('BURP_TOOL_ERROR');
+            result = { ...activeObservation(response, workspace.policy), transport: 'PORTSWIGGER_MONTOYA', historyCapture: false };
+          } else result = await sendViaBurpProxy(req.params.name, req.params.arguments, workspace.policy);
+          break;
         }
         default: throw new Error('TOOL_NOT_ALLOWED');
       }
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (e) {
-      const code = ['OUT_OF_SCOPE','UNSAFE_REQUEST','TIMEOUT','UNAVAILABLE','INCOMPATIBLE','EVIDENCE_LIMIT','OBSERVATION_EXPIRED','TOOL_NOT_ALLOWED'].includes(e.message) ? e.message : 'INVALID_INPUT';
-      return { isError: true, content: [{ type: 'text', text: `${code}: request rejected or outcome unknown. Never retry an active request automatically after timeout; inspect Burp before a distinct next test.` }] };
+      const code = e instanceof BurpTransportError ? e.message : ['UNAVAILABLE','INCOMPATIBLE'].includes(e.message) ? 'BURP_MCP_UNAVAILABLE' : ['OUT_OF_SCOPE','UNSAFE_REQUEST','TIMEOUT','EVIDENCE_LIMIT','OBSERVATION_EXPIRED','TOOL_NOT_ALLOWED'].includes(e.message) ? e.message : 'INVALID_INPUT';
+      return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, ...(e.details ?? {transportResult:code,remoteStatus:null}), note:'No HTTP response is fabricated for an internal error. Outcome may be unknown; never retry an active request automatically after TIMEOUT.' }) }] };
     }
   });
   const transport = new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: 131072 });
