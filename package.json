@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:network": "SCANNER_HTTP_TESTS=1 vitest run tests/network",
     "test:ui": "node tests/e2e/targetWorkflow.mjs",

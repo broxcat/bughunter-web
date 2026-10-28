@@ -1,6 +1,7 @@
 "use client";
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import { terminalHandlesKey } from '@/lib/research/terminalClipboard';
 import '@xterm/xterm/css/xterm.css';
 
 export default function ResearchTerminal({ targetId, company, host, requiredUserAgent, embedded = false }: { targetId: string; company: string; host: string; requiredUserAgent: string; embedded?: boolean }) {
@@ -14,6 +15,7 @@ export default function ResearchTerminal({ targetId, company, host, requiredUser
       const [{ Terminal }, { FitAddon }] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
       if (disposed || !element.current) return;
       terminal = new Terminal({ cursorBlink: true, scrollback: 3000, fontSize: 14, fontFamily: getComputedStyle(element.current).getPropertyValue('--font-jetbrains-mono').trim() || 'monospace', theme: { background: '#090d12', foreground: '#d9e2ef' }, allowProposedApi: false });
+      terminal.attachCustomKeyEventHandler(event => terminalHandlesKey(event, terminal!.hasSelection()));
       const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(element.current); fit.fit(); terminal.focus();
       setError(''); setState('connecting');
       const ticket = async () => {

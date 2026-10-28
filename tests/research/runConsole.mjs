@@ -15,6 +15,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { issueTerminalTicket } from '../../src/lib/research/terminal.ts';
 import { portSwiggerAcceptance } from './portSwiggerAcceptance.mjs';
+import { verifyConsoleClipboard } from './clipboard.mjs';
 import { fakeBurp } from './fakeBurp.mjs';
 const execute = promisify(execFile), prefix = `bh-console-${randomUUID().slice(0,8)}`, temp = await mkdtemp(join(tmpdir(),prefix));
 const run = async (file,args,options={}) => (await execute(file,args,{timeout:60000,maxBuffer:2**20,...options})).stdout.trim();
@@ -71,6 +72,7 @@ try {
  const inspected=JSON.parse(await run('docker',['inspect',consoleId]))[0];assert(inspected.NetworkSettings.Ports['22/tcp'].every(p=>p.HostIp==='127.0.0.1'));assert(!JSON.stringify(inspected.Config.Env).match(/AUTH_SECRET|DATABASE_URL|REDIS_URL|CREDENTIALS_ENCRYPTION_KEY/));assert(!JSON.stringify(inspected.Mounts).includes('docker.sock'));assert(!inspected.HostConfig.Privileged);
  const dbId=await compose('ps','-q','db'),redisId=await compose('ps','-q','redis');for(const [id,port] of [[dbId,5432],[redisId,6379]]){const ip=JSON.parse(await run('docker',['inspect',id]))[0].NetworkSettings.Networks[prefix+'_backend'].IPAddress;await assert.rejects(dexec('node','-e',`const s=require('net').connect(${port},'${ip}',()=>process.exit(0));s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),1000);`));}
  console.log('CONSOLE VERIFIED: real xterm/browser/auth tickets, PTY/Codex --yolo, same tmux across refreshes, distinct target sessions, scope revoke, non-root/no app secrets/socket/backend access, exact Codex skill discovery.');
+ await verifyConsoleClipboard({page,context,dexec,targetId:data.ids[1]});
  // Burp and Playwright wire checks are below; their fixture never contacts the Internet.
  const targetRequests=[], proxyConnections=[];
  targetFixture=createServer((req,res)=>{targetRequests.push({url:req.url,ua:req.headers['user-agent'],host:req.headers.host});if(req.url==='/timeout')return;if(req.url==='/redirect'){res.writeHead(302,{Location:'http://foreign.example.test/never'}).end();return;}res.writeHead(200,{'Content-Type':'text/html','Set-Cookie':'sid=LOCAL_SENSITIVE_COOKIE'}).end('<html><h1>Local target fixture</h1></html>');});await new Promise(r=>targetFixture.listen(0,'127.0.0.1',r));
