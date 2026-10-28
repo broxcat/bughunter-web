@@ -9,6 +9,13 @@ const HTTP_TOOLS = new Set(["httpx", "katana", "nuclei", "dalfox"]);
 export function enforcedToolArgs(cmd: string, args: string[]): string[] {
   const ctx = currentTargetExecution();
   if (ctx.requestGuard) throw new Error("External CLI request counts cannot be enforced inside a bounded Hunt");
+  if (cmd === 'subfinder') {
+    if (!ctx.programReconId || args.length !== 2 || args[0] !== '-d' || !ctx.reconSeeds?.includes(args[1])) throw new Error('Unauthorized passive enumeration seed');
+    // No -active/-nW, resolver or target HTTP probes. Provider traffic is
+    // passive lookup traffic, not an HTTP request to the bounty target.
+    return ['-d', args[1], '-silent', '-duc', '-timeout', '15', '-max-time', '1', '-rl', '5'];
+  }
+  if (ctx.programReconId) throw new Error('Program Recon supports passive enumeration only');
   if (cmd === "nmap") return ["-sT", "-Pn", "-n", ctx.host.split(":")[0]];
   if (!HTTP_TOOLS.has(cmd)) throw new Error("Unaudited scanner tool; refusing execution");
   for (const arg of args) if (/^https?:\/\//i.test(arg)) assertExecutionUrl(arg, ctx);

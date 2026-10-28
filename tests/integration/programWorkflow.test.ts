@@ -4,7 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, rm, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-const mocks=vi.hoisted(()=>({auth:vi.fn(),purge:vi.fn()}));
+const mocks=vi.hoisted(()=>({auth:vi.fn(),purge:vi.fn(),command:vi.fn()}));
+vi.mock('@/server/scanners/runCommand',()=>({runCommand:mocks.command}));
 vi.mock('@/lib/auth',()=>({auth:mocks.auth}));
 vi.mock('@/server/queue/scanQueue',()=>({purgeScanJobs:mocks.purge,deliverScanJob:vi.fn(async()=>({alreadyPresent:false}))}));
 vi.mock('@/server/queue/logBus',()=>({publishScanLog:vi.fn(async()=>{})}));
@@ -23,7 +24,7 @@ let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/progr
     const pair=generateKeyPairSync('ed25519');process.env.RESEARCH_TERMINAL_PRIVATE_KEY_FILE=join(root,'private.pem');await writeFile(process.env.RESEARCH_TERMINAL_PRIVATE_KEY_FILE,pair.privateKey.export({type:'pkcs8',format:'pem'}),{mode:0o600});
   },30000);
   beforeEach(async()=>{
-    vi.restoreAllMocks();mocks.purge.mockReset();mocks.purge.mockResolvedValue(undefined);
+    vi.restoreAllMocks();mocks.command.mockReset();mocks.command.mockResolvedValue({code:0,timedOut:false});mocks.purge.mockReset();mocks.purge.mockResolvedValue(undefined);
     userId=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;mocks.auth.mockResolvedValue({user:{id:userId}});
     programId=(await p.bountyProgram.create({data:{ownerId:userId,companyName:'Program without hosts',requiredUserAgent:'Workflow/1',scopeRules:['*.example.test'],outOfScope:['admin.example.test'],rulesOfEngagement:'Passive Recon only; no destructive actions.'}})).id;
   });
@@ -47,6 +48,72 @@ let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/progr
     for(const [host,state] of [['admin.example.test','EXCLUDED'],['evilexample.test','OUT_OF_SCOPE'],['example.test.evil.test','OUT_OF_SCOPE'],['example.test','OUT_OF_SCOPE']])expect(await persist(r.id,host,'CERTIFICATE_TRANSPARENCY')).toMatchObject({state,added:false});
     for(const input of ['x;touch /tmp/unsafe','https://api.example.test','*.example.test'])expect(await persist(r.id,input,'CERTIFICATE_TRANSPARENCY')).toBeNull();
     expect(await p.target.count({where:{programId,contextOnly:false}})).toBe(0);expect(await p.scanRun.count({where:{target:{programId}}})).toBe(1);
+  });
+  it.each([
+    {rules:['*.example.test'],output:['api.example.test','www.example.test','dev.example.test'],accepted:['api.example.test','dev.example.test','www.example.test'],seeds:['example.test']},
+    {rules:['*.example.test'],output:['api.example.test','api.example.test','API.EXAMPLE.TEST.'],accepted:['api.example.test'],seeds:['example.test']},
+    {rules:['*.example.test'],output:['api.example.test','api.other.test','example.test.attacker.net','example.test'],accepted:['api.example.test'],seeds:['example.test']},
+    {rules:['*.example.test'],output:['api.example.test','admin.example.test','foo.internal.example.test','www.example.test'],accepted:['api.example.test','www.example.test'],seeds:['example.test']},
+    {rules:['*.api.example.test'],output:['v1.api.example.test','internal.v2.api.example.test','www.example.test','api.example.test'],accepted:['internal.v2.api.example.test','v1.api.example.test'],seeds:['api.example.test']},
+    {rules:['*.example.test','api.other.test','*.services.company.test','example.test'],output:[],accepted:['api.other.test','example.test'],seeds:['example.test','api.other.test','services.company.test']},
+    {rules:['api.example.test'],output:[],accepted:['api.example.test'],seeds:['api.example.test']},
+  ])('enumerates $rules through the existing wrapper, validates and persists results',async({rules,output,accepted,seeds})=>{
+    await p.bountyProgram.update({where:{id:programId},data:{scopeRules:rules,outOfScope:['admin.example.test','*.internal.example.test']}});
+    const r=await run();
+    mocks.command.mockImplementation(async(_cmd,_args,options)=>{for(const host of output)await options.onStdoutLine(host);return{code:0,timedOut:false};});
+    vi.spyOn(globalThis,'fetch').mockImplementation(async()=>new Response('[]'));
+    const {runRecon}=await import('@/server/scanners/recon');const {withTargetExecution}=await import('@/server/execution');
+    expect(await withTargetExecution({targetId:r.targetId,host:'program.invalid',programReconId:programId,requiredUserAgent:'laziza',qualifying:[],nonQualifying:[]},()=>runRecon('program.invalid',r.id))).toEqual({outcome:'SUCCESS'});
+    expect(mocks.command.mock.calls.map(call=>call[0])).toEqual(seeds.map(()=> 'subfinder'));
+    expect(mocks.command.mock.calls.map(call=>call[1])).toEqual(seeds.map(seed=>['-d',seed]));
+    expect((await p.target.findMany({where:{programId,active:true,contextOnly:false},orderBy:{host:'asc'}})).map(t=>t.host)).toEqual(accepted);
+    expect((await p.bountyProgram.findUniqueOrThrow({where:{id:programId}})).scopeRules).toEqual(rules);
+  });
+  it('makes discoveries visible while subfinder is still running and reuses the same job lifecycle',async()=>{
+    const r=await run();let release!:()=>void,first!:()=>void;
+    const hold=new Promise<void>(resolve=>{release=resolve;}),discovered=new Promise<void>(resolve=>{first=resolve;});
+    mocks.command.mockImplementation(async(_cmd,_args,options)=>{await options.onStdoutLine('api.example.test');first();await hold;await options.onStdoutLine('www.example.test');return{code:0,timedOut:false};});
+    vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('[]'));
+    const {runRecon}=await import('@/server/scanners/recon');const {withTargetExecution}=await import('@/server/execution');
+    const pending=withTargetExecution({targetId:r.targetId,host:'program.invalid',programReconId:programId,requiredUserAgent:'laziza',qualifying:[],nonQualifying:[]},()=>runRecon('program.invalid',r.id));
+    await discovered;expect(await p.target.count({where:{programId,host:'api.example.test'}})).toBe(1);expect(await p.target.count({where:{programId,host:'www.example.test'}})).toBe(0);
+    release();await pending;expect(await p.target.count({where:{programId,active:true}})).toBe(2);
+  });
+  it('synchronizes an explicitly added/edited/removed wildcard and accepts both program and legacy Recon entry points',async()=>{
+    await p.bountyProgram.update({where:{id:programId},data:{scopeRules:[]}});
+    const {mutateHost}=await import('@/server/programHosts');
+    const wildcard=await mutateHost(userId,programId,'ADD',{host:'*.example.test'});
+    expect((await p.bountyProgram.findUniqueOrThrow({where:{id:programId}})).scopeRules).toEqual(['*.example.test']);
+    const {POST:start}=await import('@/app/api/programs/[id]/recon/route');
+    expect((await start(new Request('http://localhost',{method:'POST'}),{params:Promise.resolve({id:programId})})).status).toBe(201);
+    expect(await p.target.count({where:{programId,active:true,host:{not:{startsWith:'*.'}}}})).toBe(0);
+    const {loadTargetExecution}=await import('@/server/execution');await expect(loadTargetExecution(wildcard.id)).rejects.toThrow();expect((await loadTargetExecution(wildcard.id,'RECON')).programReconId).toBe(programId);
+    const edited=await mutateHost(userId,programId,'EDIT',{hostId:wildcard.id,host:'*.api.example.test'});
+    expect((await p.bountyProgram.findUniqueOrThrow({where:{id:programId}})).scopeRules).toEqual(['*.api.example.test']);
+    await mutateHost(userId,programId,'REMOVE',{hostId:edited.id});expect((await p.bountyProgram.findUniqueOrThrow({where:{id:programId}})).scopeRules).toEqual([]);
+  });
+  it('keeps wildcard Recon available after editing only exclusions or User-Agent',async()=>{
+    const {PATCH}=await import('@/app/api/programs/[id]/route');
+    for(const change of [{outOfScope:['admin.example.test']},{requiredUserAgent:'laziza'}]){
+      const response=await PATCH(new Request('http://localhost',{method:'PATCH',body:JSON.stringify(change)}),{params:Promise.resolve({id:programId})});expect(response.status).toBe(200);
+      expect((await p.bountyProgram.findUniqueOrThrow({where:{id:programId}})).scopeRules).toEqual(['*.example.test']);
+    }
+  });
+  it('rejects buffered late discoveries after cancellation or complete target deletion',async()=>{
+    const r=await run();await persist(r.id,'api.example.test','SUBFINDER');
+    await p.scanRun.update({where:{id:r.id},data:{cancelRequestedAt:new Date(),status:'CANCELLED'}});
+    await expect(persist(r.id,'late.example.test','SUBFINDER')).rejects.toThrow('Recon stopped');
+    await remove(userId,programId);await expect(persist(r.id,'later.example.test','SUBFINDER')).rejects.toThrow();
+    expect(await p.target.count({where:{programId}})).toBe(0);
+  });
+  it('repairs only approved, explicitly declared wildcard rules during migration, idempotently',async()=>{
+    await p.bountyProgram.update({where:{id:programId},data:{scopeRules:[]}});
+    for(const [host,status,source] of [['*.repair.example.test','APPROVED',null],['*.revoked.example.test','REVOKED',null],['*.discovered.example.test','APPROVED','SUBFINDER']] as const){
+      const scope=await p.scope.create({data:{userId,hostPattern:host,status}});await p.target.create({data:{programId,userId,scopeId:scope.id,host,discoverySource:source}});
+    }
+    const sql=await readFile('prisma/migrations/20261028140000_reconcile_wildcard_scope_rules/migration.sql','utf8');
+    await p.$executeRawUnsafe(sql);const first=await p.bountyProgram.findUniqueOrThrow({where:{id:programId}});expect(first.scopeRules).toEqual(['*.repair.example.test']);
+    await p.$executeRawUnsafe(sql);expect((await p.bountyProgram.findUniqueOrThrow({where:{id:programId}})).updatedAt).toEqual(first.updatedAt);
   });
   it('runs the existing Recon entry point in passive program mode and persists a streamed host before enumeration ends',async()=>{
     const r=await run();let stream!:ReadableStreamDefaultController<Uint8Array>;

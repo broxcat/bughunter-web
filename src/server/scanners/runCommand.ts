@@ -23,6 +23,7 @@ export type RunCommandOptions = {
   scanRunId: string;
   timeoutMs: number;
   signal?: AbortSignal;
+  onStdoutLine?: (line: string) => Promise<void>;
 };
 
 export type RunCommandResult = {
@@ -76,6 +77,12 @@ export async function runCommand(
       ...(/^cookie:/i.test(arg) ? value.split(";").map(pair => pair.slice(pair.indexOf("=") + 1).trim()) : [])].filter(Boolean);
   });
   const redact = (line: string) => secrets.reduce((text, secret) => text.replaceAll(secret, "[REDACTED]"), line);
+
+  let outputWork = Promise.resolve(), outputError: unknown;
+  // A cancellation is not complete while an incremental database write is
+  // still in flight. Future buffered lines are ignored after cancellation.
+  const releaseOutput = control?.track(async () => { await outputWork; });
+  try {
 
   const result = await new Promise<RunCommandResult>((resolve) => {
     void record(scanRunId, safeCommandSummary(cmd, args), "STDOUT");
@@ -132,21 +139,34 @@ export async function runCommand(
       STDOUT: "",
       STDERR: "",
     };
+    const consume = (line: string, stream: 'STDOUT' | 'STDERR') => {
+      void record(scanRunId, redact(line), stream);
+      if (stream === 'STDOUT' && opts.onStdoutLine) {
+        child.stdout!.pause();
+        outputWork = outputWork.then(async () => {
+          if (!signal.aborted && !timedOut && !outputError) await opts.onStdoutLine!(line);
+        }).catch(error => { outputError ??= error; void stop(false); });
+      }
+    };
 
     const pump = (chunk: Buffer, stream: "STDOUT" | "STDERR") => {
       buffers[stream] += chunk.toString("utf8");
+      if (opts.onStdoutLine && buffers[stream].length > 1024 * 1024) {
+        outputError ??= new Error('Enumeration output line limit exceeded'); void stop(false); return;
+      }
       let idx: number;
       while ((idx = buffers[stream].indexOf("\n")) !== -1) {
         const line = buffers[stream].slice(0, idx).replace(/\r$/, "");
         buffers[stream] = buffers[stream].slice(idx + 1);
-        void record(scanRunId, redact(line), stream);
+        consume(line, stream);
       }
+      if (stream === 'STDOUT' && opts.onStdoutLine) void outputWork.then(() => child.stdout!.resume());
     };
 
     const flush = () => {
       (["STDOUT", "STDERR"] as const).forEach((stream) => {
         if (buffers[stream].length > 0) {
-          void record(scanRunId, redact(buffers[stream].replace(/\r$/, "")), stream);
+          consume(buffers[stream].replace(/\r$/, ""), stream);
           buffers[stream] = "";
         }
       });
@@ -187,6 +207,9 @@ export async function runCommand(
       finish(toolSpawnFailed ? null : toolExit ? toolExit.code : code, toolSpawnFailed);
     });
   });
+  await outputWork;
+  if (outputError) throw outputError;
   if (result.code === 0 && !result.timedOut && !result.cancelled) await recordUsefulScanWork();
   return result;
+  } finally { releaseOutput?.(); }
 }

@@ -32,5 +32,5 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ ...target, scanRuns: target.scanRuns.map(withScanDispatch), scanRejection: scanRejection(target) });
+  return NextResponse.json({ ...target, scanRuns: target.scanRuns.map(withScanDispatch), scanRejection: scanRejection(target, 'RECON') });
 }

@@ -76,9 +76,10 @@ export async function runRecon(_host: string, scanRunId: string): Promise<ScanEx
   }
 
   // DNS records only: discovered identities are never auto-authorized.
-  // Passive provider HTTP has no reliable per-program UA control in subfinder.
+  // Passive subdomain enumeration belongs to program Recon. This host stage
+  // remains confined to the selected concrete host.
   // DNS-only resolution performs no HTTP and does not authorize discovered hosts.
-  await record({ step: "subfinder", state: "SKIPPED", reason: "disabled: provider HTTP cannot guarantee Target User-Agent; DNS resolution USER_AGENT_NOT_APPLICABLE" });
+  await record({ step: "subfinder", state: "SKIPPED", reason: "performed in program Recon; selected-host discovery does not expand authorization; DNS resolution USER_AGENT_NOT_APPLICABLE" });
   try {
     throwIfScanAborted();
     await beforeScanNetwork();

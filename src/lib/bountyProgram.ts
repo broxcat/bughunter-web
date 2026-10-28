@@ -36,11 +36,23 @@ export const programSchema = z.object({
   qualifying: z.array(z.enum(VULNERABILITY_FAMILIES)).default([]),
   nonQualifying: z.array(z.enum(VULNERABILITY_FAMILIES)).default([]),
 });
-export const programUpdateSchema = programSchema.omit({ scopeHosts: true }).partial();
+// Zod 4 applies nested defaults even under partial(). A PATCH must leave every
+// absent policy field untouched, especially the wildcard discovery rules.
+export const programUpdateSchema = programSchema.omit({ scopeHosts: true }).extend({
+  rewardCurrency: programSchema.shape.rewardCurrency.removeDefault(),
+  scopeRules: programSchema.shape.scopeRules.removeDefault(),
+  outOfScope: programSchema.shape.outOfScope.removeDefault(),
+  qualifying: programSchema.shape.qualifying.removeDefault(),
+  nonQualifying: programSchema.shape.nonQualifying.removeDefault(),
+}).partial();
 
 /** A wildcard covers subdomains only. Explicit exclusions always win. */
 export function matchesHost(host: string, rule: string): boolean {
   return rule.startsWith("*.") ? host.endsWith(rule.slice(1)) && host !== rule.slice(2) : host === rule;
+}
+/** Technical seeds only. Never rewrite the original authorization rules. */
+export function reconSeeds(rules: readonly string[]): string[] {
+  return [...new Set(rules.map(normalizeFqdn).map(rule => rule.startsWith('*.') ? rule.slice(2) : rule))];
 }
 export function isExcluded(host: string, exclusions: readonly string[]): boolean {
   // A wildcard overlapping an exclusion cannot be used as an execution target.

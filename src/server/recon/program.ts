@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/prisma';
-import { matchesHost, normalizeFqdn } from '@/lib/bountyProgram';
-import { currentTargetExecution } from '../execution';
+import { matchesHost, normalizeFqdn, reconSeeds } from '@/lib/bountyProgram';
+import { currentTargetExecution, withTargetExecution } from '../execution';
+import { runCommand } from '../scanners/runCommand';
+import { commandStepResult } from '../scanners/result';
 import { beforeScanNetwork, currentScanControl, recordUsefulScanWork, throwIfScanAborted } from '../scanControl';
 import { logLine } from '../scanners/context';
 import type { ScanExecutionResult } from '../scanners/result';
@@ -14,10 +16,12 @@ export async function persistProgramDiscovery(scanRunId: string, input: string, 
   try { host = normalizeFqdn(input.trim()); if (host.startsWith('*.')) return null; } catch { return null; }
   return prisma.$transaction(async tx => {
     const run = await tx.scanRun.findUniqueOrThrow({ where: { id: scanRunId }, include: { target: true } });
-    if (!run.target.contextOnly || !run.target.programId || run.type !== 'RECON') throw new Error('Invalid discovery context');
+    if ((!run.target.contextOnly && !run.target.host.startsWith('*.')) || !run.target.programId || run.type !== 'RECON') throw new Error('Invalid discovery context');
     const programId = run.target.programId;
     const locked = await tx.$queryRaw<{id:string}[]>`SELECT id FROM "BountyProgram" WHERE id=${programId} AND "ownerId"=${run.target.userId} AND "deletingAt" IS NULL FOR UPDATE`;
-    if (!locked.length || run.cancelRequestedAt || run.status !== 'RUNNING') throw new Error('Recon stopped');
+    if (!locked.length) throw new Error('Recon stopped');
+    const current = await tx.scanRun.findUniqueOrThrow({where:{id:scanRunId},include:{target:{include:{scope:true}}}});
+    if (current.cancelRequestedAt || current.status !== 'RUNNING' || current.target.scope.status !== 'APPROVED' || current.target.scope.userId !== run.target.userId) throw new Error('Recon stopped');
     const existing = await tx.hostDiscovery.findUnique({ where: { scanRunId_host: { scanRunId, host } } });
     if (existing) return { ...existing, firstObservation: false };
     const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId } });
@@ -75,19 +79,41 @@ export async function runProgramRecon(scanRunId: string): Promise<ScanExecutionR
   let seen = 0, failures = 0;
   const discover = async (host: string, source: string) => {
     throwIfScanAborted();
+    if (seen >= 10000) throw new Error('Discovery limit exceeded');
     const row = await persistProgramDiscovery(scanRunId, host, source);
     if (row?.firstObservation) { seen++; await logLine(scanRunId, `[discovery] ${row.host}: ${row.state}${row.added ? ' (new host)' : ''}`); }
   };
-  await logLine(scanRunId, '[recon] Program passive enumeration: scope seeds → certificate transparency → incremental inventory. No active scans.');
+  const seeds = reconSeeds(program.scopeRules);
+  await logLine(scanRunId, '[recon] Program passive enumeration: scope seeds → subfinder → certificate transparency → incremental inventory. No active scans.');
   for (const rule of program.scopeRules) if (!rule.startsWith('*.')) await discover(rule, 'SCOPE_RULE');
-  for (const [index, rule] of program.scopeRules.slice(0, 50).entries()) {
+  for (const [index, seed] of seeds.slice(0, 50).entries()) {
     throwIfScanAborted();
-    await logLine(scanRunId, `[recon] Certificate transparency ${index + 1}/${Math.min(program.scopeRules.length, 50)}: ${rule}`);
+    await logLine(scanRunId, `[recon] subfinder ${index + 1}/${Math.min(seeds.length, 50)}; Recon seed: ${seed}`);
+    try {
+      const timeoutMs = 75000;
+      const result = await withTargetExecution({ ...execution, reconSeeds: seeds }, () => runCommand('subfinder', ['-d', seed], {
+        scanRunId, timeoutMs, signal: currentScanControl()?.signal,
+        onStdoutLine: line => discover(line, 'SUBFINDER'),
+      }));
+      throwIfScanAborted();
+      const step = commandStepResult('subfinder', result, timeoutMs);
+      if (step.state !== 'SUCCESS') failures++;
+      await logLine(scanRunId, `[recon] subfinder: ${step.state === 'SUCCESS' ? 'completed' : step.reason}`, step.state === 'SUCCESS' ? 'STDOUT' : 'STDERR');
+    } catch {
+      throwIfScanAborted(); failures++;
+      await logLine(scanRunId, '[recon] subfinder incomplete; retained discoveries and continuing existing certificate step', 'STDERR');
+    }
+  }
+  // Preserve the existing certificate parser and provider as enrichment/fallback.
+  // Select each technical seed once even if exact and wildcard rules overlap.
+  for (const [index, seed] of seeds.slice(0, 50).entries()) {
+    throwIfScanAborted();
+    await logLine(scanRunId, `[recon] Certificate transparency ${index + 1}/${Math.min(seeds.length, 50)}: ${seed}`);
     const controller = new AbortController();
     const release = currentScanControl()?.track(async () => { controller.abort(); });
     try {
       await beforeScanNetwork();
-      const url = new URL('https://crt.sh/'); url.searchParams.set('q', rule.startsWith('*.') ? `%${rule.slice(1)}` : rule); url.searchParams.set('output', 'json');
+      const url = new URL('https://crt.sh/'); url.searchParams.set('q', program.scopeRules.includes(`*.${seed}`) ? `%.${seed}` : seed); url.searchParams.set('output', 'json');
       const response = await fetch(url, { headers: { 'User-Agent': execution.requiredUserAgent }, redirect: 'error', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000), ...(currentScanControl() ? [currentScanControl()!.signal] : [])]) });
       for await (const name of certificateNames(response)) { if (seen >= 10000) throw new Error('Discovery limit exceeded'); await discover(name, 'CERTIFICATE_TRANSPARENCY'); }
       await recordUsefulScanWork();
@@ -96,7 +122,7 @@ export async function runProgramRecon(scanRunId: string): Promise<ScanExecutionR
       await logLine(scanRunId, '[recon] Certificate provider step incomplete; persisted discoveries retained', 'STDERR');
     } finally { controller.abort(); release?.(); }
   }
-  const bounded = program.scopeRules.length > 50 || seen >= 10000;
+  const bounded = seeds.length > 50 || seen >= 10000;
   await logLine(scanRunId, `[recon] Enumeration finished: ${seen} observations; ${failures} incomplete steps`);
-  return failures || bounded ? { outcome: 'PARTIAL', reason: 'Certificate provider unavailable or enumeration limit reached; inventory is partial' } : { outcome: 'SUCCESS' };
+  return failures || bounded ? { outcome: 'PARTIAL', reason: 'Passive enumeration step unavailable or enumeration limit reached; inventory is partial' } : { outcome: 'SUCCESS' };
 }

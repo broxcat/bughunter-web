@@ -78,10 +78,13 @@ try {
   await page.getByRole("button", { name: "Edit Target", exact: true }).waitFor();
   await page.getByText("Workflow-Required/2.0", { exact: true }).waitFor();
   await page.getByRole("link", { name: "Start Recon →", exact: true }).click();
-  await page.waitForURL(/\/recon/);
+  await page.waitForURL(`${app}/targets/${programId}?tab=RECON`);
+  assert(await page.getByRole("button",{name:"Lancer le RECON",exact:true}).isEnabled());
+  await page.goto(`${app}/recon?program=${programId}`);
   await page.getByLabel("Host", { exact: true }).locator("option").first().waitFor({ state: "attached" });
   const choices = await page.getByLabel("Host", { exact: true }).locator("option").allTextContents();
-  assert.deepEqual(choices, ["www.example.test"]);
+  assert.deepEqual(choices, ["Program scope — passive discovery", "*.example.test", "www.example.test"]);
+  await page.getByLabel("Host", {exact:true}).selectOption({label:"www.example.test"});
   await page.getByText("Workflow-Required/2.0", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Start Recon", exact: true }).click();
   await page.waitForURL(/\/hosts\/[^/]+$/);

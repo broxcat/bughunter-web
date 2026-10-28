@@ -53,7 +53,7 @@ describe("enforced Target HTTP context", () => {
     const target = { host: "api.example.com", active: true, userId: "u", scope: { status: "APPROVED" }, program: { ownerId: "u", requiredUserAgent: "UA/1", outOfScope: [] as string[] } };
     expect(scanRejection(target)).toBeNull();
     expect(scanRejection({ ...target, active: false })).toMatch(/removed/);
-    expect(scanRejection({ ...target, host: "*.example.com" })).toMatch(/concrete/);
+    expect(scanRejection({ ...target, host: "*.example.com" })).toMatch(/discovery rule/);
     expect(scanRejection({ ...target, program: null })).toMatch(/User-Agent/);
     expect(scanRejection({ ...target, program: { ...target.program, outOfScope: ["*.example.com"] } })).toMatch(/out of scope/);
   });

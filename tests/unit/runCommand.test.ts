@@ -11,6 +11,23 @@ import { readFile } from "node:fs/promises";
 import { runCommand } from "@/server/scanners/runCommand";
 const opts = { scanRunId: "run", timeoutMs: 2000 };
 describe("real runCommand process outcomes", () => {
+  it('delivers stdout discoveries incrementally, including a final line without newline, before returning',async()=>{
+    const lines:string[]=[];let finish!:()=>void;
+    const first=new Promise<void>(resolve=>{finish=resolve;});
+    let completed=false;
+    const run=runCommand(process.execPath,['-e','console.log("api.example.test");setTimeout(()=>process.stdout.write("www.example.test"),200)'],{...opts,onStdoutLine:async line=>{lines.push(line);finish();}}).then(result=>{completed=true;return result;});
+    await first;expect(completed).toBe(false);expect(lines).toEqual(['api.example.test']);
+    expect(await run).toMatchObject({code:0});expect(lines).toEqual(['api.example.test','www.example.test']);
+  });
+  it('propagates failed persistence and stops the enumerator rather than reporting success',async()=>{
+    await expect(runCommand(process.execPath,['-e','console.log("api.example.test");setInterval(()=>{},1000)'],{...opts,onStdoutLine:async()=>{throw new Error('Persistence failed');}})).rejects.toThrow('Persistence failed');
+  });
+  it('stops consuming buffered discoveries at the tool timeout and drains the in-flight write',async()=>{
+    let writes=0;
+    const result=await runCommand(process.execPath,['-e','for(let n=0;n<100;n++)console.log("h"+n+".example.test");setInterval(()=>{},1000)'],{...opts,timeoutMs:150,onStdoutLine:async()=>{writes++;await new Promise(resolve=>setTimeout(resolve,50));}});
+    expect(result.timedOut).toBe(true);expect(writes).toBeLessThan(5);const completed=writes;
+    await new Promise(resolve=>setTimeout(resolve,60));expect(writes).toBe(completed);
+  });
   it("successful empty output", async () => {
     expect(await runCommand(process.execPath, ["-e", "process.exit(0)"], opts)).toEqual({ code: 0, timedOut: false, cancelled: false });
   });

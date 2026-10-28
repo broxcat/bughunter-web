@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { normalizeFqdn, programSchema, matchesHost, isExcluded, familyAllowed } from "@/lib/bountyProgram";
+import { normalizeFqdn, programSchema, programUpdateSchema, matchesHost, isExcluded, familyAllowed } from "@/lib/bountyProgram";
 
 describe("bounty program contract", () => {
+  it('does not erase wildcard scope rules or other policy fields in a partial update',()=>{
+    expect(programUpdateSchema.parse({outOfScope:['admin.example.test']})).toEqual({outOfScope:['admin.example.test']});
+    expect(programUpdateSchema.parse({requiredUserAgent:'laziza'})).toEqual({requiredUserAgent:'laziza'});
+    expect(programUpdateSchema.parse({scopeRules:[]})).toEqual({scopeRules:[]});
+  });
   it("requires explicit company and User-Agent", () => {
     expect(programSchema.safeParse({ companyName: "VINCI" }).success).toBe(false);
     for (const ua of ["", " ", "x\r\nInjected: y"]) expect(programSchema.safeParse({ companyName: "VINCI", requiredUserAgent: ua }).success).toBe(false);

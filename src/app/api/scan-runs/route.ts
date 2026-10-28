@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     if (!target) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    const rejection = scanRejection(target);
+    const rejection = scanRejection(target, 'RECON');
     if (rejection) return NextResponse.json({ error: rejection }, { status: 400 });
 
     const run = await createScanRequest(session.user.id, parsed.data, key);

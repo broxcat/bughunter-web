@@ -9,12 +9,20 @@ export async function mutateHost(ownerId: string, programId: string, action: "AD
   return prisma.$transaction(async tx => {
     const rows = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "BountyProgram" WHERE id = ${programId} AND "ownerId" = ${ownerId} AND "deletingAt" IS NULL FOR UPDATE`;
     if (!rows.length) throw new HostError("Target not found", 404);
+    const updateWildcardRule = async (next?: string) => {
+      if (!previous?.host.startsWith('*.') && !next?.startsWith('*.')) return;
+      const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId } });
+      const rules = program.scopeRules.filter(rule => rule !== previous?.host);
+      if (next?.startsWith('*.')) rules.push(next);
+      await tx.bountyProgram.update({ where: { id: programId }, data: { scopeRules: [...new Set(rules)] } });
+    };
     const previous = input.hostId ? await tx.target.findFirst({ where: { id: input.hostId, programId, userId: ownerId, active: true, contextOnly: false } }) : null;
     if (action !== "ADD" && !previous) throw new HostError("Host not found", 404);
-    if (action === "REMOVE") return tx.target.update({ where: { id: previous!.id }, data: { active: false } });
+    if (action === "REMOVE") { await updateWildcardRule(); return tx.target.update({ where: { id: previous!.id }, data: { active: false } }); }
     const host = normalizeFqdn(input.host ?? "");
     if (previous?.host === host) return previous;
     if (await tx.target.findFirst({ where: { programId, active: true, host } })) throw new HostError("This host is already in Scope", 409);
+    await updateWildcardRule(host);
     if (input.legacyTargetId) {
       const old = await tx.target.findFirst({ where: { id: input.legacyTargetId, userId: ownerId, programId: null }, include: { scope: true } });
       if (!old || normalizeFqdn(old.host) !== host) throw new HostError("Previous host not found or FQDN differs", 404);

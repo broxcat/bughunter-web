@@ -131,7 +131,7 @@ export default function TargetDetailPage({
           {target.program?.companyName && <span className="block text-sm font-sans">{target.program.companyName}</span>}{target.host}
         </h1>
         {target.label && <p className="text-sm text-muted">{target.label}</p>}
-        <p className="mt-1 text-sm text-muted">{scopeApproved ? "Active scope host" : "History — unavailable for new scans"}</p>
+        <p className="mt-1 text-sm text-muted">{scopeApproved ? target.host.startsWith("*.") ? "Scope rule — passive program Recon available" : "Active scope host" : "History — unavailable for new scans"}</p>
       </div>
 
       {error && (
@@ -152,7 +152,7 @@ export default function TargetDetailPage({
         >
           {starting === "RECON" ? "Starting…" : "Run recon"}
         </Button>
-        <CreateResearchButton targetId={id} disabled={!scopeApproved} />
+        {scopeApproved && target.host.startsWith("*.") && target.program ? <Link className="text-brand" href={`/targets/${target.program.id}?tab=Codex%20Console`}>Open program Codex console</Link> : <CreateResearchButton targetId={id} disabled={!scopeApproved} />}
         <div className="ml-auto flex gap-4 text-sm">
           <Link
             href={`/targets/${id}/findings`}
@@ -240,7 +240,7 @@ export default function TargetDetailPage({
         )}
       </div>
 
-      <TargetAuthentication targetId={id} disabled={!scopeApproved} />
+      <TargetAuthentication targetId={id} disabled={!scopeApproved || target.host.startsWith("*.")} />
     </div>
   );
 }

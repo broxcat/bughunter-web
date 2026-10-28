@@ -99,7 +99,9 @@ de suppression restent dans le journal applicatif, sans contenu de workspace.
 ## Découverte et autorisation
 
 Le RECON programme réutilise le worker existant et son annulation. Les règles
-exactes produisent des seeds ; les certificats publics sont ensuite énumérés
+exactes produisent des seeds ; les wildcards produisent leur domaine sans `*.`.
+Subfinder est exécuté passivement via le wrapper existant ; les certificats
+publics sont ensuite énumérés
 via une URL fixe `https://crt.sh/`, avec le User-Agent enregistré, sans redirection.
 Le JSON est lu en flux et chaque host est persisté avant la fin de l'énumération.
 Il n'y a aucun HTTP vers la target, résolution DNS, crawling ou scan de ports
@@ -115,7 +117,8 @@ Un host issu du RECON est aussi refusé pour une future exécution active si les
 règles officielles ne le couvrent plus. Les exclusions restent prioritaires.
 
 Limites explicites : 50 règles interrogées par run, 5 Mio par réponse fournisseur,
-30 secondes par requête et 10 000 observations. Une couverture incomplète ou un
+30 secondes par requête de certificats, 75 secondes par commande subfinder
+et 10 000 observations. Une couverture incomplète ou un
 fournisseur indisponible produit `PARTIAL` et conserve les découvertes déjà
 persistées. Les wildcards de certificat ne sont pas transformés en hosts.
 
@@ -232,3 +235,6 @@ Modifiés :
 - `docker/research/validator/burp-active.mjs`, `burp-service.mjs`, `console-burp-main.mjs`, `console-files.mjs`, `playwright-launch.mjs`, `codex-rpc.mjs`
 - `tests/fixtures/research.ts`, `tests/unit/scanWorker.test.ts`
 - `tests/queue/runInfrastructure.mjs`, `tests/research/runConsole.mjs`, `runInfrastructure.mjs`
+
+La correction des entrées wildcard, du PATCH partiel et des sélecteurs est
+détaillée dans [WILDCARD-RECON.md](WILDCARD-RECON.md).

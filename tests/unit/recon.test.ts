@@ -17,10 +17,10 @@ beforeEach(() => {
   mocks.discovery.mockResolvedValue({ html: "", urls: [], authenticated: false, execution: { successfulRequests: 1, failedRequests: 0, issues: [] } });
 });
 describe("best-effort Recon", () => {
-  it("successful commands with no output and disabled subfinder are successful", async () => {
+  it("successful host commands with no output and program-level enumeration are successful", async () => {
     expect(await runRecon("example.test", "run")).toEqual({ outcome: "SUCCESS" });
     expect(mocks.command.mock.calls.map(c => c[0])).toEqual(["httpx", "nmap", "katana"]);
-    expect(mocks.log.mock.calls.some(c => c[1].includes("subfinder: disabled"))).toBe(true);
+    expect(mocks.log.mock.calls.some(c => c[1].includes("subfinder: performed in program Recon"))).toBe(true);
   });
   it.each([
     { code: 2, timedOut: false },

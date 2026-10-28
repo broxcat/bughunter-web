@@ -57,7 +57,7 @@ export function createScanProcessor(workerId: string, executor: Executor = execu
         if (type === "VALIDATE" || run.type === "VALIDATE") return { outcome: "UNSUPPORTED" as const, reason: "VALIDATE scan type is not supported: validation engine is not implemented." };
         if (run.type !== type || run.targetId !== targetId) throw new Error("Scan job identity mismatch");
         // Scope/policy are revalidated on every real start, after winning the claim.
-        const execution = await loadTargetExecution(targetId);
+        const execution = await loadTargetExecution(targetId, 'RECON');
         control.assertActive();
         await prisma.scanRun.update({ where: { id: scanRunId }, data: { requiredUserAgent: execution.requiredUserAgent } });
         return withTargetExecution(execution, () => executor(type, run.target.host, scanRunId));

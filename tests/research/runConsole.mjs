@@ -104,7 +104,9 @@ try {
    const server=discovered.data.find(s=>s.name==='bughunter_burp');assert(server,'Codex app-server must discover Burp MCP');assert(JSON.stringify(server.tools).includes('burp_status'),JSON.stringify(discovered));
  }
  // Start through the target API, then inject a controlled worker discovery (no Internet Recon).
- const queued=await page.evaluate(async id=>{const r=await fetch('/api/programs/'+id+'/recon',{method:'POST'});if(!r.ok)throw new Error(await r.text());return r.json();},globalProgram.id);
+ await page.getByRole('button',{name:'RECON',exact:true}).click();await page.getByText('No scan runs yet. Start Recon from the authorized scope rules above.',{exact:true}).waitFor();
+ assert(await page.getByRole('button',{name:'Lancer le RECON',exact:true}).isEnabled());
+ const startedRecon=page.waitForResponse(r=>r.url().endsWith('/api/programs/'+globalProgram.id+'/recon')&&r.request().method()==='POST');await page.getByRole('button',{name:'Lancer le RECON',exact:true}).click();const queuedResponse=await startedRecon;assert([201,202].includes(queuedResponse.status()));const queued=await queuedResponse.json();
  reconWorker=spawn('docker',['compose','-p',prefix,'-f',config,'exec','-T','-e','BH_DISPOSABLE_CONSOLE=1','-e','BH_TEST_RUN_ID='+queued.id,'web','node','--import','tsx','tests/research/holdProgramRecon.mts'],{stdio:['ignore','pipe','pipe']});let workerOutput='';reconWorker.stdout.on('data',chunk=>workerOutput+=chunk);reconWorker.stderr.on('data',()=>{});
  for(let i=0;!workerOutput.includes('CONTROLLED_RECON_RUNNING');i++){if(i===100)throw new Error('Controlled Recon did not start: '+workerOutput);await wait(100);}
  await webScript(`import {PrismaClient} from '@prisma/client';import {persistProgramDiscovery} from '/app/src/server/recon/program.ts';const p=new PrismaClient();await persistProgramDiscovery(${JSON.stringify(queued.id)},'api.example.test','CONTROLLED_FIXTURE');console.log('{}');await p.$disconnect();`);

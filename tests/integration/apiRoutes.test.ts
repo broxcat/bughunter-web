@@ -410,7 +410,7 @@ d("API route authorization (integration)", () => {
     expect((await create("stolen.example.com")).status).toBe(404);
   });
 
-  it("Recon/Research selectors and enqueue only allow active, owned, non-excluded concrete hosts", async () => {
+  it("Recon accepts wildcard discovery while Research and active execution require concrete hosts", async () => {
     const { GET } = await import("@/app/api/scan-hosts/route");
     const { POST: add } = await import("@/app/api/programs/[id]/hosts/route");
     const { loadTargetExecution } = await import("@/server/execution");
@@ -423,8 +423,11 @@ d("API route authorization (integration)", () => {
     const wildcard = await host("*.scan.example");
     await prisma.target.update({ where: { id: removed.id }, data: { active: false } });
     const programs = await (await GET()).json();
-    expect(programs.find((v: { id: string }) => v.id === p.id).hosts.map((v: { id: string }) => v.id)).toEqual([active.id]);
-    for (const h of [excluded, removed, wildcard]) {
+    expect(programs.find((v: { id: string }) => v.id === p.id).hosts.map((v: { id: string }) => v.id)).toEqual([wildcard.id,active.id]);
+    expect((await scanRunsPost(req("http://localhost", {targetId:wildcard.id,type:"RECON"}))).status).toBe(201);
+    await expect(loadTargetExecution(wildcard.id)).rejects.toThrow(/discovery rule/);
+    expect((await loadTargetExecution(wildcard.id,"RECON")).programReconId).toBe(p.id);
+    for (const h of [excluded, removed]) {
       expect((await scanRunsPost(req("http://localhost", { targetId: h.id, type: "RECON" }))).status).toBe(400);
       await expect(loadTargetExecution(h.id)).rejects.toThrow();
     }
