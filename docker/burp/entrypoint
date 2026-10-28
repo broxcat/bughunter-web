@@ -29,6 +29,14 @@ Xvfb :99 -screen 0 1280x900x24 -nolisten tcp &
 xvfb_pid=$!
 java -Xms128m -Xmx1536m -jar /opt/burp/burpsuite.jar --disable-auto-update --user-config-file=/opt/burp/user-options.json &
 burp_pid=$!
-trap 'kill "$burp_pid" "$xvfb_pid" 2>/dev/null || true; wait || true' TERM INT EXIT
+trap 'kill "$burp_pid" "$xvfb_pid" "${forward_pid:-}" 2>/dev/null || true; wait || true' TERM INT EXIT
+if [ "${BURP_PRIVATE_FORWARD:-no}" = yes ]; then
+  python3 /opt/burp/forward.py &
+  forward_pid=$!
+fi
 python3 /opt/burp/bootstrap.py
-wait "$burp_pid"
+while kill -0 "$burp_pid" 2>/dev/null; do
+  if [ -n "${forward_pid:-}" ] && ! kill -0 "$forward_pid" 2>/dev/null; then exit 1; fi
+  sleep 1
+done
+exit 1

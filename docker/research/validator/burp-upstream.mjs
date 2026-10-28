@@ -1,12 +1,12 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { BURP_ENDPOINT } from '../../../src/lib/research/burp.ts';
-// Only a loopback SSE endpoint. No OAuth, redirects, cookies or configurable
-// endpoint environment. Bound the whole operation AND decompressed SSE bytes.
-export async function withBurp(action, timeoutMs = 3000, endpoint = BURP_ENDPOINT) {
+import { burpEndpoint } from './burp-proxy.mjs';
+// Loopback or the installed operator endpoint only. No OAuth, redirects or
+// cookies. Bound the whole operation AND decompressed SSE bytes.
+export async function withBurp(action, timeoutMs = 3000, endpoint = burpEndpoint().url) {
   // endpoint parameter exists solely for disposable local protocol tests.
   const base = new URL(endpoint);
-  if (base.hostname !== '127.0.0.1' || base.protocol !== 'http:' || base.username || base.password || base.pathname !== '/') throw new Error('UNSAFE_ENDPOINT');
+  if (!['127.0.0.1', new URL(burpEndpoint().url).hostname].includes(base.hostname) || base.protocol !== 'http:' || base.username || base.password || base.pathname !== '/') throw new Error('UNSAFE_ENDPOINT');
   const controller = new AbortController(); let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
   let total = 0;

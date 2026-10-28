@@ -1,15 +1,21 @@
+import { claudeBurpServer } from './managed-mcp.mjs';
 export function claudeConfigDirectory(cwd) {
   if (!/^\/workspaces\/research_[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(cwd)) throw new Error('WORKSPACE_REQUIRED');
   return `/home/researcher/.claude/workspaces/${cwd.slice('/workspaces/research_'.length)}`;
 }
-/** Isolated, per-invocation configuration. Never changes user/global MCP files. */
-export function claudeArguments(cwd, instructions, resume = false) {
+/** Isolated configuration; never changes user/global MCP files.
+ * @param {string} cwd
+ * @param {string} instructions
+ * @param {boolean} resume
+ * @param {string | undefined} mcpFile
+ */
+export function claudeArguments(cwd, instructions, resume = false, mcpFile = undefined) {
   if (!/^\/workspaces\/research_[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(cwd)) throw new Error('WORKSPACE_REQUIRED');
   return [
     '--permission-mode', 'default', '--setting-sources', '',
     '--tools', 'Read,Glob,Grep,Edit,Write', '--no-chrome',
-    '--strict-mcp-config', '--mcp-config', JSON.stringify({ mcpServers: {
-      bughunter_burp: { type: 'stdio', command: '/usr/local/bin/bughunter-burp-passive-mcp', args: [] },
+    '--strict-mcp-config', '--mcp-config', mcpFile ?? JSON.stringify({ mcpServers: {
+      bughunter_burp: claudeBurpServer,
     } }),
     '--append-system-prompt', instructions,
     ...(resume ? ['--continue'] : []),

@@ -21,6 +21,13 @@ chown researcher:research /home/researcher/.codex
 setpriv --reuid=researcher --regid=research --init-groups chmod 0700 /home/researcher/.codex
 # Dedicated Claude state volume, never the host operator's personal configuration.
 install -d -o researcher -g research -m 0700 /home/researcher/.claude
+# Recreate deterministic non-secret transport settings before any CLI starts.
+node --input-type=module -e '
+import {writeFileSync} from "node:fs";
+const keys = ["BURP_MCP_HOST", "BURP_MCP_PORT", "BURP_PROXY_HOST", "BURP_PROXY_PORT"];
+writeFileSync("/etc/bughunter/burp-endpoint.json", JSON.stringify(Object.fromEntries(keys.filter(k => process.env[k]).map(k => [k, process.env[k]]))), {mode: 0o644});'
+chmod 0644 /etc/bughunter/burp-endpoint.json
+HOME=/home/researcher setpriv --reuid=researcher --regid=research --init-groups node /opt/bughunter/docker/research/validator/reconcile-mcp.mjs
 /usr/sbin/sshd -D -e &
 sshd_pid=$!
 printf '%s\n' "$sshd_pid" > /run/research-sshd.pid

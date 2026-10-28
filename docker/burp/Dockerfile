@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     && curl -fL "https://portswigger.net/burp/releases/download?product=desktop&version=${BURP_VERSION}&type=Jar" -o /opt/burp/burpsuite.jar \
     && echo "$BURP_SHA256  /opt/burp/burpsuite.jar" | sha256sum -c -
 COPY --from=extension /build/build/libs/burp-mcp-all.jar /opt/burp/burp-mcp-all.jar
-COPY docker/burp/user-options.json docker/burp/bootstrap.py /opt/burp/
+COPY docker/burp/user-options.json docker/burp/bootstrap.py docker/burp/forward.py /opt/burp/
 COPY --chmod=755 docker/burp/entrypoint /usr/local/bin/burp-entrypoint
 USER burp
 WORKDIR /home/burp

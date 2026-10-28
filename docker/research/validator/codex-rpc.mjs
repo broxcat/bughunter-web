@@ -24,7 +24,16 @@ export async function codexRead(method, params, cwd = process.cwd(), timeout = 5
         // 0.165.0. Listing the global app-server alone omits workspace servers.
         if (initializeThread) {
           const result = await request('thread/start', { cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: initializeThread !== 'persistent' });
-          const response = await request(method, { ...params, threadId: result.thread.id });
+          let response = await request(method, { ...params, threadId: result.thread.id });
+          // MCP startup is asynchronous in the native app-server. Give the
+          // optional Java relay a bounded discovery window, without model work.
+          if (method === 'mcpServerStatus/list') {
+            const deadline = Date.now() + 8000;
+            while (response.data?.some(s => s.name === 'burp' && !Object.keys(s.tools ?? {}).length) && Date.now() < deadline) {
+              await new Promise(resolve => setTimeout(resolve, 250));
+              response = await request(method, { ...params, threadId: result.thread.id });
+            }
+          }
           return initializeThread === 'persistent' ? { thread: result.thread, response } : response;
         }
         return request(method, params);

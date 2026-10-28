@@ -149,6 +149,7 @@ services:
     environment:
       RESEARCH_TERMINAL_ORIGIN: "${AUTH_URL:?Set AUTH_URL to the browser origin}"
       RESEARCH_TERMINAL_PUBLIC_KEY_FILE: /run/research-terminal/public.pem
+      BURP_SERVICE_HOST: "${BURP_SERVICE_HOST-burp-private}"
       BURP_MCP_HOST: "${BURP_MCP_HOST:-127.0.0.1}"
       BURP_MCP_PORT: "${BURP_MCP_PORT:-9876}"
       BURP_PROXY_HOST: "${BURP_PROXY_HOST:-127.0.0.1}"
@@ -156,7 +157,7 @@ services:
     expose: ["7681"]
     ports:
       - "127.0.0.1:${RESEARCH_SSH_PORT:-2222}:22"
-    networks: [research_egress, research_terminal]
+    networks: [research_egress, research_terminal, burp_link]
     volumes:
       - type: bind
         source: ${RESEARCH_HOST_ROOT:-/home/brokcat/bughunter-research}
@@ -186,8 +187,8 @@ services:
     shm_size: 1g
     restart: unless-stopped
 
-  # Optional dedicated real Community instance. Loopback is shared with Codex,
-  # not the host; separate PID namespace protects Burp from target deletion.
+  # Optional existing Community instance with independent network lifetime.
+  # Private forwarding ports are reachable only through burp_link; no host ports.
   # Existing external Burp + SSH bridge remains supported without this profile.
   burp:
     profiles: [burp]
@@ -195,11 +196,12 @@ services:
       context: .
       dockerfile: docker/burp/Dockerfile
     image: bughunter-burp
-    network_mode: service:research-console
-    depends_on:
-      research-console:
-        condition: service_healthy
+    networks:
+      research_egress: {}
+      burp_link:
+        aliases: [burp-private]
     environment:
+      BURP_PRIVATE_FORWARD: "yes"
       BURP_ACCEPT_TERMS: "${BURP_ACCEPT_TERMS:-no}"
     volumes:
       - burp-home:/home/burp
@@ -267,6 +269,8 @@ networks:
   # Only ingress sidecar + console; web/worker/db/redis do not join this network.
   research_terminal:
     driver: bridge
+    internal: true
+  burp_link:
     internal: true
   research_egress:
     driver: bridge

@@ -21,6 +21,7 @@
     "test:auth": "node tests/queue/runInfrastructure.mjs --auth-browser",
     "test:research": "node tests/research/runInfrastructure.mjs && npm run test:research:console",
     "test:research:final": "node --import tsx tests/e2e/researchFinal.mjs",
+    "test:research:mcp-rebuild": "node tests/research/mcpRebuild.mjs",
     "test:research:console": "node --import tsx tests/research/runConsole.mjs"
   },
   "dependencies": {

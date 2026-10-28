@@ -52,9 +52,15 @@ const control = createServer(socket => {
 });
 await new Promise(resolve => control.listen(socketPath, resolve)); await chmod(socketPath, 0o600);
 await server.connect(new StdioServerTransport());
-const monitor = setInterval(() => { void refresh(); }, 15000);
+let monitor, retryDelay = 1000;
+async function monitorBurp() {
+  const result = await refresh();
+  retryDelay = result.status === 'connected' ? 15000 : Math.min(retryDelay * 2, 15000);
+  if (!stopped) monitor = setTimeout(monitorBurp, retryDelay);
+}
+monitor = setTimeout(monitorBurp, 1000);
 async function close() {
-  if (stopped) return; stopped = true; clearInterval(monitor); control.close();
+  if (stopped) return; stopped = true; clearTimeout(monitor); control.close();
   await busy?.catch(() => {}); await connection.close(); await server.close(); await workspace.root.close(); await rm(socketPath, { force: true });
   process.exit(0);
 }

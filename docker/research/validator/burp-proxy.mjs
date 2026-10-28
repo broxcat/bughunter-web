@@ -1,3 +1,4 @@
+import { burpSettings } from './burp-settings.mjs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { connect } from 'node:net';
@@ -7,7 +8,8 @@ import { burpInventory } from './burp-inventory.mjs';
 // Operator configuration only. Compose shares Burp's network namespace, never
 // its PID namespace. Neither the MCP nor proxy port is published.
 export function burpEndpoint() {
-  const host = process.env.BURP_MCP_HOST ?? '127.0.0.1', port = Number(process.env.BURP_MCP_PORT ?? 9876);
+  const settings = burpSettings();
+  const host = settings.BURP_MCP_HOST ?? '127.0.0.1', port = Number(settings.BURP_MCP_PORT ?? 9876);
   if (!/^(?:127\.0\.0\.1|localhost|[a-zA-Z0-9][a-zA-Z0-9.-]{0,252})$/.test(host) || !Number.isInteger(port) || port < 1 || port > 65535) throw new Error('UNAVAILABLE');
   return { host, port, url: `http://${host}:${port}/` };
 }

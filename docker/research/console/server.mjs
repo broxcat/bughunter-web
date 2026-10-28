@@ -1,3 +1,6 @@
+import { diagnoseProviderBurp } from './mcp-diagnostics.mjs';
+import { startBurpTunnel } from './burp-tunnel.mjs';
+await startBurpTunnel();
 import { createServer } from 'node:http';
 import { readFile, access } from 'node:fs/promises';
 import { stopWorkspaceProcesses, deleteWorkspaceThreads, deleteClaudeWorkspaceThreads } from './stop.mjs';
@@ -7,7 +10,6 @@ import { WebSocketServer } from 'ws';
 import * as pty from 'node-pty';
 import { verifyTerminalTicket, verifyStopTicket, targetWorkspaceId } from '../../../src/lib/research/terminal.ts';
 import { openConsoleWorkspace } from '../validator/console-files.mjs';
-import { diagnoseOfficialBurp } from '../validator/burp-proxy.mjs';
 import { sessionCommand, providerStatus } from './providers.mjs';
 import { providerTmuxIdentity } from '../../../src/lib/research/provider.ts';
 import { reconnectWorkspaceBurp } from './burp-reconnect.mjs';
@@ -78,7 +80,8 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
       if (checking || closed) return; checking = true;
       send({ type: 'status', provider, authentication: auth, codex: provider === 'codex' ? auth : undefined, burp: 'starting' });
       try {
-        const diagnostic = reconnect ? await reconnectWorkspaceBurp(`/workspaces/${targetWorkspaceId(claims.targetId)}`) : await diagnoseOfficialBurp();
+        if (reconnect) await reconnectWorkspaceBurp(`/workspaces/${targetWorkspaceId(claims.targetId)}`);
+        const diagnostic = await diagnoseProviderBurp(provider, `/workspaces/${targetWorkspaceId(claims.targetId)}`);
         send({ type: 'status', provider, authentication: auth, codex: provider === 'codex' ? auth : undefined, burp: diagnostic.status, burpDetails: { provider: diagnostic.provider, toolCount: diagnostic.toolCount, version: diagnostic.version, optional: diagnostic.optional } });
       } finally { checking = false; }
     };

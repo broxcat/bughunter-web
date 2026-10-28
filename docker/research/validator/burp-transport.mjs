@@ -1,3 +1,4 @@
+import { burpSettings } from './burp-settings.mjs';
 import { spawn } from 'node:child_process';
 import { request } from 'node:http';
 import { X509Certificate, randomUUID } from 'node:crypto';
@@ -12,7 +13,8 @@ export class BurpTransportError extends Error {
   constructor(code, details = {}) { super(code); this.details = { transportResult: code, remoteStatus: null, ...details }; }
 }
 export function proxyEndpoint() {
-  const host = process.env.BURP_PROXY_HOST ?? '127.0.0.1', port = Number(process.env.BURP_PROXY_PORT ?? 8080);
+  const settings = burpSettings();
+  const host = settings.BURP_PROXY_HOST ?? '127.0.0.1', port = Number(settings.BURP_PROXY_PORT ?? 8080);
   if (!/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$/.test(host) || !Number.isInteger(port) || port < 1 || port > 65535) throw new BurpTransportError('BURP_PROXY_UNREACHABLE');
   return { host, port };
 }
