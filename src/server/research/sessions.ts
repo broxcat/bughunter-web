@@ -10,7 +10,7 @@ export const researchRootFor = (workspaceId: string) => workspaceId.startsWith("
 export const ownedResearch = (userId: string) => ({ userId, target: { userId, OR: [{ program: null }, { program: { ownerId: userId } }] } });
 // The same bounded metadata response is used for list/detail; no paths or secrets.
 export const researchSessionSelect = {
-  id: true, workspaceId: true, consoleTargetId: true, targetId: true, targetHost: true, programName: true,
+  id: true, workspaceId: true, consoleTargetId: true, provider: true, targetId: true, targetHost: true, programName: true,
   authorizationSnapshot: true, reconScanRunId: true, status: true, createdAt: true, updatedAt: true,
   scopeMarkdown: true, files: true, hypothesesSyncedAt: true, hypothesesSourceSha256: true,
 } as const;

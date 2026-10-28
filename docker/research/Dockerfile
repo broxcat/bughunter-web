@@ -26,20 +26,22 @@ FROM eclipse-temurin:21-jre-jammy AS java-runtime
 FROM node:24-bookworm-slim
 # Official npm stable checked during implementation; never install @latest at runtime.
 ARG CODEX_VERSION=0.165.0
+ARG CLAUDE_VERSION=2.1.312
 ARG RESEARCH_WORKSPACE_UID=1000
 ARG RESEARCH_WORKSPACE_GID=1000
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-server git curl jq python3 ripgrep ca-certificates procps less tmux util-linux \
     build-essential \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install -g @openai/codex@${CODEX_VERSION} \
+    && npm install -g @openai/codex@${CODEX_VERSION} @anthropic-ai/claude-code@${CLAUDE_VERSION} \
+    && claude --version && claude --help >/dev/null \
     && codex --version && codex --help && codex --yolo --help >/dev/null \
     && groupmod -n research -g ${RESEARCH_WORKSPACE_GID} node \
     && usermod -l researcher -d /home/researcher -m -g research -u ${RESEARCH_WORKSPACE_UID} -s /bin/bash node \
     && passwd -d researcher \
     && install -d -m 0755 /run/sshd /etc/ssh/host-keys /etc/bughunter \
     && install -d -o root -g research -m 3770 /workspaces \
-    && install -d -o researcher -g research -m 0700 /home/researcher/.codex \
+    && install -d -o researcher -g research -m 0700 /home/researcher/.codex /home/researcher/.claude \
     && rm -f /etc/ssh/ssh_host_*
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 COPY docker/research/validator/package*.json /opt/bughunter/
@@ -57,7 +59,7 @@ COPY --from=research-skills /skills.sha256 /etc/codex/skills.sha256
 RUN cd /etc/codex/skills && sha256sum --check ../skills.sha256 \
     && chmod -R a-w /etc/codex/skills
 # Shared contracts and small runner helpers only; never copy the application source.
-COPY src/lib/research/hypotheses.ts src/lib/research/burp.ts src/lib/research/terminal.ts src/lib/research/consolePolicy.ts /opt/bughunter/src/lib/research/
+COPY src/lib/research/hypotheses.ts src/lib/research/burp.ts src/lib/research/terminal.ts src/lib/research/provider.ts src/lib/research/consolePolicy.ts /opt/bughunter/src/lib/research/
 COPY src/lib/bountyProgram.ts src/lib/observationSafety.ts src/lib/httpPolicy.mjs /opt/bughunter/src/lib/
 COPY docker/research/validator/*.mjs docker/research/validator/*.cjs /opt/bughunter/docker/research/validator/
 COPY docker/research/console/ /opt/bughunter/docker/research/console/

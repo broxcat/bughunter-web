@@ -8,12 +8,13 @@ export function tmuxIdentity(id: string) { return `bughunter-${targetIdentity.pa
 export const terminalClaims = z.strictObject({
   v: z.literal(1), aud: z.literal("bughunter-research-terminal"),
   userId: targetIdentity, targetId: targetIdentity, sessionId: targetIdentity,
+  provider: z.enum(["codex", "claude"]).optional(),
   policySha256: z.string().regex(/^[a-f0-9]{64}$/),
   iat: z.number().int(), exp: z.number().int(), nonce: z.uuid(),
 });
 export type TerminalClaims = z.infer<typeof terminalClaims>;
 export const sha256 = (text: string | Buffer) => createHash("sha256").update(text).digest("hex");
-export function issueTerminalTicket(ids: Pick<TerminalClaims, "userId" | "targetId" | "sessionId" | "policySha256">, privateKey: string, now = Date.now()) {
+export function issueTerminalTicket(ids: Pick<TerminalClaims, "userId" | "targetId" | "sessionId" | "policySha256" | "provider">, privateKey: string, now = Date.now()) {
   const iat = Math.floor(now / 1000);
   const claims = terminalClaims.parse({ ...ids, v: 1, aud: "bughunter-research-terminal", iat, exp: iat + 30, nonce: randomUUID() });
   const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");

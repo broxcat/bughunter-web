@@ -165,6 +165,7 @@ services:
           create_host_path: false
       - research-workspaces:/legacy-workspaces
       - research-codex:/home/researcher/.codex
+      - research-claude:/home/researcher/.claude
       - research-host-keys:/etc/ssh/host-keys
       - type: bind
         source: ./data/research-ssh
@@ -280,5 +281,6 @@ volumes:
   tailscale-bughunter-state:
   research-workspaces:
   research-codex:
+  research-claude:
   research-host-keys:
   burp-home:

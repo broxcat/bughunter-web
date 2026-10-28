@@ -73,7 +73,22 @@ export async function portSwiggerAcceptance({ image, runnerImage, prefix, consol
     await run('docker',['start',burp]);
     for(let i=0;i<180;i++){try{await run('docker',['exec',burp,'sh','-c','test -f /tmp/bughunter-burp-ready']);if(JSON.parse(await probe()).status==='connected')break;}catch{}if(i===179)throw new Error('Real Burp did not recover');await wait(500);}
     await page.getByRole('button',{name:'Reconnect',exact:true}).click();await page.getByText('Burp MCP: connected',{exact:true}).waitFor({timeout:30000});assert((await client.listTools()).tools.length>3);
-    const emptyHistory=await client.callTool({name:'get_proxy_http_history',arguments:{count:20,offset:0}});assert(!emptyHistory.isError,JSON.stringify(emptyHistory));assert.deepEqual(JSON.parse(emptyHistory.content[0].text).items,[],'Community restart uses a fresh in-memory project');
+    // The extension's tool inventory can recover before history is readable.
+    // Poll only this passive readiness read; never replay an active target call.
+    let emptyHistory;
+    for(let attempt=0;attempt<10;attempt++){
+      emptyHistory=await client.callTool({name:'get_proxy_http_history',arguments:{count:20,offset:0}});
+      if(!emptyHistory.isError)break;
+      await wait(500);
+    }
+    assert(!emptyHistory.isError,JSON.stringify(emptyHistory));assert.deepEqual(JSON.parse(emptyHistory.content[0].text).items,[],'Community restart uses a fresh in-memory project');
+    const passive = await connectMcp(hostId,'bughunter-burp-passive-mcp');
+    try {
+      assert.deepEqual((await passive.listTools()).tools.map(tool=>tool.name),['burp_status','burp_history','burp_save_observation']);
+      assert.equal(JSON.parse((await passive.callTool({name:'burp_status',arguments:{}})).content[0].text).upstream,'AVAILABLE');
+      assert(!(await passive.callTool({name:'burp_history',arguments:{count:1,offset:0}})).isError);
+      console.log('CLAUDE PASSIVE RELAY VERIFIED with real Burp: server inventory, upstream protocol connection, bounded history; no authenticated Claude model/tool invocation claimed.');
+    } finally {await passive.close();}
     console.log('REAL BURP VERIFIED: Community 2026.10.1 + official extension 1.3.0; Java stdio/SSE tools/list; Playwright → real proxy → local HTTP → real history → native Codex mcpServer/tool/call; UA, private binding, real disconnect/restart/reconnect.');
   } finally {
     await client?.close().catch(()=>{});

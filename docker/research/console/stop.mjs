@@ -1,6 +1,7 @@
-import { readdir, readlink, readFile } from 'node:fs/promises';
+import { readdir, readlink, readFile, rm, lstat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { claudeConfigDirectory } from '../validator/claude-config.mjs';
 import { codexRead } from '../validator/codex-rpc.mjs';
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 // Snapshot /proc, include descendants even when a child changed directory. Only
@@ -77,4 +78,19 @@ else:
     ids.add(id);
   }
   for (const id of ids) await promisify(execFile)('codex', ['delete', '--force', id], { timeout: 8000, maxBuffer: 32768, cwd: '/home/researcher' });
+}
+
+/** Delete only BugHunter's dedicated target Claude state after its processes stop.
+ * No global/personal configuration or another target's conversations is touched. */
+export async function deleteClaudeWorkspaceThreads(paths) {
+  for (const path of paths) {
+    if (!/^\/workspaces\/research_[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(path)) continue;
+    const directory = claudeConfigDirectory(path);
+    const parent = '/home/researcher/.claude/workspaces';
+    for (const item of ['/home/researcher/.claude', parent, directory]) {
+      try { const stat = await lstat(item); if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('UNSAFE_FILE'); }
+      catch (e) { if (e.code !== 'ENOENT') throw e; }
+    }
+    await rm(directory, { recursive: true, force: true });
+  }
 }

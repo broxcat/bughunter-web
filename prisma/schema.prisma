@@ -604,6 +604,8 @@ model ResearchSession {
   workspaceId    String @unique
   // Null for historical UUID sessions. One persistent console per technical Target.
   consoleTargetId String? @unique
+  // Selected console; native conversations remain separate for each provider.
+  provider       ResearchProvider @default(codex)
   reconScanRunId String?
   status         ResearchSessionStatus @default(CREATING)
   targetHost     String
@@ -713,4 +715,9 @@ model ResearchFindingPromotion {
   user       User @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([userId])
+}
+
+enum ResearchProvider {
+  codex
+  claude
 }

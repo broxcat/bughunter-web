@@ -64,6 +64,7 @@ try {
   const research = await client.researchSession.findUniqueOrThrow({ where: { id: "upgrade-research" } });
   assert.equal(research.hypothesesSyncedAt, null); assert.equal(research.hypothesesSourceSha256, null);
   assert.equal(research.authorizationSnapshot, null);
+  assert.equal(research.provider, "codex", "Historical Research sessions must default to Codex without a history migration");
   assert.equal(await client.researchHypothesis.count(), 1); assert.equal(await client.researchHypothesisRevision.count(), 1);
   const indexes = await client.$queryRaw`SELECT indexname FROM pg_indexes WHERE tablename IN ('ResearchHypothesis', 'ResearchHypothesisRevision')`;
   assert(indexes.some(i => i.indexname === 'ResearchHypothesis_sessionId_status_idx'));

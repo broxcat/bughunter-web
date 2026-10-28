@@ -19,10 +19,12 @@ if [ "$(stat -c %u /home/researcher/.codex)" != "$(id -u researcher)" ]; then
 fi
 chown researcher:research /home/researcher/.codex
 setpriv --reuid=researcher --regid=research --init-groups chmod 0700 /home/researcher/.codex
+# Dedicated Claude state volume, never the host operator's personal configuration.
+install -d -o researcher -g research -m 0700 /home/researcher/.claude
 /usr/sbin/sshd -D -e &
 sshd_pid=$!
 printf '%s\n' "$sshd_pid" > /run/research-sshd.pid
-HOME=/home/researcher USER=researcher LOGNAME=researcher CODEX_HOME=/home/researcher/.codex setpriv --reuid=researcher --regid=research --init-groups --no-new-privs node /opt/bughunter/docker/research/console/server.mjs &
+HOME=/home/researcher USER=researcher LOGNAME=researcher CODEX_HOME=/home/researcher/.codex CLAUDE_CONFIG_DIR=/home/researcher/.claude DISABLE_AUTOUPDATER=1 setpriv --reuid=researcher --regid=research --init-groups --no-new-privs node /opt/bughunter/docker/research/console/server.mjs &
 console_pid=$!
 trap 'setpriv --reuid=researcher --regid=research --init-groups kill "$console_pid" 2>/dev/null || true; kill "$sshd_pid" 2>/dev/null || true; wait || true' TERM INT EXIT
 # Failure of either mandatory local process triggers Docker restart, not a silent half-service.

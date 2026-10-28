@@ -40,6 +40,16 @@ let root:string,userId:string,otherId:string,targetId:string,publicKey:string;
   const result=await request();expect(result.status).toBe(200);const body=await result.json(),claims=verifyTerminalTicket(body.token,publicKey);
   expect(claims.targetId).toBe(targetId);expect(claims.userId).toBe(userId);expect(body.requiredUserAgent).toBe('Console-UA/1');expect(JSON.stringify(body)).not.toMatch(/DATABASE_URL|AUTH_SECRET|private.pem|workspacePath|command/);
  });
+ it('persists provider selection, signs the selected engine and preserves historical defaults', async () => {
+  const initial = await (await request()).json();
+  expect(initial.provider).toBe('codex'); expect(verifyTerminalTicket(initial.token, publicKey).provider).toBeUndefined();
+  const selected = await (await request(targetId, {body:JSON.stringify({provider:'claude'})})).json();
+  expect(selected.provider).toBe('claude'); expect(verifyTerminalTicket(selected.token, publicKey).provider).toBe('claude');
+  expect((await prisma.researchSession.findUniqueOrThrow({where:{consoleTargetId:targetId}})).provider).toBe('claude');
+  expect((await (await request()).json()).provider).toBe('claude');
+  expect((await (await request(targetId,{body:JSON.stringify({provider:'codex'})})).json()).provider).toBe('codex');
+  for(const body of [{provider:'other'},{provider:'claude',command:'bash'}]) expect((await request(targetId,{body:JSON.stringify(body)})).status).toBe(400);
+ });
  it('rejects anonymous/foreign target, foreign origin and any browser body/command',async()=>{
   mocks.auth.mockResolvedValue(null);expect((await request()).status).toBe(401);mocks.auth.mockResolvedValue({user:{id:otherId}});expect((await request()).status).toBe(404);
   mocks.auth.mockResolvedValue({user:{id:userId}});expect((await request(targetId,{headers:{Origin:'http://foreign.example.test'}})).status).toBe(403);
