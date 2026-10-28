@@ -8,7 +8,7 @@ export async function GET() {
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   return NextResponse.json(await prisma.bountyProgram.findMany({
     where: { ownerId: session.user.id }, orderBy: { companyName: "asc" },
-    include: { targets: { where: { active: true }, orderBy: { host: "asc" } } },
+    include: { targets: { where: { active: true, contextOnly: false, userId: session.user.id }, orderBy: { host: "asc" } } },
   }));
 }
 export async function POST(req: Request) {
@@ -17,6 +17,7 @@ export async function POST(req: Request) {
   const parsed = programSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });
   const { scopeHosts, ...data } = parsed.data;
+  data.scopeRules = [...new Set([...data.scopeRules, ...scopeHosts])];
   const ownerId = session.user.id;
   const program = await prisma.$transaction(async tx => {
     const p = await tx.bountyProgram.create({ data: { ...data, ownerId } });

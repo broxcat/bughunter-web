@@ -7,6 +7,7 @@ export interface ProgramData {
   id: string; companyName: string; platform: string | null; programUrl: string | null;
   rewardCurrency: string; rewardLow: string | null; rewardMedium: string | null; rewardHigh: string | null; rewardCritical: string | null;
   requiredUserAgent: string; outOfScope: string[]; qualifying: string[]; nonQualifying: string[];
+  scopeRules: string[]; rulesOfEngagement: string | null; deletingAt?: string | null;
   targets: { id: string; host: string; active: boolean }[];
 }
 const inputClass = "w-full rounded border border-border bg-surface p-2";
@@ -21,6 +22,7 @@ export default function ProgramForm({ initial, onSaved }: { initial?: ProgramDat
   const [busy, setBusy] = useState(false);
   const [scopeHosts, setScopeHosts] = useState<string[]>([]);
   const [outOfScope, setOutOfScope] = useState(initial?.outOfScope ?? []);
+  const [scopeRules, setScopeRules] = useState(initial?.scopeRules ?? []);
   const [qualifying, setQualifying] = useState(initial?.qualifying ?? []);
   const [nonQualifying, setNonQualifying] = useState(initial?.nonQualifying ?? []);
   async function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -28,7 +30,7 @@ export default function ProgramForm({ initial, onSaved }: { initial?: ProgramDat
     const data = Object.fromEntries(new FormData(e.currentTarget));
     const body = { ...data, platform: data.platform || null, programUrl: data.programUrl || null,
       ...Object.fromEntries(["rewardLow", "rewardMedium", "rewardHigh", "rewardCritical"].map(k => [k, data[k] || null])),
-      ...(initial ? {} : { scopeHosts }), outOfScope, qualifying, nonQualifying };
+      ...(initial ? {} : { scopeHosts }), scopeRules, outOfScope, qualifying, nonQualifying };
     try {
       const res = await fetch(initial ? `/api/programs/${initial.id}` : "/api/programs", { method: initial ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const json = await res.json(); if (!res.ok) throw new Error(json.error); onSaved(json.id);
@@ -41,6 +43,9 @@ export default function ProgramForm({ initial, onSaved }: { initial?: ProgramDat
     <label className="block">Program URL<input name="programUrl" type="url" defaultValue={initial?.programUrl ?? ""} className={inputClass} /></label>
     <fieldset><legend className="font-semibold">Rewards</legend><div className="grid gap-3 sm:grid-cols-5">{(["Low", "Medium", "High", "Critical"] as const).map(level => <label key={level}>{level}<input name={`reward${level}`} inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" defaultValue={initial?.[`reward${level}`] ?? ""} className={inputClass} /></label>)}<label>Currency<input name="rewardCurrency" required pattern="[A-Z]{3}" maxLength={3} defaultValue={initial?.rewardCurrency ?? "EUR"} className={inputClass} /></label></div></fieldset>
     {!initial && <Hosts title="Scope" value={scopeHosts} onChange={setScopeHosts} />}
+    <Hosts title="Authorized scope rules" value={scopeRules} onChange={setScopeRules} />
+    <p className="text-sm text-muted">Enter exact domains or *.example.com as officially authorized. These rules allow Recon and Codex before any host exists. A wildcard covers subdomains only; exclusions take priority.</p>
+    <label className="block">Rules of engagement<textarea name="rulesOfEngagement" maxLength={20000} rows={5} defaultValue={initial?.rulesOfEngagement ?? ''} className={inputClass} placeholder="Official program rules, technical restrictions, authorization conditions…" /></label>
     <Hosts title="Out of Scope" value={outOfScope} onChange={setOutOfScope} />
     {families("Qualifying vulnerabilities", qualifying, setQualifying)}
     <p className="text-sm text-muted">These fields record program policy for research. They do not select automated tests. Explicit exclusions always take priority.</p>

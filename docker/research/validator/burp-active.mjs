@@ -5,6 +5,7 @@ const destination = { targetHostname: text(253), targetPort: z.number().int().mi
 export const http1Arguments = z.strictObject({ ...destination, content: text(65536) });
 export const http2Arguments = z.strictObject({ ...destination, pseudoHeaders: z.record(text(100), text(4096)), headers: z.record(text(100), text(4096)), requestBody: text(65536) });
 function destinationCheck(a, p) {
+  if (p.mode === 'PROGRAM_PASSIVE') throw new Error('TOOL_NOT_ALLOWED');
   if (a.targetHostname !== p.targetHost || a.targetPort !== p.port || a.usesHttps !== (p.scheme === 'https')) throw new Error('OUT_OF_SCOPE');
 }
 function authority(value, p) { return value === p.targetHost || value === `${p.targetHost}:${p.port}`; }

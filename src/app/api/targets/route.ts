@@ -44,7 +44,7 @@ export async function GET() {
   }
 
   const targets = await prisma.target.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, contextOnly: false },
     orderBy: { createdAt: "desc" },
     include: { scope: true },
   });

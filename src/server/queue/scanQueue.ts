@@ -25,6 +25,31 @@ export const PRODUCER_REDIS_OPTIONS = {
   retryStrategy: () => null,
 };
 
+export async function purgeScanJobs(ids: string[]) {
+  if (!ids.length) return;
+  const client = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', PRODUCER_REDIS_OPTIONS);
+  client.on('error', () => {});
+  let queue: Queue | undefined;
+  try {
+    await client.connect();
+    queue = new Queue(SCAN_QUEUE_NAME, { connection: client });
+    for (const id of ids) {
+      const deadline = Date.now() + 5000;
+      while (true) {
+        const job = await queue.getJob(id);
+        if (!job) break;
+        // The worker commits cleanup before BullMQ acknowledges completion.
+        // Wait for that short acknowledgement window before removing its job.
+        if (await job.isActive()) {
+          if (Date.now() >= deadline) throw new Error('Queue cleanup unconfirmed');
+          await new Promise(resolve => setTimeout(resolve, 100)); continue;
+        }
+        await job.remove(); break;
+      }
+    }
+  } finally { client.disconnect(); if (queue) void queue.close().catch(() => {}); }
+}
+
 /** One disposable, nonblocking BullMQ producer per delivery attempt.
  * BullMQ 6 permits finite retries on Queue connections (only Worker blocking
  * connections require null). CUIDs are valid custom IDs: no ':' or integer IDs.

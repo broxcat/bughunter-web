@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
+import ProgramWorkflow from "@/components/ProgramWorkflow";
 import ProgramForm, { type ProgramData } from "@/components/ProgramForm";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -29,5 +30,6 @@ export default function ProgramPage({ params }: { params: Promise<{ id: string }
         <p>Qualifying: {program.qualifying.join(", ") || "Not specified"}</p><p>Non-qualifying: {program.nonQualifying.join(", ") || "None"}</p>
       </Card><div className="flex gap-4"><Link className="text-brand" href={`/scopes/${id}`}>Open Scope →</Link><Link className="text-brand" href={`/recon?program=${id}`}>Start Recon →</Link><Link className="text-brand" href={`/research?program=${id}`}>Create Research Workspace →</Link></div>
     </>}
+    <ProgramWorkflow program={program} />
   </div>;
 }

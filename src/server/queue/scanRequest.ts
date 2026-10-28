@@ -28,7 +28,7 @@ export async function findScanRequest(userId: string, key: string | null, input:
   void _target;
   return run;
 }
-export async function createScanRequest(userId: string, input: ScanRequest, key: string | null) {
+export async function createScanRequest(userId: string, input: ScanRequest, key: string | null, reuseLive = false) {
   if (input.type !== "RECON" || input.approvedTechniques?.length || input.approveBoundedTiming) throw new ScanRequestConflict("Only Recon scans are supported; legacy Hunt is retired");
   try {
     const run = await prisma.$transaction(async tx => {
@@ -38,6 +38,10 @@ export async function createScanRequest(userId: string, input: ScanRequest, key:
       await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
       const existing = await findScanRequest(userId, key, input, tx);
       if (existing) return existing;
+      if (reuseLive) {
+        const live = await tx.scanRun.findFirst({ where: { targetId: input.targetId, target: { userId }, type: 'RECON', status: { in: ['QUEUED', 'RUNNING'] } }, include: { jobOutbox: { select: dispatchSelect } } });
+        if (live) return live;
+      }
       const policy = RATE_LIMIT_POLICIES.scanUser;
       const where = { target: { userId }, createdAt: { gt: new Date(Date.now() - policy.windowSec * 1000) } };
       if (await tx.scanRun.count({ where }) >= policy.limit) {

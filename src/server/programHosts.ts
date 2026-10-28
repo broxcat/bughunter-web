@@ -7,9 +7,9 @@ export class HostError extends Error {
 /** Serialize host mutations per program; a partial DB index also prevents races. */
 export async function mutateHost(ownerId: string, programId: string, action: "ADD" | "EDIT" | "REMOVE", input: { host?: string; hostId?: string; legacyTargetId?: string }) {
   return prisma.$transaction(async tx => {
-    const rows = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "BountyProgram" WHERE id = ${programId} AND "ownerId" = ${ownerId} FOR UPDATE`;
+    const rows = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "BountyProgram" WHERE id = ${programId} AND "ownerId" = ${ownerId} AND "deletingAt" IS NULL FOR UPDATE`;
     if (!rows.length) throw new HostError("Target not found", 404);
-    const previous = input.hostId ? await tx.target.findFirst({ where: { id: input.hostId, programId, userId: ownerId, active: true } }) : null;
+    const previous = input.hostId ? await tx.target.findFirst({ where: { id: input.hostId, programId, userId: ownerId, active: true, contextOnly: false } }) : null;
     if (action !== "ADD" && !previous) throw new HostError("Host not found", 404);
     if (action === "REMOVE") return tx.target.update({ where: { id: previous!.id }, data: { active: false } });
     const host = normalizeFqdn(input.host ?? "");

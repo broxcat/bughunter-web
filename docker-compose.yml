@@ -74,6 +74,7 @@ services:
       default:
         gw_priority: 1
       tailscale_frontend:
+      research_terminal:
     depends_on:
       db:
         condition: service_healthy

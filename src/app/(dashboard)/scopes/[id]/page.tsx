@@ -21,7 +21,19 @@ export default function ScopePage({ params }: { params: Promise<{ id: string }> 
     if (!p.ok || !h.ok) throw new Error("Target not found");
     setProgram(await p.json()); setHosts(await h.json());
   }
-  useEffect(() => { Promise.all([fetch(`/api/programs/${id}`), fetch(`/api/programs/${id}/hosts`)]).then(async ([p, h]) => { if (!p.ok || !h.ok) throw new Error("Target not found"); setProgram(await p.json()); setHosts(await h.json()); }).catch(e => setError(e.message)); }, [id]);
+  useEffect(() => {
+    let disposed = false;
+    const poll = async () => {
+      try {
+        const [p, h] = await Promise.all([fetch(`/api/programs/${id}`), fetch(`/api/programs/${id}/hosts`)]);
+        if (!p.ok || !h.ok) throw new Error("Target not found");
+        const [program, hosts] = await Promise.all([p.json(), h.json()]);
+        if (!disposed) { setProgram(program); setHosts(hosts); }
+      } catch (e) { if (!disposed) setError((e as Error).message); }
+    };
+    void poll(); const timer = setInterval(() => void poll(), 2000);
+    return () => { disposed = true; clearInterval(timer); };
+  }, [id]);
   async function save(host?: Host) {
     if (!program) return; setBusy(true); setError("");
     try {

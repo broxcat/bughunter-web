@@ -58,7 +58,7 @@ RUN cd /etc/codex/skills && sha256sum --check ../skills.sha256 \
     && chmod -R a-w /etc/codex/skills
 # Shared contracts and small runner helpers only; never copy the application source.
 COPY src/lib/research/hypotheses.ts src/lib/research/burp.ts src/lib/research/terminal.ts src/lib/research/consolePolicy.ts /opt/bughunter/src/lib/research/
-COPY src/lib/observationSafety.ts src/lib/httpPolicy.mjs /opt/bughunter/src/lib/
+COPY src/lib/bountyProgram.ts src/lib/observationSafety.ts src/lib/httpPolicy.mjs /opt/bughunter/src/lib/
 COPY docker/research/validator/*.mjs docker/research/validator/*.cjs /opt/bughunter/docker/research/validator/
 COPY docker/research/console/ /opt/bughunter/docker/research/console/
 COPY --chmod=755 docker/research/bughunter-* /usr/local/bin/

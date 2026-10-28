@@ -30,14 +30,14 @@ beforeEach(() => {
     Object.assign(run, data); return { count: 1 };
   });
   mocks.attemptCreate.mockImplementation(async ({ data }) => {
-    const attempt = { id: "attempt", ...data, state: "RUNNING", startedAt: new Date(), heartbeatAt: new Date(), finishedAt: null, reason: null, usefulWorkAt: null, networkStartedAt: null };
+    const attempt = { id: "attempt", ...data, state: "RUNNING", startedAt: new Date(), heartbeatAt: new Date(), finishedAt: null, cleanupConfirmedAt: null, reason: null, usefulWorkAt: null, networkStartedAt: null };
     attempts.push(attempt); return { ...attempt };
   });
   mocks.attemptFind.mockImplementation(async () => ({ ...attempts[0] }));
   mocks.attemptList.mockImplementation(async () => attempts.filter(a => a.state === "RUNNING" && a.heartbeatAt.getTime() <= Date.now() - HEARTBEAT_STALE_MS));
   mocks.attemptUpdate.mockImplementation(async ({ where, data }) => {
     const a = attempts[0];
-    if (!a || a.id !== where.id || a.state !== where.state || where.workerId && a.workerId !== where.workerId || where.heartbeatAt && a.heartbeatAt.getTime() !== where.heartbeatAt.getTime()) return { count: 0 };
+    if (!a || a.id !== where.id || where.state && a.state !== where.state || where.workerId && a.workerId !== where.workerId || where.heartbeatAt && a.heartbeatAt.getTime() !== where.heartbeatAt.getTime()) return { count: 0 };
     Object.assign(a, data); return { count: 1 };
   });
   mocks.execution.mockImplementation(async () => { if (run.target.scope.status !== "APPROVED") throw new Error("Scope not APPROVED"); return { targetId: "target", requiredUserAgent: "Test/1" }; });
@@ -128,7 +128,7 @@ describe("replay, heartbeat and cancellation", () => {
     run.cancelRequestedAt = new Date(); await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
     expect(signal.aborted).toBe(true); expect(run.status).toBe("RUNNING");
     release(); await work;
-    expect(run).toMatchObject({ status: "CANCELLED", outcome: null }); expect(attempts[0].state).toBe("CANCELLED");
+    expect(run).toMatchObject({ status: "CANCELLED", outcome: null }); expect(attempts[0].state).toBe("CANCELLED"); expect(attempts[0].cleanupConfirmedAt).toBeInstanceOf(Date);
     expect(vi.getTimerCount()).toBe(0);
   });
   it("worker shutdown aborts resources, marks interruption and rejects new work", async () => {
@@ -170,10 +170,10 @@ describe("replay, heartbeat and cancellation", () => {
     const work = processor.process(job("RECON")); await vi.advanceTimersByTimeAsync(0);
     const shutdown = processor.shutdown(10); await vi.advanceTimersByTimeAsync(1500); await shutdown;
     expect(force.mock.calls.some(call => call[0] === true)).toBe(true);
-    expect(attempts[0]).toMatchObject({ state: "INTERRUPTED", reason: "WORKER_SHUTDOWN_GRACE_EXPIRED" });
+    expect(attempts[0]).toMatchObject({ state: "INTERRUPTED", reason: "CLEANUP_UNCONFIRMED", cleanupConfirmedAt: null });
     expect(run.status).toBe("FAILED");
     await vi.advanceTimersByTimeAsync(6000); await work;
-    expect(attempts[0].reason).toBe("WORKER_SHUTDOWN_GRACE_EXPIRED");
+    expect(attempts[0].reason).toBe("CLEANUP_UNCONFIRMED");
   });
   it("late success cannot overwrite an interruption committed by another worker", async () => {
     let finish!: (value: { outcome: "SUCCESS" }) => void;

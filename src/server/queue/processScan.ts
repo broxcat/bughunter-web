@@ -103,9 +103,9 @@ export function createScanProcessor(workerId: string, executor: Executor = execu
       if (await settlesWithin(Promise.allSettled([...calls]), graceMs)) return;
       await Promise.all([...active.values()].map(async monitor => {
         monitor.control.abort("WORKER_SHUTDOWN");
-        await monitor.control.cleanup(true, 1000);
+        const clean = await monitor.control.cleanup(true, 1000);
         monitor.stop();
-        await settlesWithin(finishScanExecution(monitor.control.identity.attemptId, workerId, { state: "INTERRUPTED", reason: "WORKER_SHUTDOWN_GRACE_EXPIRED" }), 1000);
+        await settlesWithin(finishScanExecution(monitor.control.identity.attemptId, workerId, { state: "INTERRUPTED", reason: clean ? "WORKER_SHUTDOWN_GRACE_EXPIRED" : "CLEANUP_UNCONFIRMED" }), 1000);
       }));
     },
   };

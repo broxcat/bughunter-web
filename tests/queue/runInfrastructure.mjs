@@ -32,7 +32,7 @@ try {
   // Pin Redis’s disposable port: Docker can reassign an ephemeral mapping on start.
   const fixedRedisPort = await unusedPort(), executionRedisPort = await unusedPort(), abuseRedisPort = await unusedPort();
   for (const [name, args] of [
-    [pg, ["-e", "POSTGRES_PASSWORD=disposable-test", "-p", "127.0.0.1::5432", "postgres:16-alpine"]],
+    [pg, [...(process.env.TEST_POSTGRES_TMPFS === '1' ? ['--tmpfs', '/var/lib/postgresql/data'] : []), "-e", "POSTGRES_PASSWORD=disposable-test", "-p", "127.0.0.1::5432", "postgres:16-alpine"]],
     [abuseRedis, ["-p", `127.0.0.1:${abuseRedisPort}:6379`, "redis:7-alpine"]],
     [executionRedis, ["-p", `127.0.0.1:${executionRedisPort}:6379`, "redis:7-alpine"]],
     [redis, ["-p", `127.0.0.1:${fixedRedisPort}:6379`, "redis:7-alpine", "redis-server", "--appendonly", "yes", "--appendfsync", "always"]],

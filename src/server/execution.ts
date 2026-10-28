@@ -3,7 +3,7 @@ import { logger } from "@/lib/logger";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { chromium, type Browser, type Route } from "playwright-chromium";
 import { prisma } from "@/lib/prisma";
-import { isExcluded, programSchema } from "@/lib/bountyProgram";
+import { isExcluded, programSchema, matchesHost } from "@/lib/bountyProgram";
 
 export interface TargetRequestGuard {
   assertRequest?(url: string, method: string, body?: string): void;
@@ -12,6 +12,7 @@ export interface TargetRequestGuard {
   signal: AbortSignal;
 }
 export interface TargetExecution {
+  programReconId?: string;
   requestGuard?: TargetRequestGuard;
   targetId: string;
   host: string;
@@ -28,11 +29,14 @@ export function currentTargetExecution(): TargetExecution {
   if (!ctx) throw new Error("Missing authorized Target execution context");
   return ctx;
 }
-export function scanRejection(target: { userId: string; host: string; active: boolean; scope: { status: string }; program: { ownerId: string; requiredUserAgent: string; outOfScope: string[] } | null }): string | null {
+export function scanRejection(target: { userId: string; host: string; active: boolean; contextOnly?: boolean; discoverySource?: string | null; scope: { status: string }; program: { ownerId: string; requiredUserAgent: string; outOfScope: string[]; deletingAt?: Date | null; scopeRules?: string[] } | null }): string | null {
+  if (target.program?.deletingAt) return 'Target deletion is in progress';
   if (target.scope.status !== "APPROVED") return "Target's scope is not APPROVED; refusing to scan";
-  if (!target.active) return "Host has been removed from Scope";
+  if (!target.active && !target.contextOnly) return "Host has been removed from Scope";
   if (!target.program || target.program.ownerId !== target.userId) return "Add this host to a Target with a required User-Agent before scanning";
   if (!programSchema.shape.requiredUserAgent.safeParse(target.program.requiredUserAgent).success || target.program.requiredUserAgent !== target.program.requiredUserAgent.trim()) return "Target requires a valid User-Agent";
+  if (target.contextOnly) return target.program.scopeRules?.length ? null : 'Configure authorized scope rules before Recon';
+  if (target.discoverySource && !target.program.scopeRules?.some(rule => matchesHost(target.host, rule))) return "Discovered host is no longer within authorized program scope";
   if (target.host.includes("*")) return "Add a concrete FQDN to Scope before scanning a wildcard rule";
   if (isExcluded(target.host, target.program.outOfScope)) return "Host is explicitly out of scope";
   return null;
@@ -42,7 +46,7 @@ export async function loadTargetExecution(targetId: string): Promise<TargetExecu
   if (!target) throw new Error("Host not found");
   const error = scanRejection(target);
   if (error) throw new Error(error);
-  return { targetId, host: target.host, requiredUserAgent: target.program!.requiredUserAgent,
+  return { targetId, host: target.host, ...(target.contextOnly ? { programReconId: target.program!.id } : {}), requiredUserAgent: target.program!.requiredUserAgent,
     qualifying: target.program!.qualifying, nonQualifying: target.program!.nonQualifying };
 }
 /** Requests stay on the selected concrete identity. Discovery never grants access. */

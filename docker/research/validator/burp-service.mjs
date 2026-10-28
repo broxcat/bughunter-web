@@ -1,3 +1,4 @@
+import { matchesHost, normalizeFqdn } from '../../../src/lib/bountyProgram.ts';
 import { randomUUID } from 'node:crypto';
 import { BURP_EXTENSION_VERSION } from '../../../src/lib/research/burp.ts';
 import { withBurp } from './burp-upstream.mjs';
@@ -11,9 +12,14 @@ export class BurpResearch {
     catch (error) { upstream = ['TIMEOUT', 'INCOMPATIBLE'].includes(error.message) ? error.message : 'UNAVAILABLE'; }
     return { version: 1, workspaceId: this.policy.workspaceId, checkedAt: new Date().toISOString(), runner: 'AVAILABLE', configuration: 'CONFIGURED', upstream, mode: 'PASSIVE_METADATA_ONLY' };
   }
-  async history(count, offset) {
-    const result = await this.upstream(client => client.callTool({ name: 'get_proxy_http_history_regex', arguments: historyArguments(this.policy, count, offset) }, undefined, { timeout: 4000 }), 5000);
-    const { observations, skipped } = parseHistory(result, this.policy);
+  async history(count, offset, host) {
+    let policy = this.policy;
+    if (policy.mode === 'PROGRAM_PASSIVE') {
+      if (!host || normalizeFqdn(host) !== host || host.includes('*') || !policy.programScope?.rules.some(r => matchesHost(host, r)) || policy.programScope.exclusions.some(r => matchesHost(host, r))) throw new Error('OUT_OF_SCOPE');
+      policy = { ...policy, targetHost: host };
+    } else if (host && host !== policy.targetHost) throw new Error('OUT_OF_SCOPE');
+    const result = await this.upstream(client => client.callTool({ name: 'get_proxy_http_history_regex', arguments: historyArguments(policy, count, offset) }, undefined, { timeout: 4000 }), 5000);
+    const { observations, skipped } = parseHistory(result, policy);
     const observedAt = new Date().toISOString();
     const items = observations.map(metadata => ({ observationId: randomUUID(), observedAt, ...metadata }));
     for (const item of items) {

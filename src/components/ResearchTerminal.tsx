@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
 
-export default function ResearchTerminal({ targetId, company, host, requiredUserAgent }: { targetId: string; company: string; host: string; requiredUserAgent: string }) {
+export default function ResearchTerminal({ targetId, company, host, requiredUserAgent, embedded = false }: { targetId: string; company: string; host: string; requiredUserAgent: string; embedded?: boolean }) {
   const element = useRef<HTMLDivElement>(null);
   const [attempt, reconnect] = useState(0), [state, setState] = useState('connecting'), [burp, setBurp] = useState('not checked'), [codex, setCodex] = useState('checking'), [error, setError] = useState('');
   useEffect(() => {
@@ -44,7 +44,7 @@ export default function ResearchTerminal({ targetId, company, host, requiredUser
     void connect().catch(e => { if (!disposed) { setError(e.message); setState('unavailable'); } });
     return () => { disposed = true; if (renewal) clearInterval(renewal); observer?.disconnect(); ws?.close(); terminal?.dispose(); };
   }, [targetId, attempt]);
-  return <div className="flex h-dvh w-full flex-col overflow-hidden bg-[#090d12] text-slate-200">
+  return <div className={`flex ${embedded ? "h-[650px] rounded border border-border" : "h-dvh"} w-full flex-col overflow-hidden bg-[#090d12] text-slate-200`}>
     <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-800 px-3 py-2 text-xs">
       <Link className="text-slate-400 hover:text-white" href="/research">← Research</Link>
       <h1 className="mr-auto truncate text-sm font-medium">{company} / {host}</h1>

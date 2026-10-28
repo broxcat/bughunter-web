@@ -143,6 +143,9 @@ enum BountyPlatform {
 
 // Business Target. Technical Target identities and their historical FKs stay intact.
 model BountyProgram {
+  scopeRules        String[]        @default([])
+  rulesOfEngagement String?         @db.Text
+  deletingAt        DateTime?
   id                String          @id @default(cuid())
   ownerId           String
   companyName       String
@@ -166,6 +169,11 @@ model BountyProgram {
 }
 
 model Target {
+  // Internal program execution/workspace identity; never a discovered host.
+  contextOnly Boolean @default(false)
+  discoverySource String?
+  discoveredAt DateTime?
+  discoveredByScanRunId String?
   programId String?
   active    Boolean        @default(true)
   program   BountyProgram? @relation(fields: [programId], references: [id], onDelete: Restrict)
@@ -262,6 +270,7 @@ enum CredentialMode {
 // ---------------------------------------------------------------------------
 
 model ScanRun {
+  discoveries HostDiscovery[]
   approvedHuntTechniques String[]   @default([])
   huntReport             Json?
   reconCorpus            Json?
@@ -295,8 +304,21 @@ model ScanRun {
   @@index([status])
 }
 
+model HostDiscovery {
+  id String @id @default(cuid())
+  scanRunId String
+  host String
+  source String
+  state String
+  added Boolean @default(false)
+  createdAt DateTime @default(now())
+  scanRun ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  @@unique([scanRunId, host])
+}
+
 // Real starts only: historical scans have no invented execution attempts.
 model ScanExecutionAttempt {
+  cleanupConfirmedAt DateTime?
   id               String                    @id @default(cuid())
   scanRunId        String
   workerId         String

@@ -14,9 +14,9 @@ import type { Prisma } from "@prisma/client";
 
 // Explicit projection: no Prisma credential or AI secret can enter the exporter.
 export const researchTargetSelect = {
-  id: true, userId: true, host: true, scheme: true, active: true,
+  id: true, userId: true, host: true, scheme: true, active: true, contextOnly: true, discoverySource: true,
   scope: { select: { updatedAt: true, id: true, userId: true, hostPattern: true, status: true, rulesOfEngagement: true, scopeDetails: true, outOfScope: true, disclosurePolicy: true, safeHarbor: true, legalTerms: true, eligibilityCriteria: true, reportingFormat: true } },
-  program: { select: { updatedAt: true, id: true, ownerId: true, companyName: true, requiredUserAgent: true, outOfScope: true, qualifying: true, nonQualifying: true } },
+  program: { select: { updatedAt: true, id: true, ownerId: true, companyName: true, requiredUserAgent: true, scopeRules: true, rulesOfEngagement: true, deletingAt: true, outOfScope: true, qualifying: true, nonQualifying: true } },
   credentials: { select: { label: true, purpose: true, sessionStatus: true } },
 } satisfies Prisma.TargetSelect;
 export type ResearchTarget = Prisma.TargetGetPayload<{ select: typeof researchTargetSelect }>;
@@ -28,6 +28,8 @@ export class ResearchError extends Error {
 
 export function assertResearchTarget(target: ResearchTarget, userId: string) {
   if (target.userId !== userId || target.scope.userId !== userId || target.program?.ownerId !== userId) throw new ResearchError("Target not found", 404);
+  if (target.program?.deletingAt) throw new ResearchError('Target deletion is in progress', 409);
+  if (target.contextOnly) { if (target.scope.status !== "APPROVED") throw new ResearchError("Program scope is not approved"); return; }
   const rejection = scanRejection(target);
   if (rejection) throw new ResearchError(rejection);
   try { if (normalizeFqdn(target.host) !== target.host || !matchesHost(target.host, target.scope.hostPattern)) throw new Error(); }
@@ -61,8 +63,8 @@ export function createResearchBundle(target: ResearchTarget, recon: ResearchReco
   const program = target.program!;
   const sshPort = /^\d{1,5}$/.test(process.env.RESEARCH_SSH_PORT ?? "") ? process.env.RESEARCH_SSH_PORT : "2222";
   const provenance = { source: recon ? `ScanRun ${recon.id}` : `Target ${target.id}`, generatedAt: session.createdAt.toISOString() };
-  const policy = ["# Program policy", `Source: Scope ${target.scope.id} / Program ${program.id}`, ...Object.entries({ rulesOfEngagement: target.scope.rulesOfEngagement, scopeDetails: target.scope.scopeDetails, outOfScope: target.scope.outOfScope, disclosurePolicy: target.scope.disclosurePolicy, safeHarbor: target.scope.safeHarbor, legalTerms: target.scope.legalTerms, eligibilityCriteria: target.scope.eligibilityCriteria, reportingFormat: target.scope.reportingFormat }).filter(([, value]) => value).map(([key, value]) => `## ${key}\n\n${exportText(value!)}`), `## Qualifying\n\n${program.qualifying.join(", ") || "Not specified."}`, `## Non-qualifying\n\n${program.nonQualifying.join(", ") || "Not specified."}`].join("\n\n") + "\n";
-  const scope = `# Authorized Scope\n\nProgram: ${exportText(program.companyName)}\n\nSource: Target ${target.id}, Scope ${target.scope.id}; snapshot ${provenance.generatedAt}.\nRecheck current authorization in BugHunter before each session.\n\n## Selected target\n\n${target.host}\n\n## Explicitly authorized hosts\n\n- ${target.host}\n\nOnly this selected concrete host is authorized by this workspace.\n\n## Excluded\n\n${program.outOfScope.map(host => `- ${host}`).join("\n") || "No structured host exclusions recorded."}\n${target.scope.outOfScope ? exportText(target.scope.outOfScope) : ""}\n\n## Required User-Agent\n\n${exportText(program.requiredUserAgent)}\n\n## Program rules\n\n${target.scope.rulesOfEngagement ? exportText(target.scope.rulesOfEngagement) : "No additional rules recorded."}\nSee program-policy.md for the other recorded policy fields.\n\n## Safety rule\n\nDiscovery does not grant authorization. Hosts discovered during research MUST NOT\nbe treated as authorized unless they appear in the explicitly authorized scope above.\nDo not follow redirects to another host. Authorization revocation requires stopping.\n`;
+  const policy = ["# Program policy", `Source: Scope ${target.scope.id} / Program ${program.id}`, ...Object.entries({ rulesOfEngagement: target.scope.rulesOfEngagement, scopeDetails: target.scope.scopeDetails, outOfScope: target.scope.outOfScope, disclosurePolicy: target.scope.disclosurePolicy, safeHarbor: target.scope.safeHarbor, legalTerms: target.scope.legalTerms, eligibilityCriteria: target.scope.eligibilityCriteria, reportingFormat: target.scope.reportingFormat }).filter(([, value]) => value).map(([key, value]) => `## ${key}\n\n${exportText(value!)}`), `## Program rules of engagement\n\n${exportText(program.rulesOfEngagement ?? "No additional program rules recorded.")}`, `## Qualifying\n\n${program.qualifying.join(", ") || "Not specified."}`, `## Non-qualifying\n\n${program.nonQualifying.join(", ") || "Not specified."}`].join("\n\n") + "\n";
+  const scope = `# Authorized Scope\n\nProgram: ${exportText(program.companyName)}\n\nSource: Target ${target.id}, Scope ${target.scope.id}; snapshot ${provenance.generatedAt}.\nRecheck current authorization in BugHunter before each session.\n\n## Selected target\n\n${target.host}\n\n## Explicitly authorized hosts\n\n- ${target.host}\n\nOnly this selected concrete host is authorized by this workspace.\n\n## Excluded\n\n${program.outOfScope.map(host => `- ${host}`).join("\n") || "No structured host exclusions recorded."}\n${target.scope.outOfScope ? exportText(target.scope.outOfScope) : ""}\n\n## Required User-Agent\n\n${exportText(program.requiredUserAgent)}\n\n## Program rules\n\n${target.scope.rulesOfEngagement ? exportText(target.scope.rulesOfEngagement) : "No additional host rules recorded."}\n${exportText(program.rulesOfEngagement ?? "No additional program rules recorded.")}\nSee program-policy.md for the other recorded policy fields.\n\n## Safety rule\n\nDiscovery does not grant authorization. Hosts discovered during research MUST NOT\nbe treated as authorized unless they appear in the explicitly authorized scope above.\nDo not follow redirects to another host. Authorization revocation requires stopping.\n`;
   const files: Record<string, string> = {
     "AGENTS.md": RESEARCH_RULES,
     "README.md": `# BugHunter Research Workspace\n\n${exportText(program.companyName)} / ${target.host}\n\nRead AGENTS.md and scope.md before doing anything.\n\nSSH from the Docker host (use your configured SSH port/key):\n\n\`\`\`sh\nssh -i ~/.ssh/bughunter_research -p ${sshPort} researcher@127.0.0.1\ncd /workspaces/${session.workspaceId}\nbughunter-codex\n# Wrapper: codex --yolo with the fixed workspace MCP configuration\n\`\`\`\n\nBootstrap prompt:\n\nRead AGENTS.md, scope.md and all existing recon evidence. Build an initial map of\nthe application and create only evidence-backed hypotheses in research/hypotheses.json, with a human-readable view in research/hypotheses.md.\n\n${recon ? `Recon source: ScanRun ${recon.id}.` : "No Recon evidence was available at creation; do not invent observations."}\nExport contains metadata only, no target credentials or raw HTTP responses.\nNo remote Git repository or automatic Finding creation is configured.\n\nHypothesis workflow:\n1. Inspect evidence.\n2. Create/update research/hypotheses.json (contract v2; see research/hypothesis.schema.json).\n3. Keep research/hypotheses.md human-readable.\n4. Run bughunter-validate-hypotheses.\n5. Return to BugHunter and click Sync from workspace.\nBugHunter stores imported hypotheses and revisions read-only; workspace edits never create Findings.\nInput files are read-only; research/, evidence/ and scripts/ are writable.\nZIP downloads preserve this initial bundle, excluding subsequent local research edits.\nOptional Burp MCP:\nRead evidence/burp/README.md and the repository docs/BURP-MCP-RESEARCH.md.\nThe installed bughunter-codex wrapper configures a passive metadata MCP gateway.\nStart Burp MCP externally and its loopback SSH tunnel, then run bughunter-burp-status.\nThe web displays only the last diagnostic; it cannot control Burp or execute MCP.\nConfigure authorized scope, exclusions and the required User-Agent in Burp before manual testing.\n127.0.0.1 inside the runner refers to the runner, not the Docker host.\n`,
@@ -140,6 +142,7 @@ export async function writeResearchWorkspace(root: string, workspaceId: string, 
   await safeDirectory(exports, 0o700, gid);
   await mkdir(temp, { mode: 0o700 }); // exclusive; no partial workspace is visible to SSH
   const archiveTemp = join(exports, `.tmp-${workspaceId}`), archivePath = join(exports, `${workspaceId}.zip`);
+  let archivePublished = false;
   try {
     // Never overwrite a prior session, even with the same server identity.
     try { await lstat(final); throw new ResearchError("Workspace already exists"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
@@ -154,11 +157,13 @@ export async function writeResearchWorkspace(root: string, workspaceId: string, 
     try { await archive.writeFile(zip); await archive.sync(); } finally { await archive.close(); }
     await chown(temp, process.getuid!(), gid); await chmod(temp, 0o2750);
     await rename(archiveTemp, archivePath);
+    archivePublished = true;
     await rename(temp, final); // single publication point
     return { exportSha256: digest(zip), files: Object.keys(files).sort() };
   } catch (error) {
     await rm(temp, { recursive: true, force: true });
     await rm(archiveTemp, { force: true });
+    if (archivePublished) await rm(archivePath, { force: true });
     throw error;
   }
 }

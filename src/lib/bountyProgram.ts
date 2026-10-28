@@ -30,6 +30,8 @@ export const programSchema = z.object({
   rewardLow: money, rewardMedium: money, rewardHigh: money, rewardCritical: money,
   requiredUserAgent: requiredUserAgentSchema,
   scopeHosts: hosts.default([]),
+  scopeRules: hosts.default([]),
+  rulesOfEngagement: z.string().trim().max(20000).nullable().optional(),
   outOfScope: hosts.default([]),
   qualifying: z.array(z.enum(VULNERABILITY_FAMILIES)).default([]),
   nonQualifying: z.array(z.enum(VULNERABILITY_FAMILIES)).default([]),

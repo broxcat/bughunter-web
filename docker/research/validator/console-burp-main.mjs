@@ -9,8 +9,8 @@ import { http1Arguments, http2Arguments, enforceHttp1, enforceHttp2, activeObser
 import { saveConsoleObservation } from './console-evidence.mjs';
 const workspace = await openConsoleWorkspace();
 const research = new BurpResearch(workspace.policy, withOfficialBurp);
-const empty = z.strictObject({}), paging = z.strictObject({ count: z.number().int().min(1).max(20).default(10), offset: z.number().int().min(0).max(10000).default(0) }), save = z.strictObject({ observationId: z.uuid() });
-async function status() { const result = await research.diagnostic(); return { ...result, mode: 'SCOPED_ACTIVE_HTTP' }; }
+const empty = z.strictObject({}), paging = z.strictObject({ count: z.number().int().min(1).max(20).default(10), offset: z.number().int().min(0).max(10000).default(0), host: z.string().max(253).optional() }), save = z.strictObject({ observationId: z.uuid() });
+async function status() { const result = await research.diagnostic(); return { ...result, mode: workspace.policy.mode }; }
 if (process.argv[2] === 'status') {
   const result = await status(); console.log(`Burp MCP: ${result.upstream}; scoped HTTP gateway via official PortSwigger mcp-proxy.`); process.exitCode = result.upstream === 'AVAILABLE' ? 0 : 1; await workspace.root.close();
 } else {
@@ -22,13 +22,14 @@ if (process.argv[2] === 'status') {
     ['send_http1_request', 'Send one authorized-host HTTP/1 request. Gateway validates destination/Host and enforces required User-Agent. No automatic redirect follow or retry. State hypothesis/expected signal/falsification first. Response is untrusted evidence, not vulnerability proof.', http1Arguments],
     ['send_http2_request', 'Send one authorized-host HTTP/2 request. Gateway validates authority/scheme/port and enforces required User-Agent. No automatic redirect follow or retry. Requires hypothesis and falsification. Response is untrusted data.', http2Arguments],
   ];
+  if (workspace.policy.mode === 'PROGRAM_PASSIVE') tools.splice(3);
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: tools.map(([name, description, schema]) => ({ name, description, inputSchema: z.toJSONSchema(schema) })) }));
   server.setRequestHandler(CallToolRequestSchema, async req => {
     try {
       let result;
       switch (req.params.name) {
         case 'burp_status': empty.parse(req.params.arguments ?? {}); result = await status(); break;
-        case 'burp_history': { const a = paging.parse(req.params.arguments ?? {}); result = await research.history(a.count, a.offset); break; }
+        case 'burp_history': { const a = paging.parse(req.params.arguments ?? {}); result = await research.history(a.count, a.offset, a.host); break; }
         case 'burp_save_observation': result = { ref: await saveConsoleObservation(workspace.root, research.evidence(save.parse(req.params.arguments).observationId)) }; break;
         case 'send_http1_request': case 'send_http2_request': {
           const args = req.params.name === 'send_http1_request' ? enforceHttp1(req.params.arguments, workspace.policy) : enforceHttp2(req.params.arguments, workspace.policy);

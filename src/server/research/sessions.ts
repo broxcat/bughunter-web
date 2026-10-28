@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 import { rm } from "node:fs/promises";
 import { assertResearchTarget, researchAuthorizationSnapshot, createResearchBundle, newWorkspaceId, researchTargetSelect, ResearchError, workspacePath, writeResearchWorkspace } from "./workspace";
 
@@ -42,7 +42,10 @@ export async function createResearchSession(userId: string, targetId: string) {
       return tx.researchSession.update({ where: { id: session.id }, data: { status: "READY", scopeMarkdown: bundle["scope.md"], ...result }, select: researchSessionSelect });
     }, { timeout: 15000 });
   } catch (error) {
-    if (published) await rm(workspacePath(root, workspaceId), { force: true, recursive: true }).catch(() => {});
+    if (published) {
+      await rm(workspacePath(root, workspaceId), { force: true, recursive: true }).catch(() => {});
+      await rm(join(root, '.exports', `${workspaceId}.zip`), { force: true }).catch(() => {});
+    }
     if (sessionId) {
       // Transaction rollback removes CREATING. Persist a safe failure record, with
       // no exception text, scope inputs, credentials or filesystem paths.

@@ -31,6 +31,7 @@ try {
   // Testing service is derived from the real service: preserve capabilities,
   // user, entrypoint and healthcheck, change only disposable resources/port.
   delete runner.build;
+  runner.image=process.env.RESEARCH_TEST_RUNNER_IMAGE??runner.image;
   delete runner.profiles;
   runner.restart = "no";
   const listener = createServer();

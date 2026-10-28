@@ -91,6 +91,9 @@ export async function finishScanExecution(attemptId: string, workerId: string, c
     // request wins until this transaction locks the run. Worker loss is interrupted.
     if (run.cancelRequestedAt && state !== "INTERRUPTED") state = "CANCELLED";
     const reason = state === "CANCELLED" ? "USER_CANCELLED" : "reason" in completion ? completion.reason : completion.result.reason ?? null;
+    // This owner callback runs after resource draining. A stale-heartbeat
+    // reconciler cannot assert this; deletion must wait for the actual owner.
+    if (!("reason" in completion && completion.reason === 'CLEANUP_UNCONFIRMED')) await tx.scanExecutionAttempt.updateMany({ where: { id: attemptId, workerId }, data: { cleanupConfirmedAt: new Date() } });
     const claimed = await tx.scanExecutionAttempt.updateMany({ where: { id: attemptId, state: "RUNNING", workerId }, data: { state, reason, finishedAt: new Date() } });
     if (!claimed.count) return;
     const result = "result" in completion ? completion.result : null;

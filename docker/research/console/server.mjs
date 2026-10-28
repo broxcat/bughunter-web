@@ -1,10 +1,11 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, access } from 'node:fs/promises';
+import { stopWorkspaceProcesses, deleteWorkspaceThreads } from './stop.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { WebSocketServer } from 'ws';
 import * as pty from 'node-pty';
-import { verifyTerminalTicket, tmuxIdentity, targetWorkspaceId } from '../../../src/lib/research/terminal.ts';
+import { verifyTerminalTicket, verifyStopTicket, tmuxIdentity, targetWorkspaceId } from '../../../src/lib/research/terminal.ts';
 import { openConsoleWorkspace } from '../validator/console-files.mjs';
 import { withOfficialBurp } from '../validator/burp-proxy.mjs';
 const exec = promisify(execFile);
@@ -16,7 +17,26 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
   origin = parsedOrigin.origin;
   const spent = new Map(), connections = new Set(), pending = new Map();
   const wss = new WebSocketServer({ noServer: true, maxPayload: 32768, perMessageDeflate: false, handleProtocols: protocols => protocols.has('bh-terminal.v1') ? 'bh-terminal.v1' : false });
-  const server = createServer((req, res) => { res.writeHead(req.url === '/health' ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(req.url === '/health' ? '{"status":"ok"}' : '{"error":"Not found"}'); });
+  const server = createServer((req, res) => { void (async () => {
+    res.setHeader('Cache-Control', 'no-store'); res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/control/stop' && req.method === 'POST') {
+      try {
+        const claims = verifyStopTicket(String(req.headers.authorization ?? '').replace(/^Bearer /, ''), publicKey);
+        const name = tmuxIdentity(claims.targetId);
+        for (const ws of connections) if (ws.targetId === claims.targetId) ws.close(1008, 'Target deletion');
+        await pending.get(name)?.catch(() => {});
+        const paths = claims.workspaceId.startsWith('research_') ? [`/workspaces/${claims.workspaceId}`] : [`/legacy-workspaces/${claims.workspaceId}`];
+        // Capture descendants before tmux exits/reparents them, then stop the session.
+        await stopWorkspaceProcesses(paths);
+        await deleteWorkspaceThreads(paths);
+        await exec('tmux', ['kill-session', '-t', `=${name}`], { timeout: 3000 }).catch(() => {});
+        await stopWorkspaceProcesses(paths);
+        res.end('{"stopped":true}');
+      } catch { res.writeHead(503); res.end('{"error":"Cleanup unconfirmed"}'); }
+      return;
+    }
+    res.writeHead(req.url === '/health' ? 200 : 404); res.end(req.url === '/health' ? '{"status":"ok"}' : '{"error":"Not found"}');
+  })().catch(() => {res.writeHead(503);res.end();}); });
   function claim(token) {
     const claims = verifyTerminalTicket(token, publicKey);
     for (const [key, expiry] of spent) if (expiry < Date.now()) spent.delete(key);
@@ -43,7 +63,7 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
     })();
   });
   wss.on('connection', (ws, claims) => {
-    connections.add(ws); let terminal, closed = false, lease = claims.exp * 1000, inputBytes = 0, messages = 0;
+    ws.targetId = claims.targetId; connections.add(ws); let terminal, closed = false, lease = claims.exp * 1000, inputBytes = 0, messages = 0;
     const send = value => { if (ws.readyState === ws.OPEN) { if (ws.bufferedAmount > 1024 * 1024) ws.close(1009, 'Slow terminal'); else ws.send(JSON.stringify(value)); } };
     const leaseTimer = setInterval(() => { inputBytes = 0; messages = 0; if (Date.now() > lease) ws.close(1008, 'Renew authorization'); }, 1000);
     ws.on('close', () => { closed = true; clearInterval(leaseTimer); connections.delete(ws); terminal?.kill(); }); // tmux/Codex survives detach.
@@ -55,6 +75,7 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
         // second boundary across reconnects/processes. Never pass a client command.
         const previous = pending.get(name) ?? Promise.resolve();
         const creating = previous.catch(() => {}).then(async () => {
+          await access(cwd + '/.deleting').then(() => { throw new Error('DENIED'); }, e => { if (e.code !== 'ENOENT') throw e; });
           try { await exec('tmux', ['has-session', '-t', `=${name}`], { timeout: 3000 }); }
           catch {
             try { await exec('tmux', ['-f', '/etc/bughunter/tmux.conf', 'new-session', '-d', '-s', name, '-c', cwd, '/usr/local/bin/bughunter-codex'], { timeout: 5000 }); }
