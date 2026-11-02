@@ -15,7 +15,7 @@ export async function persistProgramDiscovery(scanRunId: string, input: string, 
   let host: string;
   try { host = normalizeFqdn(input.trim()); if (host.startsWith('*.')) return null; } catch { return null; }
   return prisma.$transaction(async tx => {
-    const run = await tx.scanRun.findUniqueOrThrow({ where: { id: scanRunId }, include: { target: true } });
+    const run = await tx.scanRun.findUniqueOrThrow({ where: { id: scanRunId }, include: { target: true, scopeAsset: true } });
     if ((!run.target.contextOnly && !run.target.host.startsWith('*.')) || !run.target.programId || run.type !== 'RECON') throw new Error('Invalid discovery context');
     const programId = run.target.programId;
     const locked = await tx.$queryRaw<{id:string}[]>`SELECT id FROM "BountyProgram" WHERE id=${programId} AND "ownerId"=${run.target.userId} AND "deletingAt" IS NULL FOR UPDATE`;
@@ -25,11 +25,12 @@ export async function persistProgramDiscovery(scanRunId: string, input: string, 
     const existing = await tx.hostDiscovery.findUnique({ where: { scanRunId_host: { scanRunId, host } } });
     if (existing) return { ...existing, firstObservation: false };
     const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId } });
-    const state = discoveryState(host, program.scopeRules, program.outOfScope);
+    if (run.scopeAsset && (!run.scopeAsset.active || run.scopeAsset.format !== 'WILDCARD_DOMAIN')) throw new Error('Asset scope revoked');
+    const state = discoveryState(host, run.scopeAsset ? [run.scopeAsset.normalizedValue] : program.scopeRules, program.outOfScope);
     let added = false;
     if (state === 'VALIDATED' && !await tx.target.findFirst({ where: { programId, host, active: true, contextOnly: false } })) {
       const scope = await tx.scope.create({ data: { userId: program.ownerId, hostPattern: host, programName: program.companyName, status: 'APPROVED', justification: `Explicit program scope; ${source}; ScanRun ${scanRunId}` } });
-      await tx.target.create({ data: { userId: program.ownerId, programId, scopeId: scope.id, host, active: true, discoverySource: source, discoveredAt: new Date(), discoveredByScanRunId: scanRunId } });
+      await tx.target.create({ data: { userId: program.ownerId, programId, scopeId: scope.id, host, active: true, discoverySource: source, discoveredAt: new Date(), discoveredByScanRunId: scanRunId, ...(run.scopeAssetId ? { discoveredFromAssetId: run.scopeAssetId } : {}) } });
       added = true;
     }
     return { ...await tx.hostDiscovery.create({ data: { scanRunId, host, source, state, added } }), firstObservation: true };
@@ -75,7 +76,8 @@ export async function* certificateNames(response: Response) {
 export async function runProgramRecon(scanRunId: string): Promise<ScanExecutionResult> {
   const execution = currentTargetExecution();
   const program = await prisma.bountyProgram.findUniqueOrThrow({ where: { id: execution.programReconId } });
-  if (program.deletingAt || !program.scopeRules.length) throw new Error('Program unavailable');
+  const rules = execution.scopeAsset ? [execution.scopeAsset.normalizedValue] : program.scopeRules;
+  if (program.deletingAt || !rules.length) throw new Error('Program unavailable');
   let seen = 0, failures = 0;
   const discover = async (host: string, source: string) => {
     throwIfScanAborted();
@@ -83,9 +85,9 @@ export async function runProgramRecon(scanRunId: string): Promise<ScanExecutionR
     const row = await persistProgramDiscovery(scanRunId, host, source);
     if (row?.firstObservation) { seen++; await logLine(scanRunId, `[discovery] ${row.host}: ${row.state}${row.added ? ' (new host)' : ''}`); }
   };
-  const seeds = reconSeeds(program.scopeRules);
+  const seeds = reconSeeds(rules);
   await logLine(scanRunId, '[recon] Program passive enumeration: scope seeds → subfinder → certificate transparency → incremental inventory. No active scans.');
-  for (const rule of program.scopeRules) if (!rule.startsWith('*.')) await discover(rule, 'SCOPE_RULE');
+  for (const rule of rules) if (!rule.startsWith('*.')) await discover(rule, 'SCOPE_RULE');
   for (const [index, seed] of seeds.slice(0, 50).entries()) {
     throwIfScanAborted();
     await logLine(scanRunId, `[recon] subfinder ${index + 1}/${Math.min(seeds.length, 50)}; Recon seed: ${seed}`);
@@ -113,7 +115,7 @@ export async function runProgramRecon(scanRunId: string): Promise<ScanExecutionR
     const release = currentScanControl()?.track(async () => { controller.abort(); });
     try {
       await beforeScanNetwork();
-      const url = new URL('https://crt.sh/'); url.searchParams.set('q', program.scopeRules.includes(`*.${seed}`) ? `%.${seed}` : seed); url.searchParams.set('output', 'json');
+      const url = new URL('https://crt.sh/'); url.searchParams.set('q', rules.includes(`*.${seed}`) ? `%.${seed}` : seed); url.searchParams.set('output', 'json');
       const response = await fetch(url, { headers: { 'User-Agent': execution.requiredUserAgent }, redirect: 'error', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000), ...(currentScanControl() ? [currentScanControl()!.signal] : [])]) });
       for await (const name of certificateNames(response)) { if (seen >= 10000) throw new Error('Discovery limit exceeded'); await discover(name, 'CERTIFICATE_TRANSPARENCY'); }
       await recordUsefulScanWork();

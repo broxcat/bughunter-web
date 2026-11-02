@@ -10,6 +10,8 @@ import { withScanDispatch } from "@/lib/scanDispatch";
 import { rateLimit } from "@/lib/rateLimit";
 import { logger } from "@/lib/logger";
 import { RATE_LIMIT_POLICIES } from "@/lib/abusePolicy";
+import { backfillProgramAssets, lockOwnedProgram } from '@/server/scopeAssets';
+import { ResearchError } from '@/server/research/workspace';
 
 const createRunSchema = z.object({
   targetId: z.string().trim().min(1, "targetId is required"),
@@ -101,7 +103,7 @@ export async function POST(req: NextRequest) {
 
     const target = await prisma.target.findFirst({
       where: { id: parsed.data.targetId, userId: session.user.id },
-      include: { scope: true, program: true },
+      include: { scope: true, program: true, scopeAsset: true },
     });
     if (!target) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -109,9 +111,14 @@ export async function POST(req: NextRequest) {
     const rejection = scanRejection(target, 'RECON');
     if (rejection) return NextResponse.json({ error: rejection }, { status: 400 });
 
-    const run = await createScanRequest(session.user.id, parsed.data, key);
+    let scopeAssetId = target.scopeAssetId;
+    if (!scopeAssetId && target.program?.id && !target.contextOnly) {
+      scopeAssetId = await prisma.$transaction(async tx => { await lockOwnedProgram(tx, session.user.id!, target.program!.id); await backfillProgramAssets(tx, target.program!.id, session.user.id!); return (await tx.target.findUniqueOrThrow({ where: { id: target.id }, select: { scopeAssetId: true } })).scopeAssetId; });
+    }
+    const run = await createScanRequest(session.user.id, { ...parsed.data, ...(scopeAssetId ? { scopeAssetId } : {}) }, key);
     return await respond(run);
   } catch (err) {
+    if (err instanceof ResearchError) return NextResponse.json({ error: err.message }, { status: err.status });
     if (err instanceof ScanRequestQuotaExceeded) return NextResponse.json({ error: err.message }, { status: 429, headers: { "Retry-After": String(err.retrySec) } });
     if (err instanceof ScanRequestConflict) return NextResponse.json({ error: err.message }, { status: 409 });
     if (err instanceof ScanRequestNotFound) return NextResponse.json({ error: "Not found" }, { status: 404 });

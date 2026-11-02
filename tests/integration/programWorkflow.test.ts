@@ -79,13 +79,13 @@ let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/progr
     await discovered;expect(await p.target.count({where:{programId,host:'api.example.test'}})).toBe(1);expect(await p.target.count({where:{programId,host:'www.example.test'}})).toBe(0);
     release();await pending;expect(await p.target.count({where:{programId,active:true}})).toBe(2);
   });
-  it('synchronizes an explicitly added/edited/removed wildcard and accepts both program and legacy Recon entry points',async()=>{
+  it('preserves legacy wildcard identities while retiring new whole-program Recon entry points',async()=>{
     await p.bountyProgram.update({where:{id:programId},data:{scopeRules:[]}});
     const {mutateHost}=await import('@/server/programHosts');
     const wildcard=await mutateHost(userId,programId,'ADD',{host:'*.example.test'});
     expect((await p.bountyProgram.findUniqueOrThrow({where:{id:programId}})).scopeRules).toEqual(['*.example.test']);
     const {POST:start}=await import('@/app/api/programs/[id]/recon/route');
-    expect((await start(new Request('http://localhost',{method:'POST'}),{params:Promise.resolve({id:programId})})).status).toBe(201);
+    expect((await start(new Request('http://localhost',{method:'POST'}),{params:Promise.resolve({id:programId})})).status).toBe(410);
     expect(await p.target.count({where:{programId,active:true,host:{not:{startsWith:'*.'}}}})).toBe(0);
     const {loadTargetExecution}=await import('@/server/execution');await expect(loadTargetExecution(wildcard.id)).rejects.toThrow();expect((await loadTargetExecution(wildcard.id,'RECON')).programReconId).toBe(programId);
     const edited=await mutateHost(userId,programId,'EDIT',{hostId:wildcard.id,host:'*.api.example.test'});

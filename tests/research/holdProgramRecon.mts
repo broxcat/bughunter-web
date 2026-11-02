@@ -9,8 +9,8 @@ import { currentScanControl } from '../../src/server/scanControl';
 import { SCAN_QUEUE_NAME, type ScanJobData } from '../../src/server/queue/scanQueue';
 if(process.env.BH_DISPOSABLE_CONSOLE !== '1') throw new Error('Disposable console test only');
 const runId=process.env.BH_TEST_RUN_ID!;
-const run=await prisma.scanRun.findUniqueOrThrow({where:{id:runId},include:{target:{include:{program:true}}}});
-if(!run.target.contextOnly||run.target.program?.companyName!=='Global empty program')throw new Error('Controlled fixture required');
+const run=await prisma.scanRun.findUniqueOrThrow({where:{id:runId},include:{target:{include:{program:true}},scopeAsset:true}});
+if(run.scopeAsset?.format!=='WILDCARD_DOMAIN'||run.target.program?.companyName!=='Global empty program')throw new Error('Controlled fixture required');
 const processor=createScanProcessor('controlled-console-worker',async(_type,_host,id)=>{
   if(id!==runId)throw new Error('Unexpected test job');
   const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});

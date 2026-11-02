@@ -1,0 +1,125 @@
+import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), publish: vi.fn() }));
+vi.mock('@/lib/auth', () => ({ auth: mocks.auth }));
+vi.mock('@/server/queue/scanJobPublisher', () => ({ publishScanJob: mocks.publish, dispatchSelect: { status: true, attempts: true, lastError: true, nextAttemptAt: true, publishedAt: true } }));
+const db = process.env.TEST_DATABASE_URL, schema = 'scopeassets_' + randomUUID().replaceAll('-', '');
+if (db) { const url = new URL(db); url.searchParams.set('schema', schema); process.env.DATABASE_URL = url.toString(); }
+let p: typeof import('@/lib/prisma').prisma, service: typeof import('@/server/scopeAssets'), markdown: typeof import('@/server/scopeMarkdown');
+let api: typeof import('@/app/api/programs/[id]/assets/route'), edit: typeof import('@/app/api/programs/[id]/assets/[assetId]/route'), recon: typeof import('@/app/api/programs/[id]/assets/[assetId]/recon/route'), research: typeof import('@/app/api/programs/[id]/assets/[assetId]/research/route');
+let userId: string, otherId: string, programId: string, root: string;
+const context = (assetId = '') => ({ params: Promise.resolve({ id: programId, assetId }) });
+const request = (body?: unknown, method = 'POST', origin = 'http://app.example.test') => new Request('http://app.example.test/api', { method, headers: { Origin: origin }, ...(body ? { body: JSON.stringify(body) } : {}) });
+(db ? describe : describe.skip)('Target Scope Asset PostgreSQL workflow', () => {
+  beforeAll(async () => {
+    execFileSync('npx', ['prisma', 'migrate', 'deploy'], { env: process.env, stdio: 'pipe' });
+    ({ prisma: p } = await import('@/lib/prisma')); service = await import('@/server/scopeAssets'); markdown = await import('@/server/scopeMarkdown');
+    api = await import('@/app/api/programs/[id]/assets/route'); edit = await import('@/app/api/programs/[id]/assets/[assetId]/route'); recon = await import('@/app/api/programs/[id]/assets/[assetId]/recon/route'); research = await import('@/app/api/programs/[id]/assets/[assetId]/research/route');
+    root = await mkdtemp(join(tmpdir(), 'asset-research-')); process.env.RESEARCH_CONSOLE_ROOT = root; process.env.AUTH_URL = 'http://app.example.test';
+    otherId = (await p.user.create({ data: { email: randomUUID() + '@example.test' } })).id;
+  }, 30000);
+  beforeEach(async () => {
+    userId = (await p.user.create({ data: { email: randomUUID() + '@example.test' } })).id;
+    programId = (await p.bountyProgram.create({ data: { ownerId: userId, companyName: 'Équipe | asset fixture', requiredUserAgent: 'Asset-Fixture/1', scopeRules: [], outOfScope: ['excluded.example.test'] } })).id;
+    mocks.auth.mockResolvedValue({ user: { id: userId } }); mocks.publish.mockReset().mockResolvedValue({ dispatch: 'PENDING' });
+  });
+  afterAll(async () => { if (p) { await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`); await p.$disconnect(); } if (root) await rm(root, { recursive: true, force: true }); });
+  const create = async (value = 'https://app.example.test/api', extra = {}) => {
+    const response = await api.POST(request({ value, ...extra }), context()); expect(response.status).toBe(201); return response.json();
+  };
+  it('persists original input, normalized format, suggested type and Medium default, with explicit overrides', async () => {
+    const asset = await create('www\\.vfsvisaonline.com'); expect(asset).toMatchObject({ originalValue: 'www\\.vfsvisaonline.com', normalizedValue: 'www.vfsvisaonline.com', format: 'SUBDOMAIN', type: 'WEB_APPLICATION', assetValue: 'MEDIUM', typeSource: 'HEURISTIC' });
+    const response = await edit.PATCH(request({ type: 'API', assetValue: 'CRITICAL' }, 'PATCH'), context(asset.id)); expect(response.status).toBe(200);
+    expect(await p.scopeAsset.findUniqueOrThrow({ where: { id: asset.id } })).toMatchObject({ type: 'API', assetValue: 'CRITICAL', typeSource: 'USER' });
+    expect((await api.POST(request({ value: 'WWW.VFSVISAONLINE.COM' }), context())).status).toBe(409);
+  });
+  it('backfills only official entries and explicit legacy hosts, preserving IDs/results and user metadata', async () => {
+    await p.bountyProgram.update({ where: { id: programId }, data: { scopeRules: ['*.example.test'] } });
+    const scope = await p.scope.create({ data: { userId, hostPattern: 'app.example.test', status: 'APPROVED' } });
+    const host = await p.target.create({ data: { userId, programId, scopeId: scope.id, host: 'app.example.test' } });
+    const old = await p.scanRun.create({ data: { targetId: host.id, type: 'RECON', status: 'COMPLETED' } });
+    await p.target.create({ data: { userId, programId, scopeId: scope.id, host: 'discovered.example.test', discoverySource: 'SUBFINDER' } });
+    let rows = await service.listScopeAssets(userId, programId); expect(rows.map(r => r.normalizedValue).sort()).toEqual(['*.example.test', 'app.example.test']);
+    const item = rows.find(r => r.normalizedValue === host.host)!; expect(item.executionTarget?.id).toBe(host.id);
+    await service.editScopeAsset(userId, programId, item.id, { type: 'API', assetValue: 'HIGH' }); rows = await service.listScopeAssets(userId, programId);
+    expect(rows.find(r => r.id === item.id)).toMatchObject({ type: 'API', assetValue: 'HIGH' }); expect((await p.scanRun.findUniqueOrThrow({ where: { id: old.id } })).reconCorpus).toBeNull();
+  });
+  it('attaches each Recon to the selected asset, captures immutable policy and durable queued stages, and reuses live scans', async () => {
+    const asset = await create('https://app.example.test:8443/app', { type: 'API', assetValue: 'HIGH' });
+    const first = await recon.POST(request(), context(asset.id)); expect(first.status).toBe(202); const run = await first.json();
+    const saved = await p.scanRun.findUniqueOrThrow({ where: { id: run.id }, include: { reconSteps: true } });
+    expect(saved).toMatchObject({ scopeAssetId: asset.id, scopeAssetSnapshot: { normalizedValue: asset.normalizedValue, type: 'API', assetValue: 'HIGH' } });
+    expect(saved.reconSteps).toHaveLength(11); expect(saved.reconSteps.every(s => s.state === 'PENDING')).toBe(true);
+    expect((await (await recon.POST(request(), context(asset.id))).json()).id).toBe(run.id);
+    await service.editScopeAsset(userId, programId, asset.id, { assetValue: 'LOW' }); expect((await p.scanRun.findUniqueOrThrow({ where: { id: run.id } })).scopeAssetSnapshot).toMatchObject({ assetValue: 'HIGH' });
+    expect((await edit.DELETE(request(undefined, 'DELETE'), context(asset.id))).status).toBe(409);
+    await p.scanRun.update({ where: { id: run.id }, data: { status: 'COMPLETED', outcome: 'PARTIAL', finishedAt: new Date() } });
+    expect((await service.listScopeAssets(userId, programId))[0].reconStatus).toBe('PARTIAL');
+    const newer = await (await recon.POST(request(), context(asset.id))).json(); expect(newer.id).not.toBe(run.id);
+  });
+  it('keeps URL assets on the same host as distinct execution identities and immutable scope boundaries', async () => {
+    const a = await create('https://app.example.test/app'), b = await create('https://app.example.test/admin');
+    const aa = await service.ensureAssetExecution(userId, programId, a.id), bb = await service.ensureAssetExecution(userId, programId, b.id);
+    expect(aa.target.id).not.toBe(bb.target.id); expect(aa.target.host).toBe(bb.target.host);
+    const { loadTargetExecution, assertExecutionUrl } = await import('@/server/execution');
+    const execution = await loadTargetExecution(aa.target.id, 'RECON');
+    expect(() => assertExecutionUrl('https://app.example.test/app/users', execution)).not.toThrow(); expect(() => assertExecutionUrl('https://app.example.test/admin', execution)).toThrow();
+  });
+  it('returns owned scope downloads with deterministic content, provenance, escaping and safe headers', async () => {
+    const a = await create('https://app.example.test/app', { assetValue: 'CRITICAL' });
+    const response = await markdown.scopeMarkdownDownload(userId, programId, a.id); expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toContain('text/markdown'); expect(response.headers.get('Content-Disposition')).toMatch(/^attachment; filename="asset-[a-z0-9-]+-scope.md"$/);
+    const text = await response.text(); expect(text).toContain(a.id); expect(text).toContain('Target ID: ' + programId); expect(text).toContain('No data collected yet.'); expect(text).toContain('Équipe \\| asset fixture'); expect(text).toContain('LLM Safety Instructions');
+    expect(await (await markdown.scopeMarkdownDownload(userId, programId, a.id)).text()).toBe(text);
+    const global = await (await markdown.scopeMarkdownDownload(userId, programId)).text(); expect(global).toContain('# Bug Bounty Target Scope'); expect(global).toContain('CRITICAL'); expect(global).toContain(a.id);
+    expect((await markdown.scopeMarkdownDownload(otherId, programId, a.id)).status).toBe(404);
+  });
+  it('enriches existing ResearchReconSnapshot with type, value and precise asset scope without rewriting history', async () => {
+    const a = await create('https://app.example.test/api', { type: 'API', assetValue: 'CRITICAL' });
+    const result = await research.POST(request(), context(a.id)); expect(result.status).toBe(200); const { targetId } = await result.json();
+    const { generateReconSnapshot, reconPanelState } = await import('@/server/research/reconSnapshots');
+    const first = await generateReconSnapshot(userId, targetId); expect(first.snapshot?.context.scopeAssets?.[0]).toMatchObject({ id: a.id, type: 'API', assetValue: 'CRITICAL', normalizedValue: a.normalizedValue });
+    await service.editScopeAsset(userId, programId, a.id, { assetValue: 'HIGH' }); expect((await reconPanelState(userId, targetId)).updateAvailable).toBe(true);
+    const second = await generateReconSnapshot(userId, targetId); expect(second.snapshot?.id).not.toBe(first.snapshot?.id);
+    expect((await p.researchReconSnapshot.findUniqueOrThrow({ where: { id: first.snapshot!.id } })).context).toMatchObject({ scopeAssets: [expect.objectContaining({ assetValue: 'CRITICAL' })] });
+  });
+  it('archives authorization while preserving Recon and preventing subsequent execution', async () => {
+    const a = await create('api.example.test'); const { target } = await service.ensureAssetExecution(userId, programId, a.id);
+    const run = await p.scanRun.create({ data: { targetId: target.id, scopeAssetId: a.id, type: 'RECON', status: 'COMPLETED', outcome: 'SUCCESS', finishedAt: new Date('2026-01-01') } });
+    expect((await service.listScopeAssets(userId, programId))[0].reconStatus).toBe('STALE');
+    expect((await edit.DELETE(request(undefined, 'DELETE'), context(a.id))).status).toBe(200);
+    expect((await p.scanRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe('COMPLETED'); expect((await recon.POST(request(), context(a.id))).status).toBe(404);
+    expect((await service.listScopeAssets(userId, programId))[0].active).toBe(false);
+  });
+  it('reuses parent wildcard evidence in focused Research without creating a new Recon or widening the child scope', async () => {
+    const parent = await create('*.example.test', { assetValue: 'HIGH' });
+    const { target } = await service.ensureAssetExecution(userId, programId, parent.id);
+    const { researchRecon } = await import('../fixtures/research');
+    const at = new Date(), corpus = { ...researchRecon().reconCorpus, capturedAt: at.toISOString() };
+    const scan = await p.scanRun.create({ data: { targetId: target.id, scopeAssetId: parent.id, type: 'RECON', status: 'COMPLETED', outcome: 'SUCCESS', finishedAt: at,
+      assetResults: { version: 1, scopeAssetId: parent.id, bounded: false, hosts: [{ hostname: 'app.example.test', capturedAt: at.toISOString(), corpus, dns: [], http: [], ports: [] }] } } });
+    const child = await create('https://app.example.test/search', { type: 'API', assetValue: 'CRITICAL' });
+    const response = await research.POST(request(), context(child.id)), { targetId } = await response.json(); expect(response.status).toBe(200);
+    const { generateReconSnapshot } = await import('@/server/research/reconSnapshots');
+    const state = await generateReconSnapshot(userId, targetId);
+    const snapshot = await p.researchReconSnapshot.findUniqueOrThrow({ where: { id: state.snapshot!.id } });
+    const value = snapshot.context as unknown as import('@/lib/research/recon').ResearchReconContext;
+    expect(value.sources.some(s => s.scanId === scan.id)).toBe(true);
+    expect(value.endpoints.find(e => e.url.endsWith('/search'))).toMatchObject({ inScope: true });
+    expect(value.endpoints.find(e => e.url.endsWith('/profile'))).toMatchObject({ inScope: false });
+    expect(value.scopeAssets?.[0]).toMatchObject({ id: child.id, type: 'API', assetValue: 'CRITICAL' });
+    expect(await p.scanRun.count({ where: { target: { programId } } })).toBe(1);
+  });
+  it('rejects foreign ownership/origin, invalid overrides and unsupported network formats', async () => {
+    const a = await create();
+    expect((await edit.PATCH(request({ assetValue: 'SUPER' }, 'PATCH'), context(a.id))).status).toBe(400);
+    expect((await api.POST(request({ value: 'other.example.test' }, 'POST', 'https://foreign.test'), context())).status).toBe(403);
+    const ip = await create('192.0.2.1'); expect((await recon.POST(request(), context(ip.id))).status).toBe(422);
+    mocks.auth.mockResolvedValue({ user: { id: otherId } }); expect((await api.GET(new Request('http://app.example.test'), context())).status).toBe(404); expect((await edit.PATCH(request({ type: 'API' }, 'PATCH'), context(a.id))).status).toBe(404); expect((await recon.POST(request(), context(a.id))).status).toBe(404);
+    mocks.auth.mockResolvedValue(null); expect((await api.GET(new Request('http://app.example.test'), context())).status).toBe(401);
+  });
+});

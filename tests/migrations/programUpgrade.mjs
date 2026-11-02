@@ -43,7 +43,7 @@ try {
   migrate(join(temp, "schema.prisma"));
   const huntReport = { version: 1, archivedEvidence: "Synthetic historical observation" };
   const huntSnapshot = { version: 1, selectedFamilies: ["xss"] };
-  await client.scanRun.update({ where: { id: "upgrade-hunt" }, data: { huntReport, huntSnapshot, approvedHuntTechniques: ["legacy-approved-technique"] } });
+  await client.scanRun.update({ where: { id: "upgrade-hunt" }, data: { huntReport, huntSnapshot, approvedHuntTechniques: ["legacy-approved-technique"] }, select: { id: true } });
   // Seed an existing Phase 1 session before adding the hypothesis registry.
   await cp(join("prisma/migrations", "20261027170000_research_sessions"), join(temp, "migrations", "20261027170000_research_sessions"), { recursive: true });
   migrate(join(temp, "schema.prisma"));
@@ -54,7 +54,21 @@ try {
   await client.$executeRaw`INSERT INTO "ResearchHypothesis" (id, "sessionId", "externalId", title, status, hypothesis, "evidenceFor", "evidenceAgainst", "nextTest", "expectedSignal", "falsificationCondition", "contentSha256", "updatedAt") VALUES ('upgrade-hypothesis', 'upgrade-research', 'H-001', 'Historical Research claim', 'CONFIRMED', 'Original unreviewed hypothesis', '[]'::jsonb, '[]'::jsonb, 'Original next test', 'Original signal', 'Original falsification', 'original-content-hash', now())`;
   await client.$executeRaw`INSERT INTO "ResearchHypothesisRevision" (id, "hypothesisId", revision, snapshot) VALUES ('upgrade-revision', 'upgrade-hypothesis', 1, '{"status":"CONFIRMED","legacy":true}'::jsonb)`;
   const originalHypotheses = await client.$queryRaw`SELECT id, status, hypothesis, "contentSha256", "createdAt", "updatedAt" FROM "ResearchHypothesis"`;
+  // Also exercise a real pre-asset program with scope, host and Recon already present.
+  for (const entry of await readdir('prisma/migrations')) if (entry >= '20261027190000_research_hypothesis_registry' && entry < '20261102220000_scope_assets') await cp(join('prisma/migrations', entry), join(temp, 'migrations', entry), { recursive: true });
+  migrate(join(temp, 'schema.prisma'));
+  await client.$executeRaw`INSERT INTO "BountyProgram" (id,"ownerId","companyName","requiredUserAgent","scopeRules","updatedAt") VALUES ('preasset-program','upgrade-user','Pre Asset fixture','Upgrade/1',ARRAY['*.example.test','api.example.test'],now())`;
+  await client.$executeRaw`INSERT INTO "Target" (id,"userId","scopeId","programId",host,"updatedAt") VALUES ('preasset-host','upgrade-user','upgrade-scope','preasset-program','api.example.test',now())`;
+  await client.$executeRaw`INSERT INTO "ScanRun" (id,"targetId",type,status,"reconCorpus") VALUES ('preasset-scan','preasset-host','RECON','COMPLETED','{"version":1,"source":"legacy untouched"}'::jsonb)`;
+  const preasset = await client.$queryRaw`SELECT id,status,"createdAt","reconCorpus" FROM "ScanRun" WHERE id='preasset-scan'`;
   migrate(schema);
+  assert.deepEqual(await client.$queryRaw`SELECT id,status,"createdAt","reconCorpus" FROM "ScanRun" WHERE id='preasset-scan'`, preasset);
+  const assets = await client.scopeAsset.findMany({where:{programId:'preasset-program'},orderBy:{normalizedValue:'asc'},include:{executionTarget:true}});
+  assert.equal(assets.length,2); assert(assets.every(a=>a.assetValue==='MEDIUM'&&a.typeSource==='BACKFILL'));
+  assert.equal(assets.find(a=>a.normalizedValue==='api.example.test').executionTarget.id,'preasset-host');
+  assert.equal(assets.find(a=>a.normalizedValue==='api.example.test').type,'API');
+  assert.equal((await client.scanRun.findUniqueOrThrow({where:{id:'preasset-scan'}})).scopeAssetSnapshot,null);
+  assert.equal(await client.reconPipelineStep.count(),0,'Do not invent historical step execution');
   assert.deepEqual(await client.$queryRaw`SELECT id, status, hypothesis, "contentSha256", "createdAt", "updatedAt" FROM "ResearchHypothesis"`, originalHypotheses);
   assert.equal((await client.researchHypothesis.findUniqueOrThrow({ where: { id: "upgrade-hypothesis" } })).researchData, null);
   assert.equal(await client.researchFindingPromotion.count(), 0, "Never invent historical human promotions");
@@ -75,7 +89,7 @@ try {
   assert.deepEqual(hunt.huntReport, huntReport); assert.deepEqual(hunt.huntSnapshot, huntSnapshot);
   assert.deepEqual(hunt.approvedHuntTechniques, ["legacy-approved-technique"]);
   assert.equal(await client.researchSession.count(), 1, "Keep only the existing Phase 1 session; never backfill from scans");
-  assert.deepEqual(await client.$queryRaw`SELECT id, status, error, "createdAt", "startedAt", "finishedAt" FROM "ScanRun" ORDER BY id`, historicalRuns);
+  assert.deepEqual(await client.$queryRaw`SELECT id, status, error, "createdAt", "startedAt", "finishedAt" FROM "ScanRun" WHERE "targetId"='upgrade-host' ORDER BY id`, historicalRuns);
   assert.equal(await client.scanExecutionAttempt.count(), 0, "Do not invent historical execution attempts");
   assert((await client.scanRun.findMany()).every(run => run.cancelRequestedAt === null));
   assert.equal(await client.scanJobOutbox.count(), 0, "Do not invent historical publication intents");

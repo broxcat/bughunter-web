@@ -4,16 +4,18 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { dispatchSelect } from "./scanJobPublisher";
 import { RATE_LIMIT_POLICIES } from "@/lib/abusePolicy";
+import { assetSnapshot } from '@/server/scopeAssets';
+import { RECON_STAGES } from '@/lib/reconPipeline';
 
 // Empty legacy hashing fields preserve existing Recon idempotency keys; approvals cannot execute.
-export type ScanRequest = { targetId: string; type: "RECON"; approvedTechniques?: string[]; approveBoundedTiming?: true };
+export type ScanRequest = { targetId: string; type: "RECON"; scopeAssetId?: string; approvedTechniques?: string[]; approveBoundedTiming?: true };
 export class ScanRequestConflict extends Error {}
 export class ScanRequestNotFound extends Error {}
 export class ScanRequestQuotaExceeded extends Error {
   constructor(public readonly retrySec: number) { super("Too many scan runs. Please try again later."); }
 }
 function requestHash(input: ScanRequest): string {
-  return createHash("sha256").update(JSON.stringify({ targetId: input.targetId, type: input.type, approvedTechniques: [...new Set(input.approvedTechniques ?? [])].sort(), approveBoundedTiming: input.approveBoundedTiming === true })).digest("hex");
+  return createHash("sha256").update(JSON.stringify({ targetId: input.targetId, type: input.type, approvedTechniques: [...new Set(input.approvedTechniques ?? [])].sort(), approveBoundedTiming: input.approveBoundedTiming === true, ...(input.scopeAssetId ? { scopeAssetId: input.scopeAssetId } : {}) })).digest("hex");
 }
 export async function findScanRequest(userId: string, key: string | null, input: ScanRequest, db: Pick<Prisma.TransactionClient, "scanRequestKey"> = prisma) {
   if (!key) return null;
@@ -23,7 +25,7 @@ export async function findScanRequest(userId: string, key: string | null, input:
   });
   if (!request) return null;
   if (request.scanRun.target.userId !== userId) throw new ScanRequestNotFound();
-  if (request.requestHash !== requestHash(input)) throw new ScanRequestConflict("Idempotency-Key already used with different scan parameters");
+  if (request.requestHash !== requestHash(input) && !(input.scopeAssetId === undefined && request.scanRun.scopeAssetId && request.requestHash === requestHash({ ...input, scopeAssetId: request.scanRun.scopeAssetId }))) throw new ScanRequestConflict("Idempotency-Key already used with different scan parameters");
   const { target: _target, ...run } = request.scanRun;
   void _target;
   return run;
@@ -39,7 +41,7 @@ export async function createScanRequest(userId: string, input: ScanRequest, key:
       const existing = await findScanRequest(userId, key, input, tx);
       if (existing) return existing;
       if (reuseLive) {
-        const live = await tx.scanRun.findFirst({ where: { targetId: input.targetId, target: { userId }, type: 'RECON', status: { in: ['QUEUED', 'RUNNING'] } }, include: { jobOutbox: { select: dispatchSelect } } });
+        const live = await tx.scanRun.findFirst({ where: { targetId: input.targetId, ...(input.scopeAssetId ? { scopeAssetId: input.scopeAssetId } : {}), target: { userId }, type: 'RECON', status: { in: ['QUEUED', 'RUNNING'] } }, include: { jobOutbox: { select: dispatchSelect } } });
         if (live) return live;
       }
       const policy = RATE_LIMIT_POLICIES.scanUser;
@@ -48,7 +50,9 @@ export async function createScanRequest(userId: string, input: ScanRequest, key:
         const oldest = await tx.scanRun.findFirst({ where, orderBy: { createdAt: "asc" }, select: { createdAt: true } });
         throw new ScanRequestQuotaExceeded(Math.max(1, Math.ceil(((oldest?.createdAt.getTime() ?? Date.now()) + policy.windowSec * 1000 - Date.now()) / 1000)));
       }
-      const run = await tx.scanRun.create({ data: { targetId: input.targetId, type: input.type, status: "QUEUED" } });
+      const asset = input.scopeAssetId ? await tx.scopeAsset.findFirst({ where: { id: input.scopeAssetId, active: true, program: { ownerId: userId, deletingAt: null }, executionTarget: { id: input.targetId, userId } } }) : null;
+      if (input.scopeAssetId && !asset) throw new ScanRequestNotFound();
+      const run = await tx.scanRun.create({ data: { targetId: input.targetId, type: input.type, status: "QUEUED", ...(asset ? { scopeAssetId: asset.id, scopeAssetSnapshot: assetSnapshot(asset), reconSteps: { create: RECON_STAGES.map((name, position) => ({ name, position })) } } : {}) } });
       const jobOutbox = await tx.scanJobOutbox.create({ data: { scanRunId: run.id }, select: dispatchSelect });
       if (key) await tx.scanRequestKey.create({ data: { userId, key, scanRunId: run.id, requestHash: requestHash(input) } });
       return { ...run, jobOutbox };

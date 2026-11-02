@@ -4,11 +4,16 @@ import { persistedCorpusSchema } from '@/server/recon/corpus';
 import { safeObservationUrl, isSafeReadUrl } from '@/lib/observationSafety';
 import { normalizeFqdn } from '@/lib/bountyProgram';
 import type { ReconEvidence, ResearchReconContext } from '@/lib/research/recon';
+import { assetAllowsHost, assetAllowsUrl, assetValueRank } from '@/lib/scopeAssets';
+import type { AssetEvidence } from '@/server/recon/assetEvidence';
 
 export const RECON_DETAIL_BYTES = 1024 * 1024;
 export const RECON_SUMMARY_BYTES = 24 * 1024;
 export const RECON_INPUT_LIMITS = { scans: 60, discoveries: 500, logs: 1000 } as const;
 export type ReconRun = {
+  partialCoverage?: boolean;
+  historicalUrls?: string[];
+  corpusReference?: string; httpObservations?: AssetEvidence['hosts'][number]['http']; dnsAddresses?: string[]; portObservations?: AssetEvidence['hosts'][number]['ports']; tlsObservation?: AssetEvidence['hosts'][number]['tls'];
   id: string; targetId: string; status: string; outcome: string | null; createdAt: Date; startedAt: Date | null; finishedAt: Date | null;
   reconCorpus: unknown; target: { host: string };
   discoveries: Array<{ id: string; host: string; source: string; state: string; createdAt: Date }>;
@@ -43,9 +48,11 @@ function observedUrl(value: string) {
 export function buildReconContext(input: {
   programId: string; scopeId: string; targetId: string; generatedAt: string; runs: ReconRun[];
   inScope: (value: string) => boolean; activeSuggestionsAllowed: boolean; warnings?: string[];
+  scopeAssets?: ResearchReconContext['scopeAssets'];
 }): ResearchReconContext {
   const warnings = new Set(input.warnings ?? []);
   const context: ResearchReconContext = { schemaVersion: 1, programId: input.programId, scopeId: input.scopeId, targetId: input.targetId,
+    ...(input.scopeAssets ? { scopeAssets: [...input.scopeAssets].sort((a, b) => assetValueRank(a.assetValue) - assetValueRank(b.assetValue) || a.id.localeCompare(b.id)) } : {}),
     generatedAt: input.generatedAt, untrustedData: true, authorizationGranted: false, activeSuggestionsAllowed: input.activeSuggestionsAllowed,
     sources: [], assets: [], endpoints: [], technologies: [], observations: [], suggestions: [], warnings: [],
     counts: { assets: 0, endpoints: 0, technologies: 0, observations: 0, sources: 0, suggestions: 0 }, truncated: false };
@@ -57,13 +64,14 @@ export function buildReconContext(input: {
   const previousCompleted = new Map<string, string>();
   const endpointRuns = new Map<string, Set<string>>();
   for (const run of runs) if (run.status === 'COMPLETED' && persistedCorpusSchema.safeParse(run.reconCorpus).success) {
-    if (latest.has(run.targetId)) previousCompleted.set(run.targetId, latest.get(run.targetId)!);
+    if (latest.has(run.targetId) && latest.get(run.targetId) !== run.id) previousCompleted.set(run.targetId, latest.get(run.targetId)!);
     latest.set(run.targetId, run.id);
     const corpus = persistedCorpusSchema.parse(run.reconCorpus);
     latestTime.set(run.targetId, iso(new Date(corpus.capturedAt)));
   }
   const evidenceTargets = new Map<string, Set<string>>();
   for (const run of runs) {
+    if (run.partialCoverage) warnings.add(`Scan ${run.id}: active host enrichment was bounded; unprobed discoveries remain observations only.`);
     if (run.status !== 'COMPLETED' || run.outcome !== 'SUCCESS') warnings.add(`Scan ${run.id}: ${run.status}/${run.outcome ?? 'UNKNOWN'}; coverage is incomplete or unknown.`);
     if (run._count && (run._count.logs > run.logs.length || run._count.discoveries > run.discoveries.length)) {
       warnings.add(`Scan ${run.id}: input limit reached; consult the original Recon for all rows.`); context.truncated = true;
@@ -107,14 +115,15 @@ export function buildReconContext(input: {
       const seen = endpointRuns.get(record.id) ?? new Set<string>(); seen.add(run.id); endpointRuns.set(record.id, seen);
       // Do not lift path/port authorization to a whole hostname.
       asset(new URL(parsed.url).hostname, tool, ref, at, verification);
+      return record;
     };
     for (const d of run.discoveries) {
-      const tool = ['SUBFINDER', 'CERTIFICATE_TRANSPARENCY', 'SCOPE_RULE'].includes(d.source) ? d.source.toLowerCase() : 'discovery';
+      const tool = ['SUBFINDER', 'CERTIFICATE_TRANSPARENCY', 'SCOPE_RULE', 'GAU'].includes(d.source) ? d.source.toLowerCase() : 'discovery';
       asset(d.host, tool, `HostDiscovery:${d.id}`, d.createdAt);
     }
     const parsed = persistedCorpusSchema.safeParse(run.reconCorpus);
     if (parsed.success) {
-      const c = parsed.data, at = new Date(c.capturedAt), ref = `ScanRun:${run.id}:reconCorpus`;
+      const c = parsed.data, at = new Date(c.capturedAt), ref = run.corpusReference ?? `ScanRun:${run.id}:reconCorpus`;
       for (const [field, values] of [['urls', c.urls], ['jsUrls', c.jsUrls], ['authUrls', c.authUrls]] as const) {
         for (const url of sorted(values)) endpoint(url, 'corpus-v1', `${ref}.${field}`, at, undefined, c.queryParams.filter(p => observedUrl(p.url)?.url === observedUrl(url)?.url).map(p => p.key), c.authenticated);
       }
@@ -130,6 +139,20 @@ export function buildReconContext(input: {
       }
       for (const [signal, present] of Object.entries(c.surface)) if (present) merge(maps.observations, `${run.target.host}:${signal}`, { type: signal, description: `Recon corpus recorded the ${signal} surface signal; requires investigation.`, asset: run.target.host }, 'corpus-v1', `${ref}.surface.${signal}`, at, run.target.host, 'INFERRED');
     } else if (run.reconCorpus !== null) warnings.add(`Scan ${run.id}: malformed or unsupported corpus; valid discoveries/logs retained.`);
+    const richRef = `ScanRun:${run.id}:assetResults:${run.target.host}`;
+    for (const url of run.historicalUrls ?? []) {
+      endpoint(url, 'gau', `ScanRun:${run.id}:assetResults.historicalUrls`, run.finishedAt ?? run.createdAt);
+      merge(maps.observations, `${url}:archive`, { type: 'historical-url', asset: observedUrl(url)?.url ?? run.target.host, description: 'URL collected from a historical archive. Live accessibility and original observation date are unknown; collection time is not a live verification.' }, 'gau', `ScanRun:${run.id}:assetResults.historicalUrls`, run.finishedAt ?? run.createdAt, url, 'INFERRED');
+    }
+    for (const http of run.httpObservations ?? []) {
+      const e = endpoint(http.url, 'asset-http', `${richRef}.http`, new Date(http.observedAt), http.method, [], undefined, 'PROBED');
+      if (e && http.observedAt >= e.lastSeenAt) { e.statusCode = http.statusCode; e.contentType = http.contentType; }
+      if (http.authenticationSchemes.length) merge(maps.observations, `${http.url}:http-authentication`, { type: 'http-authentication', asset: http.url, description: `HTTP authentication challenge schemes observed: ${http.authenticationSchemes.join(', ')}. This does not establish access-control behavior.` }, 'asset-http', `${richRef}.http`, new Date(http.observedAt), http.url);
+      if (http.redirect) merge(maps.observations, `${http.url}:redirect:${http.redirect}`, { type: 'redirect', asset: http.redirect, description: 'HTTP redirect destination observed, not automatically followed or authorized.' }, 'asset-http', `${richRef}.http`, new Date(http.observedAt), http.redirect);
+    }
+    for (const address of run.dnsAddresses ?? []) if (isIP(address)) merge(maps.observations, `${run.target.host}:dns:${address}`, { type: 'dns-address', asset: run.target.host, description: `DNS address observed: ${address}; IP testing is not authorized by this association.` }, 'dns', `${richRef}.dns`, run.finishedAt ?? run.createdAt, run.target.host);
+    for (const port of run.portObservations ?? []) merge(maps.observations, `${run.target.host}:tcp:${port.port}:${port.state}`, { type: 'tcp-port', asset: run.target.host, description: `TCP port ${port.port} observed ${port.state}; service label ${port.serviceLabel} is not version confirmation.` }, 'nmap', `${richRef}.ports`, run.finishedAt ?? run.createdAt, run.target.host);
+    if (run.tlsObservation) merge(maps.observations, `${run.target.host}:tls:${run.tlsObservation.fingerprint256}`, { type: 'tls-certificate', asset: run.target.host, description: `TLS certificate observed, fingerprint ${run.tlsObservation.fingerprint256}; validity ${run.tlsObservation.validFrom} to ${run.tlsObservation.validTo}.` }, 'tls', `${richRef}.tls`, run.finishedAt ?? run.createdAt, run.target.host);
     // Legacy scanners persist stdout, not JSONL. Only recognize their bounded, actual formats.
     let tool = '';
     for (const log of [...run.logs].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))) {
@@ -165,6 +188,7 @@ export function buildReconContext(input: {
       item.historical = [...(evidenceTargets.get(item.id) ?? [])].every(targetId => {
         const newest = latest.get(targetId); return Boolean(newest && item.lastSeenAt < latestTime.get(targetId)! && !item.sources.some(s => s.startsWith(`${newest}/`)));
       });
+      if (item.sources.length && item.sources.every(source => source.endsWith('/gau'))) item.historical = true;
     }
   }
   context.sources.sort((a, b) => a.id.localeCompare(b.id));
@@ -175,6 +199,8 @@ export function buildReconContext(input: {
     if (/\/(admin|manage|console|dashboard)(\/|$)/i.test(path)) { signals.push('Administrative route name; access control is unverified.'); score += 30; }
     if (/\/(api|v\d+|graphql)(\/|$)/i.test(path)) { signals.push('API route observed.'); score += 20; }
     if (e.parameters.length) { signals.push('Parameter names observed; values omitted.'); score += 15; }
+    const authChallenge = context.observations.find(o => o.type === 'http-authentication' && o.asset === e.url && !o.historical && o.freshness !== 'STALE');
+    if (authChallenge) { signals.push('HTTP authentication challenge observed; access-control behavior requires verification.'); score += 20; }
     if (e.authenticatedCrawl) { signals.push('Discovered during an authenticated crawl; authentication requirement is unverified.'); score += 10; }
     const sourceTargets = evidenceTargets.get(e.id) ?? new Set<string>();
     const isNew = [...sourceTargets].some(t => {
@@ -185,7 +211,8 @@ export function buildReconContext(input: {
     if (!signals.length) continue;
     if (e.freshness === 'AGING') score -= 10;
     context.suggestions.push({ id: `review-${e.id}`, asset: e.url, reason: signals.join(' '), signals, observationIds: [e.id], sources: e.sources,
-      confidence: 'LOW', freshness: e.freshness, scopeId: input.scopeId, mode: input.activeSuggestionsAllowed ? 'SCOPED_REVIEW' : 'PASSIVE_REVIEW', score });
+      confidence: 'LOW', freshness: e.freshness, scopeId: input.scopeId, mode: input.activeSuggestionsAllowed ? 'SCOPED_REVIEW' : 'PASSIVE_REVIEW', score,
+      ...(authChallenge ? { observationIds: [e.id, authChallenge.id], sources: sorted([...e.sources, ...authChallenge.sources]) } : {}) });
   }
   for (const item of [...context.technologies, ...context.observations.filter(o => o.type === 'tcp-port' && /observed open/.test(o.description))]) {
     if (!item.inScope || item.historical || item.freshness === 'STALE') continue;
@@ -193,7 +220,11 @@ export function buildReconContext(input: {
     context.suggestions.push({ id: `review-${item.id}`, asset: item.asset!, reason, signals: [reason], observationIds: [item.id], sources: item.sources,
       confidence: 'LOW', freshness: item.freshness, scopeId: input.scopeId, mode: input.activeSuggestionsAllowed ? 'SCOPED_REVIEW' : 'PASSIVE_REVIEW', score: item.freshness === 'AGING' ? 5 : 15 });
   }
-  context.suggestions.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  for (const suggestion of context.suggestions) {
+    const scopeAsset = context.scopeAssets?.find(a => a.active && (suggestion.asset.startsWith('http') ? assetAllowsUrl(a, suggestion.asset) : assetAllowsHost(a, suggestion.asset)));
+    if (scopeAsset) { suggestion.scopeAssetId = scopeAsset.id; suggestion.assetValue = scopeAsset.assetValue; suggestion.assetType = scopeAsset.type; }
+  }
+  context.suggestions.sort((a, b) => assetValueRank(a.assetValue ?? 'MEDIUM') - assetValueRank(b.assetValue ?? 'MEDIUM') || b.score - a.score || a.id.localeCompare(b.id));
   context.suggestions = context.suggestions.slice(0, 20);
   if (!runs.length) warnings.add('No Recon results available. Missing results do not demonstrate absence of vulnerabilities.');
   if ([...context.assets, ...context.endpoints, ...context.technologies, ...context.observations].some(item => item.freshness !== 'RECENT')) warnings.add('Some observations are older than seven days; stale observations over thirty days are excluded from suggestions. Freshness must be reassessed at the time of use.');
@@ -201,6 +232,7 @@ export function buildReconContext(input: {
   if (context.observations.some(o => o.historical) || context.endpoints.some(o => o.historical)) warnings.add('Historical observations are retained; absence from a later scan may reflect coverage differences.');
   for (const name of ['assets', 'endpoints', 'technologies', 'observations', 'sources', 'suggestions'] as const) context.counts[name] = context[name].length;
   context.warnings = [...warnings].sort();
+  while (context.scopeAssets && Buffer.byteLength(reconJson(context.scopeAssets)) > RECON_DETAIL_BYTES / 3) { context.scopeAssets.splice(-Math.max(1, Math.ceil(context.scopeAssets.length / 10))); context.truncated = true; }
   // Explicit truncation, stable ordering and retained-source closure keep the artifact bounded.
   while (Buffer.byteLength(reconJson(context)) > RECON_DETAIL_BYTES - 512) {
     const biggest = [...(['assets', 'endpoints', 'technologies', 'observations'] as const)].sort((a, b) => context[b].length - context[a].length)[0];
@@ -219,9 +251,11 @@ export function compactReconContext(context: ResearchReconContext): ResearchReco
   compact.endpoints = compact.endpoints.slice(0, 12); compact.assets = compact.assets.slice(0, 12);
   compact.technologies = compact.technologies.slice(0, 12); compact.observations = compact.observations.slice(0, 12); compact.suggestions = compact.suggestions.slice(0, 8);
   compact.warnings = compact.warnings.slice(0, 20);
+  if (compact.scopeAssets && compact.scopeAssets.length > 20) { compact.scopeAssets = compact.scopeAssets.slice(0, 20); compact.truncated = true; }
   const selected = new Set([...compact.endpoints, ...compact.assets, ...compact.technologies, ...compact.observations].flatMap(r => r.sources).concat(compact.suggestions.flatMap(s => s.sources)));
   compact.sources = compact.sources.filter(s => selected.has(s.id));
   while (Buffer.byteLength(reconJson(compact)) > RECON_SUMMARY_BYTES) {
+    if (compact.scopeAssets?.length && Buffer.byteLength(reconJson(compact.scopeAssets)) > RECON_SUMMARY_BYTES / 3) { compact.scopeAssets.pop(); compact.truncated = true; continue; }
     const key = [...(['endpoints', 'assets', 'technologies', 'observations', 'suggestions', 'sources', 'warnings'] as const)].sort((a, b) => JSON.stringify(compact[b]).length - JSON.stringify(compact[a]).length)[0];
     compact[key].pop(); compact.truncated = true;
   }

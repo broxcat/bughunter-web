@@ -52,6 +52,7 @@ export async function probe(
     throwIfScanAborted();
     opts.signal?.throwIfAborted();
     assertExecutionUrl(url);
+    if (currentTargetExecution().scopeAsset || currentTargetExecution().parentScopeAsset) { const { assertLiveAsset } = await import('../recon/assetPipeline'); await assertLiveAsset(); }
     const guard = currentTargetExecution().requestGuard;
     guard?.assertRequest?.(url, method, opts.body);
     release = await guard?.acquire(url, method);

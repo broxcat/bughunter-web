@@ -4,6 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { chromium, type Browser, type Route } from "playwright-chromium";
 import { prisma } from "@/lib/prisma";
 import { isExcluded, programSchema, matchesHost } from "@/lib/bountyProgram";
+import { assetAllowsUrl, assetAllowsHost, detectScopeAsset, type AssetBoundary } from '@/lib/scopeAssets';
 
 export interface TargetRequestGuard {
   assertRequest?(url: string, method: string, body?: string): void;
@@ -12,6 +13,8 @@ export interface TargetRequestGuard {
   signal: AbortSignal;
 }
 export interface TargetExecution {
+  parentScopeAsset?: AssetBoundary & { id: string; programId: string; type: string; assetValue: string; originalValue: string };
+  scopeAsset?: AssetBoundary & { id: string; programId: string; type: string; assetValue: string; originalValue: string };
   programReconId?: string;
   reconSeeds?: readonly string[];
   requestGuard?: TargetRequestGuard;
@@ -30,12 +33,18 @@ export function currentTargetExecution(): TargetExecution {
   if (!ctx) throw new Error("Missing authorized Target execution context");
   return ctx;
 }
-export function scanRejection(target: { userId: string; host: string; active: boolean; contextOnly?: boolean; discoverySource?: string | null; scope: { status: string }; program: { ownerId: string; requiredUserAgent: string; outOfScope: string[]; deletingAt?: Date | null; scopeRules?: string[] } | null }, purpose: 'HOST' | 'RECON' = 'HOST'): string | null {
+export function scanRejection(target: { userId: string; host: string; active: boolean; contextOnly?: boolean; discoverySource?: string | null; scopeAsset?: (AssetBoundary & { programId?: string }) | null; scope: { status: string }; program: { id?: string; ownerId: string; requiredUserAgent: string; outOfScope: string[]; deletingAt?: Date | null; scopeRules?: string[] } | null }, purpose: 'HOST' | 'RECON' = 'HOST'): string | null {
   if (target.program?.deletingAt) return 'Target deletion is in progress';
   if (target.scope.status !== "APPROVED") return "Target's scope is not APPROVED; refusing to scan";
-  if (!target.active && !target.contextOnly) return "Host has been removed from Scope";
+  if (!target.active && !target.contextOnly && !target.scopeAsset) return "Host has been removed from Scope";
   if (!target.program || target.program.ownerId !== target.userId) return "Add this host to a Target with a required User-Agent before scanning";
   if (!programSchema.shape.requiredUserAgent.safeParse(target.program.requiredUserAgent).success || target.program.requiredUserAgent !== target.program.requiredUserAgent.trim()) return "Target requires a valid User-Agent";
+  if (target.scopeAsset) {
+    if (!target.scopeAsset.active || !detectScopeAsset(target.scopeAsset.normalizedValue).executable) return 'Scope asset is archived or unsupported';
+    if (target.scopeAsset.programId !== target.program.id) return 'Asset program mismatch';
+    if (target.scopeAsset.format === 'WILDCARD_DOMAIN') return purpose === 'RECON' ? null : 'Wildcard is a discovery rule; Research stays passive until an authorized concrete host is selected';
+    return isExcluded(target.host, target.program.outOfScope) ? 'Host is explicitly out of scope' : null;
+  }
   if (target.contextOnly) return purpose !== 'RECON' ? 'Program context supports passive Recon only' : target.program.scopeRules?.length ? null : 'Configure authorized scope rules before Recon';
   if (target.discoverySource && !target.program.scopeRules?.some(rule => matchesHost(target.host, rule))) return "Discovered host is no longer within authorized program scope";
   if (target.host.includes('*')) return purpose === 'RECON' && target.program.scopeRules?.includes(target.host) ? null : 'Wildcard is a discovery rule; use program Recon for passive enumeration';
@@ -43,17 +52,20 @@ export function scanRejection(target: { userId: string; host: string; active: bo
   return null;
 }
 export async function loadTargetExecution(targetId: string, purpose: 'HOST' | 'RECON' = 'HOST'): Promise<TargetExecution> {
-  const target = await prisma.target.findUnique({ where: { id: targetId }, include: { program: true, scope: true } });
+  const target = await prisma.target.findUnique({ where: { id: targetId }, include: { program: true, scope: true, scopeAsset: true, discoveredFromAsset: true } });
   if (!target) throw new Error("Host not found");
   const error = scanRejection(target, purpose);
   if (error) throw new Error(error);
-  return { targetId, host: target.host, ...(target.contextOnly || target.host.startsWith('*.') ? { programReconId: target.program!.id } : {}), requiredUserAgent: target.program!.requiredUserAgent,
+  if (target.discoveredFromAsset && (!target.discoveredFromAsset.active || !assetAllowsHost(target.discoveredFromAsset, target.host))) throw new Error('Parent Scope Asset no longer authorizes this discovered host');
+  return { targetId, host: target.scopeAsset?.format === 'URL' ? new URL(target.scopeAsset.normalizedValue).host : target.host, ...(target.scopeAsset ? { scopeAsset: target.scopeAsset } : {}), ...(target.discoveredFromAsset ? { parentScopeAsset: target.discoveredFromAsset } : {}), ...((target.contextOnly && !target.scopeAsset) || target.host.startsWith('*.') ? { programReconId: target.program!.id } : {}), requiredUserAgent: target.program!.requiredUserAgent,
     qualifying: target.program!.qualifying, nonQualifying: target.program!.nonQualifying };
 }
 /** Requests stay on the selected concrete identity. Discovery never grants access. */
 export function assertExecutionUrl(url: string, ctx = currentTargetExecution()): void {
   const u = new URL(url);
   if (!/^https?:$/.test(u.protocol) || u.username || u.password || u.host.toLowerCase() !== ctx.host.toLowerCase()) throw new Error("URL is outside the selected active Scope host");
+  if (ctx.scopeAsset && !assetAllowsUrl(ctx.scopeAsset, url)) throw new Error('URL is outside the selected Scope Asset boundary');
+  if (ctx.parentScopeAsset && !assetAllowsUrl(ctx.parentScopeAsset, url)) throw new Error('URL is outside the parent Scope Asset boundary');
 }
 export function executionHeaders(headers?: HeadersInit): Headers {
   const ctx = currentTargetExecution();

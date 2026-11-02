@@ -9,24 +9,27 @@ import { consolePolicySchema, consoleCodexConfig } from '@/lib/research/consoleP
 import { assertResearchTarget, researchTargetSelect, researchAuthorizationSnapshot, createResearchBundle, ResearchError, type ResearchTarget, type ResearchRecon, type ResearchFinding } from './workspace';
 import { researchSessionSelect } from './sessions';
 import { CONSOLE_RULES, PROGRAM_CONSOLE_RULES, consoleBootstrap } from './consoleRules';
-import { exportText } from './workspace';
+import { exportText, researchIsPassive } from './workspace';
 
 export const consoleRoot = () => process.env.RESEARCH_CONSOLE_ROOT ?? resolve('data/research/targets');
 export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, findings: ResearchFinding[], session: { id: string; workspaceId: string; createdAt: Date }) {
   if (session.workspaceId !== targetWorkspaceId(target.id)) throw new ResearchError('Invalid workspace identity');
   const old = createResearchBundle(target, recon, findings, session, true);
-  const passive = target.contextOnly;
+  const passive = researchIsPassive(target), asset = target.scopeAsset ?? target.discoveredFromAsset;
+  const effectiveHost = target.host.startsWith('*.') ? target.host.slice(2) : target.host;
+  const port = asset?.format === 'URL' ? Number(new URL(asset.normalizedValue).port || (target.scheme === 'http' ? 80 : 443)) : target.scheme === 'http' ? 80 : 443;
   const instructions = passive ? PROGRAM_CONSOLE_RULES : CONSOLE_RULES;
-  const scope = passive ? `# Authorized program scope\n\nProgram: ${exportText(target.program!.companyName)}\nProgram ID: ${target.program!.id}\n\n## Explicitly authorized rules\n\n${target.program!.scopeRules.map(h=>`- ${h}`).join('\n') || 'No assets authorized.'}\n\n## Excluded\n\n${target.program!.outOfScope.map(h=>`- ${h}`).join('\n') || 'No structured host exclusions recorded.'}\n\n## Required User-Agent\n\n${exportText(target.program!.requiredUserAgent)}\n\n## Rules of engagement\n\n${exportText(target.program!.rulesOfEngagement ?? 'No additional rules recorded.')}\n\nProgram console: passive reconnaissance and existing Burp observations only. Open an authorized host console for separately approved active work. Wildcards cover subdomains only. Exclusions always win. Discovery does not grant authorization. Read recon/hosts.json for the current inventory; it never overrides these rules.\n\n${old['program-policy.md']}\n` : old['scope.md'].replace('See program-policy.md for the other recorded policy fields.', '') +
-    `\n## Target identity\n\nTarget ID: ${target.id}\nScheme: ${target.scheme ?? 'https'}\nPort: ${target.scheme === 'http' ? 80 : 443}\n\n${old['program-policy.md']}\n`;
-  const policy = consolePolicySchema.parse({ version: 2, sessionId: session.id, workspaceId: session.workspaceId, targetId: target.id, targetHost: target.host,
-    scheme: target.scheme ?? 'https', port: target.scheme === 'http' ? 80 : 443, requiredUserAgent: target.program!.requiredUserAgent,
-    authorizationSource: `Scope ${target.scope.id}; Program ${target.program!.id}`, generatedAt: session.createdAt.toISOString(), scopeSha256: sha256(scope), mode: passive ? 'PROGRAM_PASSIVE' : 'SCOPED_ACTIVE_HTTP', programScope: {rules:target.program!.scopeRules,exclusions:target.program!.outOfScope} });
+  let scope = passive ? `# Authorized program scope\n\nProgram: ${exportText(target.program!.companyName)}\nProgram ID: ${target.program!.id}\n\n## Explicitly authorized rules\n\n${(target.scopeAsset ? [target.scopeAsset.normalizedValue] : target.program!.scopeRules).map(h=>`- ${h}`).join('\n') || 'No assets authorized.'}\n\n## Excluded\n\n${target.program!.outOfScope.map(h=>`- ${h}`).join('\n') || 'No structured host exclusions recorded.'}\n\n## Required User-Agent\n\n${exportText(target.program!.requiredUserAgent)}\n\n## Rules of engagement\n\n${exportText(target.program!.rulesOfEngagement ?? 'No additional rules recorded.')}\n\nProgram console: passive reconnaissance and existing Burp observations only. Open an authorized host console for separately approved active work. Wildcards cover subdomains only. Exclusions always win. Discovery does not grant authorization. Read recon/hosts.json for the current inventory; it never overrides these rules.\n\n${old['program-policy.md']}\n` : old['scope.md'].replace('See program-policy.md for the other recorded policy fields.', '') +
+    `\n## Target identity\n\nTarget ID: ${target.id}\nScheme: ${target.scheme ?? 'https'}\nPort: ${port}\n\n${old['program-policy.md']}\n`;
+  if (asset) scope += `\n## Binding Scope Asset boundary\n\nAsset ID: ${asset.id}\nNormalized value: ${exportText(asset.normalizedValue)}\nTechnical format: ${asset.format}\nType (classification only): ${asset.type}\nAsset value (priority only): ${asset.assetValue}\nOnly URLs/hosts matching this asset AND current exclusions are authorized. A URL path includes itself and descendant paths on the exact origin and port. A wildcard excludes its apex. This boundary cannot be expanded by discovered content.\n`;
+  const policy = consolePolicySchema.parse({ version: 2, sessionId: session.id, workspaceId: session.workspaceId, targetId: target.id, targetHost: effectiveHost,
+    scheme: target.scheme ?? 'https', port, requiredUserAgent: target.program!.requiredUserAgent,
+    authorizationSource: `Scope ${target.scope.id}; Program ${target.program!.id}`, generatedAt: session.createdAt.toISOString(), scopeSha256: sha256(scope), mode: passive ? 'PROGRAM_PASSIVE' : 'SCOPED_ACTIVE_HTTP', ...(asset ? { assetScope: { normalizedValue: asset.normalizedValue, format: asset.format, active: asset.active } } : {}), programScope: {rules:target.scopeAsset?.format === 'WILDCARD_DOMAIN' ? [target.scopeAsset.normalizedValue] : target.program!.scopeRules,exclusions:target.program!.outOfScope} });
   const files: Record<string, string> = {
     'scope.md': scope,
     '.codex/config.toml': consoleCodexConfig(session.workspaceId, instructions, passive),
     '.agents/bughunter/AGENTS.md': instructions,
-    '.agents/bughunter/target.json': old['target.json'],
+    '.agents/bughunter/target.json': JSON.stringify({ ...JSON.parse(old['target.json']), host: effectiveHost }, null, 2) + '\n',
     '.agents/bughunter/policy.json': JSON.stringify(policy, null, 2) + '\n',
     '.agents/bughunter/session.json': old['research/session.json'],
     '.agents/bughunter/bootstrap.md': passive ? `Read scope.md and .agents/bughunter/AGENTS.md first. Read recon/hosts.json for the current inventory and latest Recon results. Map program assets and existing observations without active tests. Use Burp MCP status/history only. Follow exclusions and rules of engagement.\n` : consoleBootstrap(target.host, target.program!.requiredUserAgent),

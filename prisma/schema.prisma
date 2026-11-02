@@ -164,11 +164,16 @@ model BountyProgram {
   updatedAt         DateTime        @updatedAt
   owner             User            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   targets           Target[]
+  scopeAssets       ScopeAsset[]
 
   @@index([ownerId])
 }
 
 model Target {
+  scopeAssetId String? @unique
+  scopeAsset ScopeAsset? @relation("AssetExecution", fields: [scopeAssetId], references: [id], onDelete: SetNull)
+  discoveredFromAssetId String?
+  discoveredFromAsset ScopeAsset? @relation("AssetDiscoveries", fields: [discoveredFromAssetId], references: [id], onDelete: SetNull)
   // Internal program execution/workspace identity; never a discovered host.
   contextOnly Boolean @default(false)
   discoverySource String?
@@ -270,6 +275,11 @@ enum CredentialMode {
 // ---------------------------------------------------------------------------
 
 model ScanRun {
+  scopeAssetId String?
+  scopeAsset ScopeAsset? @relation(fields: [scopeAssetId], references: [id], onDelete: SetNull)
+  scopeAssetSnapshot Json?
+  assetResults Json?
+  reconSteps ReconPipelineStep[]
   discoveries HostDiscovery[]
   approvedHuntTechniques String[]   @default([])
   huntReport             Json?
@@ -739,6 +749,66 @@ model ResearchReconSnapshot {
 
   @@unique([sessionId, sourceFingerprint])
   @@index([sessionId, createdAt])
+}
+
+enum ScopeAssetFormat {
+  URL
+  WILDCARD_DOMAIN
+  DOMAIN
+  SUBDOMAIN
+  HOSTNAME
+  IP
+  CIDR
+}
+enum ScopeAssetType {
+  API
+  WEB_APPLICATION
+  WILDCARD
+  OTHER
+}
+enum AssetValue {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+model ScopeAsset {
+  id String @id @default(cuid())
+  programId String
+  originalValue String
+  normalizedValue String
+  format ScopeAssetFormat
+  type ScopeAssetType
+  typeSource String @default("HEURISTIC")
+  assetValue AssetValue @default(MEDIUM)
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  executionTarget Target? @relation("AssetExecution")
+  discoveredTargets Target[] @relation("AssetDiscoveries")
+  scanRuns ScanRun[]
+  @@unique([programId, normalizedValue])
+  @@index([programId, active])
+}
+enum ReconPipelineState {
+  PENDING
+  RUNNING
+  COMPLETED
+  SKIPPED
+  FAILED
+}
+model ReconPipelineStep {
+  id String @id @default(cuid())
+  scanRunId String
+  name String
+  position Int
+  state ReconPipelineState @default(PENDING)
+  reason String?
+  startedAt DateTime?
+  finishedAt DateTime?
+  scanRun ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  @@unique([scanRunId, name])
 }
 
 // Delivery means a message was staged for the operator, never that an LLM consumed it.

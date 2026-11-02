@@ -23,13 +23,13 @@ export default function ProgramPage({ params }: { params: Promise<{ id: string }
   if (!program) return <p role="status">{error || "Loading…"}</p>;
   return <div className="space-y-6"><Link href="/targets" className="text-brand">← Targets</Link><h1 className="text-2xl font-semibold">{program.companyName}</h1>
     <Button variant="secondary" onClick={() => setEditing(!editing)}>{editing ? "Cancel" : "Edit Target"}</Button>
+    <ProgramWorkflow program={program} />
     {editing ? <Card className="p-6"><ProgramForm initial={program} onSaved={() => { setEditing(false); void load(); }} /></Card> : <>
-      <Card className="space-y-4 p-6"><p>Platform: {program.platform ?? "—"}</p>{program.programUrl && <a href={program.programUrl} rel="noreferrer" target="_blank" className="text-brand">Program information ↗</a>}
+      <details><summary className="cursor-pointer text-brand">Program details and rules</summary><Card className="mt-3 space-y-4 p-6"><p>Platform: {program.platform ?? "—"}</p>{program.programUrl && <a href={program.programUrl} rel="noreferrer" target="_blank" className="text-brand">Program information ↗</a>}
         <dl className="grid grid-cols-2 gap-2">{(["Low", "Medium", "High", "Critical"] as const).map(l => <div key={l}><dt>{l}</dt><dd>{program[`reward${l}`] ?? "—"} {program.rewardCurrency}</dd></div>)}</dl>
         <p>Required User-Agent: <code>{program.requiredUserAgent}</code></p><p>Scope — {program.targets.length} hosts</p><p>Out of Scope — {program.outOfScope.length} hosts</p>
         <p>Qualifying: {program.qualifying.join(", ") || "Not specified"}</p><p>Non-qualifying: {program.nonQualifying.join(", ") || "None"}</p>
-      </Card><div className="flex gap-4"><Link className="text-brand" href={`/scopes/${id}`}>Open Scope →</Link><Link className="text-brand" href={`/targets/${id}?tab=RECON`}>Start Recon →</Link><Link className="text-brand" href={`/targets/${id}?tab=Codex%20Console`}>Create Research Workspace →</Link></div>
+      </Card></details>
     </>}
-    <ProgramWorkflow program={program} />
   </div>;
 }

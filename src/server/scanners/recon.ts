@@ -22,6 +22,7 @@ import { loadTargetCredentials, credentialHeaders } from "@/server/credentials";
 const MINUTE = 60_000;
 
 export async function runRecon(_host: string, scanRunId: string): Promise<ScanExecutionResult> {
+  if (currentTargetExecution().scopeAsset) { const { runAssetRecon } = await import('../recon/assetPipeline'); return runAssetRecon(scanRunId); }
   if (currentTargetExecution().programReconId) { const { runProgramRecon } = await import('../recon/program'); return runProgramRecon(scanRunId); }
   const steps: ReconStepResult[] = [];
   const record = async (step: ReconStepResult) => {

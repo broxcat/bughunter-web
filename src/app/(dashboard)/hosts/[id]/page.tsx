@@ -3,7 +3,7 @@
 import Link from "next/link";
 import TargetAuthentication from "@/components/TargetAuthentication";
 import CreateResearchButton from "@/components/CreateResearchButton";
-import { use, useEffect, useRef, useState } from "react";
+import { use, useEffect, useState } from "react";
 import ScanCancelButton from "@/components/ScanCancelButton";
 import ScanLogViewer from "@/components/ScanLogViewer";
 import {
@@ -13,7 +13,6 @@ import {
 } from "@/components/ScopePolicy";
 import { scanPresentation } from "@/lib/scanPresentation";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
 type ScanType = "RECON" | "HUNT" | "VALIDATE";
@@ -57,8 +56,6 @@ export default function TargetDetailPage({
   const [target, setTarget] = useState<TargetDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [starting, setStarting] = useState<ScanType | null>(null);
-  const pendingRequest = useRef<{ body: string; key: string } | null>(null);
   const [openRun, setOpenRun] = useState<string | null>(null);
 
   async function load() {
@@ -80,31 +77,6 @@ export default function TargetDetailPage({
     }).catch(e => setError(e.message)).finally(() => setLoading(false));
   }, [id]);
 
-  async function startScan(type: ScanType) {
-    setStarting(type);
-    setError(null);
-    try {
-      const body = JSON.stringify({ targetId: id, type });
-      if (pendingRequest.current?.body !== body) pendingRequest.current = { body, key: crypto.randomUUID() };
-      const res = await fetch("/api/scan-runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": pendingRequest.current.key },
-        body,
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error ?? `Failed to start scan (${res.status})`);
-      }
-      const run = await res.json();
-      pendingRequest.current = null;
-      await load();
-      setOpenRun(run.id);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to start scan");
-    } finally {
-      setStarting(null);
-    }
-  }
 
   if (loading) return <p className="text-sm text-muted">Loading…</p>;
   if (error && !target)
@@ -145,13 +117,7 @@ export default function TargetDetailPage({
       )}
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button
-          variant="primary"
-          onClick={() => startScan("RECON")}
-          disabled={!scopeApproved || starting !== null}
-        >
-          {starting === "RECON" ? "Starting…" : "Run recon"}
-        </Button>
+        {target.program && <Link className="text-brand" href={`/targets/${target.program.id}?tab=Recon`}>Recon from Target assets →</Link>}
         {scopeApproved && target.host.startsWith("*.") && target.program ? <Link className="text-brand" href={`/targets/${target.program.id}?tab=Codex%20Console`}>Open program Codex console</Link> : <CreateResearchButton targetId={id} disabled={!scopeApproved} />}
         <div className="ml-auto flex gap-4 text-sm">
           <Link

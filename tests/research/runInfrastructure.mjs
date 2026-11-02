@@ -23,7 +23,7 @@ try {
   assert.equal(runner.ports[0].published, process.env.RESEARCH_SSH_PORT ?? "2222");
   assert(!runner.env_file);
   assert(!JSON.stringify(runner).match(/docker\.sock|DATABASE_URL|AUTH_SECRET|REDIS_URL|CREDENTIALS_ENCRYPTION_KEY/));
-  assert.deepEqual(Object.keys(runner.networks).sort(), ["research_egress", "research_terminal"]);
+  assert.deepEqual(Object.keys(runner.networks).sort(), ["burp_link", "research_egress", "research_terminal"]);
   runner.networks = {research_egress:{}};
   runner.entrypoint = ["entrypoint"];
   runner.healthcheck = {test:["CMD", "healthcheck"]};

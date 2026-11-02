@@ -1,5 +1,6 @@
 import { throwIfScanAborted } from "@/server/scanControl";
 import { isSafeReadUrl } from "@/lib/observationSafety";
+import { assertExecutionUrl } from '@/server/execution';
 // Authenticated, depth-limited Recon observation collection. Discovered URLs
 // remain confined to the selected host and never expand authorization.
 // Bodies are transient only; the persisted corpus contains sanitized metadata.
@@ -87,6 +88,7 @@ async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryC
     const { url, depth } = queue.shift()!;
     const norm = new URL(url.replace(/#.*$/, "")).toString();
     if (visited.has(norm) || !isSafeReadUrl(norm)) continue;
+    try { assertExecutionUrl(norm); } catch { continue; }
     visited.add(norm);
 
     const res = await probe(norm, { headers, timeoutMs: PAGE_TIMEOUT_MS });
@@ -125,14 +127,15 @@ async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryC
  * a corpus the families parse for candidate URLs/params. Never throws.
  */
 export function discoverCorpus(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryCorpus> {
-  const cached = cache.get(ctx.scanRunId);
+  const key = `${ctx.scanRunId}:${ctx.baseUrl}`;
+  const cached = cache.get(key);
   if (cached) return cached;
   const p = crawl(ctx, seeds).catch(() => {
     throwIfScanAborted();
     return { html: "", urls: [], authenticated: false, execution: { successfulRequests: 0, failedRequests: 1, issues: ["DISCOVERY_FAILED"] } };
   });
-  cache.set(ctx.scanRunId, p);
+  cache.set(key, p);
   return p;
 }
 
-export function clearDiscoveryCorpus(scanRunId: string) { cache.delete(scanRunId); }
+export function clearDiscoveryCorpus(scanRunId: string) { for (const key of cache.keys()) if (key.startsWith(`${scanRunId}:`)) cache.delete(key); }

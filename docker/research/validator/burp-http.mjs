@@ -1,5 +1,6 @@
 // Adapter for PortSwigger/mcp-server v1.3.0. Never expose raw upstream text.
 import { safeObservationUrl } from '../../../src/lib/observationSafety.ts';
+import { assetAllowsUrl } from '../../../src/lib/scopeAssets.ts';
 const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function historyArguments(policy, count, offset, requestId) {
   // This prefilter is an optimization, NOT proof of the actual HTTP destination.
@@ -28,15 +29,16 @@ export function sanitizeHistoryItem(raw, policy) {
   const response = /^HTTP\/(?:1\.[01]|2) ([1-5][0-9]{2})(?: |$)/.exec(res.first);
   const hosts = req.values.get('host') ?? [];
   if (!request || !response || hosts.length !== 1) return null;
-  const allowedPort = policy.scheme === 'https' ? '443' : '80';
+  const allowedPort = String(policy.port ?? (policy.scheme === 'https' ? 443 : 80));
   if (hosts[0].toLowerCase() !== policy.targetHost && hosts[0].toLowerCase() !== `${policy.targetHost}:${allowedPort}`) return null;
   let url;
   try {
     const path = request[2];
     if (!path.startsWith('/') && !/^https?:\/\//.test(path)) return null;
     if (path.startsWith('//') || /[\\#\x00-\x20\x7f]/.test(path)) return null;
-    url = new URL(path, `${policy.scheme}://${policy.targetHost}`);
-    if (url.hostname !== policy.targetHost || url.port || url.protocol !== `${policy.scheme}:` || url.username || url.password) return null;
+    url = new URL(path, `${policy.scheme}://${policy.targetHost}:${allowedPort}`);
+    if (url.hostname !== policy.targetHost || Number(url.port || (policy.scheme === 'https' ? 443 : 80)) !== Number(allowedPort) || url.protocol !== `${policy.scheme}:` || url.username || url.password) return null;
+    if (policy.assetScope && !assetAllowsUrl(policy.assetScope, url.href)) return null;
   } catch { return null; }
   const ua = req.values.get('user-agent') ?? [];
   const ids = req.values.get('x-bughunter-request-id') ?? [];

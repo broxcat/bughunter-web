@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Job } from "bullmq";
 import type { ScanJobData } from "@/server/queue/scanQueue";
 import type { ScanExecutionAttempt } from "@prisma/client";
-const mocks = vi.hoisted(() => ({ tx: vi.fn(), find: vi.fn(), update: vi.fn(), claim: vi.fn(), attemptFind: vi.fn(), attemptCreate: vi.fn(), attemptUpdate: vi.fn(), attemptList: vi.fn(), execution: vi.fn(), recon: vi.fn(), hunt: vi.fn(), log: vi.fn() }));
-vi.mock("@/lib/prisma", () => ({ prisma: { $transaction: mocks.tx, scanRun: { findUnique: mocks.find, findUniqueOrThrow: mocks.find, update: mocks.update, updateMany: mocks.claim }, scanExecutionAttempt: { findUnique: mocks.attemptFind, findUniqueOrThrow: mocks.attemptFind, create: mocks.attemptCreate, updateMany: mocks.attemptUpdate, findMany: mocks.attemptList }, scanLog: { create: mocks.log } } }));
+const mocks = vi.hoisted(() => ({ tx: vi.fn(), find: vi.fn(), update: vi.fn(), claim: vi.fn(), attemptFind: vi.fn(), attemptCreate: vi.fn(), attemptUpdate: vi.fn(), attemptList: vi.fn(), execution: vi.fn(), recon: vi.fn(), hunt: vi.fn(), log: vi.fn(), pipeline: vi.fn() }));
+vi.mock("@/lib/prisma", () => ({ prisma: { reconPipelineStep: { updateMany: mocks.pipeline }, $transaction: mocks.tx, scanRun: { findUnique: mocks.find, findUniqueOrThrow: mocks.find, update: mocks.update, updateMany: mocks.claim }, scanExecutionAttempt: { findUnique: mocks.attemptFind, findUniqueOrThrow: mocks.attemptFind, create: mocks.attemptCreate, updateMany: mocks.attemptUpdate, findMany: mocks.attemptList }, scanLog: { create: mocks.log } } }));
 vi.mock("@/server/execution", () => ({ loadTargetExecution: mocks.execution, withTargetExecution: (_ctx: unknown, work: () => unknown) => work() }));
 vi.mock("@/server/scanners/recon", () => ({ runRecon: mocks.recon }));
 vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), warn: vi.fn() } }));
@@ -17,7 +17,7 @@ let run: { id: string; status: string; type: string; targetId: string; target: t
 let attempts: ScanExecutionAttempt[];
 let processor: ReturnType<typeof createScanProcessor>;
 beforeEach(() => {
-  vi.resetAllMocks(); attempts = [];
+  vi.resetAllMocks(); mocks.pipeline.mockResolvedValue({ count: 0 }); attempts = [];
   run = { id: "run", status: "QUEUED", type: "RECON", targetId: "target", target, startedAt: null, cancelRequestedAt: null, outcome: null, reconCorpus: { observed: true } };
   // A serialized transaction fixture models row locking; real PostgreSQL tests
   // separately verify the SQL exclusion and crash/replay behaviour.

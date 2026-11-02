@@ -8,7 +8,7 @@ export async function GET() {
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   return NextResponse.json(await prisma.bountyProgram.findMany({
     where: { ownerId: session.user.id }, orderBy: { companyName: "asc" },
-    include: { targets: { where: { active: true, contextOnly: false, userId: session.user.id }, orderBy: { host: "asc" } } },
+    include: { _count: { select: { scopeAssets: { where: { active: true } } } }, targets: { where: { active: true, contextOnly: false, userId: session.user.id }, orderBy: { host: "asc" } } },
   }));
 }
 export async function POST(req: Request) {

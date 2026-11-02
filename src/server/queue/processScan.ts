@@ -52,12 +52,15 @@ export function createScanProcessor(workerId: string, executor: Executor = execu
       work = withScanControl(control, async () => {
         await monitor.ready;
         control.assertActive();
-        const run = await prisma.scanRun.findUniqueOrThrow({ where: { id: scanRunId }, include: { target: { include: { scope: true } } } });
+        const run = await prisma.scanRun.findUniqueOrThrow({ where: { id: scanRunId }, include: { target: { include: { scope: true } }, scopeAsset: true } });
         if (type === "HUNT" || run.type === "HUNT") return { outcome: "UNSUPPORTED" as const, reason: "Legacy HUNT is retired. Create a Codex Research Workspace instead." };
         if (type === "VALIDATE" || run.type === "VALIDATE") return { outcome: "UNSUPPORTED" as const, reason: "VALIDATE scan type is not supported: validation engine is not implemented." };
         if (run.type !== type || run.targetId !== targetId) throw new Error("Scan job identity mismatch");
         // Scope/policy are revalidated on every real start, after winning the claim.
         const execution = await loadTargetExecution(targetId, 'RECON');
+        if (run.scopeAssetId && (!run.scopeAsset?.active || execution.scopeAsset?.id !== run.scopeAssetId || (run.scopeAssetSnapshot as { normalizedValue?: string } | null)?.normalizedValue !== run.scopeAsset.normalizedValue)) throw new Error('Scope asset authorization changed since the scan was queued');
+        const policy = run.scopeAssetSnapshot as { type?: string; assetValue?: string } | null;
+        if (execution.scopeAsset && policy?.type && policy.assetValue) execution.scopeAsset = { ...execution.scopeAsset, type: policy.type, assetValue: policy.assetValue };
         control.assertActive();
         await prisma.scanRun.update({ where: { id: scanRunId }, data: { requiredUserAgent: execution.requiredUserAgent } });
         return withTargetExecution(execution, () => executor(type, run.target.host, scanRunId));

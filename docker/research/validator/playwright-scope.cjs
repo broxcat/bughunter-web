@@ -1,7 +1,8 @@
 // Installed initialization hook, never target-supplied JavaScript/configuration.
 exports.default = async ({ page }) => {
   const p = JSON.parse(process.env.BUGHUNTER_BROWSER_POLICY);
-  const allowed = value => { try { const u = new URL(value); return u.protocol === `${p.scheme}:` && u.hostname === p.host && Number(u.port || (p.scheme === 'https' ? 443 : 80)) === p.port && !u.username && !u.password; } catch { return false; } };
+  const { assetAllowsUrl } = await import('../../../src/lib/scopeAssets.ts');
+  const allowed = value => { try { const u = new URL(value); return u.protocol === `${p.scheme}:` && u.hostname === p.host && Number(u.port || (p.scheme === 'https' ? 443 : 80)) === p.port && !u.username && !u.password && (!p.assetScope || assetAllowsUrl(p.assetScope, value)); } catch { return false; } };
   const context = page.context();
   if (context.__bughunterScoped) return; context.__bughunterScoped = true;
   await context.route('**/*', async route => {

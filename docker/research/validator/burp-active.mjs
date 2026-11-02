@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { safeObservationUrl, redactObservationText } from '../../../src/lib/observationSafety.ts';
 import { matchesHost, normalizeFqdn } from '../../../src/lib/bountyProgram.ts';
+import { assetAllowsUrl } from '../../../src/lib/scopeAssets.ts';
 const text = max => z.string().max(max);
 const destination = { targetHostname: text(253), targetPort: z.number().int().min(1).max(65535), usesHttps: z.boolean() };
 export const http1Arguments = z.strictObject({ ...destination, content: text(65536) });
@@ -14,6 +15,7 @@ function destinationCheck(a, p) {
 function authority(value, p) { return value === p.targetHost || value === `${p.targetHost}:${p.port}`; }
 function pathCheck(value, p) {
   if (!value || /[\x00-\x20\x7f\\]/.test(value) || value.startsWith('//') || value.includes('#')) throw new Error('UNSAFE_REQUEST');
+  if (p.assetScope && !assetAllowsUrl(p.assetScope, new URL(value, `${p.scheme}://${p.targetHost}:${p.port}`).href)) throw new Error('OUT_OF_SCOPE');
   if (value.startsWith('/')) return;
   let u; try { u = new URL(value); } catch { throw new Error('UNSAFE_REQUEST'); }
   if (u.hostname !== p.targetHost || u.protocol !== `${p.scheme}:` || Number(u.port || (u.protocol === 'https:' ? 443 : 80)) !== p.port || u.username || u.password) throw new Error('OUT_OF_SCOPE');

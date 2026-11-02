@@ -31,6 +31,7 @@ export async function createResearchSession(userId: string, targetId: string) {
       await tx.$queryRaw`SELECT "id" FROM "BountyProgram" WHERE "id" = ${target.program!.id} FOR SHARE`;
       const current = await tx.target.findFirstOrThrow({ where: { id: targetId }, select: researchTargetSelect });
       assertResearchTarget(current, userId);
+      if (current.scopeAsset && ['URL', 'WILDCARD_DOMAIN'].includes(current.scopeAsset.format)) throw new ResearchError('Use the persistent asset Research console for URL/path or wildcard scope. Historical ZIP workspaces remain unchanged.');
       if (await tx.researchSession.count({ where: { userId, createdAt: { gt: new Date(Date.now() - 3600_000) } } }) >= 20) throw new ResearchError("Research workspace quota reached (20 per hour)", 429);
       const recon = await tx.scanRun.findFirst({ where: { targetId, type: "RECON", status: "COMPLETED", reconCorpus: { not: Prisma.DbNull } }, orderBy: { createdAt: "desc" }, select: { id: true, reconCorpus: true } });
       const findings = await tx.finding.findMany({ where: { targetId }, orderBy: { createdAt: "asc" }, take: 1000, select: { id: true, title: true, severity: true, vulnClass: true, reviewStatus: true, location: true } });

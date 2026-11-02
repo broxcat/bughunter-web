@@ -262,11 +262,15 @@ rejection of implicit CSRF writes and explicitly requested credential login. The
 client tests even without external tools; optional suites are skipped when their
 prerequisites are not explicitly enabled.
 
-For the browser workflow smoke test, start the built app against disposable
-Postgres/Redis, without a worker (the test enqueues one Recon job but runs no scan):
+The Target page now owns structured scope assets, per-asset Recon, scope.md
+downloads and focused Research. See [Target Recon workflow](docs/target-recon-workflow.md)
+for migration, boundaries, collection plans and deployment.
+
+The browser workflow builds the app and starts disposable Postgres/Redis without
+a worker (it enqueues one Recon job but runs no remote scan):
 
 ```sh
-TEST_APP_URL=http://localhost:3101 npm run test:ui
+npm run test:ui
 ```
 
 Secrets remain encrypted at rest. Credential values are never exposed by program

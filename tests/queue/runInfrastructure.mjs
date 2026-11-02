@@ -43,11 +43,13 @@ try {
   await Promise.all([ready(pg, ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]), ready(redis, ["redis-cli", "ping"]), ready(executionRedis, ["redis-cli", "ping"]), ready(abuseRedis, ["redis-cli", "ping"])]);
   const pgPort = (await docker("port", pg, "5432/tcp")).split(":").at(-1);
   const redisPort = (await docker("port", redis, "6379/tcp")).split(":").at(-1);
-  for (const db of ["queue_test", "api_test", "migration_test", "execution_test", "abuse_test"]) await docker("exec", pg, "createdb", "-U", "postgres", db);
+  for (const db of ["queue_test", "api_test", "migration_test", "execution_test", "abuse_test", "shadow_test"]) await docker("exec", pg, "createdb", "-U", "postgres", db);
   const dbUrl = name => `postgresql://postgres:disposable-test@127.0.0.1:${pgPort}/${name}`;
   const env = { ...process.env, LOG_LEVEL: "silent", TEST_ABUSE_DATABASE_URL: dbUrl("abuse_test"), TEST_ABUSE_REDIS_URL: `redis://127.0.0.1:${abuseRedisPort}`, TEST_ABUSE_REDIS_CONTAINER: abuseRedis, TEST_DATABASE_URL: dbUrl("api_test"), TEST_QUEUE_DATABASE_URL: dbUrl("queue_test"), TEST_EXECUTION_DATABASE_URL: dbUrl("execution_test"), TEST_EXECUTION_REDIS_URL: `redis://127.0.0.1:${executionRedisPort}`, TEST_MIGRATION_DATABASE_URL: dbUrl("migration_test"), TEST_QUEUE_REDIS_URL: `redis://127.0.0.1:${redisPort}`, TEST_QUEUE_REDIS_CONTAINER: redis };
   await run(["test"], env);
   await run(["run", "test:migration"], env);
+  await run(['prisma', 'migrate', 'diff', '--from-migrations', 'prisma/migrations', '--to-schema-datamodel', 'prisma/schema.prisma', '--shadow-database-url', dbUrl('shadow_test'), '--exit-code'], env, 'npx');
+  if (process.argv.includes('--target-browser')) await run(['tests/e2e/targetAssetWorkflow.mjs'], env, process.execPath);
   if (process.argv.includes("--research-browser")) await run(["tests/e2e/researchWorkflow.mjs"], env, process.execPath);
   if (process.argv.includes("--auth-browser")) await run(["tests/e2e/authHardening.mjs"], env, process.execPath);
 } catch (error) {

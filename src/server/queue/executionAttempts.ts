@@ -24,6 +24,7 @@ async function interrupt(tx: Prisma.TransactionClient, attempt: ScanExecutionAtt
   const changed = await tx.scanExecutionAttempt.updateMany({ where: { id: attempt.id, state: "RUNNING", heartbeatAt: attempt.heartbeatAt }, data: { state: "INTERRUPTED", reason, finishedAt: new Date() } });
   if (!changed.count) return false;
   await tx.scanRun.updateMany({ where: { id: attempt.scanRunId, status: "RUNNING" }, data: { status: "FAILED", outcome: attempt.usefulWorkAt ? "PARTIAL" : "FAILED", error: "Previous execution was interrupted; automatic network replay refused.", finishedAt: new Date() } });
+  await tx.reconPipelineStep.updateMany({ where: { scanRunId: attempt.scanRunId, state: { in: ['PENDING', 'RUNNING'] } }, data: { state: 'FAILED', reason: 'Execution interrupted; automatic replay refused.', finishedAt: new Date() } });
   await event(tx, attempt, reason, "execution interrupted; automatic network replay disabled");
   return true;
 }
@@ -104,6 +105,7 @@ export async function finishScanExecution(attemptId: string, workerId: string, c
       finishedAt: new Date(),
     } });
     await event(tx, attempt, state === "CANCELLED" ? "USER_CANCELLED" : reason ?? state, state === "CANCELLED" ? "scan cancellation completed after cleanup" : `execution attempt ${state.toLowerCase()}`);
+    await tx.reconPipelineStep.updateMany({ where: { scanRunId: run.id, state: { in: ['PENDING', 'RUNNING'] } }, data: { state: state === 'CANCELLED' ? 'SKIPPED' : 'FAILED', reason: 'Execution ended before the step completed.', finishedAt: new Date() } });
   });
 }
 

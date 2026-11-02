@@ -27,6 +27,7 @@ export async function settleQueuedCancellations(): Promise<void> {
     await tx.$queryRaw`SELECT id FROM "ScanRun" WHERE id = ${run.id} FOR UPDATE`;
     const claimed = await tx.scanRun.updateMany({ where: { id: run.id, status: "QUEUED", startedAt: null, cancelRequestedAt: { not: null }, executionAttempts: { none: {} } }, data: { status: "CANCELLED", outcome: null, error: null, finishedAt: new Date() } });
     if (claimed.count) {
+      await tx.reconPipelineStep.updateMany({ where: { scanRunId: run.id, state: { in: ['PENDING', 'RUNNING'] } }, data: { state: 'SKIPPED', reason: 'Cancelled before network work started.', finishedAt: new Date() } });
       logger.info({ scanRunId: run.id, reason: "USER_CANCELLED_BEFORE_START" }, "queued scan cancellation completed");
       await tx.scanLog.create({ data: { scanRunId: run.id, line: "[worker] queued scan cancelled before execution; no network work started", stream: "STDERR" } });
     }

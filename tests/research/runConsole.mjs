@@ -32,11 +32,14 @@ async function webScript(script){
 try {
  const original=JSON.parse(await run('docker',['compose','config','--format','json'])), service=original.services['research-console'];
  assert(!service.env_file);assert(!JSON.stringify(service).match(/docker\.sock|DATABASE_URL|REDIS_URL|AUTH_SECRET|privileged|SYS_ADMIN/));
- assert.deepEqual(Object.keys(service.networks).sort(),['research_egress','research_terminal']);assert.equal(service.ports[0].host_ip,'127.0.0.1');
+ assert.deepEqual(Object.keys(service.networks).sort(),['burp_link','research_egress','research_terminal']);assert.equal(service.ports[0].host_ip,'127.0.0.1');
  const [appPort,terminalPort,sshPort,publicPort]=await Promise.all([freePort(),freePort(),freePort(),freePort()]); const origin=`http://127.0.0.1:${publicPort}`;
  await writeFile(join(temp,'private.pem'),privateKey,{mode:0o600});await writeFile(join(temp,'public.pem'),keys.publicKey.export({type:'spki',format:'pem'}));
  await run('ssh-keygen',['-q','-t','ed25519','-N','','-f',join(temp,'ssh')]);await writeFile(join(temp,'authorized_keys'),await readFile(join(temp,'ssh.pub')));
- delete service.build;service.image=process.env.RESEARCH_TEST_RUNNER_IMAGE??service.image;service.restart='no';service.environment={RESEARCH_TERMINAL_ORIGIN:origin};
+ // This acceptance runner starts both providers, app-server probes and multiple
+ // independent workspaces concurrently. Keep its fixture process budget local.
+ service.pids_limit=2048;
+ service.networks={research_egress:{},research_terminal:{}};delete service.build;service.image=process.env.RESEARCH_TEST_RUNNER_IMAGE??service.image;service.restart='no';service.environment={RESEARCH_TERMINAL_ORIGIN:origin};
  service.ports=[{target:22,published:String(sshPort),host_ip:'127.0.0.1'},{target:7681,published:String(terminalPort),host_ip:'127.0.0.1'}];
  service.volumes=[{type:'volume',source:'targets',target:'/workspaces'},{type:'volume',source:'codex',target:'/home/researcher/.codex'},{type:'volume',source:'claude',target:'/home/researcher/.claude'},{type:'volume',source:'hostkeys',target:'/etc/ssh/host-keys'}, {type:'bind',source:join(temp,'public.pem'),target:'/run/research-terminal/public.pem',read_only:true},{type:'bind',source:join(temp,'authorized_keys'),target:'/run/research-keys/authorized_keys',read_only:true}];
  await writeFile(config,JSON.stringify({services:{'research-console':service,web:{image:process.env.RESEARCH_TEST_APP_IMAGE??'bughunter-web',command:['npm','run','start'],restart:'no',ports:[{target:3000,published:String(appPort),host_ip:'127.0.0.1'}],networks:['backend','research_terminal'],environment:{DATABASE_URL:'postgresql://postgres:disposable-console@db:5432/postgres',REDIS_URL:'redis://redis:6379',AUTH_URL:origin,AUTH_SECRET:randomUUID(),CREDENTIALS_ENCRYPTION_KEY:'ab'.repeat(32),RESEARCH_WORKSPACE_ROOT:'/research-workspaces',RESEARCH_CONSOLE_ROOT:'/research-target-workspaces',RESEARCH_WORKSPACE_UID:'1000',RESEARCH_WORKSPACE_GID:'1000',RESEARCH_TERMINAL_PRIVATE_KEY_FILE:'/run/research-terminal/private.pem',LOG_LEVEL:'silent',ALLOW_PUBLIC_REGISTRATION:'true',TRUST_PROXY_HEADERS:'false'},volumes:[{type:'volume',source:'targets',target:'/research-target-workspaces'},{type:'volume',source:'legacy',target:'/research-workspaces'},{type:'bind',source:join(temp,'private.pem'),target:'/run/research-terminal/private.pem',read_only:true}]},db:{image:'postgres:16-alpine',tmpfs:['/var/lib/postgresql/data'],environment:{POSTGRES_PASSWORD:'disposable-console'},networks:['backend']},redis:{image:'redis:7-alpine',networks:['backend']}},volumes:{targets:{},legacy:{},codex:{},claude:{},hostkeys:{}},networks:{backend:{},research_egress:{},research_terminal:{internal:true}}}));
@@ -126,7 +129,7 @@ try {
  for(const inventory of [[],['burp_status','burp_history','burp_save_observation']]) {
    fixture.inventory.splice(0,fixture.inventory.length,...inventory);
    await page.getByRole('button',{name:'Reconnect',exact:true}).click();
-   await page.getByText('Burp MCP: incompatible',{exact:true}).waitFor({timeout:45000});
+   await page.getByText('Burp MCP: unavailable',{exact:true}).waitFor({timeout:45000});
    assert.equal((await official.listTools()).tools.length,0);
  }
  fixture.inventory.splice(0,fixture.inventory.length,...expectedInventory);
@@ -148,7 +151,7 @@ try {
  await mcp.close();mcp=null;
  // A global console works without any host and exposes actual Codex-discovered MCP tools.
  const globalProgram=await page.evaluate(async()=>{const r=await fetch('/api/programs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({companyName:'Global empty program',requiredUserAgent:'Research-Test/1',scopeRules:['*.example.test'],outOfScope:['admin.example.test'],rulesOfEngagement:'Passive only; no destructive tests.'})});if(!r.ok)throw new Error(await r.text());return r.json();});
- await page.goto(origin+'/targets/'+globalProgram.id);await page.getByRole('button',{name:'Codex Console',exact:true}).click();await page.getByRole('button',{name:'Launch Codex Console',exact:true}).click();await page.getByText('Terminal: connected',{exact:true}).waitFor({timeout:30000});
+ await page.goto(origin+'/targets/'+globalProgram.id);await page.getByRole('navigation',{name:'Target workflow'}).getByRole('button',{name:'Research',exact:true}).click();await page.getByRole('button',{name:'Target intelligence · all assets',exact:true}).click();await page.getByText('Terminal: connected',{exact:true}).waitFor({timeout:30000});
  const globalContext=await webScript(`import {PrismaClient} from '@prisma/client';const p=new PrismaClient();const t=await p.target.findFirstOrThrow({where:{programId:${JSON.stringify(globalProgram.id)},contextOnly:true}});console.log(JSON.stringify({id:t.id,hosts:await p.target.count({where:{programId:t.programId,contextOnly:false}})}));await p.$disconnect();`);assert.equal(globalContext.hosts,0);
  const globalCwd='/workspaces/research_'+globalContext.id;
  mcp=await connectMcp(globalContext.id,'bughunter-burp-mcp');assert.deepEqual((await mcp.listTools()).tools.map(t=>t.name),['burp_status','burp_history','burp_save_observation']);
@@ -161,14 +164,14 @@ try {
    const server=discovered.data.find(s=>s.name==='bughunter_burp');assert(server,'Codex app-server must discover Burp MCP');assert(JSON.stringify(server.tools).includes('burp_status'),JSON.stringify(discovered));
  }
  // Start through the target API, then inject a controlled worker discovery (no Internet Recon).
- await page.getByRole('button',{name:'RECON',exact:true}).click();await page.getByText('No scan runs yet. Start Recon from the authorized scope rules above.',{exact:true}).waitFor();
- assert(await page.getByRole('button',{name:'Lancer le RECON',exact:true}).isEnabled());
- const startedRecon=page.waitForResponse(r=>r.url().endsWith('/api/programs/'+globalProgram.id+'/recon')&&r.request().method()==='POST');await page.getByRole('button',{name:'Lancer le RECON',exact:true}).click();const queuedResponse=await startedRecon;assert([201,202].includes(queuedResponse.status()));const queued=await queuedResponse.json();
+ await page.getByRole('navigation',{name:'Target workflow'}).getByRole('button',{name:'Recon',exact:true}).click();
+ const wildcardRow=page.locator('tbody tr').filter({hasText:'*.example.test'});
+ const startedRecon=page.waitForResponse(r=>/\/assets\/[^/]+\/recon$/.test(r.url())&&r.request().method()==='POST');await wildcardRow.getByRole('button',{name:'Recon',exact:true}).click();const queuedResponse=await startedRecon;assert([201,202].includes(queuedResponse.status()));const queued=await queuedResponse.json();
  reconWorker=spawn('docker',['compose','-p',prefix,'-f',config,'exec','-T','-e','BH_DISPOSABLE_CONSOLE=1','-e','BH_TEST_RUN_ID='+queued.id,'web','node','--import','tsx','tests/research/holdProgramRecon.mts'],{stdio:['ignore','pipe','pipe']});let workerOutput='';reconWorker.stdout.on('data',chunk=>workerOutput+=chunk);reconWorker.stderr.on('data',()=>{});
  for(let i=0;!workerOutput.includes('CONTROLLED_RECON_RUNNING');i++){if(i===100)throw new Error('Controlled Recon did not start: '+workerOutput);await wait(100);}
  await webScript(`import {PrismaClient} from '@prisma/client';import {persistProgramDiscovery} from '/app/src/server/recon/program.ts';const p=new PrismaClient();await persistProgramDiscovery(${JSON.stringify(queued.id)},'api.example.test','CONTROLLED_FIXTURE');console.log('{}');await p.$disconnect();`);
- await page.goto(origin+'/scopes/'+globalProgram.id);await page.getByRole('link',{name:'Open host',exact:true}).waitFor();
- await page.goto(origin+'/targets/'+globalProgram.id);await page.getByRole('button',{name:'Codex Console',exact:true}).click();await page.getByRole('button',{name:'Launch Codex Console',exact:true}).click();await page.getByText('Terminal: connected',{exact:true}).waitFor();
+ await page.goto(origin+'/targets/'+globalProgram.id);await page.locator('tbody tr').filter({hasText:'*.example.test'}).getByRole('button',{name:'View',exact:true}).click();await page.getByText('Known hosts (latest bounded discovery inventory)',{exact:true}).click();await page.getByRole('button',{name:'Open focused Research',exact:true}).waitFor();
+ await page.goto(origin+'/targets/'+globalProgram.id);await page.getByRole('navigation',{name:'Target workflow'}).getByRole('button',{name:'Research',exact:true}).click();await page.getByRole('button',{name:'Target intelligence · all assets',exact:true}).click();await page.getByText('Terminal: connected',{exact:true}).waitFor();
  await page.getByLabel('Moteur IA',{exact:true}).selectOption('claude');await page.getByRole('button',{name:'Open Claude Code',exact:true}).click();await page.getByText('Claude: login required',{exact:true}).waitFor({timeout:30000});
  const globalClaudeConfig='/home/researcher/.claude/workspaces/'+globalContext.id;await dexec('test','-d',globalClaudeConfig);
  const inventory=JSON.parse(await dexec('cat',globalCwd+'/recon/hosts.json'));assert.equal(inventory.hosts[0].host,'api.example.test');
@@ -180,7 +183,7 @@ try {
  const countNativeThread=async()=>Number(await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','python3','-c',"import os,sqlite3,sys; c=sqlite3.connect('file:'+os.environ['CODEX_HOME']+'/state_5.sqlite?mode=ro',uri=True); print(c.execute('SELECT count(*) FROM threads WHERE id=?',(sys.argv[1],)).fetchone()[0])",nativeThread.thread.id));
  assert.equal(await countNativeThread(),1,'Native history fixture must exist before deletion');
  const childPid=await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','sh','-c',`cd ${globalCwd} && sleep 300 >/dev/null 2>&1 & echo $!`);
- await page.getByRole('button',{name:'Settings',exact:true}).click();page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Supprimer la target',exact:true}).click();
+ await page.getByRole('button',{name:'Settings',exact:true}).click();page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Delete Target permanently',exact:true}).click();
  try{await page.waitForURL(origin+'/targets?deleted=1',{timeout:40000});}catch(e){console.error('Deletion UI:',await page.locator('body').innerText());console.error(await compose('logs','--tail','20','research-console'));throw e;}
  assert.equal(await countNativeThread(),0,'Native Codex history must be permanently deleted');
  await assert.rejects(dexec('test','-e',globalClaudeConfig));

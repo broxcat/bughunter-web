@@ -26,6 +26,12 @@ export async function PATCH(req: Request, { params }: Params) {
   return prisma.$transaction(async tx => {
     const rows = await tx.$queryRaw<{id:string}[]>`SELECT id FROM "BountyProgram" WHERE id=${id} AND "ownerId"=${session.user.id} AND "deletingAt" IS NULL FOR UPDATE`;
     if (!rows.length) return Response.json({ error: 'Target unavailable' }, { status: 409 });
+    if (parsed.data.scopeRules) {
+      const removed = program.scopeRules.filter(rule => !parsed.data.scopeRules!.includes(rule));
+      const assets = await tx.scopeAsset.findMany({ where: { programId: id, normalizedValue: { in: removed }, active: true }, select: { id: true } });
+      if (await tx.scanRun.count({ where: { scopeAssetId: { in: assets.map(a => a.id) }, status: { in: ['QUEUED', 'RUNNING'] } } })) return Response.json({ error: 'Stop active Recon before removing its scope rules' }, { status: 409 });
+      await tx.scopeAsset.updateMany({ where: { id: { in: assets.map(a => a.id) } }, data: { active: false } });
+    }
     return NextResponse.json(await tx.bountyProgram.update({ where: { id }, data: parsed.data }));
   });
 }
