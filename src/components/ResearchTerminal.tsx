@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { providerName, engineStatusesSchema, type ResearchEngineStatus, type ResearchProvider } from '@/lib/research/provider';
 import { terminalHandlesKey } from '@/lib/research/terminalClipboard';
+import ResearchReconContext from './ResearchReconContext';
 import '@xterm/xterm/css/xterm.css';
 
 export default function ResearchTerminal({ targetId, company, host, requiredUserAgent, embedded = false }: { targetId: string; company: string; host: string; requiredUserAgent: string; embedded?: boolean }) {
@@ -77,6 +78,7 @@ export default function ResearchTerminal({ targetId, company, host, requiredUser
     <p className="shrink-0 px-3 py-1 text-xs" aria-live="polite">{providerName(selectedProvider)} · {providerState}</p>
     {selectedProvider === 'claude' && <p className="shrink-0 px-3 py-1 text-xs" title={providerState}>Claude: passive Research and existing Burp observations · login is separate for each target · /login · /model · Ctrl+C to interrupt · /exit to stop. Active security skills are unavailable.</p>}
     {error && <p role="alert" className="shrink-0 bg-red-950 px-3 py-2 text-sm">{error}</p>}
+    <ResearchReconContext targetId={targetId} provider={selectedProvider} connected={state === 'connected'} />
     <div ref={element} aria-label={`${providerName(selectedProvider)} console for ${host}`} className="min-h-0 flex-1 p-2" />
   </div>;
 }

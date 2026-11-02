@@ -13,6 +13,7 @@ import { openConsoleWorkspace } from '../validator/console-files.mjs';
 import { sessionCommand, providerStatus } from './providers.mjs';
 import { providerTmuxIdentity } from '../../../src/lib/research/provider.ts';
 import { reconnectWorkspaceBurp } from './burp-reconnect.mjs';
+import { stageReconContext } from './recon-context.mjs';
 const exec = promisify(execFile);
 export async function startTerminalService({ port = 7681, host = '0.0.0.0', origin = process.env.RESEARCH_TERMINAL_ORIGIN, publicKey } = {}) {
   publicKey ??= await readFile(process.env.RESEARCH_TERMINAL_PUBLIC_KEY_FILE ?? '/run/research-terminal/public.pem', 'utf8');
@@ -21,10 +22,21 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
   if (!['http:','https:'].includes(parsedOrigin.protocol) || parsedOrigin.username || parsedOrigin.password || parsedOrigin.pathname !== '/' || parsedOrigin.search || parsedOrigin.hash) throw new Error('Set the public Research terminal origin');
   origin = parsedOrigin.origin;
   const spent = new Map(), connections = new Set(), pending = new Map();
+  const reconDeliveries = new Map();
   let claudeCreation = Promise.resolve();
   const wss = new WebSocketServer({ noServer: true, maxPayload: 32768, perMessageDeflate: false, handleProtocols: protocols => protocols.has('bh-terminal.v1') ? 'bh-terminal.v1' : false });
   const server = createServer((req, res) => { void (async () => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/control/recon' && req.method === 'POST') {
+      try {
+        const staged = await stageReconContext(String(req.headers.authorization ?? '').replace(/^Bearer /, ''), publicKey, exec, reconDeliveries);
+        res.end(JSON.stringify(staged));
+      } catch (error) {
+        res.writeHead(error.deliveryUncertain ? 202 : 409);
+        res.end(error.deliveryUncertain ? '{"status":"UNKNOWN"}' : '{"error":"Recon context could not be staged"}');
+      }
+      return;
+    }
     if (req.url === '/control/stop' && req.method === 'POST') {
       try {
         const claims = verifyStopTicket(String(req.headers.authorization ?? '').replace(/^Bearer /, ''), publicKey);

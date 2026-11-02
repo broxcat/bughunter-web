@@ -617,6 +617,8 @@ model ResearchSession {
   hypothesesSyncedAt DateTime?
   hypothesesSourceSha256 String?
   hypotheses ResearchHypothesis[]
+  reconSnapshots ResearchReconSnapshot[]
+  reconDeliveries ResearchReconDelivery[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -720,4 +722,35 @@ model ResearchFindingPromotion {
 enum ResearchProvider {
   codex
   claude
+}
+
+// Derived, immutable evidence. Original ScanRun/HostDiscovery/ScanLog stay authoritative.
+model ResearchReconSnapshot {
+  id String @id @default(cuid())
+  sessionId String
+  sourceFingerprint String
+  contentSha256 String
+  summarySha256 String
+  context Json
+  summary Json
+  createdAt DateTime @default(now())
+  session ResearchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  deliveries ResearchReconDelivery[]
+
+  @@unique([sessionId, sourceFingerprint])
+  @@index([sessionId, createdAt])
+}
+
+// Delivery means a message was staged for the operator, never that an LLM consumed it.
+model ResearchReconDelivery {
+  id String @id @default(cuid())
+  sessionId String
+  snapshotId String
+  provider ResearchProvider
+  status String @default("PENDING")
+  createdAt DateTime @default(now())
+  session ResearchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  snapshot ResearchReconSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
 }
