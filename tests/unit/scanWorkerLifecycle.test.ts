@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ construct: vi.fn(), on: vi.fn(), pause: vi.fn(async () => {}), run: vi.fn(async () => {}), workerClose: vi.fn(async () => {}), start: vi.fn(), dispatcherClose: vi.fn(async () => {}), maintain: vi.fn(async () => {}), maintenanceClose: vi.fn(async () => {}), stop: vi.fn(), shutdown: vi.fn(async () => {}), redis: { options: { maxRetriesPerRequest: null }, disconnect: vi.fn() }, process: vi.fn(), interrupt: vi.fn() }));
 vi.mock("@/server/recon/summaries", () => ({ startReconSummaryWorker: () => ({close: mocks.maintenanceClose}) }));
+vi.mock("@/server/recon/toolchain",()=>({collectReconDoctor:async()=>({ready:true,fingerprint:"fixture-manifest"})}));
 vi.mock("bullmq", () => ({ Worker: class { constructor(...args: unknown[]) { mocks.construct(...args); } on = mocks.on; close = mocks.workerClose; pause = mocks.pause; run = mocks.run; } }));
 vi.mock("@/server/queue/connection", () => ({ redis: mocks.redis }));
 vi.mock("@/server/queue/processScan", () => ({ createScanProcessor: () => ({ process: mocks.process, stopAccepting: mocks.stop, shutdown: mocks.shutdown, interrupt: mocks.interrupt }) }));

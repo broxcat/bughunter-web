@@ -55,9 +55,10 @@ function assetBody(detail:Detail) {
   text+='## Changes Since Previous Recon\n\nPrevious successful scan: '+(change?.previousScanId??'None retained.')+'\nNot observed in this run does not prove disappearance; compare stage coverage.\n\n';
   for(const name of ['new','removed','changed'] as const)text+=data(name[0].toUpperCase()+name.slice(1),(change?.[name]??[]).slice(0,10));
   text+=data('Research Priorities',detail.priorities.slice(0,8));
+  const graph=(r?.changeSet as {assetGraph?:{edges?:unknown[]}}|null)?.assetGraph;if(graph?.edges)text+=data('Observed Asset Relationships',graph.edges.slice(0,20));
   text+='## Recon Coverage\n\n'+table(['Stage','Status','Tool','Notes'],r?.reconSteps.map(s=>[s.name,s.state,plan?.stages.find(p=>p.name===s.name)?.tools.join(', ')??'Historical',s.reason])??[])+'\n';
   text+=data('Tool Versions',r?.toolVersions?Object.entries(r.toolVersions).map(([tool,value])=>({tool,...(value as object)})):[]);
-  text+='## Limitations\n\n'+(detail.truncated?'- Included artifact limit reached; inspect the paginated artifact API.\n':'')+(r?.reconSteps.filter(s=>['PARTIAL','BLOCKED','FAILED','SKIPPED'].includes(s.state)).map(s=>`- ${markdownText(s.name)}: ${markdownText(s.reason??s.state)}`).join('\n')||'- No additional stage limitation recorded; missing observations remain unknown.')+'\n- Discovered URLs are not verified accessible. Technology signatures do not confirm versions.\n- No missing result demonstrates absence of vulnerabilities.\n\n';
+  text+='## Limitations\n\n'+(detail.truncated?'- Included artifact limit reached; inspect the paginated artifact API.\n':'')+(r?.reconSteps.filter(s=>['PARTIAL','BLOCKED','FAILED','SKIPPED','SKIPPED_UNSUPPORTED','CANCELLED'].includes(s.state)).map(s=>`- ${markdownText(s.name)}: ${markdownText(s.reason??s.state)}`).join('\n')||'- No additional stage limitation recorded; missing observations remain unknown.')+'\n- Discovered URLs are not verified accessible. Technology signatures do not confirm versions.\n- No missing result demonstrates absence of vulnerabilities.\n\n';
   text+='## Provenance\n\nTarget ID: '+a.programId+'\nAsset ID: '+a.id+'\nRecon run: '+(r?.id??'None')+'\nArtifact IDs: '+all.slice(0,30).map(i=>i.id).join(', ')+'\n\n';
   return text;
 }

@@ -34,7 +34,7 @@ export function normalizeArtifact(kind: ArtifactKind, raw: Record<string, unknow
       const url = canonicalReconUrl(raw.url); host = new URL(url).hostname; value.url = url; value.category = classifyReconUrl(url);
       value.safeForActiveReview = isSafeReadUrl(raw.url) && raw.safeForActiveReview !== false;
       if (kind === 'parameter' && (typeof value.name !== 'string' || !/^[a-z_][a-z0-9_.[\]-]{0,63}$/i.test(value.name))) return null;
-      canonicalKey = `${url}|${value.method ?? '?'}|${kind === 'parameter' ? value.name : kind === 'observation' ? [value.type,value.templateId,value.requestRef,value.responseRef].filter(v=>v!==undefined).join('|') : ''}`;
+      canonicalKey = `${url}|${value.method ?? (value.declaredMethod ? 'declared:'+value.declaredMethod : '?')}|${kind === 'parameter' ? value.name : kind === 'observation' ? [value.type,value.templateId,value.requestRef,value.responseRef].filter(v=>v!==undefined).join('|') : ''}`;
       inScope = assetAllowsUrl(boundary, raw.url);
     } else {
       host = normalizeFqdn(String(raw.hostname ?? raw.host ?? '')); if (host.startsWith('*.')) return null; value.hostname = host;

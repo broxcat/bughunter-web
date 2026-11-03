@@ -284,6 +284,7 @@ model ScanRun {
   reconOrder Int @default(0)
   reconPlan Json?
   toolVersions Json?
+  toolManifest Json?
   artifactVersion Int @default(0)
   artifacts ReconArtifact[]
   changeSet Json?
@@ -811,6 +812,10 @@ model ScopeAsset {
   @@index([programId, active])
 }
 enum ReconPipelineState {
+  COMPLETED_WITH_FALLBACK
+  SKIPPED_NOT_APPLICABLE
+  SKIPPED_UNSUPPORTED
+  CANCELLED
   PARTIAL
   BLOCKED
   PENDING
@@ -820,6 +825,8 @@ enum ReconPipelineState {
   FAILED
 }
 model ReconPipelineStep {
+  capability String?
+  details Json?
   id String @id @default(cuid())
   scanRunId String
   name String

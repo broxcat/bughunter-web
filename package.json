@@ -24,7 +24,9 @@
     "test:research:final": "node --import tsx tests/e2e/researchFinal.mjs",
     "test:research:mcp-rebuild": "node tests/research/mcpRebuild.mjs",
     "test:research:recon": "tsx tests/research/reconDelivery.mts",
-    "test:research:console": "node --import tsx tests/research/runConsole.mjs"
+    "test:research:console": "node --import tsx tests/research/runConsole.mjs",
+    "recon:doctor": "tsx scripts/recon/doctor.mts",
+    "test:recon:toolchain": "node tests/recon/runToolchain.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",

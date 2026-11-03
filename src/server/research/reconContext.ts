@@ -1,3 +1,4 @@
+import { deriveAssetGraph } from '@/lib/reconGraph';
 import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { persistedCorpusSchema } from '@/server/recon/corpus';
@@ -255,6 +256,9 @@ export function buildReconContext(input: {
   warnings.add('Discovered URLs, route names, port labels and technology signatures are observations, not verified reachability, versions or vulnerabilities. Missing observations are not negative security evidence.');
   if (context.observations.some(o => o.historical) || context.endpoints.some(o => o.historical)) warnings.add('Historical observations are retained; absence from a later scan may reflect coverage differences.');
   for (const name of ['assets', 'endpoints', 'technologies', 'observations', 'sources', 'suggestions'] as const) context.counts[name] = context[name].length;
+  const graph=deriveAssetGraph(runs.flatMap(r=>r.artifacts??[]),{nodes:100,edges:150});
+  while(Buffer.byteLength(reconJson(graph))>131072){if(graph.edges.length)graph.edges.pop();else graph.nodes.pop();graph.truncated=true;}
+  if(graph.nodes.length){context.assetGraph={...graph,nodes:graph.nodes.map(n=>({...n,inScope:['HOSTNAME','ENDPOINT'].includes(n.type)&&input.inScope(n.value)}))};}
   context.warnings = [...warnings].sort();
   while (context.scopeAssets && Buffer.byteLength(reconJson(context.scopeAssets)) > RECON_DETAIL_BYTES / 3) { context.scopeAssets.splice(-Math.max(1, Math.ceil(context.scopeAssets.length / 10))); context.truncated = true; }
   // Explicit truncation, stable ordering and retained-source closure keep the artifact bounded.
@@ -269,6 +273,7 @@ export function buildReconContext(input: {
 }
 export function compactReconContext(context: ResearchReconContext): ResearchReconContext {
   const compact = structuredClone(context);
+  if(compact.assetGraph){delete compact.assetGraph;compact.truncated=true;}
   // Prioritized endpoints first; complete bounded evidence remains in the immutable detail file.
   const rank = new Map(compact.suggestions.flatMap((s, i) => s.observationIds.map(id => [id, i] as const)));
   compact.endpoints.sort((a, b) => (rank.get(a.id) ?? 100) - (rank.get(b.id) ?? 100) || a.id.localeCompare(b.id));

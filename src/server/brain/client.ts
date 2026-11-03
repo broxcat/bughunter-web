@@ -38,7 +38,8 @@ export interface ChatOptions {
    * false to make a reasoning model answer directly instead of spending the
    * token budget on hidden thinking. Omitted = provider default (unchanged).
    */
-  think?: boolean;
+  think?: boolean | string;
+  contextWindow?: number;
   format?: Record<string, unknown>;
   maxResponseBytes?: number;
 }
@@ -285,7 +286,7 @@ export class BrainClient {
         options: {
           num_predict: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
           temperature: opts.temperature ?? DEFAULT_TEMPERATURE,
-          num_ctx: MAX_CTX,
+          num_ctx: opts.contextWindow ?? MAX_CTX,
         },
       },
       opts,

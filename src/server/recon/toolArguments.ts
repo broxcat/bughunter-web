@@ -2,8 +2,9 @@ import { join } from 'node:path';
 import { assetAllowsUrl } from '@/lib/scopeAssets';
 import { isSafeReadUrl } from '@/lib/observationSafety';
 import type { ReconPlan } from '@/lib/reconPlanner';
+import { gobusterCalibrationPolicy, type UnknownPathBaseline } from './calibration';
 import { nucleiReconTemplates, NUCLEI_RECON_DENY } from './nucleiPolicy';
-export function reconToolArguments(tool:string,args:string[],ctx:{reconPlan:ReconPlan;host:string;requiredUserAgent:string;reconTempDir?:string;ffufWordlist?:string;gobusterWordlist?:string;gobusterResolver?:string;reconRelayOrigin?:string;reconRelayTarget?:string}) {
+export function reconToolArguments(tool:string,args:string[],ctx:{reconPlan:ReconPlan;host:string;requiredUserAgent:string;reconTempDir?:string;ffufWordlist?:string;gobusterWordlist?:string;gobusterResolver?:string;reconRelayOrigin?:string;reconRelayTarget?:string;contentBaseline?:UnknownPathBaseline}) {
   const p=ctx.reconPlan,b=p.limits,ua=['-H',`User-Agent: ${ctx.requiredUserAgent}`];
   if(['subfinder','amass','assetfinder'].includes(tool)) {
     const seed=p.boundary.format==='WILDCARD_DOMAIN'?p.boundary.normalizedValue.slice(2):undefined;
@@ -31,7 +32,10 @@ export function reconToolArguments(tool:string,args:string[],ctx:{reconPlan:Reco
   if(tool==='httpx')return ['-u',url,'-silent','-json','-sc','-title','-ct','-location','-td','-tls-grab','-ob','-nfs','-duc','-threads','1','-rl',String(b.rps),'-timeout','8','-retries','0',...ua];
   if(tool==='gobuster') {
     if(args[0]!=='dir'||!p.gobuster?.dir||!ctx.gobusterWordlist||args[args.indexOf('-w')+1]!==ctx.gobusterWordlist)throw new Error('Unapproved Gobuster mode/profile');
-    return ['dir','-u',url,'--wordlist',ctx.gobusterWordlist,'--threads','1','--delay',`${Math.ceil(1000/b.rps)}ms`,'--timeout','8s','--useragent',ctx.requiredUserAgent,'--expanded','--quiet','--no-progress','--no-color'];
+    const calibration=ctx.contentBaseline?gobusterCalibrationPolicy(ctx.contentBaseline):undefined;
+    if(calibration&&!calibration.enabled)throw new Error('NON_DISCRIMINATING_WILDCARD_RESPONSE: Gobuster skipped after target calibration');
+    const filters=calibration?.excludeLengths?.length?['--exclude-length',calibration.excludeLengths.join(',')]:[];
+    return ['dir','-u',url,'--wordlist',ctx.gobusterWordlist,'--threads','1','--delay',`${Math.ceil(1000/b.rps)}ms`,'--timeout','8s','--useragent',ctx.requiredUserAgent,'--expanded','--quiet','--no-progress','--no-color',...filters];
   }
   if(tool==='ffuf') {
     if(!ctx.ffufWordlist||args[args.indexOf('-w')+1]!==ctx.ffufWordlist||!url.endsWith('/FUZZ'))throw new Error('Unapproved ffuf profile');

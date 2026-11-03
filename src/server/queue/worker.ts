@@ -9,6 +9,7 @@ import { settlesWithin } from "@/server/scanControl";
 import { logger } from "@/lib/logger";
 import { RECON_CAPACITY } from '@/lib/reconPlanner';
 
+import { collectReconDoctor } from '../recon/toolchain';
 import { startReconSummaryWorker } from '../recon/summaries';
 let summaries:ReturnType<typeof startReconSummaryWorker>|undefined;
 const workerId = workerIdentity();
@@ -22,6 +23,9 @@ let dispatcher: ReturnType<typeof startScanDispatcher> | undefined;
 let maintenance: ReturnType<typeof startExecutionMaintenance> | undefined;
 let closing = false;
 export const ready = (async () => {
+  const doctor=await collectReconDoctor();
+  if(!doctor.ready)throw new Error('Recon worker execution prerequisites are not ready');
+  logger.info({workerId,manifest:doctor.fingerprint,readiness:doctor.ready},'Recon Doctor validated worker execution infrastructure');
   await maintainScanExecutions(); // Reconcile durable state before accepting work.
   if (closing) return;
   summaries=startReconSummaryWorker();

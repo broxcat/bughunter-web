@@ -15,7 +15,7 @@ export async function createReconRelay(execution:TargetExecution,targetUrl:strin
   const mapUrl=(raw:string)=>{const u=new URL(raw,origin);if(u.origin!==origin)throw new Error('Foreign relay origin');const result=new URL(u.pathname+u.search,target.origin).toString();if(!assetAllowsUrl(execution.scopeAsset!,result)||!isSafeReadUrl(result))throw new Error('Relay scope denied');return result;};
   const request=async(url:string)=>withTargetExecution(execution,async()=>{
     if(!assetAllowsUrl(execution.scopeAsset!,url)||!isSafeReadUrl(url))throw new Error('Scope denied');
-    signal.throwIfAborted();if(budget.remaining--<=0){protection.blocked=true;protection.reason='Asset request budget exhausted';throw new Error('PARTIAL: Asset request budget exhausted');}
+    signal.throwIfAborted();if(budget.remaining--<=0){protection.blocked=true;protection.reason='Asset request budget exhausted';protection.reasonCode='RESOURCE_LIMIT';throw new Error('PARTIAL: Asset request budget exhausted');}
     await protection.beforeRequest(signal);const page=await probe(url,{timeoutMs:8000,signal});protection.observe(page.error?undefined:page.status,page.error);await onResponse(page);return page;
   });
   const server=createServer((req,res)=>{const work=async()=>{

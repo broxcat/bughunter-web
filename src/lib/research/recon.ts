@@ -6,6 +6,7 @@ export type ReconEvidence = {
   confidence: 'OBSERVED' | 'INFERRED'; freshness: ReconFreshness; historical: boolean; inScope: boolean;
 };
 export type ResearchReconContext = {
+  assetGraph?: import('../reconGraph').ReconAssetGraph;
   scopeAssets?: Array<{ id: string; programId: string; originalValue: string; normalizedValue: string; format: string; formatSource?:string; type: string; assetValue: string; active: boolean }>;
   schemaVersion: 1; programId: string; scopeId: string; targetId: string; generatedAt: string;
   untrustedData: true; authorizationGranted: false; activeSuggestionsAllowed: boolean;

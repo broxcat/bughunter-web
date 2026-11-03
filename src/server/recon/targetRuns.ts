@@ -20,6 +20,7 @@ export async function startTargetRecon(userId:string,programId:string) {
     const policy=RATE_LIMIT_POLICIES.scanUser;
     if(await tx.targetReconRun.count({where:{program:{ownerId:userId},createdAt:{gt:new Date(Date.now()-policy.windowSec*1000)}}})>=policy.limit)throw new ResearchError('Target Recon quota reached; retry later',429);
     if(await tx.scanRun.count({where:{scopeAssetId:{in:assets.map(a=>a.id)},status:{in:['QUEUED','RUNNING']}}}))throw new ResearchError('A previous asset Recon is still running; cancel or finish it first',409);
+    const previous=new Set((await tx.scanRun.groupBy({by:['scopeAssetId'],where:{scopeAssetId:{in:assets.map(a=>a.id)},type:'RECON',status:'COMPLETED'},_count:true})).map(r=>r.scopeAssetId));
     const parent=await tx.targetReconRun.create({data:{programId,preflight:{version:2,database:'AVAILABLE',queue:'PENDING',storage:'DATABASE',assetIds:assets.map(a=>a.id)}}});
     for(const [reconOrder,asset] of assets.entries()) {
       let target=asset.executionTarget;
@@ -28,7 +29,7 @@ export async function startTargetRecon(userId:string,programId:string) {
         target=await tx.target.create({data:{userId,programId,scopeId:scope.id,scopeAssetId:asset.id,host,scheme:asset.format==='URL'?new URL(asset.normalizedValue).protocol.slice(0,-1):'https',active:false},include:{scope:true}});
       }
       const host=asset.format==='URL'?new URL(asset.normalizedValue).hostname:asset.normalizedValue;
-      const plan=buildReconPlan(asset,{active:target.scope.status==='APPROVED'&&!(asset.format==='WILDCARD_DOMAIN'?program.outOfScope.some(rule=>matchesHost(host,rule)):isExcluded(host,program.outOfScope)),exclusions:program.outOfScope});
+      const plan=buildReconPlan(asset,{active:target.scope.status==='APPROVED'&&!(asset.format==='WILDCARD_DOMAIN'?program.outOfScope.some(rule=>matchesHost(host,rule)):isExcluded(host,program.outOfScope)),exclusions:program.outOfScope},{newSurface:!previous.has(asset.id)});
       const scan=await tx.scanRun.create({data:{targetId:target.id,scopeAssetId:asset.id,targetReconRunId:parent.id,reconOrder,scopeAssetSnapshot:assetSnapshot(asset),reconPlan:plan as unknown as Prisma.InputJsonValue,type:'RECON',reconSteps:{create:plan.stages.map((s,position)=>({name:s.name,position,reason:s.reason}))}}});
       await tx.scanJobOutbox.create({data:{scanRunId:scan.id}});
     }

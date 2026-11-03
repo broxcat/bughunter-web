@@ -15,6 +15,7 @@ export interface TargetRequestGuard {
 }
 export interface TargetExecution {
   reconPlan?: ReconPlan;
+  contentBaseline?: import('./recon/calibration').UnknownPathBaseline;
   reconTempDir?: string;
   ffufWordlist?: string;
   gobusterWordlist?: string;

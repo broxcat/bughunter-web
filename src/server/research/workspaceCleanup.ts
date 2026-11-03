@@ -26,6 +26,8 @@ export async function removeWorkspace(root: string, workspaceId: string) {
       if (!parent) continue;
       if (!parent.isDirectory() || parent.isSymbolicLink()) throw new ResearchError('Unsafe workspace export', 409);
     }
-    await rm(entry, { recursive: true, force: true });
+    // Concurrent idempotent cleanup may create the revocation marker while
+    // another request removes the directory. Retry transient filesystem races.
+    await rm(entry, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 }

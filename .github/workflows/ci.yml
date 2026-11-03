@@ -83,3 +83,10 @@ jobs:
         run: |
           docker exec ${{ job.services.postgres.id }} createdb -U postgres bughunter_upgrade
           npm run test:migration
+
+  recon-native-toolchain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build pinned scanner toolchain and run offline native acceptance
+        run: docker build --target tools -t bughunter-recon-ci .

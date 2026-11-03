@@ -11,6 +11,7 @@ export function researchPriorities(artifacts:ReconArtifactData[],asset:{id:strin
   return artifacts.filter(a=>a.scopeState==='IN_SCOPE'&&(a.kind==='endpoint'||a.kind==='technology'||a.kind==='port'||a.kind==='auth-surface'||a.kind==='api-surface')).flatMap(a=>{
     if(a.kind==='port'&&a.value.state!=='open')return[];
     const url=typeof a.value.url==='string'?a.value.url:undefined,category=url?classifyReconUrl(url):a.kind;
+    if(a.value.baselineEquivalent===true) return[];
     if(url&&(a.value.safeForActiveReview===false||!isSafeReadUrl(url)||category==='static'))return[];
     const facts:string[]=[];let score=0;
     if(category==='auth'||a.kind==='auth-surface'){facts.push('Authentication surface observed; access controls remain unverified.');score+=30;}

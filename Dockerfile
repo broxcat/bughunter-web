@@ -21,6 +21,27 @@ ENV GOTOOLCHAIN=local GOMAXPROCS=4 GOFLAGS=-p=4
 RUN go install github.com/owasp-amass/amass/v4/...@v4.2.0 \
     && go install github.com/tomnomnom/assetfinder@v0.1.1
 
+# Nuclei 3.11.1 embeds Sonic 1.15.0: its upstream Go build tags support
+# through Go 1.26. Keep the scanner release/dependencies unchanged and isolate
+# the compiler, rather than patching a transitive JSON/ABI library.
+FROM node:22-bookworm AS nuclei-tools
+ENV GOTOOLCHAIN=local GOMAXPROCS=4 GOFLAGS=-p=4 GOPATH=/root/go
+ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git build-essential wget \
+    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) goarch=amd64; go_sha=ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5 ;; \
+      arm64) goarch=arm64; go_sha=3f4227ce7b206a513e794f1393adb473a07b46e94d18bd15d1c684bbb7319797 ;; \
+      *) echo "unsupported Nuclei architecture" >&2; exit 1 ;; \
+    esac; \
+    wget -q "https://go.dev/dl/go1.26.10.linux-${goarch}.tar.gz" -O /tmp/nuclei-go.tgz; \
+    echo "${go_sha}  /tmp/nuclei-go.tgz" | sha256sum -c -; \
+    tar -C /usr/local -xzf /tmp/nuclei-go.tgz; rm /tmp/nuclei-go.tgz; \
+    go version; \
+    go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.11.1; \
+    go version -m /root/go/bin/nuclei
+
 FROM node:22-bookworm AS tools
 
 ENV GO_VERSION=1.27.3
@@ -56,7 +77,6 @@ RUN set -eux; \
 RUN set -eux; \
     go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.17.0; \
     go install github.com/projectdiscovery/httpx/cmd/httpx@v1.12.0; \
-    go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.11.1; \
     go install github.com/projectdiscovery/katana/cmd/katana@v1.8.0; \
     go install github.com/projectdiscovery/dnsx/cmd/dnsx@v1.3.1; \
     go install github.com/ffuf/ffuf/v2@v2.1.0; \
@@ -72,6 +92,11 @@ RUN git clone --depth 1 --branch v10.5.1 https://github.com/projectdiscovery/nuc
     && test "$(git -C /root/nuclei-templates rev-parse HEAD)" = 79fb682760ab3d5b0e22afbb44709353cbebf023 \
     && mkdir -p /root/.config/nuclei
 COPY --from=passive-tools /go/bin/amass /go/bin/assetfinder /root/go/bin/
+COPY --from=nuclei-tools /root/go/bin/nuclei /root/go/bin/nuclei
+# Network-free functional proof, including all four permitted Recon templates.
+COPY scripts/recon/toolchain-smoke.mjs /opt/bughunter/toolchain-smoke.mjs
+COPY src/server/recon/templates/ /opt/bughunter/recon-templates/
+RUN --network=none RECON_SMOKE_BIN=/root/go/bin RECON_SMOKE_TEMPLATES=/opt/bughunter/recon-templates node /opt/bughunter/toolchain-smoke.mjs
 
 # ---------------------------------------------------------------------------
 # Stage 2: node dependencies (full install — devDeps included; worker uses tsx)
@@ -165,6 +190,9 @@ COPY --from=deps /ms-playwright /ms-playwright
 # The built application: node_modules (incl. generated Prisma client), .next,
 # src (the tsx worker runs TS source directly), prisma, and config files.
 COPY --from=builder /app /app
+# Audit the actual runtime libraries, architecture, resources and writable tmp.
+# This manifest is an image artifact; each run also captures a fresh doctor report.
+RUN --network=none npm run recon:doctor -- --strict --output /app/recon-tool-manifest.json
 
 EXPOSE 3000
 

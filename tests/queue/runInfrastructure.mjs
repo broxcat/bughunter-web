@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 const exec = promisify(execFile);
 const prefix = `bughunter-queue-test-${randomUUID().slice(0, 8)}`;
 const containers = [];
-const docker = async (...args) => (await exec("docker", args, { timeout: 30_000 })).stdout.trim();
+const docker = async (...args) => (await exec("docker", args, { timeout: args[0] === "run" ? 90_000 : 30_000 })).stdout.trim();
 async function unusedPort() {
   const server = createServer();
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -37,8 +37,8 @@ try {
     [executionRedis, ["-p", `127.0.0.1:${executionRedisPort}:6379`, "redis:7-alpine"]],
     [redis, ["-p", `127.0.0.1:${fixedRedisPort}:6379`, "redis:7-alpine", "redis-server", "--appendonly", "yes", "--appendfsync", "always"]],
   ]) {
+    containers.push(name); // Also clean a container created before a slow start times out.
     await docker("run", "-d", "--name", name, "--label", "bughunter.queue-test=disposable", ...args);
-    containers.push(name);
   }
   await Promise.all([ready(pg, ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]), ready(redis, ["redis-cli", "ping"]), ready(executionRedis, ["redis-cli", "ping"]), ready(abuseRedis, ["redis-cli", "ping"])]);
   const pgPort = (await docker("port", pg, "5432/tcp")).split(":").at(-1);
