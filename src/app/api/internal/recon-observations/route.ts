@@ -1,0 +1,3 @@
+import { verifyReconWorkerMac } from '@/lib/research/reconCollection';
+import { collectOwnedRunBurp } from '@/server/recon/burpCollection';
+export async function POST(req:Request){const run=req.headers.get('x-bughunter-run')??'',time=req.headers.get('x-bughunter-time')??'',mac=req.headers.get('x-bughunter-mac')??'';if(!process.env.AUTH_SECRET||!verifyReconWorkerMac(run,time,mac,process.env.AUTH_SECRET))return Response.json({error:'Unauthorized'},{status:401});try{return Response.json(await collectOwnedRunBurp(run),{headers:{'Cache-Control':'no-store'}});}catch{return Response.json({status:'UNAVAILABLE',observations:[]});}}

@@ -6,11 +6,14 @@ import { normalizeFqdn } from '@/lib/bountyProgram';
 import type { ReconEvidence, ResearchReconContext } from '@/lib/research/recon';
 import { assetAllowsHost, assetAllowsUrl, assetValueRank } from '@/lib/scopeAssets';
 import type { AssetEvidence } from '@/server/recon/assetEvidence';
+import type { ReconArtifactData } from '@/lib/reconArtifacts';
 
 export const RECON_DETAIL_BYTES = 1024 * 1024;
 export const RECON_SUMMARY_BYTES = 24 * 1024;
 export const RECON_INPUT_LIMITS = { scans: 60, discoveries: 500, logs: 1000 } as const;
 export type ReconRun = {
+  artifacts?: ReconArtifactData[];
+  artifactInputTruncated?: boolean;
   partialCoverage?: boolean;
   historicalUrls?: string[];
   corpusReference?: string; httpObservations?: AssetEvidence['hosts'][number]['http']; dnsAddresses?: string[]; portObservations?: AssetEvidence['hosts'][number]['ports']; tlsObservation?: AssetEvidence['hosts'][number]['tls'];
@@ -63,14 +66,15 @@ export function buildReconContext(input: {
   const latestTime = new Map<string, string>();
   const previousCompleted = new Map<string, string>();
   const endpointRuns = new Map<string, Set<string>>();
-  for (const run of runs) if (run.status === 'COMPLETED' && persistedCorpusSchema.safeParse(run.reconCorpus).success) {
+  for (const run of runs) if (run.status === 'COMPLETED' && (run.artifacts || persistedCorpusSchema.safeParse(run.reconCorpus).success)) {
     if (latest.has(run.targetId) && latest.get(run.targetId) !== run.id) previousCompleted.set(run.targetId, latest.get(run.targetId)!);
     latest.set(run.targetId, run.id);
-    const corpus = persistedCorpusSchema.parse(run.reconCorpus);
-    latestTime.set(run.targetId, iso(new Date(corpus.capturedAt)));
+    const capturedAt = run.artifacts ? run.finishedAt ?? run.createdAt : new Date(persistedCorpusSchema.parse(run.reconCorpus).capturedAt);
+    latestTime.set(run.targetId, iso(capturedAt));
   }
   const evidenceTargets = new Map<string, Set<string>>();
   for (const run of runs) {
+    if (run.artifactInputTruncated) { warnings.add(`Scan ${run.id}: artifact input limit reached; inspect Scope details for the complete inventory.`); context.truncated = true; }
     if (run.partialCoverage) warnings.add(`Scan ${run.id}: active host enrichment was bounded; unprobed discoveries remain observations only.`);
     if (run.status !== 'COMPLETED' || run.outcome !== 'SUCCESS') warnings.add(`Scan ${run.id}: ${run.status}/${run.outcome ?? 'UNKNOWN'}; coverage is incomplete or unknown.`);
     if (run._count && (run._count.logs > run.logs.length || run._count.discoveries > run.discoveries.length)) {
@@ -120,6 +124,25 @@ export function buildReconContext(input: {
     for (const d of run.discoveries) {
       const tool = ['SUBFINDER', 'CERTIFICATE_TRANSPARENCY', 'SCOPE_RULE', 'GAU'].includes(d.source) ? d.source.toLowerCase() : 'discovery';
       asset(d.host, tool, `HostDiscovery:${d.id}`, d.createdAt);
+    }
+    if (run.artifacts) {
+      for (const a of run.artifacts) for (const s of a.sources) {
+        const v=a.value,tool=s.tool,ref=`ReconArtifact:${a.id};${s.sourceRef}`,at=new Date(s.observedAt),url=typeof v.url==='string'?v.url:undefined,host=typeof v.hostname==='string'?v.hostname:run.target.host;
+        if(a.kind==='hostname')asset(host,tool,ref,at,a.verification==='OBSERVED'?'PROBED':'DISCOVERED');
+        else if(a.kind==='endpoint'||a.kind==='url'||a.kind==='parameter'){
+          if(!url)continue;const method=typeof v.method==='string'&&/^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/.test(v.method)?v.method:undefined;
+          const e=endpoint(url,tool,ref,at,method,a.kind==='parameter'&&typeof v.name==='string'?[v.name]:[],undefined,a.verification==='OBSERVED'?'PROBED':'DISCOVERED');
+          if(e&&typeof v.statusCode==='number')e.statusCode=v.statusCode;if(e&&typeof v.contentType==='string')e.contentType=v.contentType;
+          if(e&&v.safeForActiveReview===false)e.safeForActiveReview=false;
+        }else if(a.kind==='technology'&&typeof v.name==='string'&&/^[a-z0-9][a-z0-9 .+:/_-]{0,79}$/i.test(v.name))merge(maps.technologies,`${host}:${v.name.toLowerCase()}`,{name:v.name,asset:host},tool,ref,at,host,'INFERRED');
+        else{
+          const type=a.kind==='observation'&&typeof v.type==='string'?v.type:a.kind;
+          const description=type==='nuclei-recon'?`Read-only Recon template ${String(v.templateId)} matched; this is not a confirmed vulnerability.`:type==='burp-history'?'Existing Burp history metadata, not a live verification. Collection time does not establish the original request date.':a.kind==='auth-surface'?'Authentication surface observed; access-control behavior requires verification.':a.kind==='port'||a.kind==='service'?`TCP port ${String(v.port)} observed ${String(v.state??'service label')}; version and vulnerability unconfirmed.`:a.kind==='api-surface'?'API surface signal observed; behavior and authorization require verification.':`Structured ${type} observation; review the original artifact.`;
+          merge(maps.observations,`${a.kind}:${a.canonicalKey}`,{type,description,asset:url??host,facts:v},tool,ref,at,url??host,a.verification==='OBSERVED'?'OBSERVED':'INFERRED');
+          if(url&&tool==='burp'){const e=endpoint(url,tool,ref,at,typeof v.method==='string'?v.method:undefined);if(e&&typeof v.statusCode==='number')e.statusCode=v.statusCode;}
+        }
+      }
+      continue; // Structured runs never reparse scanner logs or legacy corpus.
     }
     const parsed = persistedCorpusSchema.safeParse(run.reconCorpus);
     if (parsed.success) {
@@ -189,6 +212,7 @@ export function buildReconContext(input: {
         const newest = latest.get(targetId); return Boolean(newest && item.lastSeenAt < latestTime.get(targetId)! && !item.sources.some(s => s.startsWith(`${newest}/`)));
       });
       if (item.sources.length && item.sources.every(source => source.endsWith('/gau'))) item.historical = true;
+      if (item.sources.length && item.sources.every(source => source.endsWith('/burp'))) item.historical = true;
     }
   }
   context.sources.sort((a, b) => a.id.localeCompare(b.id));

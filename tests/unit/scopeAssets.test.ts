@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { detectScopeAsset, assetAllowsHost, assetAllowsUrl, assetReconStatus, assetValueRank } from '@/lib/scopeAssets';
-import { assetReconPlan } from '@/lib/reconPipeline';
+import { buildReconPlan } from '@/lib/reconPlanner';
 import { consoleBundle } from '@/server/research/consoleWorkspace';
 import { consolePolicySchema } from '@/lib/research/consolePolicy';
 import { researchTarget } from '../fixtures/research';
@@ -52,11 +52,11 @@ describe('one asset authorization boundary', () => {
     expect(assetReconStatus({ status: 'RUNNING', outcome: null, finishedAt: null }, now)).toBe('RUNNING');
     expect(assetValueRank('CRITICAL')).toBeLessThan(assetValueRank('HIGH'));
   });
-  it('adapts collection by actual format and editable type without broadening scope', () => {
-    expect(assetReconPlan({ format: 'WILDCARD_DOMAIN', type: 'WILDCARD' })).toMatchObject({ wildcard: true, maxHosts: 8 });
-    expect(assetReconPlan({ format: 'URL', type: 'API' })).toMatchObject({ api: true, guardedHttpOnly: true, documentation: expect.arrayContaining(['openapi.json', 'graphql']) });
-    expect(assetReconPlan({ format: 'DOMAIN', type: 'WILDCARD' }).wildcard).toBe(false);
-    expect(assetReconPlan({ format: 'DOMAIN', type: 'OTHER' }).documentation).toEqual([]);
+  it('uses the central planner for exact and wildcard authorization', () => {
+    const plan=(value:string,type:string)=>buildReconPlan({id:'asset',...detectScopeAsset(value),active:true,type,assetValue:'MEDIUM'},{active:true,exclusions:[]});
+    expect(plan('*.example.test','WILDCARD').limits.maxHosts).toBe(12);
+    expect(plan('https://app.example.test/api/','API')).toMatchObject({ffufProfile:'API_STANDARD',limits:{ports:[]}});
+    expect(plan('example.test','WILDCARD').stages.find(s=>s.name==='Passive discovery')?.enabled).toBe(false);
   });
 });
 describe('asset policy and existing Burp MCP', () => {

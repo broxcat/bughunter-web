@@ -87,9 +87,9 @@ describe("worker execution outcome persistence", () => {
   });
   it("revoked scope prevents scan work after winning the execution claim", async () => {
     run.target = { ...target, scope: { status: "REVOKED" } };
-    await expect(processor.process(job("RECON"))).rejects.toThrow("APPROVED");
-    expect(run).toMatchObject({ status: "FAILED", outcome: "FAILED" }); expect(mocks.recon).not.toHaveBeenCalled();
-    expect(mocks.execution).toHaveBeenCalledWith("target", "RECON");
+    await processor.process(job("RECON"));
+    expect(run).toMatchObject({ status: "CANCELLED", outcome: null }); expect(mocks.recon).not.toHaveBeenCalled();
+    expect(mocks.execution).not.toHaveBeenCalled();
   });
   it("removed target execution cannot start network work", async () => {
     mocks.execution.mockRejectedValue(new Error("Host has been removed from Scope"));

@@ -1,3 +1,5 @@
+> Recon orchestration and the minimal Target interface now follow [Adaptive Target Recon](target-recon-playbooks.md). This document describes the original Scope Asset migration and compatibility model.
+
 # Target → Scope Asset → Recon → Research → Findings
 
 ## Product workflow

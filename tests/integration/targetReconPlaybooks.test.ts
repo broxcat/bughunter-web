@@ -1,0 +1,74 @@
+import { beforeAll,beforeEach,afterAll,describe,it,expect,vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp,rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+const mocks=vi.hoisted(()=>({auth:vi.fn(),publish:vi.fn()}));
+vi.mock('@/lib/auth',()=>({auth:mocks.auth}));
+vi.mock('@/lib/rateLimit',()=>({rateLimit:vi.fn(async()=>({status:'ALLOWED'}))}));
+vi.mock('@/server/queue/scanJobPublisher',()=>({publishScanJob:mocks.publish}));
+const db=process.env.TEST_DATABASE_URL,schema='playbooks_'+randomUUID().replaceAll('-','');if(db){const u=new URL(db);u.searchParams.set('schema',schema);process.env.DATABASE_URL=u.toString();}
+let p:typeof import('@/lib/prisma').prisma,service:typeof import('@/server/scopeAssets'),runs:typeof import('@/server/recon/targetRuns'),artifacts:typeof import('@/server/recon/artifacts'),route:typeof import('@/app/api/programs/[id]/recon/route'),root:string,userId:string,programId:string;
+const req=(method='POST',origin='http://app.example.test')=>new Request('http://app.example.test/api',{method,headers:{Origin:origin}});
+const ctx=()=>({params:Promise.resolve({id:programId})});
+(db?describe:describe.skip)('Target-wide adaptive Recon: PostgreSQL contracts (controlled scan states, no CLI/model claims)',()=>{
+  beforeAll(async()=>{execFileSync('npx',['prisma','migrate','deploy'],{env:process.env,stdio:'pipe'});({prisma:p}=await import('@/lib/prisma'));service=await import('@/server/scopeAssets');runs=await import('@/server/recon/targetRuns');artifacts=await import('@/server/recon/artifacts');route=await import('@/app/api/programs/[id]/recon/route');root=await mkdtemp(join(tmpdir(),'playbook-snapshots-'));process.env.RESEARCH_CONSOLE_ROOT=root;process.env.AUTH_URL='http://app.example.test';},30000);
+  beforeEach(async()=>{userId=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;programId=(await p.bountyProgram.create({data:{ownerId:userId,companyName:'Adaptive fixture',requiredUserAgent:'Adaptive-Fixture/1',outOfScope:['excluded.example.test']}})).id;mocks.auth.mockResolvedValue({user:{id:userId}});mocks.publish.mockReset().mockResolvedValue({dispatch:'PENDING'});});
+  afterAll(async()=>{if(p){await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);await p.$disconnect();}if(root)await rm(root,{recursive:true,force:true});});
+  const add=(value:string,type:'API'|'WEB_APPLICATION'|'WILDCARD'|'OTHER'='WEB_APPLICATION',assetValue:'LOW'|'MEDIUM'|'HIGH'|'CRITICAL'='MEDIUM')=>service.createScopeAsset(userId,programId,{value,type,assetValue});
+  const finish=async(id:string,outcome:'SUCCESS'|'PARTIAL'|'FAILED'='SUCCESS')=>p.scanRun.update({where:{id},data:{status:outcome==='FAILED'?'FAILED':'COMPLETED',outcome,artifactVersion:2,finishedAt:new Date()}});
+  it('rejects empty scope, foreign origin/ownership and missing auth without any child scans',async()=>{expect((await route.POST(req(),ctx())).status).toBe(400);expect((await route.POST(req('POST','https://foreign.test'),ctx())).status).toBe(403);mocks.auth.mockResolvedValue({user:{id:'foreign'}});expect((await route.POST(req(),ctx())).status).toBe(404);mocks.auth.mockResolvedValue(null);expect((await route.POST(req(),ctx())).status).toBe(401);expect(await p.targetReconRun.count({where:{programId}})).toBe(0);});
+  it('retires new unassigned program Recon through the legacy API while retaining historical replay contracts',async()=>{
+    await add('api.example.test','API');const {ensureProgramContext}=await import('@/server/programContext'),context=await ensureProgramContext(userId,programId);const {POST}=await import('@/app/api/scan-runs/route'),{NextRequest}=await import('next/server');
+    const response=await POST(new NextRequest('http://app.example.test/api/scan-runs',{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://app.example.test'},body:JSON.stringify({targetId:context.id,type:'RECON'})}));expect(response.status).toBe(410);expect(await p.scanRun.count({where:{target:{programId}}})).toBe(0);
+  });
+  it('atomically captures all active assets in value order and coalesces concurrent starts',async()=>{
+    const low=await add('low.example.test','OTHER','LOW'),url=await add('https://portal.example.test/app','WEB_APPLICATION','MEDIUM'),api=await add('api.example.test','API','HIGH'),wildcard=await add('*.example.test','WILDCARD','CRITICAL');
+    const[a,b]=await Promise.all([runs.startTargetRecon(userId,programId),runs.startTargetRecon(userId,programId)]);expect(a.id).toBe(b.id);
+    const children=await p.scanRun.findMany({where:{targetReconRunId:a.id},orderBy:{reconOrder:'asc'},include:{jobOutbox:true,reconSteps:true}});expect(children.map(c=>c.scopeAssetId)).toEqual([wildcard.id,api.id,url.id,low.id]);expect(children.every(c=>c.reconSteps.length===12&&c.jobOutbox?.status==='PENDING')).toBe(true);
+    expect(children[0].reconPlan).toMatchObject({activityMode:'ACTIVE',depth:'DEEP',limits:{enrichHosts:8}});expect(children[2].reconPlan).toMatchObject({limits:{ports:[]}});await service.editScopeAsset(userId,programId,api.id,{assetValue:'LOW'});expect((await p.scanRun.findUniqueOrThrow({where:{id:children[1].id}})).scopeAssetSnapshot).toMatchObject({assetValue:'HIGH'});
+  });
+  it('fixes Completed · 0 discoveries by counting normalized endpoint artifacts and auto-generates both v2 briefs',async()=>{
+    const asset=await add('app.example.test'),parent=await runs.startTargetRecon(userId,programId),scan=await p.scanRun.findFirstOrThrow({where:{targetReconRunId:parent.id}});
+    const paths=['/login','/register','/api/auth/register','/api/auth/reset-password','/api/courses'];for(const path of paths)await artifacts.recordArtifact(scan.id,asset,[],'endpoint',{url:'https://app.example.test'+path},{tool:'crawler',sourceRef:'fixture:crawler',observedAt:new Date().toISOString()});
+    expect(await p.hostDiscovery.count({where:{scanRunId:scan.id}})).toBe(0);await finish(scan.id);await runs.reconcileTargetRecon(parent.id);
+    expect((await service.listScopeAssets(userId,programId))[0].scanRuns[0]._count.artifacts).toBe(5);
+    const detail=await(await import('@/server/recon/intelligence')).loadAssetReconDetail(userId,programId,asset.id);expect(detail.discoveryCount).toBe(5);
+    const child=await p.scanRun.findUniqueOrThrow({where:{id:scan.id}}),complete=await p.targetReconRun.findUniqueOrThrow({where:{id:parent.id}});expect(child.scopeMarkdown).toContain('format_version: 2');expect(child.scopeMarkdown).toContain('Normalized discoveries: 5');expect(complete.scopeMarkdown).toContain('Endpoints: 5');expect(complete.scopeMarkdownSha256).toMatch(/^[a-f0-9]{64}$/);
+    const {generateReconSnapshot}=await import('@/server/research/reconSnapshots');const state=await generateReconSnapshot(userId,scan.targetId);expect(state.snapshot!.context.counts.endpoints).toBe(5);expect(state.snapshot!.context.sources.some(s=>s.scanId===scan.id&&s.tool==='crawler')).toBe(true);expect(await p.researchReconDelivery.count({where:{sessionId:state.sessionId}})).toBe(0);
+  });
+  it('preserves multi-source provenance and previous-success diffs without rescanning for Research',async()=>{
+    const asset=await add('api.example.test','API','HIGH');let parent=await runs.startTargetRecon(userId,programId),scan=await p.scanRun.findFirstOrThrow({where:{targetReconRunId:parent.id}});
+    await Promise.all(['subfinder','amass','assetfinder'].map(tool=>artifacts.recordArtifact(scan.id,asset,[],'hostname',{hostname:'api.example.test'},{tool,sourceRef:'fixture:'+tool,observedAt:new Date().toISOString()})));
+    expect(await p.reconArtifact.count({where:{scanRunId:scan.id,kind:'hostname'}})).toBe(1);expect((await p.reconArtifact.findFirstOrThrow({where:{scanRunId:scan.id}})).sources).toHaveLength(3);await finish(scan.id);await runs.reconcileTargetRecon(parent.id);
+    const first=scan.id;parent=await runs.startTargetRecon(userId,programId);scan=await p.scanRun.findFirstOrThrow({where:{targetReconRunId:parent.id}});expect(scan.id).not.toBe(first);await finish(scan.id,'PARTIAL');await runs.reconcileTargetRecon(parent.id);expect((await runs.targetReconState(userId,programId)).researchReady).toBe(true);
+  });
+  it('aggregates useful failed/partial children as Partial, and wholly failed children as Failed',async()=>{
+    await add('a.example.test');await add('b.example.test','API','HIGH');const parent=await runs.startTargetRecon(userId,programId),children=await p.scanRun.findMany({where:{targetReconRunId:parent.id}});await finish(children[0].id,'PARTIAL');await finish(children[1].id,'FAILED');expect(await runs.reconcileTargetRecon(parent.id)).toMatchObject({status:'COMPLETED',outcome:'PARTIAL'});
+    const again=await runs.startTargetRecon(userId,programId);await p.scanRun.updateMany({where:{targetReconRunId:again.id},data:{status:'COMPLETED',outcome:'FAILED',artifactVersion:2,finishedAt:new Date()}});expect(await runs.reconcileTargetRecon(again.id)).toMatchObject({status:'FAILED',outcome:'FAILED'});expect((await p.scanRun.findFirstOrThrow({where:{targetReconRunId:again.id}})).scopeMarkdown).toContain('recon_status: failed');
+  });
+  it('cancels queued children durably, reruns with new identities and detects subsequently added scope',async()=>{
+    await add('app.example.test');const first=await runs.startTargetRecon(userId,programId);await runs.cancelTargetRecon(userId,programId,first.id);expect((await p.scanRun.findMany({where:{targetReconRunId:first.id}})).every(s=>s.status==='CANCELLED')).toBe(true);expect((await p.targetReconRun.findUniqueOrThrow({where:{id:first.id}})).status).toBe('CANCELLED');
+    const next=await runs.startTargetRecon(userId,programId);expect(next.id).not.toBe(first.id);await p.scanRun.updateMany({where:{targetReconRunId:next.id},data:{status:'COMPLETED',outcome:'SUCCESS',artifactVersion:2,finishedAt:new Date()}});await runs.reconcileTargetRecon(next.id);expect((await runs.targetReconState(userId,programId)).needsRecon).toBe(false);await add('new.example.test');expect((await runs.targetReconState(userId,programId)).needsRecon).toBe(true);
+  });
+  it('archives one asset during Recon, cancels only its work and excludes it from the next batch',async()=>{
+    const a=await add('a.example.test'),b=await add('b.example.test'),parent=await runs.startTargetRecon(userId,programId);await service.editScopeAsset(userId,programId,a.id,null);const scans=await p.scanRun.findMany({where:{targetReconRunId:parent.id}});expect(scans.find(s=>s.scopeAssetId===a.id)?.status).toBe('CANCELLED');expect(scans.find(s=>s.scopeAssetId===b.id)?.status).toBe('QUEUED');await finish(scans.find(s=>s.scopeAssetId===b.id)!.id);await runs.reconcileTargetRecon(parent.id);const next=await runs.startTargetRecon(userId,programId);expect(await p.scanRun.count({where:{targetReconRunId:next.id}})).toBe(1);
+  });
+  it('materializes delayed historical briefs from their captured parent membership, never the next run',async()=>{
+    const asset=await add('app.example.test'),first=await runs.startTargetRecon(userId,programId),old=await p.scanRun.findFirstOrThrow({where:{targetReconRunId:first.id}});
+    await artifacts.recordArtifact(old.id,asset,[],'endpoint',{url:'https://app.example.test/old-surface'},{tool:'httpx',sourceRef:'first',observedAt:new Date().toISOString()});await finish(old.id);await p.targetReconRun.update({where:{id:first.id},data:{status:'COMPLETED',outcome:'SUCCESS',finishedAt:new Date()}});
+    const second=await runs.startTargetRecon(userId,programId),next=await p.scanRun.findFirstOrThrow({where:{targetReconRunId:second.id}});await runs.reconcileTargetRecon(first.id);
+    const saved=await p.targetReconRun.findUniqueOrThrow({where:{id:first.id}});expect(saved.scopeMarkdown).toContain('target_recon_run_id: '+first.id);expect(saved.scopeMarkdown).toContain(old.id);expect(saved.scopeMarkdown).not.toContain(next.id);expect(saved.scopeMarkdown).toContain('Endpoints: 1');
+  });
+  it('keeps real Recon status for assets beyond the bounded 30-asset intelligence sample',async()=>{
+    await p.scopeAsset.createMany({data:Array.from({length:32},(_,i)=>({programId,originalValue:`host${i}.example.test`,normalizedValue:`host${i}.example.test`,format:'SUBDOMAIN',type:'WEB_APPLICATION'}))});
+    const parent=await runs.startTargetRecon(userId,programId);await p.scanRun.updateMany({where:{targetReconRunId:parent.id},data:{status:'COMPLETED',outcome:'SUCCESS',artifactVersion:2,finishedAt:new Date()}});await runs.reconcileTargetRecon(parent.id);
+    const text=(await p.targetReconRun.findUniqueOrThrow({where:{id:parent.id}})).scopeMarkdown!;expect(text).toContain('Successful: 32');expect(text).toContain('Not run: 0');expect(text).toContain('Only the first 30 priority assets');
+  },15000);
+  it('fences global/per-Target capacity before an execution attempt can start',async()=>{
+    await add('a.example.test','API','HIGH');await add('b.example.test');const a=await runs.startTargetRecon(userId,programId),children=await p.scanRun.findMany({where:{targetReconRunId:a.id},orderBy:{reconOrder:'asc'}});
+    const {beginScanExecution,finishScanExecution,ReconCapacityError}=await import('@/server/queue/executionAttempts');const attempt=await beginScanExecution(children[0].id,'worker-1');expect(attempt).not.toBeNull();await expect(beginScanExecution(children[1].id,'worker-2')).rejects.toBeInstanceOf(ReconCapacityError);expect(await p.scanExecutionAttempt.count({where:{scanRunId:children[1].id}})).toBe(0);
+    const other=(await p.bountyProgram.create({data:{ownerId:userId,companyName:'Parallel Target',requiredUserAgent:'Fixture/1'}})).id;await service.createScopeAsset(userId,other,{value:'parallel.example.test',assetValue:'MEDIUM'});const second=await runs.startTargetRecon(userId,other),secondScan=await p.scanRun.findFirstOrThrow({where:{targetReconRunId:second.id}});const secondAttempt=await beginScanExecution(secondScan.id,'worker-2');expect(secondAttempt).not.toBeNull();const thirdProgram=(await p.bountyProgram.create({data:{ownerId:userId,companyName:'Third Target',requiredUserAgent:'Fixture/1'}})).id;await service.createScopeAsset(userId,thirdProgram,{value:'third.example.test',assetValue:'LOW'});const third=await runs.startTargetRecon(userId,thirdProgram),thirdScan=await p.scanRun.findFirstOrThrow({where:{targetReconRunId:third.id}});await expect(beginScanExecution(thirdScan.id,'worker-3')).rejects.toBeInstanceOf(ReconCapacityError);const compatible=await p.scanRun.create({data:{targetId:children[0].targetId,scopeAssetId:children[0].scopeAssetId,type:'RECON'}});await expect(beginScanExecution(compatible.id,'legacy-api-worker')).rejects.toBeInstanceOf(ReconCapacityError);await finishScanExecution(attempt!.id,'worker-1',{state:'COMPLETED',result:{outcome:'SUCCESS'}});await finishScanExecution(secondAttempt!.id,'worker-2',{state:'COMPLETED',result:{outcome:'SUCCESS'}});
+  });
+});

@@ -1,11 +1,11 @@
-import { WaitingError, type Job } from "bullmq";
+import { WaitingError, DelayedError, type Job } from "bullmq";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { loadTargetExecution, withTargetExecution } from "@/server/execution";
 import { runRecon } from "@/server/scanners/recon";
 import { ScanAbortError, settlesWithin, withScanControl, type ScanStopReason } from "@/server/scanControl";
 import type { ScanExecutionResult } from "@/server/scanners/result";
-import { beginScanExecution, finishScanExecution, monitorScanExecution, workerIdentity, type ExecutionCompletion } from "./executionAttempts";
+import { beginScanExecution, finishScanExecution, monitorScanExecution, workerIdentity, ReconCapacityError, type ExecutionCompletion } from "./executionAttempts";
 import type { ScanJobData } from "./scanQueue";
 
 type Executor = (type: ScanJobData["type"], host: string, scanRunId: string) => Promise<ScanExecutionResult>;
@@ -37,7 +37,9 @@ export function createScanProcessor(workerId: string, executor: Executor = execu
       return;
     }
     if (job.attemptsStarted > 1) logger.warn({ scanRunId, workerId, reason: "BULLMQ_REPLAY" }, "BullMQ invoked the processor again; automatic network replay is fenced");
-    const attempt = await beginScanExecution(scanRunId, workerId);
+    let attempt;
+    try { attempt = await beginScanExecution(scanRunId, workerId); }
+    catch(e) { if(e instanceof ReconCapacityError){await job.moveToDelayed(Date.now()+1000,token??job.token);throw new DelayedError();}throw e; }
     if (!attempt) return;
     const monitor = monitorScanExecution(attempt), control = monitor.control;
     active.set(scanRunId, monitor);
@@ -89,6 +91,9 @@ export function createScanProcessor(workerId: string, executor: Executor = execu
     }
     try { await finishScanExecution(attempt.id, workerId, completion!); }
     finally { active.delete(scanRunId); }
+    const parent=await prisma.scanRun.findUnique({where:{id:scanRunId},select:{targetReconRunId:true,scopeAssetId:true}});
+    if(parent?.targetReconRunId)try{const {reconcileTargetRecon}=await import('../recon/targetRuns');await reconcileTargetRecon(parent.targetReconRunId);}catch{logger.warn({scanRunId,reason:'RECON_INTELLIGENCE_PUBLICATION_DEFERRED'},'Recon evidence committed; intelligence publication will retry');}
+    else if(parent?.scopeAssetId)try{const {materializeAssetRecon}=await import('../scopeMarkdown');await materializeAssetRecon(scanRunId);}catch{logger.warn({scanRunId,reason:'SCOPE_INTELLIGENCE_PUBLICATION_DEFERRED'},'Scope intelligence publication deferred');}
     if (failed && !control.signal.aborted) throw failed; // BullMQ attempts stays 1.
   };
   return {

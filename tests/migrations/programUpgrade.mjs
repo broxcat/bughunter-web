@@ -61,10 +61,20 @@ try {
   await client.$executeRaw`INSERT INTO "Target" (id,"userId","scopeId","programId",host,"updatedAt") VALUES ('preasset-host','upgrade-user','upgrade-scope','preasset-program','api.example.test',now())`;
   await client.$executeRaw`INSERT INTO "ScanRun" (id,"targetId",type,status,"reconCorpus") VALUES ('preasset-scan','preasset-host','RECON','COMPLETED','{"version":1,"source":"legacy untouched"}'::jsonb)`;
   const preasset = await client.$queryRaw`SELECT id,status,"createdAt","reconCorpus" FROM "ScanRun" WHERE id='preasset-scan'`;
+  // Upgrade through the exact deployed Scope Assets schema before this mission.
+  await cp(join('prisma/migrations','20261102220000_scope_assets'),join(temp,'migrations','20261102220000_scope_assets'),{recursive:true});
+  migrate(join(temp,'schema.prisma'));
+  await client.$executeRaw`UPDATE "ScopeAsset" SET "assetValue"='CRITICAL', type='API', "typeSource"='USER' WHERE "programId"='preasset-program' AND "normalizedValue"='api.example.test'`;
+  const assetBefore=await client.$queryRaw`SELECT id,"originalValue","normalizedValue",format,type,"assetValue","typeSource","createdAt","updatedAt" FROM "ScopeAsset" ORDER BY id`;
   migrate(schema);
+  assert.deepEqual(await client.$queryRaw`SELECT id,"originalValue","normalizedValue",format,type,"assetValue","typeSource","createdAt","updatedAt" FROM "ScopeAsset" ORDER BY id`,assetBefore);
+  assert.equal(await client.targetReconRun.count(),0,'No invented parent Recon history');
+  assert.equal(await client.reconArtifact.count(),0,'No invented historical scanner artifacts');
+  const oldRun=await client.scanRun.findUniqueOrThrow({where:{id:'preasset-scan'}});
+  assert.equal(oldRun.targetReconRunId,null);assert.equal(oldRun.reconPlan,null);assert.equal(oldRun.artifactVersion,0);assert.equal(oldRun.scopeMarkdown,null);
   assert.deepEqual(await client.$queryRaw`SELECT id,status,"createdAt","reconCorpus" FROM "ScanRun" WHERE id='preasset-scan'`, preasset);
   const assets = await client.scopeAsset.findMany({where:{programId:'preasset-program'},orderBy:{normalizedValue:'asc'},include:{executionTarget:true}});
-  assert.equal(assets.length,2); assert(assets.every(a=>a.assetValue==='MEDIUM'&&a.typeSource==='BACKFILL'));
+  assert.equal(assets.length,2); assert.equal(assets.find(a=>a.normalizedValue==='api.example.test').assetValue,'CRITICAL');assert.equal(assets.find(a=>a.normalizedValue==='*.example.test').assetValue,'MEDIUM');
   assert.equal(assets.find(a=>a.normalizedValue==='api.example.test').executionTarget.id,'preasset-host');
   assert.equal(assets.find(a=>a.normalizedValue==='api.example.test').type,'API');
   assert.equal((await client.scanRun.findUniqueOrThrow({where:{id:'preasset-scan'}})).scopeAssetSnapshot,null);

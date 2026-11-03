@@ -7,13 +7,14 @@ import { workerIdentity } from "./executionAttempts";
 import { maintainScanExecutions, startExecutionMaintenance } from "./executionMaintenance";
 import { settlesWithin } from "@/server/scanControl";
 import { logger } from "@/lib/logger";
+import { RECON_CAPACITY } from '@/lib/reconPlanner';
 
 const workerId = workerIdentity();
 const processor = createScanProcessor(workerId);
 // Keep normal lock renewal/stall detection. PostgreSQL, not maxStalledCount,
 // prevents network replay. BullMQ close() alone would wait indefinitely for work.
 const worker = new Worker<ScanJobData>(SCAN_QUEUE_NAME, (job, token, signal) => processor.process(job, signal, token), {
-  connection: redis, concurrency: 1, autorun: false, maxStalledCount: 1,
+  connection: redis, concurrency: RECON_CAPACITY.globalAssets, autorun: false, maxStalledCount: 1,
 });
 let dispatcher: ReturnType<typeof startScanDispatcher> | undefined;
 let maintenance: ReturnType<typeof startExecutionMaintenance> | undefined;

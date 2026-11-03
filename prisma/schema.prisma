@@ -165,6 +165,7 @@ model BountyProgram {
   owner             User            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   targets           Target[]
   scopeAssets       ScopeAsset[]
+  reconRuns TargetReconRun[]
 
   @@index([ownerId])
 }
@@ -275,6 +276,16 @@ enum CredentialMode {
 // ---------------------------------------------------------------------------
 
 model ScanRun {
+  targetReconRunId String?
+  targetReconRun TargetReconRun? @relation(fields: [targetReconRunId], references: [id], onDelete: SetNull)
+  reconOrder Int @default(0)
+  reconPlan Json?
+  toolVersions Json?
+  artifactVersion Int @default(0)
+  artifacts ReconArtifact[]
+  changeSet Json?
+  scopeMarkdown String? @db.Text
+  scopeMarkdownSha256 String?
   scopeAssetId String?
   scopeAsset ScopeAsset? @relation(fields: [scopeAssetId], references: [id], onDelete: SetNull)
   scopeAssetSnapshot Json?
@@ -311,6 +322,8 @@ model ScanRun {
   researchSessions ResearchSession[]
 
   @@index([targetId])
+  @@index([scopeAssetId, createdAt])
+  @@index([targetReconRunId])
   @@index([status])
 }
 
@@ -788,10 +801,13 @@ model ScopeAsset {
   executionTarget Target? @relation("AssetExecution")
   discoveredTargets Target[] @relation("AssetDiscoveries")
   scanRuns ScanRun[]
+  artifacts ReconArtifact[]
   @@unique([programId, normalizedValue])
   @@index([programId, active])
 }
 enum ReconPipelineState {
+  PARTIAL
+  BLOCKED
   PENDING
   RUNNING
   COMPLETED
@@ -823,4 +839,40 @@ model ResearchReconDelivery {
   snapshot ResearchReconSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, createdAt])
+}
+
+// Parent execution contains immutable child membership, not another scan engine.
+model TargetReconRun {
+  id String @id @default(cuid())
+  programId String
+  program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  status ScanStatus @default(QUEUED)
+  outcome ScanOutcome?
+  preflight Json?
+  createdAt DateTime @default(now())
+  startedAt DateTime?
+  finishedAt DateTime?
+  cancelRequestedAt DateTime?
+  scopeMarkdown String? @db.Text
+  scopeMarkdownSha256 String?
+  scans ScanRun[]
+  @@index([programId, createdAt])
+}
+
+model ReconArtifact {
+  id String @id @default(cuid())
+  scanRunId String
+  scopeAssetId String
+  kind String
+  canonicalKey String
+  value Json
+  scopeState String
+  verification String
+  sources Json
+  firstSeenAt DateTime
+  lastSeenAt DateTime
+  scanRun ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  scopeAsset ScopeAsset @relation(fields: [scopeAssetId], references: [id], onDelete: Cascade)
+  @@unique([scanRunId, kind, canonicalKey])
+  @@index([scopeAssetId, kind])
 }

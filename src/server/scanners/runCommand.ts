@@ -24,6 +24,7 @@ export type RunCommandOptions = {
   timeoutMs: number;
   signal?: AbortSignal;
   onStdoutLine?: (line: string) => Promise<void>;
+  onStderrLine?: (line: string) => Promise<void>;
 };
 
 export type RunCommandResult = {
@@ -147,6 +148,7 @@ export async function runCommand(
           if (!signal.aborted && !timedOut && !outputError) await opts.onStdoutLine!(line);
         }).catch(error => { outputError ??= error; void stop(false); });
       }
+      if (stream === 'STDERR' && opts.onStderrLine) outputWork = outputWork.then(async () => { if (!signal.aborted && !outputError) await opts.onStderrLine!(line); }).catch(error => { outputError ??= error; void stop(false); });
     };
 
     const pump = (chunk: Buffer, stream: "STDOUT" | "STDERR") => {

@@ -1,0 +1,17 @@
+id: bughunter-recon-auth
+info:
+  name: HTTP authentication challenge
+  author: bughunter
+  severity: info
+  tags: recon,tech,surface
+  metadata:
+    version: 2.0.0
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}"
+    redirects: false
+    max-redirects: 0
+    matchers:
+      - type: status
+        status: [401, 403]

@@ -5,7 +5,7 @@ const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function historyArguments(policy, count, offset, requestId) {
   // This prefilter is an optimization, NOT proof of the actual HTTP destination.
   if (requestId !== undefined && !/^[a-f0-9-]{36}$/i.test(requestId)) throw new Error('INVALID_INPUT');
-  return { count, offset, regex: requestId ? `(?im)^X-BugHunter-Request-Id:[ \\t]*${escapeRegex(requestId)}[ \\t]*\\r?$` : `(?im)^Host:[ \\t]*${escapeRegex(policy.targetHost)}(?::(?:80|443))?[ \\t]*\\r?$` };
+  return { count, offset, regex: requestId ? `(?im)^X-BugHunter-Request-Id:[ \\t]*${escapeRegex(requestId)}[ \\t]*\\r?$` : `(?im)^Host:[ \\t]*${escapeRegex(policy.targetHost)}(?::(?:${policy.port ?? '80|443'}))?[ \\t]*\\r?$` };
 }
 function headers(message) {
   if (typeof message !== 'string' || message.length > 6000) return null;

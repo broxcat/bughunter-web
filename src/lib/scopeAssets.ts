@@ -69,7 +69,7 @@ export const assetInputSchema = z.strictObject({
 export const assetEditSchema = z.strictObject({ type: z.enum(ASSET_TYPES).optional(), assetValue: z.enum(ASSET_VALUES).optional() }).refine(v => Object.keys(v).length > 0, 'Choose a type or asset value');
 export function assetReconStatus(run: { status: string; outcome: string | null; finishedAt: string | Date | null } | null, now = Date.now()) {
   if (!run) return 'NOT_STARTED';
-  if (run.status === 'QUEUED' || run.status === 'RUNNING') return run.status;
+  if (run.status === 'QUEUED' || run.status === 'RUNNING' || run.status === 'CANCELLED') return run.status;
   if (run.outcome === 'PARTIAL') return 'PARTIAL';
   if (run.status !== 'COMPLETED' || run.outcome !== 'SUCCESS') return 'FAILED';
   return run.finishedAt && now - new Date(run.finishedAt).getTime() > 7 * 86400000 ? 'STALE' : 'COMPLETED';

@@ -19,14 +19,18 @@ describe("scan creation and legacy compatibility", () => {
     expect(response.status).toBe(400); expect((await response.json()).error).toMatch(/VALIDATE.*not supported/);
     expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.accept).not.toHaveBeenCalled(); expect(mocks.publish).not.toHaveBeenCalled(); expect(mocks.target).not.toHaveBeenCalled();
   });
-  it.each(["RECON"])("continues to create %s with a null live outcome", async type => {
-    mocks.target.mockResolvedValue({ id: "target", userId: "owner", host: "example.test", active: true, scope: { status: "APPROVED" }, program: { ownerId: "owner", requiredUserAgent: "Test/1", outOfScope: [] } });
+  it.each(["RECON"])("creates assigned %s with a null live outcome through the common asset engine", async type => {
+    mocks.target.mockResolvedValue({ id: "target", userId: "owner", host: "example.test", active: true, scopeAssetId:"asset", scopeAsset:{programId:"program",normalizedValue:"example.test",format:"DOMAIN",active:true}, scope: { status: "APPROVED" }, program: { id:"program",ownerId: "owner", requiredUserAgent: "Test/1", outOfScope: [] } });
     mocks.accept.mockResolvedValue({ id: "run", targetId: "target", type, status: "QUEUED", outcome: null, jobId: null });
     mocks.publish.mockResolvedValue({ dispatch: "PUBLISHED" });
     const response = await post(type);
     expect(response.status).toBe(201); expect(await response.json()).toMatchObject({ type, status: "QUEUED", outcome: null });
-    expect(mocks.accept).toHaveBeenCalledWith("owner", { targetId: "target", type }, null);
+    expect(mocks.accept).toHaveBeenCalledWith("owner", { targetId: "target", type,scopeAssetId:"asset" }, null);
     expect(mocks.publish).toHaveBeenCalledWith("run");
+  });
+  it("directs new unassigned program Recon to the Target workflow", async()=>{
+    mocks.target.mockResolvedValue({id:'target',userId:'owner',host:'program.invalid',active:false,contextOnly:true,scope:{status:'APPROVED'},program:{id:'program',ownerId:'owner',requiredUserAgent:'Test/1',outOfScope:[],scopeRules:['*.example.test']}});
+    expect((await post('RECON')).status).toBe(410);expect(mocks.accept).not.toHaveBeenCalled();expect(mocks.publish).not.toHaveBeenCalled();
   });
   it("returns accepted work as 202 while queue delivery is pending", async () => {
     mocks.replay.mockResolvedValue({ id: "run", status: "QUEUED", outcome: null, jobId: null });

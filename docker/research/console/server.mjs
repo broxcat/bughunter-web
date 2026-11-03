@@ -14,6 +14,7 @@ import { sessionCommand, providerStatus } from './providers.mjs';
 import { providerTmuxIdentity } from '../../../src/lib/research/provider.ts';
 import { reconnectWorkspaceBurp } from './burp-reconnect.mjs';
 import { stageReconContext } from './recon-context.mjs';
+import { collectReconObservations } from './recon-observations.mjs';
 const exec = promisify(execFile);
 export async function startTerminalService({ port = 7681, host = '0.0.0.0', origin = process.env.RESEARCH_TERMINAL_ORIGIN, publicKey } = {}) {
   publicKey ??= await readFile(process.env.RESEARCH_TERMINAL_PUBLIC_KEY_FILE ?? '/run/research-terminal/public.pem', 'utf8');
@@ -27,6 +28,10 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
   const wss = new WebSocketServer({ noServer: true, maxPayload: 32768, perMessageDeflate: false, handleProtocols: protocols => protocols.has('bh-terminal.v1') ? 'bh-terminal.v1' : false });
   const server = createServer((req, res) => { void (async () => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/control/recon-observations' && req.method === 'POST') {
+      try { res.end(JSON.stringify(await collectReconObservations(String(req.headers.authorization ?? '').replace(/^Bearer /, ''), publicKey))); } catch { res.writeHead(403); res.end('{"error":"Collection denied"}'); }
+      return;
+    }
     if (req.url === '/control/recon' && req.method === 'POST') {
       try {
         const staged = await stageReconContext(String(req.headers.authorization ?? '').replace(/^Bearer /, ''), publicKey, exec, reconDeliveries);
@@ -37,16 +42,18 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
       }
       return;
     }
-    if (req.url === '/control/stop' && req.method === 'POST') {
+    if (['/control/stop', '/control/pause'].includes(req.url) && req.method === 'POST') {
       try {
         const claims = verifyStopTicket(String(req.headers.authorization ?? '').replace(/^Bearer /, ''), publicKey);
-        for (const ws of connections) if (ws.targetId === claims.targetId) ws.close(1008, 'Target deletion');
+        for (const ws of connections) if (ws.targetId === claims.targetId) ws.close(1008, req.url === '/control/pause' ? 'Scope authorization archived' : 'Target deletion');
         await Promise.all(['codex', 'claude'].map(provider => pending.get(providerTmuxIdentity(claims.targetId, provider))?.catch(() => {})));
         const paths = claims.workspaceId.startsWith('research_') ? [`/workspaces/${claims.workspaceId}`] : [`/legacy-workspaces/${claims.workspaceId}`];
         // Capture descendants before tmux exits/reparents them, then stop the session.
         await stopWorkspaceProcesses(paths);
-        await deleteWorkspaceThreads(paths);
-        await deleteClaudeWorkspaceThreads(paths);
+        if (req.url === '/control/stop') {
+          await deleteWorkspaceThreads(paths);
+          await deleteClaudeWorkspaceThreads(paths);
+        }
         for (const provider of ['codex', 'claude']) {
           const identity = providerTmuxIdentity(claims.targetId, provider);
           await pending.get(identity)?.catch(() => {});

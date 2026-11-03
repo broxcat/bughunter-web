@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import type { ScanExecutionResult } from "@/server/scanners/result";
 import { ScanControl } from "@/server/scanControl";
+import { RECON_CAPACITY } from '@/lib/reconPlanner';
+export class ReconCapacityError extends Error {}
 
 export const HEARTBEAT_INTERVAL_MS = 2000;
 export const HEARTBEAT_STALE_MS = 30_000;
@@ -52,6 +54,17 @@ export async function beginScanExecution(scanRunId: string, workerId: string): P
     if (run.cancelRequestedAt) {
       await tx.scanRun.update({ where: { id: scanRunId }, data: { status: "CANCELLED", outcome: null, finishedAt: new Date(), error: null } });
       return null;
+    }
+    if (run.targetReconRunId || run.scopeAssetId) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('bughunter:recon:capacity',0))`;
+      const program=run.targetReconRunId?await tx.targetReconRun.findUniqueOrThrow({where:{id:run.targetReconRunId},select:{programId:true}}):await tx.target.findUniqueOrThrow({where:{id:run.targetId},select:{programId:true}});
+      if(!program.programId)throw new Error('Recon asset program missing');
+      const global=await tx.scanExecutionAttempt.count({where:{state:'RUNNING',scanRun:{type:'RECON'}}});
+      const local=await tx.scanExecutionAttempt.count({where:{state:'RUNNING',scanRun:{target:{programId:program.programId}}}});
+      // The oldest eligible job within this Target wins. Value orders the
+      // immutable initial membership; newly arriving Targets cannot starve it.
+      const first=await tx.scanRun.findFirst({where:{target:{programId:program.programId},type:'RECON',status:'QUEUED',cancelRequestedAt:null},orderBy:[{createdAt:'asc'},{reconOrder:'asc'},{id:'asc'}],select:{id:true}});
+      if(global>=RECON_CAPACITY.globalAssets||local>=RECON_CAPACITY.perTarget||first?.id!==run.id)throw new ReconCapacityError('Recon capacity busy');
     }
     const claim = await tx.scanRun.updateMany({ where: { id: scanRunId, status: "QUEUED", startedAt: null, cancelRequestedAt: null }, data: { status: "RUNNING", outcome: null, startedAt: new Date(), finishedAt: null, error: null } });
     if (!claim.count) return null;
@@ -132,8 +145,9 @@ export function monitorScanExecution(attempt: ScanExecutionAttempt) {
       const saved = await prisma.scanExecutionAttempt.updateMany({ where: { id: attempt.id, state: "RUNNING", workerId: attempt.workerId }, data: { heartbeatAt: new Date() } });
       if (!saved.count) { control.abort("EXECUTION_LOST"); return; }
       if (!stopped && !control.signal.aborted) arm();
-      const run = await prisma.scanRun.findUnique({ where: { id: attempt.scanRunId }, select: { cancelRequestedAt: true } });
+      const run = await prisma.scanRun.findUnique({ where: { id: attempt.scanRunId }, select: { cancelRequestedAt: true, scopeAsset:{select:{active:true}},target:{select:{scope:{select:{status:true}},program:{select:{deletingAt:true}}}} } });
       if (run?.cancelRequestedAt) control.abort("USER_CANCELLED");
+      if(run?.scopeAsset?.active===false||run?.target?.program?.deletingAt||(run?.target?.scope?.status&&run.target.scope.status!=='APPROVED'))control.abort('USER_CANCELLED');
     } catch { control.abort("HEARTBEAT_LOST"); }
     finally { if (!stopped && !control.signal.aborted) timer = setTimeout(() => { pulse = tick(); }, HEARTBEAT_INTERVAL_MS); }
   };

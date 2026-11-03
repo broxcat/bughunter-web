@@ -17,6 +17,7 @@ import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { expandAssetReconRuns } from './reconInputs';
 import { assetSelect, scopeAssetSourceIds } from '../scopeAssets';
+import { artifactData, artifactSelect, ensureLegacyArtifacts } from '../recon/artifacts';
 
 const snapshotSelect = { id: true, sourceFingerprint: true, contentSha256: true, summarySha256: true, createdAt: true, summary: true } as const;
 const deliverySelect = { id: true, snapshotId: true, provider: true, status: true, createdAt: true } as const;
@@ -28,26 +29,27 @@ async function loadInputs(tx: Prisma.TransactionClient, target: ResearchTarget) 
       ...(asset ? { OR: [{ scopeAssetId: { in: sourceIds } }, { targetId: target.id }, { target: { discoveredFromAssetId: asset.id } }] }
         : target.contextOnly ? {} : { OR: [{ targetId: target.id }, { target: { contextOnly: true, scopeAssetId: null } }] }) },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: RECON_INPUT_LIMITS.scans,
-    select: { id: true, targetId: true, status: true, outcome: true, createdAt: true, startedAt: true, finishedAt: true, reconCorpus: true, assetResults: true, target: { select: { host: true } },
+    select: { id: true, targetId: true, status: true, outcome: true, createdAt: true, startedAt: true, finishedAt: true, reconCorpus: true, assetResults: true, artifactVersion: true, artifacts: {select:artifactSelect,take:2000,orderBy:[{kind:'asc'},{canonicalKey:'asc'}]}, target: { select: { host: true } },
       discoveries: { take: RECON_INPUT_LIMITS.discoveries, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true, host: true, source: true, state: true, createdAt: true } },
-      _count: { select: { discoveries: true, logs: true } } },
+      _count: { select: { discoveries: true, logs: true, artifacts: true } } },
   });
   const result: ReconRun[] = [];
   for (const run of runs) {
+    if(run.artifactVersion>=2){result.push({...run,artifacts:run.artifacts.map(artifactData),artifactInputTruncated:run._count.artifacts>run.artifacts.length,_count:{logs:0,discoveries:0},logs:[],discoveries:[]});continue;}
     // SQL bounds each line before transferring it. Raw output remains untouched in ScanLog.
     const logs = await tx.$queryRaw<ReconRun['logs']>`SELECT id, left(line, 16385) AS line, stream::text AS stream, "createdAt" FROM "ScanLog" WHERE "scanRunId" = ${run.id} ORDER BY "createdAt", id LIMIT ${RECON_INPUT_LIMITS.logs}`;
-    result.push({ ...run, logs });
+    result.push({ ...run, artifacts:undefined, logs });
   }
   return result;
 }
 export function reconScopePolicy(target: ResearchTarget, scopeAssets: NonNullable<ResearchReconContext['scopeAssets']> = []) {
-  // The repository supports structured host patterns, not structured path rules.
-  // Keep ambiguous legacy prose visible; never infer active authorization from it.
+  // Structured asset boundaries are enforced below. Additional legacy prose
+  // requires human review and never expands active authorization.
   const manualReview = Boolean(target.scope.scopeDetails?.trim() || target.scope.outOfScope?.trim());
   return {
     activeSuggestionsAllowed: !researchIsPassive(target) && !manualReview,
     warnings: [
-      ...(manualReview ? ['Legacy free-text scope restrictions require manual review; suggestions are passive only. Structured URL/path authorization is not available in the current scope engine.'] : []),
+      ...(manualReview ? ['Legacy free-text scope restrictions require manual review; suggestions are passive only. Additional prose restrictions are not interpreted as structured authorization.'] : []),
       ...(researchIsPassive(target) ? ['Program/wildcard console is passive only. Open an individually authorized host console before active investigation.'] : []),
     ],
     inScope(value: string) {
@@ -84,10 +86,11 @@ async function ownedTarget(tx: Prisma.TransactionClient, userId: string, targetI
   assertResearchTarget(target, userId); return target;
 }
 function fingerprint(target: ResearchTarget, runs: ReconRun[], assets: unknown[]) {
-  return reconHash(reconJson({ normalizerVersion: 2, limits: RECON_INPUT_LIMITS, policy: researchAuthorizationSnapshot(target), runs, assets }));
+  return reconHash(reconJson({ normalizerVersion: 3, limits: RECON_INPUT_LIMITS, policy: researchAuthorizationSnapshot(target), runs, assets }));
 }
 async function loadAssets(tx: Prisma.TransactionClient, target: ResearchTarget) { return tx.scopeAsset.findMany({ where: { programId: target.program!.id, ...((target.scopeAsset ?? target.discoveredFromAsset) ? { id: (target.scopeAsset ?? target.discoveredFromAsset)!.id } : { active: true }) }, orderBy: { id: 'asc' }, take: 1000, select: assetSelect }); }
 export async function reconPanelState(userId: string, targetId: string): Promise<ReconPanelState> {
+  await normalizeOwnedHistory(userId,targetId);
   return prisma.$transaction(async tx => {
     const target = await ownedTarget(tx, userId, targetId);
     const session = await tx.researchSession.findUnique({ where: { consoleTargetId: targetId }, select: { id: true } });
@@ -105,6 +108,7 @@ export async function reconPanelState(userId: string, targetId: string): Promise
   }, { timeout: 20000, isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
 }
 export async function generateReconSnapshot(userId: string, targetId: string) {
+  await normalizeOwnedHistory(userId,targetId);
   await ensureTargetConsole(userId, targetId);
   await prisma.$transaction(async tx => {
     const target = await ownedTarget(tx, userId, targetId, true);
@@ -161,4 +165,10 @@ export async function transmitReconSnapshot(userId: string, targetId: string, sn
     } catch { /* A lost acknowledgement does not mean delivery failed. */ }
     return tx.researchReconDelivery.update({ where: { id: delivery.id }, data: { status }, select: deliverySelect });
   }, { timeout: 20000 });
+}
+
+async function normalizeOwnedHistory(userId:string,targetId:string){
+  const target=await prisma.target.findFirst({where:{id:targetId,userId,program:{ownerId:userId}},select:{programId:true}});if(!target?.programId)return;
+  const runs=await prisma.scanRun.findMany({where:{target:{programId:target.programId,userId},scopeAssetId:{not:null},artifactVersion:{lt:2},type:'RECON',status:{notIn:['QUEUED','RUNNING']}},orderBy:{createdAt:'desc'},take:60,select:{id:true}});
+  for(const run of runs)await ensureLegacyArtifacts(run.id);
 }

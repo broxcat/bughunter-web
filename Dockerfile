@@ -16,9 +16,15 @@
 # ---------------------------------------------------------------------------
 # Stage 1: scanner tools — Go toolchain + ProjectDiscovery suite + CLI deps
 # ---------------------------------------------------------------------------
+FROM golang:1.23.4-bookworm AS passive-tools
+ENV GOTOOLCHAIN=local GOMAXPROCS=4 GOFLAGS=-p=4
+RUN go install github.com/owasp-amass/amass/v4/...@v4.2.0 \
+    && go install github.com/tomnomnom/assetfinder@v0.1.1
+
 FROM node:22-bookworm AS tools
 
-ENV GO_VERSION=1.23.4
+ENV GO_VERSION=1.27.3
+ENV GOTOOLCHAIN=local GOMAXPROCS=4 GOFLAGS=-p=4
 ENV GOPATH=/root/go
 ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
 
@@ -36,29 +42,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
-        amd64) goarch=amd64 ;; \
-        arm64) goarch=arm64 ;; \
+        amd64) goarch=amd64; go_sha=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 ;; \
+        arm64) goarch=arm64; go_sha=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49 ;; \
         *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
     esac; \
     wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${goarch}.tar.gz" -O /tmp/go.tgz; \
+    echo "${go_sha}  /tmp/go.tgz" | sha256sum -c -; \
     tar -C /usr/local -xzf /tmp/go.tgz; \
     rm /tmp/go.tgz; \
     go version
 
 # Scanner binaries land in $GOPATH/bin (= /root/go/bin).
 RUN set -eux; \
-    go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest; \
+    go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.17.0; \
     go install github.com/projectdiscovery/httpx/cmd/httpx@v1.12.0; \
     go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.11.1; \
     go install github.com/projectdiscovery/katana/cmd/katana@v1.8.0; \
-    go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest; \
-    go install github.com/ffuf/ffuf/v2@latest; \
-    go install github.com/lc/gau/v2/cmd/gau@latest; \
+    go install github.com/projectdiscovery/dnsx/cmd/dnsx@v1.3.1; \
+    go install github.com/ffuf/ffuf/v2@v2.1.0; \
+    go install github.com/lc/gau/v2/cmd/gau@v2.2.4; \
     go install github.com/hahwul/dalfox/v2@v2.13.0
 
 # Pre-pull nuclei templates into the image (written to /root/nuclei-templates
 # and /root/.config/nuclei); copied into the runtime stage below.
-RUN nuclei -update-templates
+RUN git clone --depth 1 --branch v10.5.1 https://github.com/projectdiscovery/nuclei-templates.git /root/nuclei-templates \
+    && test "$(git -C /root/nuclei-templates rev-parse HEAD)" = 79fb682760ab3d5b0e22afbb44709353cbebf023 \
+    && mkdir -p /root/.config/nuclei
+COPY --from=passive-tools /go/bin/amass /go/bin/assetfinder /root/go/bin/
 
 # ---------------------------------------------------------------------------
 # Stage 2: node dependencies (full install — devDeps included; worker uses tsx)

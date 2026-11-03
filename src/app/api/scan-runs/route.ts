@@ -115,6 +115,7 @@ export async function POST(req: NextRequest) {
     if (!scopeAssetId && target.program?.id && !target.contextOnly) {
       scopeAssetId = await prisma.$transaction(async tx => { await lockOwnedProgram(tx, session.user.id!, target.program!.id); await backfillProgramAssets(tx, target.program!.id, session.user.id!); return (await tx.target.findUniqueOrThrow({ where: { id: target.id }, select: { scopeAssetId: true } })).scopeAssetId; });
     }
+    if (!scopeAssetId) return NextResponse.json({ error: 'Start Recon from the Target; a new run requires an explicit active Scope Asset.', targetId: target.programId }, { status: 410 });
     const run = await createScanRequest(session.user.id, { ...parsed.data, ...(scopeAssetId ? { scopeAssetId } : {}) }, key);
     return await respond(run);
   } catch (err) {

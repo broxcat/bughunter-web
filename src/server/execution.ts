@@ -5,6 +5,7 @@ import { chromium, type Browser, type Route } from "playwright-chromium";
 import { prisma } from "@/lib/prisma";
 import { isExcluded, programSchema, matchesHost } from "@/lib/bountyProgram";
 import { assetAllowsUrl, assetAllowsHost, detectScopeAsset, type AssetBoundary } from '@/lib/scopeAssets';
+import type { ReconPlan } from '@/lib/reconPlanner';
 
 export interface TargetRequestGuard {
   assertRequest?(url: string, method: string, body?: string): void;
@@ -13,6 +14,11 @@ export interface TargetRequestGuard {
   signal: AbortSignal;
 }
 export interface TargetExecution {
+  reconPlan?: ReconPlan;
+  reconTempDir?: string;
+  ffufWordlist?: string;
+  reconRelayOrigin?: string;
+  reconRelayTarget?: string;
   parentScopeAsset?: AssetBoundary & { id: string; programId: string; type: string; assetValue: string; originalValue: string };
   scopeAsset?: AssetBoundary & { id: string; programId: string; type: string; assetValue: string; originalValue: string };
   programReconId?: string;

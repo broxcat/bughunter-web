@@ -1,0 +1,10 @@
+'use client';
+import { useEffect,useState } from 'react';
+import { artifactKinds,type ReconArtifactData } from '@/lib/reconArtifacts';
+import { Button } from './ui/Button';
+/** Full, bounded inventory lives on the explicit asset detail view. */
+export default function ReconArtifactBrowser({assetId,runId}:{assetId:string;runId:string}) {
+  const [kind,setKind]=useState(''),[page,setPage]=useState(0),[result,setResult]=useState<{rows:ReconArtifactData[];total:number}|null>(null),[error,setError]=useState('');
+  useEffect(()=>{const controller=new AbortController();fetch(`/api/scope-assets/${assetId}/artifacts?run=${runId}&page=${page}${kind?'&kind='+kind:''}`,{signal:controller.signal,cache:'no-store'}).then(async r=>{const json=await r.json();if(!r.ok)throw new Error(json.error??'Inventory unavailable');setResult(json);setError('');}).catch(e=>{if(!controller.signal.aborted)setError(e.message);});return()=>controller.abort();},[assetId,runId,page,kind]);
+  return <div className="space-y-3"><label>Artifact kind<select aria-label="Artifact kind" className="ml-2 rounded border border-border bg-surface p-1" value={kind} onChange={e=>{setKind(e.target.value);setPage(0);}}><option value="">All</option>{artifactKinds.map(k=><option value={k} key={k}>{k}</option>)}</select></label>{error&&<p role="alert">{error}</p>}<p className="text-sm text-muted">{result?.total??'…'} artifacts · page {page+1} · 100 per page. Stored scope labels describe the run; current authorization must be checked before testing.</p>{result?.rows.map(a=><details key={a.id}><summary className="cursor-pointer break-all text-sm">{a.kind} · {String(a.value.url??a.value.hostname??a.value.name??a.canonicalKey)} · {a.scopeState}</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(a,null,2)}</pre></details>)}<div className="flex gap-2"><Button size="sm" variant="secondary" disabled={!page} onClick={()=>setPage(n=>n-1)}>Previous artifacts</Button><Button size="sm" variant="secondary" disabled={!result||(page+1)*100>=result.total} onClick={()=>setPage(n=>n+1)}>Next artifacts</Button></div></div>;
+}

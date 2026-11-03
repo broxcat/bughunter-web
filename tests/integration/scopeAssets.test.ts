@@ -11,6 +11,7 @@ const db = process.env.TEST_DATABASE_URL, schema = 'scopeassets_' + randomUUID()
 if (db) { const url = new URL(db); url.searchParams.set('schema', schema); process.env.DATABASE_URL = url.toString(); }
 let p: typeof import('@/lib/prisma').prisma, service: typeof import('@/server/scopeAssets'), markdown: typeof import('@/server/scopeMarkdown');
 let api: typeof import('@/app/api/programs/[id]/assets/route'), edit: typeof import('@/app/api/programs/[id]/assets/[assetId]/route'), recon: typeof import('@/app/api/programs/[id]/assets/[assetId]/recon/route'), research: typeof import('@/app/api/programs/[id]/assets/[assetId]/research/route');
+let parentRecon:typeof import('@/app/api/programs/[id]/recon/route');
 let userId: string, otherId: string, programId: string, root: string;
 const context = (assetId = '') => ({ params: Promise.resolve({ id: programId, assetId }) });
 const request = (body?: unknown, method = 'POST', origin = 'http://app.example.test') => new Request('http://app.example.test/api', { method, headers: { Origin: origin }, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -18,6 +19,7 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
   beforeAll(async () => {
     execFileSync('npx', ['prisma', 'migrate', 'deploy'], { env: process.env, stdio: 'pipe' });
     ({ prisma: p } = await import('@/lib/prisma')); service = await import('@/server/scopeAssets'); markdown = await import('@/server/scopeMarkdown');
+    parentRecon=await import('@/app/api/programs/[id]/recon/route');
     api = await import('@/app/api/programs/[id]/assets/route'); edit = await import('@/app/api/programs/[id]/assets/[assetId]/route'); recon = await import('@/app/api/programs/[id]/assets/[assetId]/recon/route'); research = await import('@/app/api/programs/[id]/assets/[assetId]/research/route');
     root = await mkdtemp(join(tmpdir(), 'asset-research-')); process.env.RESEARCH_CONSOLE_ROOT = root; process.env.AUTH_URL = 'http://app.example.test';
     otherId = (await p.user.create({ data: { email: randomUUID() + '@example.test' } })).id;
@@ -48,18 +50,18 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
     await service.editScopeAsset(userId, programId, item.id, { type: 'API', assetValue: 'HIGH' }); rows = await service.listScopeAssets(userId, programId);
     expect(rows.find(r => r.id === item.id)).toMatchObject({ type: 'API', assetValue: 'HIGH' }); expect((await p.scanRun.findUniqueOrThrow({ where: { id: old.id } })).reconCorpus).toBeNull();
   });
-  it('attaches each Recon to the selected asset, captures immutable policy and durable queued stages, and reuses live scans', async () => {
+  it('starts immutable asset plans through Target-wide Recon and retires asset-specific creation', async () => {
     const asset = await create('https://app.example.test:8443/app', { type: 'API', assetValue: 'HIGH' });
-    const first = await recon.POST(request(), context(asset.id)); expect(first.status).toBe(202); const run = await first.json();
-    const saved = await p.scanRun.findUniqueOrThrow({ where: { id: run.id }, include: { reconSteps: true } });
-    expect(saved).toMatchObject({ scopeAssetId: asset.id, scopeAssetSnapshot: { normalizedValue: asset.normalizedValue, type: 'API', assetValue: 'HIGH' } });
-    expect(saved.reconSteps).toHaveLength(11); expect(saved.reconSteps.every(s => s.state === 'PENDING')).toBe(true);
-    expect((await (await recon.POST(request(), context(asset.id))).json()).id).toBe(run.id);
-    await service.editScopeAsset(userId, programId, asset.id, { assetValue: 'LOW' }); expect((await p.scanRun.findUniqueOrThrow({ where: { id: run.id } })).scopeAssetSnapshot).toMatchObject({ assetValue: 'HIGH' });
-    expect((await edit.DELETE(request(undefined, 'DELETE'), context(asset.id))).status).toBe(409);
-    await p.scanRun.update({ where: { id: run.id }, data: { status: 'COMPLETED', outcome: 'PARTIAL', finishedAt: new Date() } });
-    expect((await service.listScopeAssets(userId, programId))[0].reconStatus).toBe('PARTIAL');
-    const newer = await (await recon.POST(request(), context(asset.id))).json(); expect(newer.id).not.toBe(run.id);
+    expect((await recon.POST(request(), context(asset.id))).status).toBe(410);
+    const first=await parentRecon.POST(request(),context());expect(first.status).toBe(202);const parent=await first.json(),run=await p.scanRun.findFirstOrThrow({where:{targetReconRunId:parent.id},include:{reconSteps:true}});
+    expect(run).toMatchObject({scopeAssetId:asset.id,scopeAssetSnapshot:{normalizedValue:asset.normalizedValue,type:'API',assetValue:'HIGH'}});expect(run.reconSteps).toHaveLength(12);
+    expect((await (await parentRecon.POST(request(),context())).json()).id).toBe(parent.id);
+    await service.editScopeAsset(userId,programId,asset.id,{assetValue:'LOW'});expect((await p.scanRun.findUniqueOrThrow({where:{id:run.id}})).scopeAssetSnapshot).toMatchObject({assetValue:'HIGH'});
+    await p.scanRun.update({where:{id:run.id},data:{status:'COMPLETED',outcome:'PARTIAL',finishedAt:new Date()}});
+    expect((await service.listScopeAssets(userId,programId))[0].reconStatus).toBe('PARTIAL');
+    const {reconcileTargetRecon}=await import('@/server/recon/targetRuns');await reconcileTargetRecon(parent.id);
+    const newer=await (await parentRecon.POST(request(),context())).json();expect(newer.id).not.toBe(parent.id);
+    expect((await edit.DELETE(request(undefined,'DELETE'),context(asset.id))).status).toBe(200);expect((await p.scanRun.findFirstOrThrow({where:{targetReconRunId:newer.id}})).status).toBe('CANCELLED');
   });
   it('keeps URL assets on the same host as distinct execution identities and immutable scope boundaries', async () => {
     const a = await create('https://app.example.test/app'), b = await create('https://app.example.test/admin');
@@ -73,9 +75,9 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
     const a = await create('https://app.example.test/app', { assetValue: 'CRITICAL' });
     const response = await markdown.scopeMarkdownDownload(userId, programId, a.id); expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toContain('text/markdown'); expect(response.headers.get('Content-Disposition')).toMatch(/^attachment; filename="asset-[a-z0-9-]+-scope.md"$/);
-    const text = await response.text(); expect(text).toContain(a.id); expect(text).toContain('Target ID: ' + programId); expect(text).toContain('No data collected yet.'); expect(text).toContain('Équipe \\| asset fixture'); expect(text).toContain('LLM Safety Instructions');
+    const text = await response.text(); expect(text).toContain(a.id); expect(text).toContain('Target ID: ' + programId); expect(text).toContain('No data collected yet.'); expect(text).toContain('Équipe \\| asset fixture'); expect(text).toContain('LLM Safety Boundary');
     expect(await (await markdown.scopeMarkdownDownload(userId, programId, a.id)).text()).toBe(text);
-    const global = await (await markdown.scopeMarkdownDownload(userId, programId)).text(); expect(global).toContain('# Bug Bounty Target Scope'); expect(global).toContain('CRITICAL'); expect(global).toContain(a.id);
+    const global = await (await markdown.scopeMarkdownDownload(userId, programId)).text(); expect(global).toContain('# Bug Bounty Target Intelligence'); expect(global).toContain('Critical'); expect(global).toContain(a.id);
     expect((await markdown.scopeMarkdownDownload(otherId, programId, a.id)).status).toBe(404);
   });
   it('enriches existing ResearchReconSnapshot with type, value and precise asset scope without rewriting history', async () => {
@@ -92,7 +94,7 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
     const run = await p.scanRun.create({ data: { targetId: target.id, scopeAssetId: a.id, type: 'RECON', status: 'COMPLETED', outcome: 'SUCCESS', finishedAt: new Date('2026-01-01') } });
     expect((await service.listScopeAssets(userId, programId))[0].reconStatus).toBe('STALE');
     expect((await edit.DELETE(request(undefined, 'DELETE'), context(a.id))).status).toBe(200);
-    expect((await p.scanRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe('COMPLETED'); expect((await recon.POST(request(), context(a.id))).status).toBe(404);
+    expect((await p.scanRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe('COMPLETED'); expect((await recon.GET(new Request('http://app.example.test'), context(a.id))).status).toBe(200);
     expect((await service.listScopeAssets(userId, programId))[0].active).toBe(false);
   });
   it('reuses parent wildcard evidence in focused Research without creating a new Recon or widening the child scope', async () => {
@@ -118,8 +120,8 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
     const a = await create();
     expect((await edit.PATCH(request({ assetValue: 'SUPER' }, 'PATCH'), context(a.id))).status).toBe(400);
     expect((await api.POST(request({ value: 'other.example.test' }, 'POST', 'https://foreign.test'), context())).status).toBe(403);
-    const ip = await create('192.0.2.1'); expect((await recon.POST(request(), context(ip.id))).status).toBe(422);
-    mocks.auth.mockResolvedValue({ user: { id: otherId } }); expect((await api.GET(new Request('http://app.example.test'), context())).status).toBe(404); expect((await edit.PATCH(request({ type: 'API' }, 'PATCH'), context(a.id))).status).toBe(404); expect((await recon.POST(request(), context(a.id))).status).toBe(404);
+    const ip = await create('192.0.2.1'); expect((await research.POST(request(), context(ip.id))).status).toBe(422);
+    mocks.auth.mockResolvedValue({ user: { id: otherId } }); expect((await api.GET(new Request('http://app.example.test'), context())).status).toBe(404); expect((await edit.PATCH(request({ type: 'API' }, 'PATCH'), context(a.id))).status).toBe(404); expect((await recon.GET(new Request('http://app.example.test'), context(a.id))).status).toBe(404);
     mocks.auth.mockResolvedValue(null); expect((await api.GET(new Request('http://app.example.test'), context())).status).toBe(401);
   });
 });

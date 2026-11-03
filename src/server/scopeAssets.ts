@@ -27,11 +27,11 @@ export async function backfillProgramAssets(tx: Prisma.TransactionClient, progra
   }
 }
 export async function listScopeAssets(userId: string, programId: string) {
-  return prisma.$transaction(async tx => {
+  const result = await prisma.$transaction(async tx => {
     await lockOwnedProgram(tx, userId, programId); await backfillProgramAssets(tx, programId, userId);
     const assets = await tx.scopeAsset.findMany({ where: { programId }, select: { ...assetSelect,
       executionTarget: { select: { id: true, _count: { select: { researchSessions: true, findings: true } } } },
-      scanRuns: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 20, select: { id: true, status: true, outcome: true, createdAt: true, startedAt: true, finishedAt: true, error: true, reconSteps: { orderBy: { position: 'asc' } }, _count: { select: { discoveries: true } } } },
+      scanRuns: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 20, select: { id: true, artifactVersion:true, status: true, outcome: true, createdAt: true, startedAt: true, finishedAt: true, error: true, reconSteps: { orderBy: { position: 'asc' } }, _count: { select: { discoveries: true, artifacts: true } } } },
       _count: { select: { discoveredTargets: true, scanRuns: true } },
     } });
     return assets.sort((a, b) => assetValueRank(a.assetValue) - assetValueRank(b.assetValue) || a.normalizedValue.localeCompare(b.normalizedValue)).map(asset => ({ ...asset,
@@ -39,6 +39,9 @@ export async function listScopeAssets(userId: string, programId: string) {
       researchStatus: asset.executionTarget?._count.researchSessions ? 'STARTED' : 'NOT_STARTED',
     }));
   }, { timeout: 30000 });
+  const {ensureLegacyArtifacts}=await import('./recon/artifacts');
+  for(const asset of result){const run=asset.scanRuns[0];if(run&&run.artifactVersion<2&&!['RUNNING','QUEUED'].includes(run.status)){await ensureLegacyArtifacts(run.id);run._count.artifacts=await prisma.reconArtifact.count({where:{scanRunId:run.id}});}}
+  return result;
 }
 export async function createScopeAsset(userId: string, programId: string, input: { value: string; type?: 'API' | 'WEB_APPLICATION' | 'WILDCARD' | 'OTHER'; assetValue: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' }) {
   const detected = detectScopeAsset(input.value);
@@ -55,16 +58,18 @@ export async function createScopeAsset(userId: string, programId: string, input:
   }, { timeout: 30000 });
 }
 export async function editScopeAsset(userId: string, programId: string, assetId: string, input: { type?: 'API' | 'WEB_APPLICATION' | 'WILDCARD' | 'OTHER'; assetValue?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' } | null) {
-  return prisma.$transaction(async tx => {
+  const result = await prisma.$transaction(async tx => {
     const program = await lockOwnedProgram(tx, userId, programId);
-    const asset = await tx.scopeAsset.findFirst({ where: { id: assetId, programId, active: true } });
+    const asset = await tx.scopeAsset.findFirst({ where: { id: assetId, programId, ...(input ? {active:true} : {}) } });
     if (!asset) throw new ResearchError('Asset not found', 404);
     if (input) return tx.scopeAsset.update({ where: { id: assetId }, data: { ...input, ...(input.type ? { typeSource: 'USER' } : {}) } });
-    if (await tx.scanRun.count({ where: { scopeAssetId: assetId, status: { in: ['QUEUED', 'RUNNING'] } } })) throw new ResearchError('Stop the running Recon before removing this asset', 409);
+    await tx.scanRun.updateMany({where:{OR:[{scopeAssetId:assetId},{target:{discoveredFromAssetId:assetId}}],status:{in:['QUEUED','RUNNING']}},data:{cancelRequestedAt:new Date()}});
     // Archive the authorization. Scans, discoveries, snapshots and Findings remain readable.
     await tx.bountyProgram.update({ where: { id: programId }, data: { scopeRules: program.scopeRules.filter(rule => rule !== asset.normalizedValue) } });
     return tx.scopeAsset.update({ where: { id: assetId }, data: { active: false } });
   });
+  if(!input){const {pauseAssetResearch}=await import('./research/archiveAsset');await pauseAssetResearch(userId,assetId);const {settleQueuedCancellations}=await import('./queue/scanCancellation');await settleQueuedCancellations();}
+  return result;
 }
 export async function ensureAssetExecution(userId: string, programId: string, assetId: string) {
   return prisma.$transaction(async tx => {

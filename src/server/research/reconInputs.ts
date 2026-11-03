@@ -3,6 +3,7 @@ import type { ReconRun } from './reconContext';
 /** Flatten per-host derivatives under their real scan ID, never invent source scans. */
 export function expandAssetReconRuns(runs: Array<ReconRun & { assetResults?: unknown }>): ReconRun[] {
   return runs.flatMap(run => {
+    if (run.artifacts) return [run];
     const parsed = assetEvidenceSchema.safeParse(run.assetResults);
     if (!parsed.success) return [run];
     return [...parsed.data.hosts.map(host => ({ ...run, target: { host: host.hostname }, reconCorpus: host.corpus,

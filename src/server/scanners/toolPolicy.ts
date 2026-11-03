@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { assertExecutionUrl, currentTargetExecution } from "@/server/execution";
+import { reconToolArguments } from '@/server/recon/toolArguments';
 
 export const TOOL_CONFIG = join(process.cwd(), "src/server/scanners/templates/config.yaml");
 export const DALFOX_CONFIG = join(process.cwd(), "src/server/scanners/templates/dalfox-config.json");
@@ -9,6 +10,7 @@ const HTTP_TOOLS = new Set(["httpx", "katana", "nuclei", "dalfox"]);
 export function enforcedToolArgs(cmd: string, args: string[]): string[] {
   const ctx = currentTargetExecution();
   if (ctx.requestGuard) throw new Error("External CLI request counts cannot be enforced inside a bounded Hunt");
+  if (ctx.reconPlan) return reconToolArguments(cmd,args,{...ctx,reconPlan:ctx.reconPlan});
   if (cmd === 'gau') {
     const seed = ctx.scopeAsset?.format === 'WILDCARD_DOMAIN' ? ctx.scopeAsset.normalizedValue.slice(2) : undefined;
     if (!ctx.programReconId || !seed || args.length !== 1 || args[0] !== seed) throw new Error('Unauthorized historical URL lookup');

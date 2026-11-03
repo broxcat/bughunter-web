@@ -333,3 +333,5 @@ docker compose exec -T -e BH_FINAL_STACK_SMOKE=1 web npm run test:research:final
 
 Tests use disposable/local services. Real Burp GUI and remote Codex inference
 require operator setup and are never asserted from fixture/config checks alone.
+
+Adaptive Target-wide Recon, structured artifacts, compact Scope → Recon → Research → Findings UI and deployment: [Target Recon playbooks](docs/target-recon-playbooks.md).

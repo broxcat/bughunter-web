@@ -16,7 +16,7 @@ describe("standalone worker integration", () => {
     try {
       const { ready } = await import("@/server/queue/worker"); await ready;
       expect(mocks.maintain).toHaveBeenCalledOnce(); expect(mocks.start).toHaveBeenCalledOnce();
-      expect(mocks.construct.mock.calls[0][2]).toEqual({ connection: mocks.redis, concurrency: 1, autorun: false, maxStalledCount: 1 });
+      expect(mocks.construct.mock.calls[0][2]).toEqual({ connection: mocks.redis, concurrency: 2, autorun: false, maxStalledCount: 1 });
       expect(mocks.maintain.mock.invocationCallOrder[0]).toBeLessThan(mocks.run.mock.invocationCallOrder[0]);
       const lockLost = mocks.on.mock.calls.find(call => call[0] === "lockRenewalFailed")![1]; lockLost(["scan-id"]);
       expect(mocks.interrupt).toHaveBeenCalledWith("scan-id", "WORKER_LOCK_LOST");
