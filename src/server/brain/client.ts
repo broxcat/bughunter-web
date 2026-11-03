@@ -39,6 +39,8 @@ export interface ChatOptions {
    * token budget on hidden thinking. Omitted = provider default (unchanged).
    */
   think?: boolean;
+  format?: Record<string, unknown>;
+  maxResponseBytes?: number;
 }
 
 const DEFAULT_MAX_TOKENS = 4000;
@@ -161,7 +163,11 @@ export class BrainClient {
           res.status,
         );
       }
-      return await res.json();
+      if (!opts.maxResponseBytes) return await res.json();
+      const reader=res.body!.getReader(); let size=0; const chunks:Uint8Array[]=[];
+      try { while(true){const {done,value}=await reader.read(); if(done)break; size+=value.length;if(size>opts.maxResponseBytes)throw new Error('Provider response exceeds size limit');chunks.push(value);} }
+      finally {await reader.cancel();}
+      return JSON.parse(Buffer.concat(chunks).toString('utf8'));
     } finally {
       clearTimeout(timeout);
       finished(); release?.();
@@ -268,6 +274,7 @@ export class BrainClient {
       {
         model,
         stream: false,
+        ...(opts.format ? {format:opts.format} : {}),
         // `think` is a top-level /api/chat field (not an `options` key). Only
         // sent when explicitly set, so default behavior is unchanged.
         ...(opts.think !== undefined ? { think: opts.think } : {}),

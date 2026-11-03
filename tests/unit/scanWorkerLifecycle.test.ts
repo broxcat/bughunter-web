@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ construct: vi.fn(), on: vi.fn(), pause: vi.fn(async () => {}), run: vi.fn(async () => {}), workerClose: vi.fn(async () => {}), start: vi.fn(), dispatcherClose: vi.fn(async () => {}), maintain: vi.fn(async () => {}), maintenanceClose: vi.fn(async () => {}), stop: vi.fn(), shutdown: vi.fn(async () => {}), redis: { options: { maxRetriesPerRequest: null }, disconnect: vi.fn() }, process: vi.fn(), interrupt: vi.fn() }));
+vi.mock("@/server/recon/summaries", () => ({ startReconSummaryWorker: () => ({close: mocks.maintenanceClose}) }));
 vi.mock("bullmq", () => ({ Worker: class { constructor(...args: unknown[]) { mocks.construct(...args); } on = mocks.on; close = mocks.workerClose; pause = mocks.pause; run = mocks.run; } }));
 vi.mock("@/server/queue/connection", () => ({ redis: mocks.redis }));
 vi.mock("@/server/queue/processScan", () => ({ createScanProcessor: () => ({ process: mocks.process, stopAccepting: mocks.stop, shutdown: mocks.shutdown, interrupt: mocks.interrupt }) }));
@@ -24,7 +25,7 @@ describe("standalone worker integration", () => {
       shutdown("SIGTERM"); await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0));
       expect(mocks.stop).toHaveBeenCalledOnce(); expect(mocks.pause).toHaveBeenCalledWith(true);
       expect(mocks.shutdown).toHaveBeenCalledOnce(); expect(mocks.workerClose).toHaveBeenCalledWith(true);
-      expect(mocks.dispatcherClose).toHaveBeenCalledOnce(); expect(mocks.maintenanceClose).toHaveBeenCalledOnce(); expect(mocks.redis.disconnect).toHaveBeenCalledOnce();
+      expect(mocks.dispatcherClose).toHaveBeenCalledOnce(); expect(mocks.maintenanceClose).toHaveBeenCalledTimes(2); expect(mocks.redis.disconnect).toHaveBeenCalledOnce();
     } finally {
       for (const listener of process.listeners("SIGTERM")) if (!originalTerm.includes(listener)) process.removeListener("SIGTERM", listener);
       for (const listener of process.listeners("SIGINT")) if (!originalInt.includes(listener)) process.removeListener("SIGINT", listener);

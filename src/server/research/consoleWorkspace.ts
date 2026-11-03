@@ -100,6 +100,7 @@ export async function ensureTargetConsole(userId: string, targetId: string) {
     await tx.$queryRaw`SELECT "id" FROM "Scope" WHERE "id" = ${target.scope.id} FOR SHARE`;
     if (target.program) await tx.$queryRaw`SELECT "id" FROM "BountyProgram" WHERE "id" = ${target.program.id} FOR SHARE`;
     target = await tx.target.findUniqueOrThrow({ where: { id: targetId }, select: researchTargetSelect });
+    if(target.consoleDeletingAt)throw new ResearchError('Console deletion in progress; retry deletion',409);
     assertResearchTarget(target, userId);
     const current = researchAuthorizationSnapshot(target);
     const existing = await tx.researchSession.findUnique({ where: { consoleTargetId: targetId }, select: researchSessionSelect });

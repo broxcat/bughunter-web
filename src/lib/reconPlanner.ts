@@ -1,8 +1,8 @@
-import { assetAllowsUrl, detectScopeAsset, type AssetBoundary } from './scopeAssets';
+import { assetAllowsUrl, scopeAssetExecutable, type AssetBoundary } from './scopeAssets';
 import { isExcluded } from './bountyProgram';
 import { isSafeReadUrl } from './observationSafety';
 
-export type ReconTool = 'subfinder' | 'amass' | 'assetfinder' | 'httpx' | 'nmap' | 'ffuf' | 'nuclei' | 'burp' | 'internal';
+export type ReconTool = 'subfinder' | 'amass' | 'assetfinder' | 'httpx' | 'nmap' | 'ffuf' | 'gobuster' | 'nuclei' | 'burp' | 'internal';
 export type ReconDepth = 'LIGHT' | 'STANDARD' | 'DEEP';
 export const RECON_CAPACITY = { globalAssets: 2, perTarget: 1, maxHttpRps: 6, processesPerTool: 1 } as const;
 export const RECON_BUDGETS = {
@@ -17,28 +17,30 @@ export type ReconPlan = {
   version: 2; scopeAssetId: string; format: string; type: string; assetValue: keyof typeof RECON_BUDGETS;
   activityMode: 'PASSIVE' | 'ACTIVE'; depth: ReconDepth; boundary: AssetBoundary;
   stages: ReconStagePlan[]; limits: { maxDurationMs: number; rps: number; maxRequests: number; maxHosts: number; enrichHosts: number; ffufSeconds: number; ffufDepth: number; words: number; ports: readonly number[]; templates: number; passiveSeconds: number; crawlPages: number; maxConcurrency: number }; rationale: string[];
+  gobuster?: {dir:boolean;dns:boolean;vhost:false;seconds:number;words:number;reason:string};
   ffufProfile: string; authorization: { active: boolean; exclusions: string[] };
 };
 export function buildReconPlan(asset: { id: string; normalizedValue: string; format: string; type: string; assetValue: string; active: boolean }, authorization: { active: boolean; exclusions: string[] }): ReconPlan {
   const value = Object.hasOwn(RECON_BUDGETS, asset.assetValue) ? asset.assetValue as keyof typeof RECON_BUDGETS : 'MEDIUM';
   const budget = RECON_BUDGETS[value], wildcard = asset.format === 'WILDCARD_DOMAIN';
-  const executable = detectScopeAsset(asset.normalizedValue).executable;
+  const executable = scopeAssetExecutable(asset);
   const active = asset.active && authorization.active && executable && (asset.format!=='URL'||isSafeReadUrl(asset.normalizedValue));
   const httpOnly = asset.format === 'URL', api = asset.type === 'API';
   const limits = { ...budget, maxConcurrency: 1, maxHosts: wildcard ? budget.maxHosts : 1, enrichHosts: wildcard ? budget.enrichHosts : 1,
     maxDurationMs: wildcard ? budget.maxDurationMs : Math.min(budget.maxDurationMs, httpOnly ? 600000 : 900000),
     maxRequests: wildcard ? budget.maxRequests : Math.min(budget.maxRequests, httpOnly ? 300 : 600),
     ports: httpOnly ? [] : api || asset.type === 'WEB_APPLICATION' ? budget.ports.filter(p => [80,443,3000,5000,8000,8080,8443,9000].includes(p)) : [...budget.ports] };
+  const gobuster={dir:active && (asset.type==='WEB_APPLICATION'||api&&budget.depth!=='LIGHT'||httpOnly&&!api),dns:active&&wildcard&&budget.depth==='DEEP',vhost:false as const,seconds:Math.min(30,budget.ffufSeconds),words:budget.depth==='LIGHT'?6:budget.depth==='STANDARD'?4:8,reason:'Dir uses disjoint bounded words behind the HTTP scope relay; DNS only for explicitly authorized DEEP wildcard descendants. Vhost disabled: exact hosts do not authorize other virtual hosts.'};
   const stages = RECON_STAGE_NAMES.map(name => {
     const passive = ['Preflight', 'Passive discovery', 'Host prioritization', 'Burp enrichment', 'Normalization', 'Scope intelligence'].includes(name);
     const enabled = name === 'Passive discovery' ? wildcard && asset.active : name === 'Ports / services' ? active && !httpOnly : passive || active;
-    const tools: ReconTool[] = name === 'Passive discovery' ? ['subfinder','amass','assetfinder'] : name === 'HTTP surface' ? ['httpx'] : name === 'Ports / services' ? ['nmap'] : name === 'Content discovery' ? ['ffuf'] : name === 'Nuclei Recon' ? ['nuclei'] : name === 'Burp enrichment' ? ['burp'] : ['internal'];
+    const tools: ReconTool[] = name === 'Passive discovery' ? ['subfinder','amass','assetfinder'] : name === 'HTTP surface' ? ['httpx'] : name === 'Ports / services' ? ['nmap'] : name === 'Content discovery' ? [...(gobuster.dir&&budget.depth==='LIGHT'?[]:['ffuf' as const]),...(gobuster.dir?['gobuster' as const]:[])] : name === 'Scope validation / DNS'&&gobuster.dns ? ['internal','gobuster'] : name === 'Nuclei Recon' ? ['nuclei'] : name === 'Burp enrichment' ? ['burp'] : ['internal'];
     return { name, tools, mode: passive ? 'PASSIVE' as const : 'ACTIVE' as const, enabled,
       reason: !enabled ? httpOnly && name === 'Ports / services' ? 'URL authorization does not grant host-wide port discovery.' : !active ? 'Effective authorization does not permit active target traffic.' : 'Exact host/URL: no parent-domain enumeration.' : name === 'Burp enrichment' ? 'Read existing, authorized history only; never start an agent.' : `${budget.depth} ${api ? 'API' : asset.type} collection within the immutable asset boundary.` };
   });
   return { version: 2, scopeAssetId: asset.id, format: asset.format, type: asset.type, assetValue: value, activityMode: active ? 'ACTIVE' : 'PASSIVE', depth: budget.depth,
     boundary: { normalizedValue: asset.normalizedValue, format: asset.format, active: asset.active }, authorization, limits, stages,
-    ffufProfile: `${api ? 'API' : 'WEB'}_${budget.depth}`,
+    gobuster, ffufProfile: `${api ? 'API' : 'WEB'}_${budget.depth}`,
     rationale: [`${asset.format} selects ${wildcard ? 'multi-source passive discovery, validation, then progressive enrichment' : 'the exact selected host/origin/path; no scope expansion'}.`, `${asset.type} selects ${api ? 'API documentation and route' : 'web/service'} enrichment.`, `${value} selects ${budget.depth} depth and a bounded ${limits.maxDurationMs} ms / ${limits.maxRequests} request budget.`, 'Asset value changes budget and priority, never authorization. Active target traffic and depth are separate decisions.'] } as ReconPlan;
 }
 export function reconUrlAllowed(plan: ReconPlan, url: string) { try{return plan.activityMode === 'ACTIVE' && !isExcluded(new URL(url).hostname,plan.authorization.exclusions) && assetAllowsUrl(plan.boundary, url);}catch{return false;} }

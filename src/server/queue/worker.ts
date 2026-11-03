@@ -9,6 +9,8 @@ import { settlesWithin } from "@/server/scanControl";
 import { logger } from "@/lib/logger";
 import { RECON_CAPACITY } from '@/lib/reconPlanner';
 
+import { startReconSummaryWorker } from '../recon/summaries';
+let summaries:ReturnType<typeof startReconSummaryWorker>|undefined;
 const workerId = workerIdentity();
 const processor = createScanProcessor(workerId);
 // Keep normal lock renewal/stall detection. PostgreSQL, not maxStalledCount,
@@ -22,6 +24,7 @@ let closing = false;
 export const ready = (async () => {
   await maintainScanExecutions(); // Reconcile durable state before accepting work.
   if (closing) return;
+  summaries=startReconSummaryWorker();
   dispatcher = startScanDispatcher();
   maintenance = startExecutionMaintenance();
   void worker.run().catch(() => logger.error({ workerId, reason: "WORKER_RUN_FAILED" }, "worker stopped processing"));
@@ -41,6 +44,7 @@ async function shutdown() {
   void worker.pause(true).catch(() => {});
   await Promise.all([
     processor.shutdown(),
+    summaries?.close(),
     settlesWithin(Promise.all([dispatcher?.close(), maintenance?.close()]), 2000),
   ]);
   await settlesWithin(worker.close(true), 2000);

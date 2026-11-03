@@ -124,4 +124,24 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
     mocks.auth.mockResolvedValue({ user: { id: otherId } }); expect((await api.GET(new Request('http://app.example.test'), context())).status).toBe(404); expect((await edit.PATCH(request({ type: 'API' }, 'PATCH'), context(a.id))).status).toBe(404); expect((await recon.GET(new Request('http://app.example.test'), context(a.id))).status).toBe(404);
     mocks.auth.mockResolvedValue(null); expect((await api.GET(new Request('http://app.example.test'), context())).status).toBe(401);
   });
+  it('confirms boundary expansion, persists manual Format through reload/backfill and snapshots the next Recon only',async()=>{
+    const a=await create('example.test');
+    const before=await parentRecon.POST(request(),context());expect(before.status).toBe(202);
+    const old=await p.scanRun.findFirstOrThrow({where:{scopeAssetId:a.id}});const captured=old.reconPlan;
+    expect((await edit.PATCH(request({format:'WILDCARD_DOMAIN'},'PATCH'),context(a.id))).status).toBe(409);
+    expect((await edit.PATCH(request({format:'WILDCARD_DOMAIN',confirmBoundaryChange:true},'PATCH'),context(a.id))).status).toBe(200);
+    const reloaded=await service.listScopeAssets(userId,programId);expect(reloaded.find(i=>i.id===a.id)).toMatchObject({normalizedValue:'*.example.test',format:'WILDCARD_DOMAIN',formatSource:'MANUAL'});
+    expect((await p.scanRun.findUniqueOrThrow({where:{id:old.id}})).reconPlan).toEqual(captured);
+    const {loadTargetExecution,withTargetExecution}=await import('@/server/execution');
+    const {assertLiveAsset}=await import('@/server/recon/assetPipeline');
+    const ctx=await loadTargetExecution(old.targetId,'RECON',captured as unknown as import('@/lib/reconPlanner').ReconPlan);
+    expect(ctx.scopeAsset?.normalizedValue).toBe('example.test');
+    expect((await withTargetExecution(ctx,assertLiveAsset)).format).toBe('DOMAIN');
+    await p.scanRun.update({where:{id:old.id},data:{status:'COMPLETED',outcome:'SUCCESS',finishedAt:new Date()}});await p.targetReconRun.updateMany({where:{programId},data:{status:'COMPLETED',outcome:'SUCCESS'}});
+    const next=await parentRecon.POST(request(),context());expect(next.status).toBe(202);
+    const run=await p.scanRun.findFirstOrThrow({where:{scopeAssetId:a.id,id:{not:old.id}}});expect(run.scopeAssetSnapshot).toMatchObject({format:'WILDCARD_DOMAIN',formatSource:'MANUAL'});
+    expect((await edit.PATCH(request({resetFormatToAuto:true,confirmBoundaryChange:true},'PATCH'),context(a.id))).status).toBe(200);
+    expect(await p.scopeAsset.findUniqueOrThrow({where:{id:a.id}})).toMatchObject({normalizedValue:'example.test',format:'DOMAIN',formatSource:'AUTO'});
+  });
+
 });

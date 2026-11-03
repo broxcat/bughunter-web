@@ -74,8 +74,8 @@ export async function cancelTargetRecon(userId:string,programId:string,id:string
 export async function targetReconState(userId:string,programId:string) {
   if(!await prisma.bountyProgram.findFirst({where:{id:programId,ownerId:userId}}))throw new ResearchError('Target not found',404);
   const runs=await prisma.targetReconRun.findMany({where:{programId},take:10,orderBy:[{createdAt:'desc'},{id:'desc'}],include:{scans:{select:{id:true,scopeAssetId:true,status:true,outcome:true,scopeAssetSnapshot:true,_count:{select:{artifacts:true}}}}}});
-  const assets=await prisma.scopeAsset.findMany({where:{programId,active:true},select:{id:true,normalizedValue:true,type:true,assetValue:true}});
-  const latest=runs[0],needsRecon=!latest||assets.some(a=>!latest.scans.some(s=>{const p=s.scopeAssetSnapshot as {normalizedValue?:string;type?:string;assetValue?:string}|null;return s.scopeAssetId===a.id&&p?.normalizedValue===a.normalizedValue&&p.type===a.type&&p.assetValue===a.assetValue;}));
+  const assets=await prisma.scopeAsset.findMany({where:{programId,active:true},select:{id:true,normalizedValue:true,format:true,type:true,assetValue:true}});
+  const latest=runs[0],needsRecon=!latest||assets.some(a=>!latest.scans.some(s=>{const p=s.scopeAssetSnapshot as {normalizedValue?:string;format?:string;type?:string;assetValue?:string}|null;return s.scopeAssetId===a.id&&p?.normalizedValue===a.normalizedValue&&p.format===a.format&&p.type===a.type&&p.assetValue===a.assetValue;}));
   const findingsConfirmed=await prisma.finding.count({where:{target:{programId,userId},reviewStatus:'CONFIRMED'}}),researchStarted=await prisma.target.count({where:{programId,userId,OR:[{scopeAsset:{active:true}},{discoveredFromAsset:{active:true}},{contextOnly:true}],researchSessions:{some:{consoleTargetId:{not:null}}}}});
   return{latest:latest??null,runs,needsRecon,findingsConfirmed,researchStarted,researchReady:Boolean(latest?.scopeMarkdown&&!needsRecon&&['COMPLETED','FAILED'].includes(latest.status))};
 }

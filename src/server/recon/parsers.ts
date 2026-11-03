@@ -44,3 +44,10 @@ export function parseNuclei(line:string, allowed: readonly string[], templateVer
     return [{kind:'observation',observed:true,value:{url:text(r['matched-at'],4096),type:'nuclei-recon',templateId:id,templateVersion,tags:(Array.isArray(r.info?.tags)?r.info.tags:[]).filter((v:unknown)=>typeof v==='string').slice(0,20),severity:text(r.info?.severity,20),description:'Read-only Recon template matched; not a confirmed vulnerability.'}}];
   }catch{return[];}
 }
+
+/** Pinned Gobuster 3.8.2 expanded, uncoloured dir/DNS output. */
+export function parseGobuster(line:string,mode:'dir'|'dns'):ParsedRecon[] {
+  if(mode==='dns'){const host=/^([a-z0-9.-]+)(?:\s|$)/i.exec(line)?.[1];return host&&host.includes('.')?[{kind:'hostname',value:{hostname:host},observed:true}]:[];}
+  const match=/^(https?:\/\/\S+)\s+\(Status: (\d{3})\)/.exec(line.trim());
+  return match?[{kind:'endpoint',value:{url:match[1],method:'GET',statusCode:Number(match[2]),type:'directory-discovery'},observed:true}]:[];
+}

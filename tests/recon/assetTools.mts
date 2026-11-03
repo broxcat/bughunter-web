@@ -32,6 +32,7 @@ try{
     assert(!JSON.stringify(scan.artifacts).includes('PRIVATE_COOKIE')&&!JSON.stringify(scan.artifacts).includes('PRIVATE_BODY'));
     const steps=scan.reconSteps.map(s=>({name:s.name,status:s.state,reason:s.reason}));console.log(JSON.stringify({type:asset.type,scan:scan.id,outcome:scan.outcome,discoveries:scan.artifacts.length,steps}));
     const logs=await prisma.scanLog.findMany({where:{scanRunId:scan.id},select:{line:true}});for(const tool of ['httpx','ffuf','nuclei'])assert(logs.some(l=>l.line.startsWith('$ '+tool+' ')),tool+' must actually execute');
+    if((scan.reconPlan as unknown as {gobuster?:{dir:boolean}})?.gobuster?.dir){assert(logs.some(l=>l.line.startsWith('$ gobuster dir ')),'Native Gobuster must execute');assert(scan.artifacts.some(a=>(a.sources as unknown as {tool:string}[]).some(s=>s.tool==='gobuster')),'Gobuster results must retain native provenance');}
     if(asset.format==='URL'){assert(scan.reconSteps.some(s=>s.name==='Ports / services'&&s.state==='SKIPPED'));assert(scan.artifacts.some(a=>a.kind==='endpoint'&&(a.value as {statusCode?:number}).statusCode===401));}
     else assert(logs.some(l=>l.line.startsWith('$ nmap ')),'Bounded native Nmap must execute');
     if(asset.type==='WILDCARD')for(const tool of ['subfinder','amass','assetfinder'])assert(logs.some(l=>l.line.startsWith('$ '+tool+' ')),'Actual offline passive source '+tool);

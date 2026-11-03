@@ -6,7 +6,7 @@ export type ReconEvidence = {
   confidence: 'OBSERVED' | 'INFERRED'; freshness: ReconFreshness; historical: boolean; inScope: boolean;
 };
 export type ResearchReconContext = {
-  scopeAssets?: Array<{ id: string; programId: string; originalValue: string; normalizedValue: string; format: string; type: string; assetValue: string; active: boolean }>;
+  scopeAssets?: Array<{ id: string; programId: string; originalValue: string; normalizedValue: string; format: string; formatSource?:string; type: string; assetValue: string; active: boolean }>;
   schemaVersion: 1; programId: string; scopeId: string; targetId: string; generatedAt: string;
   untrustedData: true; authorizationGranted: false; activeSuggestionsAllowed: boolean;
   sources: Array<{ id: string; scanId: string; targetId: string; tool: string; startedAt?: string; completedAt?: string; status: string; outcome?: string }>;

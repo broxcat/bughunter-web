@@ -5,6 +5,7 @@ export const ASSET_TYPES = ['API', 'WEB_APPLICATION', 'WILDCARD', 'OTHER'] as co
 export const ASSET_VALUES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 export type AssetType = typeof ASSET_TYPES[number];
 export type AssetValue = typeof ASSET_VALUES[number];
+export const ASSET_FORMATS = ['URL', 'WILDCARD_DOMAIN', 'DOMAIN', 'SUBDOMAIN', 'HOSTNAME', 'IP', 'CIDR'] as const;
 export type AssetFormat = 'URL' | 'WILDCARD_DOMAIN' | 'DOMAIN' | 'SUBDOMAIN' | 'HOSTNAME' | 'IP' | 'CIDR';
 export type AssetBoundary = { normalizedValue: string; format: string; active?: boolean };
 export const assetTypeLabel: Record<AssetType, string> = { API: 'API', WEB_APPLICATION: 'Web Application', WILDCARD: 'Wildcard', OTHER: 'Other' };
@@ -50,7 +51,7 @@ export function assetAllowsHost(boundary: AssetBoundary, hostname: string) {
   if (boundary.active === false) return false;
   try {
     if (boundary.format === 'URL') return new URL(boundary.normalizedValue).hostname === hostname;
-    return ['DOMAIN', 'SUBDOMAIN', 'WILDCARD_DOMAIN'].includes(boundary.format) && matchesHost(normalizeFqdn(hostname), boundary.normalizedValue);
+    return ['DOMAIN', 'SUBDOMAIN', 'HOSTNAME', 'WILDCARD_DOMAIN'].includes(boundary.format) && matchesHost(normalizeFqdn(hostname), boundary.normalizedValue);
   } catch { return false; }
 }
 export function assetAllowsUrl(boundary: AssetBoundary, value: string) {
@@ -66,11 +67,26 @@ export const assetInputSchema = z.strictObject({
   value: z.string().min(1).max(2048).refine(v => { try { detectScopeAsset(v); return true; } catch { return false; } }, 'Invalid or unsupported scope value'),
   type: z.enum(ASSET_TYPES).optional(), assetValue: z.enum(ASSET_VALUES).default('MEDIUM'),
 });
-export const assetEditSchema = z.strictObject({ type: z.enum(ASSET_TYPES).optional(), assetValue: z.enum(ASSET_VALUES).optional() }).refine(v => Object.keys(v).length > 0, 'Choose a type or asset value');
+export const assetEditSchema = z.strictObject({ format: z.enum(ASSET_FORMATS).optional(), resetFormatToAuto: z.boolean().optional(), confirmBoundaryChange: z.boolean().optional(), type: z.enum(ASSET_TYPES).optional(), assetValue: z.enum(ASSET_VALUES).optional() }).refine(v => Object.keys(v).length > 0, 'Choose a type or asset value');
 export function assetReconStatus(run: { status: string; outcome: string | null; finishedAt: string | Date | null } | null, now = Date.now()) {
   if (!run) return 'NOT_STARTED';
   if (run.status === 'QUEUED' || run.status === 'RUNNING' || run.status === 'CANCELLED') return run.status;
   if (run.outcome === 'PARTIAL') return 'PARTIAL';
   if (run.status !== 'COMPLETED' || run.outcome !== 'SUCCESS') return 'FAILED';
   return run.finishedAt && now - new Date(run.finishedAt).getTime() > 7 * 86400000 ? 'STALE' : 'COMPLETED';
+}
+
+/** Explicit operator choice only. Never infer a wider authorization at creation. */
+export function overrideAssetFormat(asset: {originalValue:string;normalizedValue:string;format:string}, format: AssetFormat) {
+  const detected = detectScopeAsset(asset.originalValue);
+  let normalizedValue = detected.normalizedValue;
+  if (['DOMAIN','SUBDOMAIN','HOSTNAME','WILDCARD_DOMAIN'].includes(format)) {
+    const host = detected.format === 'URL' ? new URL(normalizedValue).hostname : normalizedValue.replace(/^\*\./, '');
+    if (!host.includes('.') || ip(host)) throw new Error('This format requires an explicit fully qualified domain');
+    normalizedValue = normalizeFqdn((format === 'WILDCARD_DOMAIN' ? '*.' : '') + host);
+  } else if (detected.format !== format) throw new Error('The original value is incompatible with this format');
+  return {format, normalizedValue, requiresConfirmation: normalizedValue !== asset.normalizedValue};
+}
+export function scopeAssetExecutable(asset: AssetBoundary) {
+  try { return detectScopeAsset(asset.normalizedValue).executable && ['URL','DOMAIN','SUBDOMAIN','WILDCARD_DOMAIN','HOSTNAME'].includes(asset.format); } catch { return false; }
 }

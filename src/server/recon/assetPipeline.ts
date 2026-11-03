@@ -15,7 +15,7 @@ import { assetHostAllowed } from '../scopeAssets';
 import { analyzeCorpus } from './corpus';
 import { recordArtifact,artifactData,artifactSelect } from './artifacts';
 import { reconDiff, type ArtifactKind } from '@/lib/reconArtifacts';
-import { parsePassive,parseHttpx,parseFfuf,parseNmap,parseNuclei,type ParsedRecon } from './parsers';
+import { parseGobuster,parsePassive,parseHttpx,parseFfuf,parseNmap,parseNuclei,type ParsedRecon } from './parsers';
 import { inspectToolchain,type ToolStatus } from './toolchain';
 import { createReconRelay } from './transport';
 import { ReconProtection } from './protection';
@@ -28,9 +28,10 @@ import type { ProbeResult } from '../scanners/http';
 export async function assertLiveAsset() {
   const execution=currentTargetExecution(),boundary=execution.scopeAsset??execution.parentScopeAsset;if(!boundary)throw new Error('Asset context required');
   const asset=await prisma.scopeAsset.findUnique({where:{id:boundary.id},include:{program:true,executionTarget:{include:{scope:true}}}});
-  if(!asset||!asset.active||asset.program.deletingAt||asset.normalizedValue!==boundary.normalizedValue||asset.executionTarget?.scope.status!=='APPROVED')throw new Error('Scope asset authorization changed');
-  if(!execution.programReconId&&!assetHostAllowed(asset,execution.host.split(':')[0],asset.program.outOfScope))throw new Error('Host is outside current asset scope');
-  return asset;
+  if(!asset||!asset.active||asset.program.deletingAt||(!execution.reconPlan && asset.normalizedValue!==boundary.normalizedValue)||asset.executionTarget?.scope.status!=='APPROVED')throw new Error('Scope asset authorization changed');
+  const effective=execution.reconPlan ? {...asset,...boundary,format:execution.reconPlan.format as typeof asset.format,type:execution.reconPlan.type as typeof asset.type,assetValue:execution.reconPlan.assetValue} : asset;
+  if(!execution.programReconId&&!assetHostAllowed(effective,execution.host.split(':')[0],asset.program.outOfScope))throw new Error('Host is outside current asset scope');
+  return effective;
 }
 export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResult> {
   const initial=currentTargetExecution(),asset=await assertLiveAsset();
@@ -85,7 +86,16 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
       hosts.clear();bounded||=candidates.length>plan.limits.maxHosts;for(const host of candidates.slice(0,plan.limits.maxHosts))await inventory(host);
     }
     if(asset.format!=='WILDCARD_DOMAIN')await inventory(asset.format==='URL'?new URL(asset.normalizedValue).hostname:asset.normalizedValue);
-    await stage('Scope validation / DNS',async()=>{let errors=0;for(const [host,data]of hosts){
+    await stage('Scope validation / DNS',async()=>{
+      let dnsFailed=false;
+      if(plan.gobuster?.dns){
+        const {createReconDnsRelay}=await import('./dnsRelay');const relay=await createReconDnsRelay(plan,signal,assertLiveAsset);
+        const path=join(temp,'dns-profile.txt');await writeFile(path,['api','auth','portal','admin','www','dev','staging','docs'].slice(0,plan.gobuster.words).join('\n')+'\n',{mode:0o600});
+        try{await withTargetExecution({...currentTargetExecution(),gobusterWordlist:path,gobusterResolver:relay.resolver},()=>command('gobuster',['dns'],async line=>{
+          for(const item of parseGobuster(line,'dns')){const row=await add(item.kind,item.value,'gobuster',true);if(row?.scopeState==='IN_SCOPE'&&hosts.size<plan.limits.maxHosts){await inventory(String(row.value.hostname));await persistProgramDiscovery(scanRunId,String(row.value.hostname),'GOBUSTER');}}
+        },plan.gobuster!.seconds));}catch{dnsFailed=true;}finally{await relay.close();}
+      }
+      let errors=0;for(const [host,data]of hosts){
       await assertLiveAsset();if(!assetHostAllowed(asset,host,asset.program.outOfScope))continue;
       const resolver=new Resolver({timeout:2500,tries:1});const release=currentScanControl()?.track(async()=>resolver.cancel());
       try{await beforeScanNetwork();const result=await Promise.allSettled([resolver.resolve4(host),resolver.resolve6(host),resolver.resolveCname(host)]);
@@ -93,7 +103,7 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
         const cname=result[2];if(cname.status==='fulfilled')for(const value of cname.value.slice(0,10))await add('hostname',{hostname:value,relationship:'CNAME',origin:host},'dns',true);
         if(!data.resolved)errors++;
       }finally{release?.();}
-    }if(errors)throw new Error('PARTIAL: Some discovered hosts did not resolve; no network/service scan will be started for them.');});
+    }if(errors||dnsFailed)throw new Error('PARTIAL: DNS enrichment incomplete; some discovered hosts did not resolve; no network/service scan will be started for them.');});
     const available=[...hosts.entries()].filter(([,h])=>h.resolved).sort((a,b)=>b[1].rank.score-a[1].rank.score||a[0].localeCompare(b[0]));
     const relays=new Map<string,Awaited<ReturnType<typeof createReconRelay>>>(),protections=new Map<string,ReconProtection>();
     const capture=async(host:string,page:ProbeResult)=>{
@@ -149,13 +159,22 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
     }),!selected.length?'No validated HTTP service; no web content requests.':undefined);
     await stage('Content discovery',()=>eachWeb(async(_host,data,relay)=>{
       const words=(await readFile(join(process.cwd(),'src/server/recon/wordlists',asset.type==='API'?'api.txt':'web.txt'),'utf8')).split(/\r?\n/).filter(Boolean).slice(0,plan.limits.words);
+      // LIGHT uses one engine; STANDARD/DEEP partition words to avoid duplicate requests.
+      const gobusterWords=plan.gobuster?.dir ? (plan.depth==='LIGHT'?words:words.splice(-plan.gobuster.words)) : [];
+      let gobusterFailed=false;
+      if(gobusterWords.length){const gp=join(temp,'gobuster-dir.txt');await writeFile(gp,gobusterWords.join('\n')+'\n',{mode:0o600});
+        try{await withTargetExecution({...currentTargetExecution(),gobusterWordlist:gp},()=>command('gobuster',['dir','-u',relay.toRelay(data.url!.endsWith('/')?data.url!:data.url!+'/'),'-w',gp],async line=>{
+          for(const item of parseGobuster(line,'dir'))try{item.value.url=relay.mapUrl(String(item.value.url));await rows([item],'gobuster');}catch{}
+        },plan.gobuster!.seconds));}catch{gobusterFailed=true;}
+      }
       const path=join(temp,'profile.txt');await writeFile(path,words.join('\n')+'\n',{mode:0o600});
       const queue=[data.url!.endsWith('/')?data.url!:data.url!+'/'],visited=new Set<string>();
-      for(let depth=0;depth<=plan.limits.ffufDepth&&queue.length;depth++){
+      for(let depth=0;!(plan.gobuster?.dir&&plan.depth==='LIGHT')&&depth<=plan.limits.ffufDepth&&queue.length;depth++){
         const next:string[]=[];for(const base of queue.splice(0,Math.max(1,plan.limits.ffufDepth))){if(visited.has(base))continue;visited.add(base);if(!assetAllowsUrl(asset,base))continue;
           await withTargetExecution({...currentTargetExecution(),ffufWordlist:path},()=>command('ffuf',['-u',relay.toRelay(base)+'FUZZ','-w',path],async line=>{for(const item of parseFfuf(line)){try{item.value.url=relay.mapUrl(String(item.value.url));await rows([item],'ffuf');if(String(item.value.url).endsWith('/')&&Number(item.value.statusCode)<400)next.push(String(item.value.url));}catch{}}},plan.limits.ffufSeconds+2));
         }queue.push(...next.slice(0,plan.limits.ffufDepth));
       }
+      if(gobusterFailed)throw new Error('PARTIAL: Gobuster discovery incomplete; other evidence retained.');
     }),!selected.length?'No validated HTTP service.':undefined);
     await stage('Nuclei Recon',()=>eachWeb(async(_host,data,relay)=>{
       await command('nuclei',['-u',relay.toRelay(data.url!)],async line=>{try{const r=JSON.parse(line);if(typeof r['matched-at']==='string')r['matched-at']=relay.mapUrl(r['matched-at']);await rows(parseNuclei(JSON.stringify(r),RECON_TEMPLATE_IDS.slice(0,plan.limits.templates),RECON_TEMPLATE_VERSION),'nuclei');}catch{}},Math.min(90,plan.limits.ffufSeconds+15));

@@ -1,43 +1,16 @@
-import { constants } from 'node:fs';
-import { open, lstat, rm, realpath } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { lstat } from 'node:fs/promises';
+import { join } from 'node:path';
 import { prisma } from '@/lib/prisma';
 import { logger } from '@/lib/logger';
 import { issueStopTicket, targetIdentity, targetWorkspaceId } from '@/lib/research/terminal';
-import { workspacePath, ResearchError } from './research/workspace';
+import { ResearchError } from './research/workspace';
 import { researchRootFor } from './research/sessions';
+import { revokeWorkspace,removeWorkspace } from './research/workspaceCleanup';
 import { consoleRoot } from './research/consoleWorkspace';
 import { readTerminalSigningKey } from './research/terminalKey';
 import { requestScanCancellation, settleQueuedCancellations } from './queue/scanCancellation';
 import { purgeScanJobs } from './queue/scanQueue';
 
-async function safeRoot(root: string) {
-  if (await realpath(root) !== resolve(root)) throw new ResearchError('Unsafe workspace root', 409);
-}
-async function revokeWorkspace(root: string, workspaceId: string) {
-  const path = workspacePath(root, workspaceId);
-  try {
-    await safeRoot(root);
-    const directory = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-    try {
-      const marker = await open(`/proc/self/fd/${directory.fd}/.deleting`, constants.O_RDONLY | constants.O_CREAT | constants.O_NOFOLLOW, 0o440);
-      await marker.close();
-    } finally { await directory.close(); }
-  } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
-}
-async function removeWorkspace(root: string, workspaceId: string) {
-  try { await safeRoot(root); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return; throw e; }
-  const path = workspacePath(root, workspaceId);
-  for (const entry of [path, join(root, `.tmp-${workspaceId}`), join(root, '.exports', `${workspaceId}.zip`), join(root, '.exports', `.tmp-${workspaceId}`)]) {
-    // Never traverse an operator-replaced export directory.
-    if (dirname(entry) !== root) {
-      const parent = await lstat(dirname(entry)).catch(e => { if (e.code !== 'ENOENT') throw e; return null; });
-      if (!parent) continue;
-      if (!parent.isDirectory() || parent.isSymbolicLink()) throw new ResearchError('Unsafe workspace export', 409);
-    }
-    await rm(entry, { recursive: true, force: true });
-  }
-}
 export async function deleteProgram(userId: string, programId: string) {
   targetIdentity.parse(programId);
   // Durable tombstone is committed before external cleanup. A retry resumes it.
@@ -48,10 +21,9 @@ export async function deleteProgram(userId: string, programId: string) {
     return true;
   });
   if (!exists) return; // Idempotent; discloses no ownership information.
-  await prisma.$transaction(async tx => {
-    // One cleanup at a time across replicas; don't hold program/scan row locks
-    // while waiting for workers to confirm cancellation.
-    await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${programId}, 0))`;
+  // External cleanup uses the committed tombstone; do not hold a transaction
+  // open across potentially slow provider shutdowns. Every step is idempotent.
+  const tx=prisma;
     const program = await tx.bountyProgram.findFirst({ where: { id: programId, ownerId: userId } });
     if (!program) return;
     const targets = await tx.target.findMany({ where: { programId }, select: { id: true, scopeId: true, userId: true } });
@@ -69,6 +41,8 @@ export async function deleteProgram(userId: string, programId: string) {
         if (stat) { sessions.push({ workspaceId, targetId: target.id }); break; }
       }
     }
+    await prisma.targetReconRun.updateMany({where:{programId,status:{in:['QUEUED','RUNNING']}},data:{cancelRequestedAt:new Date()}});
+    await prisma.reconSummary.updateMany({where:{programId,status:{in:['PENDING','RUNNING']}},data:{status:'CANCELLED'}});
     for (const run of runs) await requestScanCancellation(run.id, userId);
     await settleQueuedCancellations();
     for (const session of sessions) await revokeWorkspace(researchRootFor(session.workspaceId), session.workspaceId);
@@ -94,6 +68,8 @@ export async function deleteProgram(userId: string, programId: string) {
     for (const session of sessions) await removeWorkspace(researchRootFor(session.workspaceId), session.workspaceId);
     // Reports spanning other targets and OOB tokens shared with other findings
     // remain intact. Exclusive report content must not survive SET NULL FKs.
+    await prisma.$transaction(async tx=>{
+    const present=await tx.$queryRaw<{id:string}[]>`SELECT id FROM "BountyProgram" WHERE id=${programId} AND "ownerId"=${userId} FOR UPDATE`;if(!present.length)return;
     const ownedFinding = { targetId: { in: ids } };
     const tokens = await tx.finding.findMany({ where: { ...ownedFinding, oobToken: { not: null } }, select: { oobToken: true } });
     await tx.report.deleteMany({ where: { userId, OR: [{ targetId: { in: ids } }, { items: { some: { finding: ownedFinding } } }], NOT: { items: { some: { finding: { targetId: { notIn: ids } } } } } } });
@@ -104,5 +80,5 @@ export async function deleteProgram(userId: string, programId: string) {
     await tx.scope.deleteMany({ where: { id: { in: targets.map(t => t.scopeId) }, userId, targets: { none: {} } } });
     await tx.bountyProgram.delete({ where: { id: programId } });
     logger.info({ operation: 'program-delete', programId, userId }, 'Target resources removed after confirmed cleanup');
-  }, { timeout: 60000, maxWait: 1000 });
+  }, { timeout: 15000 });
 }

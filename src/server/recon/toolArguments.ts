@@ -3,7 +3,7 @@ import { assetAllowsUrl } from '@/lib/scopeAssets';
 import { isSafeReadUrl } from '@/lib/observationSafety';
 import type { ReconPlan } from '@/lib/reconPlanner';
 import { nucleiReconTemplates, NUCLEI_RECON_DENY } from './nucleiPolicy';
-export function reconToolArguments(tool:string,args:string[],ctx:{reconPlan:ReconPlan;host:string;requiredUserAgent:string;reconTempDir?:string;ffufWordlist?:string;reconRelayOrigin?:string;reconRelayTarget?:string}) {
+export function reconToolArguments(tool:string,args:string[],ctx:{reconPlan:ReconPlan;host:string;requiredUserAgent:string;reconTempDir?:string;ffufWordlist?:string;gobusterWordlist?:string;gobusterResolver?:string;reconRelayOrigin?:string;reconRelayTarget?:string}) {
   const p=ctx.reconPlan,b=p.limits,ua=['-H',`User-Agent: ${ctx.requiredUserAgent}`];
   if(['subfinder','amass','assetfinder'].includes(tool)) {
     const seed=p.boundary.format==='WILDCARD_DOMAIN'?p.boundary.normalizedValue.slice(2):undefined;
@@ -14,6 +14,10 @@ export function reconToolArguments(tool:string,args:string[],ctx:{reconPlan:Reco
     return ['enum','-passive','-nocolor','-d',seed,'-timeout',String(Math.max(1,Math.ceil(b.passiveSeconds/60))),'-dir',join(ctx.reconTempDir,'amass')];
   }
   if(p.activityMode!=='ACTIVE')throw new Error('Active Recon is not authorized');
+  if(tool==='gobuster'&&args[0]==='dns') {
+    if(!p.gobuster?.dns||p.format!=='WILDCARD_DOMAIN'||p.depth!=='DEEP'||!ctx.gobusterResolver||!/^127\.0\.0\.1:\d+$/.test(ctx.gobusterResolver)||!ctx.gobusterWordlist)throw new Error('Unauthorized DNS discovery');
+    return ['dns','--domain',p.boundary.normalizedValue.slice(2),'--resolver',ctx.gobusterResolver,'--protocol','udp','--wordlist',ctx.gobusterWordlist,'--threads','1','--delay',`${Math.ceil(1000/b.rps)}ms`,'--timeout','3s','--quiet','--no-progress','--no-color'];
+  }
   if(tool==='nmap') {
     if(!b.ports.length||p.format==='URL'||args.at(-1)!==ctx.host)throw new Error('Host-wide discovery is not authorized');
     return ['-sT','-Pn','-n','-p',b.ports.join(','),'--max-retries','0','--max-rate',String(Math.max(1,b.rps)),'--host-timeout','45s','-oX','-',ctx.host];
@@ -25,6 +29,10 @@ export function reconToolArguments(tool:string,args:string[],ctx:{reconPlan:Reco
   const remote=new URL(local.pathname+local.search,new URL(ctx.reconRelayTarget).origin);
   if(remote.host!==ctx.host||!assetAllowsUrl(p.boundary,remote.toString())||!isSafeReadUrl(remote.toString()))throw new Error('URL outside Recon scope');
   if(tool==='httpx')return ['-u',url,'-silent','-json','-sc','-title','-ct','-location','-td','-tls-grab','-ob','-nfs','-duc','-threads','1','-rl',String(b.rps),'-timeout','8','-retries','0',...ua];
+  if(tool==='gobuster') {
+    if(args[0]!=='dir'||!p.gobuster?.dir||!ctx.gobusterWordlist||args[args.indexOf('-w')+1]!==ctx.gobusterWordlist)throw new Error('Unapproved Gobuster mode/profile');
+    return ['dir','-u',url,'--wordlist',ctx.gobusterWordlist,'--threads','1','--delay',`${Math.ceil(1000/b.rps)}ms`,'--timeout','8s','--useragent',ctx.requiredUserAgent,'--expanded','--quiet','--no-progress','--no-color'];
+  }
   if(tool==='ffuf') {
     if(!ctx.ffufWordlist||args[args.indexOf('-w')+1]!==ctx.ffufWordlist||!url.endsWith('/FUZZ'))throw new Error('Unapproved ffuf profile');
     // Recursion is scheduled in the worker after scope validation of every

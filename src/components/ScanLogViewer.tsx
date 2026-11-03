@@ -10,10 +10,11 @@ type LogEntry = { line: string; stream: "STDOUT" | "STDERR"; createdAt: string }
 
 const TERMINAL = new Set<string>(["COMPLETED", "FAILED", "CANCELLED"]);
 
-export default function ScanLogViewer({ scanRunId }: { scanRunId: string }) {
-  return <ScanLogSession key={scanRunId} scanRunId={scanRunId} />;
+type Stage={name:string;state:string;reason:string|null};
+export default function ScanLogViewer({ scanRunId,stages,cancelled }: { scanRunId: string;stages?:Stage[];cancelled?:boolean }) {
+  return <ScanLogSession key={scanRunId} scanRunId={scanRunId} stages={stages} cancelled={cancelled} />;
 }
-function ScanLogSession({ scanRunId }: { scanRunId: string }) {
+function ScanLogSession({ scanRunId,stages,cancelled }: { scanRunId: string;stages?:Stage[];cancelled?:boolean }) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<string>("CONNECTING");
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -29,7 +30,7 @@ function ScanLogSession({ scanRunId }: { scanRunId: string }) {
     es.addEventListener("log", (event) => {
       try {
         const entry = JSON.parse((event as MessageEvent).data) as LogEntry;
-        setLogs((prev) => [...prev, entry]);
+        setLogs((prev) => [...prev.slice(-1999), entry]);
       } catch {
         // ignore a malformed frame
       }
@@ -79,10 +80,11 @@ function ScanLogSession({ scanRunId }: { scanRunId: string }) {
     <div className="flex flex-col overflow-hidden rounded-md border border-neutral-800 bg-neutral-950">
       <div className="flex items-center justify-between border-b border-neutral-800 bg-neutral-900 px-4 py-2">
         <span className="font-mono text-xs font-medium uppercase tracking-wide text-neutral-400">
-          Scan output
+          {stages ? 'Recon Console' : 'Scan output'}
         </span>
         <div className="flex items-center gap-2"><Badge tone={presentation.tone} mono>{presentation.label}</Badge><ScanCancelButton scanRunId={scanRunId} status={status} requested={Boolean(cancelRequestedAt)} onRequested={setCancelRequestedAt} /></div>
       </div>
+      {stages&&<ol className="space-y-1 border-b border-neutral-800 px-4 py-3 font-mono text-xs text-neutral-200">{stages.map(s=><li key={s.name} className="flex flex-wrap gap-x-3"><span className="min-w-48">{s.name}</span><span>{cancelled&&['PENDING','RUNNING','SKIPPED'].includes(s.state)?'Cancelled':s.state.toLowerCase().replace(/^./,c=>c.toUpperCase())}</span>{s.reason&&['PARTIAL','BLOCKED','FAILED','SKIPPED'].includes(s.state)&&<span className="basis-full text-neutral-400">{s.reason}</span>}</li>)}</ol>}
       {execution?.state === "INTERRUPTED" && <p role="status" className="px-4 py-2 text-sm text-neutral-300">Exécution interrompue · relance automatique désactivée.</p>}
       <div className="h-96 overflow-y-auto bg-neutral-950 px-4 py-3 font-mono text-xs leading-relaxed">
         {logs.length === 0 ? (

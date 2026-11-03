@@ -63,6 +63,9 @@ RUN set -eux; \
     go install github.com/lc/gau/v2/cmd/gau@v2.2.4; \
     go install github.com/hahwul/dalfox/v2@v2.13.0
 
+# Independent layer preserves the expensive existing scanner build cache.
+RUN GOMAXPROCS=2 go install github.com/OJ/gobuster/v3@v3.8.2
+
 # Pre-pull nuclei templates into the image (written to /root/nuclei-templates
 # and /root/.config/nuclei); copied into the runtime stage below.
 RUN git clone --depth 1 --branch v10.5.1 https://github.com/projectdiscovery/nuclei-templates.git /root/nuclei-templates \

@@ -169,7 +169,7 @@ let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/progr
     await expect(context(userId,programId)).rejects.toThrow();await expect(ensure(userId,c.id)).rejects.toThrow('deletion');
     await expect(p.scanRun.create({data:{targetId:c.id,type:'RECON'}})).rejects.toThrow();
     await remove('foreign-user',programId);expect(await p.bountyProgram.findUnique({where:{id:programId}})).not.toBeNull();
-    vi.mocked(fetch).mockResolvedValue(Response.json({stopped:true}));
+    vi.mocked(fetch).mockImplementation(async()=>Response.json({stopped:true}));
     await Promise.all([remove(userId,programId),remove(userId,programId)]);expect(await p.bountyProgram.findUnique({where:{id:programId}})).toBeNull();
   });
   it('waits for a running worker to confirm resource cleanup before deleting scan rows',async()=>{

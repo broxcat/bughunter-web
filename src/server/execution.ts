@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { chromium, type Browser, type Route } from "playwright-chromium";
 import { prisma } from "@/lib/prisma";
 import { isExcluded, programSchema, matchesHost } from "@/lib/bountyProgram";
-import { assetAllowsUrl, assetAllowsHost, detectScopeAsset, type AssetBoundary } from '@/lib/scopeAssets';
+import { assetAllowsUrl, assetAllowsHost, scopeAssetExecutable, type AssetBoundary } from '@/lib/scopeAssets';
 import type { ReconPlan } from '@/lib/reconPlanner';
 
 export interface TargetRequestGuard {
@@ -17,6 +17,8 @@ export interface TargetExecution {
   reconPlan?: ReconPlan;
   reconTempDir?: string;
   ffufWordlist?: string;
+  gobusterWordlist?: string;
+  gobusterResolver?:string;
   reconRelayOrigin?: string;
   reconRelayTarget?: string;
   parentScopeAsset?: AssetBoundary & { id: string; programId: string; type: string; assetValue: string; originalValue: string };
@@ -46,7 +48,7 @@ export function scanRejection(target: { userId: string; host: string; active: bo
   if (!target.program || target.program.ownerId !== target.userId) return "Add this host to a Target with a required User-Agent before scanning";
   if (!programSchema.shape.requiredUserAgent.safeParse(target.program.requiredUserAgent).success || target.program.requiredUserAgent !== target.program.requiredUserAgent.trim()) return "Target requires a valid User-Agent";
   if (target.scopeAsset) {
-    if (!target.scopeAsset.active || !detectScopeAsset(target.scopeAsset.normalizedValue).executable) return 'Scope asset is archived or unsupported';
+    if (!target.scopeAsset.active || !scopeAssetExecutable(target.scopeAsset)) return 'Scope asset is archived or unsupported';
     if (target.scopeAsset.programId !== target.program.id) return 'Asset program mismatch';
     if (target.scopeAsset.format === 'WILDCARD_DOMAIN') return purpose === 'RECON' ? null : 'Wildcard is a discovery rule; Research stays passive until an authorized concrete host is selected';
     return isExcluded(target.host, target.program.outOfScope) ? 'Host is explicitly out of scope' : null;
@@ -57,13 +59,18 @@ export function scanRejection(target: { userId: string; host: string; active: bo
   if (isExcluded(target.host, target.program.outOfScope)) return "Host is explicitly out of scope";
   return null;
 }
-export async function loadTargetExecution(targetId: string, purpose: 'HOST' | 'RECON' = 'HOST'): Promise<TargetExecution> {
+export async function loadTargetExecution(targetId: string, purpose: 'HOST' | 'RECON' = 'HOST', captured?: ReconPlan): Promise<TargetExecution> {
   const target = await prisma.target.findUnique({ where: { id: targetId }, include: { program: true, scope: true, scopeAsset: true, discoveredFromAsset: true } });
   if (!target) throw new Error("Host not found");
+  if(captured && target.scopeAsset && !target.scopeAsset.active)throw new Error('Scope Asset archived');
+  if(captured && target.scopeAsset?.id===captured.scopeAssetId) {
+    target.scopeAsset={...target.scopeAsset,...captured.boundary,format:captured.format as NonNullable<typeof target.scopeAsset>['format'],type:captured.type as NonNullable<typeof target.scopeAsset>['type'],assetValue:captured.assetValue};
+    target.host=captured.format==='URL'?new URL(captured.boundary.normalizedValue).hostname:captured.boundary.normalizedValue;
+  }
   const error = scanRejection(target, purpose);
   if (error) throw new Error(error);
   if (target.discoveredFromAsset && (!target.discoveredFromAsset.active || !assetAllowsHost(target.discoveredFromAsset, target.host))) throw new Error('Parent Scope Asset no longer authorizes this discovered host');
-  return { targetId, host: target.scopeAsset?.format === 'URL' ? new URL(target.scopeAsset.normalizedValue).host : target.host, ...(target.scopeAsset ? { scopeAsset: target.scopeAsset } : {}), ...(target.discoveredFromAsset ? { parentScopeAsset: target.discoveredFromAsset } : {}), ...((target.contextOnly && !target.scopeAsset) || target.host.startsWith('*.') ? { programReconId: target.program!.id } : {}), requiredUserAgent: target.program!.requiredUserAgent,
+  return { ...(captured?{reconPlan:captured}:{}), targetId, host: target.scopeAsset?.format === 'URL' ? new URL(target.scopeAsset.normalizedValue).host : target.host, ...(target.scopeAsset ? { scopeAsset: target.scopeAsset } : {}), ...(target.discoveredFromAsset ? { parentScopeAsset: target.discoveredFromAsset } : {}), ...((target.contextOnly && !target.scopeAsset) || target.host.startsWith('*.') ? { programReconId: target.program!.id } : {}), requiredUserAgent: target.program!.requiredUserAgent,
     qualifying: target.program!.qualifying, nonQualifying: target.program!.nonQualifying };
 }
 /** Requests stay on the selected concrete identity. Discovery never grants access. */

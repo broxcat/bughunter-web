@@ -134,3 +134,13 @@ docker compose up -d --no-deps research-console
 ```
 
 Burp, PostgreSQL, Redis, terminal proxy, Tailscale and OOB catcher do not require recreation for this feature. Existing live scanner jobs should finish or be explicitly cancelled before replacing workers; started attempts are not automatically replayed after interruption. Back up application data according to the existing operational policy.
+
+## Gobuster 3.8.2
+
+Gobuster is pinned in a separate tools-image layer and included in runtime preflight/version records. Its audited native flags are checked against installed help. FFUF is retained.
+
+- `dir`: live authorized URL/Web Application profiles, and API STANDARD/DEEP. LIGHT uses Gobuster alone where enabled; STANDARD/DEEP partition existing curated words between FFUF and Gobuster. No duplicated wordlist sweep. One thread, 1/2/3 RPS through the same guarded relay, eight-second request timeout, 15-second LIGHT or at most 30-second higher-depth runtime, at most 6/4/8 words respectively. External process cancellation enforces the runtime. No redirect following, backup expansion, force-through-wildcard or automatic recursion. Existing HTTP backoff and request budgets apply; wildcard/error prechecks fail partially rather than bypassing protections.
+- `dns`: supplementary to passive engines, only ACTIVE + DEEP wildcard assets (High/Critical). Eight or fewer deterministic candidate labels, same low rate, at most 30 seconds and 60 DNS questions. An isolated local UDP resolver validates every A/AAAA/CNAME question through the existing asset/exclusion engine before forwarding; apex/neighbours/external names are rejected. Exact domains do not authorize subdomain guessing. DNS failures preserve other evidence.
+- `vhost`: deliberately disabled in current playbooks. Exact domain/subdomain/hostname assets do not authorize alternate Host headers; there is no separate wildcard vhost grant in the current asset model. The argument policy rejects attempts to select this mode. Discovered names never expand active scope.
+
+Gobuster output is parsed into the same normalized artifacts and deduplicated with FFUF while retaining both sources. Missing Gobuster produces explicit partial coverage. Manual Format changes are captured only by subsequent plans; see [summary/lifecycle details](recon-ollama-summary.md).

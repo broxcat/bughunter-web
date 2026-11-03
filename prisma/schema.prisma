@@ -166,11 +166,13 @@ model BountyProgram {
   targets           Target[]
   scopeAssets       ScopeAsset[]
   reconRuns TargetReconRun[]
+  reconSummaries ReconSummary[]
 
   @@index([ownerId])
 }
 
 model Target {
+  consoleDeletingAt DateTime?
   scopeAssetId String? @unique
   scopeAsset ScopeAsset? @relation("AssetExecution", fields: [scopeAssetId], references: [id], onDelete: SetNull)
   discoveredFromAssetId String?
@@ -276,6 +278,7 @@ enum CredentialMode {
 // ---------------------------------------------------------------------------
 
 model ScanRun {
+  reconSummaries ReconSummary[]
   targetReconRunId String?
   targetReconRun TargetReconRun? @relation(fields: [targetReconRunId], references: [id], onDelete: SetNull)
   reconOrder Int @default(0)
@@ -790,6 +793,7 @@ model ScopeAsset {
   programId String
   originalValue String
   normalizedValue String
+  formatSource String @default("AUTO")
   format ScopeAssetFormat
   type ScopeAssetType
   typeSource String @default("HEURISTIC")
@@ -802,6 +806,7 @@ model ScopeAsset {
   discoveredTargets Target[] @relation("AssetDiscoveries")
   scanRuns ScanRun[]
   artifacts ReconArtifact[]
+  reconSummaries ReconSummary[]
   @@unique([programId, normalizedValue])
   @@index([programId, active])
 }
@@ -843,6 +848,7 @@ model ResearchReconDelivery {
 
 // Parent execution contains immutable child membership, not another scan engine.
 model TargetReconRun {
+  reconSummaries ReconSummary[]
   id String @id @default(cuid())
   programId String
   program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
@@ -875,4 +881,32 @@ model ReconArtifact {
   scopeAsset ScopeAsset @relation(fields: [scopeAssetId], references: [id], onDelete: Cascade)
   @@unique([scanRunId, kind, canonicalKey])
   @@index([scopeAssetId, kind])
+}
+
+// Durable post-Recon tasks; never an investigation provider or source of facts.
+model ReconSummary {
+  id String @id @default(cuid())
+  programId String
+  scopeAssetId String?
+  scanRunId String?
+  targetReconRunId String?
+  automaticKey String? @unique
+  status String @default("PENDING")
+  model String
+  endpoint String
+  promptVersion String
+  sourceFingerprint String
+  input Json
+  content Json?
+  error String?
+  createdAt DateTime @default(now())
+  startedAt DateTime?
+  generatedAt DateTime?
+  program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  scopeAsset ScopeAsset? @relation(fields: [scopeAssetId], references: [id], onDelete: Cascade)
+  scanRun ScanRun? @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  targetReconRun TargetReconRun? @relation(fields: [targetReconRunId], references: [id], onDelete: Cascade)
+  @@index([status, createdAt])
+  @@index([programId, createdAt])
+  @@index([scopeAssetId, createdAt])
 }

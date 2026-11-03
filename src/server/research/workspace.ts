@@ -15,6 +15,7 @@ import { assetAllowsHost } from '@/lib/scopeAssets';
 
 // Explicit projection: no Prisma credential or AI secret can enter the exporter.
 export const researchTargetSelect = {
+  consoleDeletingAt:true,
   scopeAsset: { select: { id: true, programId: true, originalValue: true, normalizedValue: true, format: true, type: true, assetValue: true, active: true, updatedAt: true } },
   discoveredFromAsset: { select: { id: true, programId: true, originalValue: true, normalizedValue: true, format: true, type: true, assetValue: true, active: true, updatedAt: true } },
   id: true, userId: true, host: true, scheme: true, active: true, contextOnly: true, discoverySource: true,
@@ -23,7 +24,7 @@ export const researchTargetSelect = {
   credentials: { select: { label: true, purpose: true, sessionStatus: true } },
 } satisfies Prisma.TargetSelect;
 type SelectedResearchTarget = Prisma.TargetGetPayload<{ select: typeof researchTargetSelect }>;
-export type ResearchTarget = Omit<SelectedResearchTarget, 'scopeAsset' | 'discoveredFromAsset'> & Partial<Pick<SelectedResearchTarget, 'scopeAsset' | 'discoveredFromAsset'>>;
+export type ResearchTarget = Omit<SelectedResearchTarget, 'scopeAsset' | 'discoveredFromAsset' | 'consoleDeletingAt'> & Partial<Pick<SelectedResearchTarget, 'scopeAsset' | 'discoveredFromAsset' | 'consoleDeletingAt'>>;
 export const researchIsPassive = (target: ResearchTarget) => target.scopeAsset ? target.scopeAsset.format === 'WILDCARD_DOMAIN' : target.contextOnly;
 export type ResearchRecon = { id: string; reconCorpus: unknown } | null;
 export type ResearchFinding = { id: string; title: string; severity: string; vulnClass: string | null; reviewStatus: string; location: string | null };
@@ -34,6 +35,7 @@ export class ResearchError extends Error {
 export function assertResearchTarget(target: ResearchTarget, userId: string) {
   if (target.userId !== userId || target.scope.userId !== userId || target.program?.ownerId !== userId) throw new ResearchError("Target not found", 404);
   if (target.program?.deletingAt) throw new ResearchError('Target deletion is in progress', 409);
+  if(target.consoleDeletingAt)throw new ResearchError('Console deletion in progress; retry Delete to complete cleanup',409);
   const boundary = target.scopeAsset ?? target.discoveredFromAsset;
   if (boundary && (!boundary.active || (target.scopeAsset?.format !== 'WILDCARD_DOMAIN' && !assetAllowsHost(boundary, target.host)))) throw new ResearchError('Scope asset authorization is no longer active', 409);
   const legacyExclusions = target.scope.outOfScope?.toLowerCase().match(/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+/g) ?? [];
@@ -68,7 +70,7 @@ export function exportText(value: string): string {
 /** Immutable policy identity/version at export. No credentials or free text. */
 export function researchAuthorizationSnapshot(target: ResearchTarget) {
   return { targetId: target.id, host: target.host, scheme: target.scheme ?? "https",
-    ...(((target.scopeAsset ?? target.discoveredFromAsset)?.format === 'URL' || (target.scopeAsset && target.contextOnly)) ? { assetId: (target.scopeAsset ?? target.discoveredFromAsset)!.id, assetBoundary: (target.scopeAsset ?? target.discoveredFromAsset)!.normalizedValue } : {}),
+    ...((((target.scopeAsset ?? target.discoveredFromAsset)?.format === 'URL') || (target.scopeAsset && target.contextOnly)) ? { assetId: (target.scopeAsset ?? target.discoveredFromAsset)!.id, assetBoundary: (target.scopeAsset ?? target.discoveredFromAsset)!.normalizedValue } : {}),
     scopeId: target.scope.id, programId: target.program!.id,
     scopeUpdatedAt: target.scope.updatedAt.toISOString(), programUpdatedAt: target.program!.updatedAt.toISOString(),
     requiredUserAgent: target.program!.requiredUserAgent };
