@@ -83,7 +83,7 @@ async function main() {
       assert(paidReportRequests<(factsRender?1:2),'Paid report would exceed its explicit request limit');paidReportRequests++;openRouterRequests++;
     }
     const response=await originalFetch(input, { ...init, redirect: 'error' });
-    if(!factsRender&&router&&u.origin===new URL(router.baseUrl).origin&&u.pathname.endsWith('/chat/completions')&&!response.ok){
+    if(router&&u.origin===new URL(router.baseUrl).origin&&u.pathname.endsWith('/chat/completions')&&!response.ok){
       const reader=response.clone().body?.getReader();let bytes=0;const chunks:Uint8Array[]=[];
       if(reader)try{while(bytes<16384){const part=await reader.read();if(part.done)break;const chunk=part.value.subarray(0,16384-bytes);bytes+=chunk.length;chunks.push(chunk);}}finally{await reader.cancel().catch(()=>{});}
       // Only dictionary tokens and booleans escape this in-memory error probe.

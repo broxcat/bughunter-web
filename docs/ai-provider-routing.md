@@ -32,6 +32,16 @@ The fixture contains ciphertext only. The harness obtains the existing encryptio
 
 `--facts-render` instead uses the current private Recon export and captured Target report, keeps the configured default unchanged, and permits exactly one real OpenRouter request. Its browser assertions check every useful factual primary and detail for visibility without expanding categories, nonempty text, coherent counts and the actual synthesis status. Combine with `--browser-only` to replay the resulting report without further inference.
 
+### Factual rendering acceptance — 2026-11-04
+
+The rendering fix is already included in `b78326cf920675b5e13b2bf6e56eae5eeb4848c3`. Previously, factual categories were collapsed HTML `details` elements: browser checks confirmed that their text existed but was hidden until expanded. Generic row values also selected the hostname ahead of technology names and port/service details, while counts included static relations and metadata-only records. The deterministic presenter now builds useful primary lines from the typed details and counts only displayed rows. Redirect `location` is retained. No AI text is needed to render facts.
+
+A fresh acceptance against the existing Recon export (SHA-256 `3233ac03f99d98d3a1102a850a1c16ee485149dbed70575dbc68f75181d3bd8b`) passed with 51 source rows, 33 useful visible rows and 23 summarized static assets. The captured Target report passed with 132 source rows, 88 useful visible rows and 54 summarized static assets. Authenticated browser checks verified all primary lines and details, coherent section counts, no expansion requirement and zero empty/dash primary lines. The original Recon, artifacts and historical reports were unchanged; no scanners were queued or executed.
+
+The single real request used `OPENROUTER`, `google/gemini-3.6-flash`, `recon-report/3`. The factual report became `READY`, with AI synthesis `FALLBACK`, narrative failure `FAILED_PROVIDER`, and recorded HTTP 400 (`PROVIDER_HTTP_ERROR`). The bounded in-memory HTTP probe detected `INVALID_ARGUMENT` and an invalid request payload/argument; it did not identify a particular parameter or establish a schema error. No provider, model, schema or routing change was made. The probe now runs in factual-render acceptance too and emits only allowlisted diagnostic tokens/flags, never the response body. Target synthesis was `READY_WITH_WARNINGS` from its captured report, without another model request.
+
+Focused renderer, report validation, component and routing tests passed (86 tests), along with TypeScript and focused ESLint checks. No database migration is needed for this rendering/diagnostic work.
+
 ## Provider capabilities and upgrade
 
 Ollama alone uses `/api/show` inspection. API providers use a conservative 8,192-token application envelope when metadata is unavailable; no Ollama model capability is borrowed. OpenRouter and OpenAI receive native JSON Schema when requested. Other providers keep prompted JSON plus the same application validation unless their registry policy explicitly supports more. No model alias/remap is applied to captured Recon jobs.
