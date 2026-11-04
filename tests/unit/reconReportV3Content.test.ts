@@ -66,4 +66,22 @@ describe('Recon report v3 facts and AI interpretation rendering', () => {
     const value = report(); value.factual.truncated = true; value.factual.totals.omittedEvidence = 25;
     const html = render(value); expect(html).toContain('25 additional evidence records'); expect(html).toContain('artifact-http-1');
   });
+  it('renders populated categories directly with coherent counts and no empty bullet', () => {
+    const value = report(), rows = value.factual.sections[0].rows;
+    rows[0].label = 'endpoint';
+    rows.push({ ...rows[0], label: 'unknown', value: '', details: {} });
+    const html = render(value);
+    expect(html).toContain('Web Surface (1)'); expect(html).toContain('1 factual entries');
+    expect(html).toContain('data-fact-primary="true"'); expect(html).toContain('GET https://'); expect(html).toContain('— 200');
+    expect(html).not.toContain('<summary class="cursor-pointer'); expect(html.match(/data-fact-row=/g)).toHaveLength(1);
+    expect(html).not.toMatch(/<li[^>]*>\s*-?\s*<\/li>/);
+  });
+  it('exposes recorded fallback status and HTTP diagnostics without leaking provider data', () => {
+    const value = report({ narrativeStatus: 'FACTUAL_ONLY', narrativeFailure: 'FAILED_PROVIDER', generation: { attempts: [{ httpStatus: 400, providerErrorCode: 'PROVIDER_HTTP_ERROR', body: 'PRIVATE_BODY', message: 'PRIVATE_TOKEN' }] } });
+    const html = render(value);
+    for (const expected of ['AI synthesis: FALLBACK', 'FAILED_PROVIDER', 'HTTP 400', 'Assessment Overview', 'Recon coverage', 'Methodology', 'Limitations']) expect(html).toContain(expected);
+    expect(html).not.toContain('PRIVATE_'); expect(html).not.toContain('PROVIDER_HTTP_ERROR');
+    expect(render()).toContain('AI synthesis: READY');
+    expect(render(report({ narrativeStatus: 'RECOVERED' }))).toContain('AI synthesis: READY_WITH_WARNINGS');
+  });
 });

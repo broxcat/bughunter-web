@@ -12,6 +12,12 @@ Historical summaries receive `OLLAMA` through the additive provider-column migra
 
 Recon facts remain deterministic application data. AI providers write a separately validated narrative. Provider unavailability, invalid credentials or unusable output leave the facts readable with a human explanation; they do not change Recon status or start scanners. A default-provider change is distinct from stale Recon, changed scope or a newer report format.
 
+## Reading factual reports
+
+Asset and Target reports show their factual categories directly, independently of AI synthesis. A deterministic presenter formats DNS addresses, observed ports/services, endpoints, technologies, TLS, redirects and relations from retained evidence. Missing methods, protocols, responses and versions are never inferred. Evidence references and sources can be expanded separately.
+
+Displayed counts include only useful, nonempty rows. Static URLs (including link relations) are summarized; metadata-only records are omitted from display. The original report and artifacts remain unchanged. `AI synthesis: FALLBACK` includes the recorded failure class and any recorded HTTP error status. It does not mean Recon failed, and it does not identify an upstream parameter or schema as the cause unless that cause was actually recorded. Provider response bodies are never shown. Methodology, coverage and limitations remain available without AI.
+
 ## Credentials and structured output
 
 API keys remain encrypted in `AiProviderConfig`. The server decrypts only the selected provider's key for inference. Keys and ciphertext are excluded from public report DTOs, report inputs, fingerprints, prompts, browser state and logs. OpenRouter receives the selected model and a strict JSON Schema through `response_format`, with `provider.require_parameters` enabled. Unsupported models or provider errors never silently route to Ollama or another model.
@@ -23,6 +29,8 @@ API keys remain encrypted in `AiProviderConfig`. The server decrypts only the se
 The fixture contains ciphertext only. The harness obtains the existing encryption master in memory and supplies it as a backend environment variable, never as a CLI argument value or disk file. Only selected configured provider origins and the isolated browser origin are allowed. Output contains bounded acceptance metadata, never prompts, keys or model response bodies. Disposable containers and temporary copies are removed afterward.
 
 `--openrouter-only` reuses previously validated real Ollama reports as historical fixtures and sends only the selected OpenRouter report. `--allow-factual-only` explicitly accepts a successful factual fallback while recording `realNarrativeValidated: false`; it never turns an upstream failure into a successful model validation. `--browser-only` replays those persisted reports without inference calls. Catalog support and valid credentials do not guarantee that every upstream model route will accept a request; report the actual HTTP outcome and retain the factual report.
+
+`--facts-render` instead uses the current private Recon export and captured Target report, keeps the configured default unchanged, and permits exactly one real OpenRouter request. Its browser assertions check every useful factual primary and detail for visibility without expanding categories, nonempty text, coherent counts and the actual synthesis status. Combine with `--browser-only` to replay the resulting report without further inference.
 
 ## Provider capabilities and upgrade
 

@@ -19,7 +19,8 @@ const image = process.env.RECON_REPORT_V3_IMAGE ?? process.env.RESEARCH_TEST_APP
 const namespace = process.env.RECON_REPORT_V3_NETWORK_CONTAINER;
 if (namespace) assert(/^[A-Za-z0-9_.-]+$/.test(namespace), 'Invalid application network namespace');
 const routerOnly=process.argv.includes('--openrouter-only');
-const routing = process.argv.includes('--routing')||routerOnly;
+const factsRender=process.argv.includes('--facts-render');
+const routing = process.argv.includes('--routing')||routerOnly||factsRender;
 const configsFile = resolve(process.env.RECON_ROUTING_CONFIGS_FILE ?? '/tmp/bughunter-ai-routing-configs.json');
 const browserOnly = process.argv.includes('--browser-only'), modelOnly = process.argv.includes('--model-only');
 assert(!(browserOnly && modelOnly), 'Choose one acceptance mode');
@@ -44,6 +45,10 @@ const emitMetadata = output => {
     try { const item = JSON.parse(line); if (item.acceptance === 'recon-report-v3') console.log(JSON.stringify(item)); }
     catch { /* Never forward unstructured diagnostic or remote content. */ }
   }
+};
+const copyPrivateScreenshots=async()=>{
+  if(!factsRender||!process.env.RECON_REPORT_V3_REPORTS_FILE)return;
+  for(const suffix of ['scope-facts','scope-ai','target-facts','target-ai'])try{await copyFile(join(directory,'reports.json.'+suffix+'.png'),reports+'.'+suffix+'.png');await chmod(reports+'.'+suffix+'.png',0o600);}catch{/* Missing screenshots are not fabricated. */}
 };
 try {
   await copyFile(source, join(directory, 'source.json')); await chmod(join(directory, 'source.json'), 0o600);
@@ -77,6 +82,7 @@ try {
   if (process.getuid && process.getgid) env.push('-e', 'RECON_REPORT_V3_OUTPUT_UID=' + process.getuid(), '-e', 'RECON_REPORT_V3_OUTPUT_GID=' + process.getgid());
   if(routerOnly)env.push('-e','RECON_ROUTING_ROUTER_ONLY=1','-e','RECON_ROUTING_BASELINE_FILE=/acceptance/baseline.json');
   if(process.argv.includes('--allow-factual-only'))env.push('-e','RECON_ROUTING_ALLOW_FACTUAL_ONLY=1');
+  if(factsRender)env.push('-e','RECON_FACTS_RENDER_ACCEPTANCE=1','-e','RECON_ROUTING_ALLOW_FACTUAL_ONLY=1');
   const mounts = [['src', '/app/src'], ['prisma', '/app/prisma'], ['tsconfig.json', '/app/tsconfig.json'], ['tests/recon/reportV3Real.mts', '/app/tests/recon/reportV3Real.mts'], ['node_modules/.prisma', '/app/node_modules/.prisma']].flatMap(([path, destination]) => ['--mount', `type=bind,source=${resolve(path)},target=${destination},readonly`]);
   mounts.push('--mount', `type=bind,source=${directory},target=/acceptance`);
   const executionNetwork = namespace ? 'container:' + namespace : network;
@@ -84,6 +90,7 @@ try {
   const result = await docker('run', '--rm', '--network', executionNetwork, ...env, ...mounts, image, 'node', '--import', 'tsx', 'tests/recon/reportV3Real.mts');
   // Only this helper's bounded, explicit acceptance metadata can reach logs.
   emitMetadata(result);
+  await copyPrivateScreenshots();
   assert.equal(createHash('sha256').update(await readFile(source)).digest('hex'), beforeHash, 'Original export changed');
   if (!browserOnly && process.env.RECON_REPORT_V3_REPORTS_FILE) {
     await mkdir(dirname(reports), { recursive: true, mode: 0o700 });
@@ -94,6 +101,7 @@ try {
   // CLI errors may contain private model output or evidence. Keep diagnostics
   // in the helper's controlled metadata rather than printing exception bodies.
   emitMetadata(error?.stdout);
+  await copyPrivateScreenshots();
   if (process.env.RECON_REPORT_V3_REPORTS_FILE) {
     try { await copyFile(join(directory, 'reports.json.failed.json'), reports + '.failed.json'); await chmod(reports + '.failed.json', 0o600); }
     catch { /* A preflight failure need not have a persisted report. */ }

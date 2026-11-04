@@ -2,7 +2,7 @@
 // No scanner/worker runs here. No prompt, model body or evidence is logged.
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
-import { chown, readFile, writeFile } from 'node:fs/promises';
+import { chmod, chown, readFile, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import bcrypt from 'bcryptjs';
@@ -12,10 +12,12 @@ import { prisma } from '@/lib/prisma';
 import { scheduleReconSummary, processReconSummary } from '@/server/recon/summaries';
 import { classifyReconUrl } from '@/lib/reconArtifacts';
 import { modelInputForReconReportV3, type ReconReportV3Input } from '@/lib/reconReportV3';
+import { presentReconFacts, reconSynthesisPresentation } from '@/lib/reconFactPresentation';
+import type { ReconReportV3 } from '@/lib/reconReportV3';
 
 type Json = Record<string, unknown>;
 type Serialized<T> = { [K in keyof T]: T[K] extends Date ? string : T[K] extends Date | null ? string | null : T[K] };
-type Source = { config: { model: string; baseUrl: string }; scan: Serialized<ScanRun> & { target: { userId: string; programId: string }; scopeAsset: Serialized<ScopeAsset>; reconSteps: Serialized<ReconPipelineStep>[] }; job: Serialized<ReconSummary>; artifacts: Serialized<ReconArtifact>[] };
+type Source = { config: { model: string; baseUrl: string }; scan: Serialized<ScanRun> & { target: { userId: string; programId: string }; scopeAsset: Serialized<ScopeAsset>; reconSteps: Serialized<ReconPipelineStep>[] }; job: Serialized<ReconSummary>; artifacts: Serialized<ReconArtifact>[];targetReport?:Serialized<ReconSummary> };
 type Saved = { sourceSha256: string; asset: Serialized<ReconSummary>; target: Serialized<ReconSummary>; sequence?: Serialized<ReconSummary>[] };
 type CapturedConfig={provider:AiProvider;model:string;baseUrl:string;apiKeyCipher?:string|null;isActive?:boolean};
 const json = (v: unknown) => v as Prisma.InputJsonValue;
@@ -36,6 +38,10 @@ function safeProviderRejection(raw:string){
 const metadata = (phase: string, extra: Json = {}) => console.log(JSON.stringify({ acceptance: 'recon-report-v3', phase, ...extra }));
 async function savePrivate(path: string, value: unknown) {
   await writeFile(path, JSON.stringify(value), { mode: 0o600 });
+  await protectArtifact(path);
+}
+async function protectArtifact(path:string){
+  await chmod(path,0o600);
   const uid = Number(process.env.RECON_REPORT_V3_OUTPUT_UID), gid = Number(process.env.RECON_REPORT_V3_OUTPUT_GID);
   // The image runs as root; the host must retain access to its private export
   // after this disposable container is removed. Keep mode0600 throughout.
@@ -53,6 +59,7 @@ async function main() {
   assert(source.config.model && source.config.baseUrl, 'Selected Settings missing');
   assert.equal(await prisma.user.count(), 0, 'Acceptance database must be empty');
   const routing=process.env.RECON_REPORT_MULTI_PROVIDER==='1';
+  const factsRender=process.env.RECON_FACTS_RENDER_ACCEPTANCE==='1';
   const configs:CapturedConfig[]=routing?(JSON.parse(await readFile(process.env.RECON_ROUTING_CONFIGS_FILE!,'utf8')) as {configs:CapturedConfig[]}).configs:[{provider:'OLLAMA',model:source.config.model,baseUrl:source.config.baseUrl}];
   const selected=(provider:AiProvider)=>{const c=configs.find(c=>c.provider===provider);assert(c?.model&&c.baseUrl,'Selected provider Settings missing');return c;};
   if(routing)assert(selected('OPENROUTER').apiKeyCipher,'Encrypted OpenRouter credentials missing');
@@ -73,10 +80,10 @@ async function main() {
       assert.equal(asObject(body.provider).require_parameters,true,'OpenRouter must require structured-output support');
       assert(!Object.hasOwn(body,'format')&&!Object.hasOwn(body,'think'),'Ollama parameters leaked into OpenRouter request');
       assert(new Headers(init?.headers).has('authorization'),'Configured provider credential was not attached in the backend');
-      assert(paidReportRequests<2,'Paid report would exceed two attempts');paidReportRequests++;openRouterRequests++;
+      assert(paidReportRequests<(factsRender?1:2),'Paid report would exceed its explicit request limit');paidReportRequests++;openRouterRequests++;
     }
     const response=await originalFetch(input, { ...init, redirect: 'error' });
-    if(router&&u.origin===new URL(router.baseUrl).origin&&u.pathname.endsWith('/chat/completions')&&!response.ok){
+    if(!factsRender&&router&&u.origin===new URL(router.baseUrl).origin&&u.pathname.endsWith('/chat/completions')&&!response.ok){
       const reader=response.clone().body?.getReader();let bytes=0;const chunks:Uint8Array[]=[];
       if(reader)try{while(bytes<16384){const part=await reader.read();if(part.done)break;const chunk=part.value.subarray(0,16384-bytes);bytes+=chunk.length;chunks.push(chunk);}}finally{await reader.cancel().catch(()=>{});}
       // Only dictionary tokens and booleans escape this in-memory error probe.
@@ -102,7 +109,7 @@ async function main() {
     await prisma.scanRun.create({ data: { ...scanData, targetReconRunId: parentId, createdAt: new Date(scan.createdAt), startedAt: date(scan.startedAt), finishedAt: date(scan.finishedAt), cancelRequestedAt: date(scan.cancelRequestedAt), ...Object.fromEntries(['reconPlan','toolVersions','toolManifest','changeSet','scopeAssetSnapshot','assetResults','huntReport','reconCorpus','huntSnapshot'].map(key => [key, nullableJson(scanData[key as keyof typeof scanData])])) } as Prisma.ScanRunUncheckedCreateInput });
     await prisma.reconPipelineStep.createMany({ data: reconSteps.map(row => ({ ...row, details: nullableJson(row.details), startedAt: date(row.startedAt), finishedAt: date(row.finishedAt) })) });
     await prisma.reconArtifact.createMany({ data: source.artifacts.map(row => ({ ...row, value: json(row.value), sources: json(row.sources), firstSeenAt: new Date(row.firstSeenAt), lastSeenAt: new Date(row.lastSeenAt) })) });
-    for(const config of configs)await prisma.aiProviderConfig.create({data:{userId:ownerId,provider:config.provider,baseUrl:config.baseUrl,model:config.model,apiKeyCipher:config.apiKeyCipher,isActive:config.provider==='OLLAMA'}});
+    for(const config of configs)await prisma.aiProviderConfig.create({data:{userId:ownerId,provider:config.provider,baseUrl:config.baseUrl,model:config.model,apiKeyCipher:config.apiKeyCipher,isActive:factsRender?!!config.isActive:config.provider==='OLLAMA'}});
     const setDefault=async(provider:AiProvider)=>{await prisma.$transaction(async tx=>{await tx.aiProviderConfig.updateMany({where:{userId:ownerId},data:{isActive:false}});await tx.aiProviderConfig.update({where:{userId_provider:{userId:ownerId,provider}},data:{isActive:true}});});};
     const historical = await prisma.reconSummary.create({ data: { ...source.job, input: json(source.job.input), content: nullableJson(source.job.content), createdAt: new Date(source.job.createdAt), startedAt: date(source.job.startedAt), generatedAt: date(source.job.generatedAt) } });
     const historicalHash = digest(serial(historical));
@@ -110,13 +117,13 @@ async function main() {
     const scanBefore = digest(await prisma.scanRun.findUniqueOrThrow({ where: { id: scan.id } }));
 
     const replayFile = process.env.RECON_REPORT_V3_REPLAY_FILE;
-    const sequence:ReconSummary[]=[];let expectedProvider:AiProvider='OLLAMA';
+    const sequence:ReconSummary[]=[];let expectedProvider:AiProvider=factsRender?'OPENROUTER':'OLLAMA';
     let assetReport: ReconSummary, targetReport: ReconSummary;
     if (replayFile) {
       phase = 'replay';
       const saved = JSON.parse(await readFile(replayFile, 'utf8')) as Saved;
       assert.equal(saved.sourceSha256, sourceSha256, 'Saved reports belong to another Recon export');
-      const restore = (row: Serialized<ReconSummary>) => prisma.reconSummary.create({ data: { ...row, automaticKey: null, input: json(row.input), content: nullableJson(row.content), createdAt: new Date(row.createdAt), startedAt: date(row.startedAt), generatedAt: date(row.generatedAt) } });
+      const restore = async(row: Serialized<ReconSummary>) => {const exists=await prisma.reconSummary.findUnique({where:{id:row.id}});if(exists){assert.deepEqual(exists.content,row.content);return exists;}return prisma.reconSummary.create({ data: { ...row, automaticKey: null, input: json(row.input), content: nullableJson(row.content), createdAt: new Date(row.createdAt), startedAt: date(row.startedAt), generatedAt: date(row.generatedAt) } });};
       assetReport = await restore(saved.asset); targetReport = await restore(saved.target);
       for(const row of saved.sequence??[])if(![saved.asset.id,saved.target.id].includes(row.id))sequence.push(await restore(row));
       metadata('replay', { status: 'PASS', realModelGenerationPreviouslySaved: true });
@@ -159,6 +166,15 @@ async function main() {
         metadata(phase, { status: 'PASS', model: saved.model, promptVersion: saved.promptVersion, latencyMs: Date.now() - started, narrativeStatus: report.narrativeStatus,realNarrativeValidated:!acceptedFactualOnly, warningCount: Array.isArray(report.warnings) ? report.warnings.length : 0, citationCount: references.length, artifacts: source.artifacts.length, storedSnapshotBytes: Buffer.byteLength(JSON.stringify(input)) });
         return saved;
       };
+      if(factsRender){
+        assert(selected('OPENROUTER').isActive,'Current Settings must select OpenRouter for this acceptance');
+        assetReport=await generate(asset.id);sequence.push(assetReport);
+        const target=source.targetReport;assert(target,'A real captured Target report is required for rendering acceptance');
+        assert.equal(target.targetReconRunId,parentId,'Target fixture belongs to a different captured Recon parent');
+        targetReport=await prisma.reconSummary.create({data:{...target,automaticKey:null,input:json(target.input),content:nullableJson(target.content),createdAt:new Date(target.createdAt),startedAt:date(target.startedAt),generatedAt:date(target.generatedAt)}});
+        assert.equal(openRouterRequests,1,'This mission authorizes exactly one real OpenRouter request');
+        metadata('facts-render-provider',{status:'PASS',requests:openRouterRequests,routingChanged:false,modelChanged:false});
+      }else{
       const routerOnly=process.env.RECON_ROUTING_ROUTER_ONLY==='1';
       const baseline=routerOnly?JSON.parse(await readFile(process.env.RECON_ROUTING_BASELINE_FILE!,'utf8')) as Saved:undefined;
       const restoreBaseline=async(row:Serialized<ReconSummary>)=>prisma.reconSummary.create({data:{...row,provider:'OLLAMA',automaticKey:null,input:json(row.input),content:nullableJson(row.content),createdAt:new Date(row.createdAt),startedAt:date(row.startedAt),generatedAt:date(row.generatedAt)}});
@@ -174,6 +190,7 @@ async function main() {
         for(const row of sequence)assert.deepEqual(await prisma.reconSummary.findUniqueOrThrow({where:{id:row.id}}),row,'Provider switch rewrote a previous report');
         metadata('routing-history',{status:'PASS',defaultSequence:['OLLAMA','OPENROUTER','OLLAMA'],assetProviders:sequence.filter(r=>r.scopeAssetId).map(r=>r.provider),reusedRealOllamaBaseline:!!baseline,reportsPreserved:sequence.length,openRouterRequests,structuredOutputRequired:true});
       }else targetReport = await generate();
+      }
       assert(providerRequests > 0 || routing&&openRouterRequests>0, 'No request reached a configured real provider');
       if (process.env.RECON_REPORT_V3_OUTPUT_FILE) await savePrivate(process.env.RECON_REPORT_V3_OUTPUT_FILE, { sourceSha256, asset: serial(assetReport), target: serial(targetReport),sequence:sequence.map(serial) });
     }
@@ -225,12 +242,39 @@ async function main() {
         assert(text.includes(scan.id) || saved.scopeAssetId === null, 'Source Recon reference missing');
         const factual = asObject(report.factual), narrative = asObject(report.narrative);
         assert(JSON.stringify(factual).length > 100 && JSON.stringify(narrative).length > 100);
-        // Facts stay compact until requested. Inspect real rendered values,
-        // rather than treating an unchanged modal heading as acceptance.
-        for (const details of await factsRegion.locator(':scope > details').all()) await details.locator('summary').first().click();
         const normalize = (v: string) => v.replace(/\s+/g, ' ').trim();
-        const renderedFacts = normalize(await factsRegion.innerText());
         let checkedRows = 0;
+        if(factsRender){
+          const typed=report as unknown as ReconReportV3,presented=presentReconFacts(typed.factual),expected=presented.sections.flatMap(section=>section.rows);
+          const rows=factsRegion.locator('[data-fact-row]');assert.equal(await rows.count(),expected.length,'Useful factual rows are missing');
+          for(let index=0;index<expected.length;index++){
+            const row=rows.nth(index),primary=row.locator('[data-fact-primary]'),text=normalize(await primary.innerText());
+            assert(await primary.isVisible(),'A factual primary is hidden before any expansion');assert(text&&!/^[-–—]+$/.test(text),'A populated observation became a placeholder');
+            assert.notEqual(text.toLowerCase(),normalize(expected[index].row.label).toLowerCase(),'A factual primary merely repeats its generic kind');
+            assert.equal(text,normalize(expected[index].primary),'A typed factual primary changed in rendering');
+            const metrics=await primary.evaluate(element=>{const style=getComputedStyle(element),r=element.getBoundingClientRect();return{width:r.width,height:r.height,fontSize:parseFloat(style.fontSize),opacity:parseFloat(style.opacity),visibility:style.visibility};});
+            assert(metrics.width>0&&metrics.height>0&&metrics.fontSize>=12&&metrics.opacity>0&&metrics.visibility==='visible','A factual value is not legible');
+            const rowText=normalize(await row.innerText());
+            for(const value of Object.values(expected[index].row.details)){
+              const display=Array.isArray(value)?value.join(', '):String(value);if(display.trim())assert(rowText.includes(normalize(display)),'An available observation detail is hidden or missing');
+            }
+            checkedRows++;
+          }
+          const synthesis=reconSynthesisPresentation(typed),aiText=await narrativeRegion.innerText();
+          assert(aiText.includes('AI synthesis: '+synthesis.state),'Actual AI synthesis status is not displayed');
+          if(synthesis.failure)assert(aiText.includes(synthesis.failure),'Recorded AI failure reason is missing');
+          for(const diagnostic of synthesis.diagnostics)assert(aiText.includes(diagnostic),'Recorded HTTP failure is missing');
+          metadata('facts-render-browser',{status:'PASS',surface:saved.scopeAssetId?'scope':'target',sourceRows:typed.factual.sections.reduce((n,s)=>n+s.rows.length,0),visibleUsefulRows:checkedRows,staticAssets:presented.staticAssets,aiState:synthesis.state,aiFailure:synthesis.failure??null,httpDiagnostics:synthesis.diagnostics,manualExpansionNeeded:false,emptyPrimaryRows:0});
+          if(process.env.RECON_REPORT_V3_OUTPUT_FILE){
+            const surface=saved.scopeAssetId?'scope':'target',factsPath=process.env.RECON_REPORT_V3_OUTPUT_FILE+'.'+surface+'-facts.png',aiPath=process.env.RECON_REPORT_V3_OUTPUT_FILE+'.'+surface+'-ai.png';
+            const network=factsRegion.getByRole('region',{name:'Network Surface',exact:true});
+            if(await network.count())await network.scrollIntoViewIfNeeded();else await factsRegion.scrollIntoViewIfNeeded();
+            await page.screenshot({path:factsPath,fullPage:true});await protectArtifact(factsPath);
+            await narrativeRegion.scrollIntoViewIfNeeded();await page.screenshot({path:aiPath,fullPage:true});await protectArtifact(aiPath);
+          }
+        }else{
+        for (const details of await factsRegion.locator(':scope > details').all()) await details.locator('summary').first().click();
+        const renderedFacts = normalize(await factsRegion.innerText());
         for (const section of (Array.isArray(factual.sections) ? factual.sections : [])) {
           const rows = asObject(section).rows;
           for (const row of (Array.isArray(rows) ? rows : []).slice(0, 2)) {
@@ -240,13 +284,14 @@ async function main() {
             }
           }
         }
+        }
         assert(checkedRows > 0, 'No factual rows were visually checked');
         assert(typeof narrative.attackSurfaceSummary === 'string' && narrative.attackSurfaceSummary.trim(), 'Narrative summary missing');
         if(report.narrativeStatus==='FACTUAL_ONLY')assert((await narrativeRegion.innerText()).includes('did not return a usable response'),'Provider-unavailable facts-only state missing');
         else assert(normalize(await narrativeRegion.innerText()).includes(normalize(narrative.attackSurfaceSummary)), 'Stored model narrative missing from the rendered report');
         await page.getByRole('button', { name: 'Close', exact: true }).click();
       }
-      if(routing){
+      if(routing&&!factsRender){
         for(const configured of ['OPENROUTER','OLLAMA'] as const){
           await page.goto(origin+'/settings');
           const group=page.getByRole('group',{name:'Configured '+configured+' provider',exact:true});
