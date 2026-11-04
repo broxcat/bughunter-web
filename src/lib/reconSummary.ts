@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { redactObservationText } from './observationSafety';
 import { classifyReconUrl } from './reconArtifacts';
 export const LEGACY_SUMMARY_PROMPT_VERSION='recon-summary/1';
-export const SUMMARY_PROMPT_VERSION='recon-report/2';
+export const SUMMARY_PROMPT_VERSION='recon-report/3';
 export const SUMMARY_INPUT_BYTES=16000;
 const entry=z.strictObject({text:z.string().min(1).max(700),evidenceRefs:z.array(z.string().max(150)).min(1).max(8)});
 export const reconSummarySchema=z.strictObject({

@@ -24,8 +24,15 @@ let server:Server,endpoint:string,root:string,userId:string,programId:string,ass
       if(req.url==='/api/show'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({model_info:{'fixture.context_length':32768},thinking:{values:[false,true],default:true}}));return;}
       if(mode==='hold')await new Promise<void>(r=>{releaseResponse=r;});
       if(mode==='fail'){res.statusCode=503;res.end('Unavailable');return;}
+      if(mode==='bad-json'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({message:{content:'not JSON'}}));return;}
       const input=JSON.parse(((received.messages as {content:string}[])[1]).content),ref=input.evidence[0].id;
       if(mode==='legacy'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({message:{content:JSON.stringify({executiveSummary:'Historical pending summary.',sections:[{title:'Web',items:[{text:'Historical evidence.',evidenceRefs:[ref]}]}],researchPriorities:[],limitations:[]})}}));return;}
+      if((received.format as {properties?:{sections?:unknown}})?.properties?.sections){
+        const narrative={title:'Recon Report',attackSurfaceSummary:'Observed evidence; further testing remains manual.',sections:[{category:'webSurface',entries:[{text:'Review the supplied evidence.',confidence:'observed',evidenceRefs:[ref]}]}],notableObservations:[],researchHandoff:[],limitations:['No finding is confirmed.']};
+        if(mode==='bad-url')narrative.sections[0].entries.push({text:'Inspect https://unsupported.invalid/private.',confidence:'observed',evidenceRefs:[ref]});
+        if(mode==='bad-ref')narrative.sections[0].entries.push({text:'Unsupported citation.',confidence:'observed',evidenceRefs:['E999999']});
+        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({message:{content:JSON.stringify(narrative)}}));return;
+      }
       res.setHeader('Content-Type','application/json');res.end(JSON.stringify({message:{content:JSON.stringify({title:'Reconnaissance & Attack Surface Assessment',attackSurfaceSummary:'Observed evidence; further tests are not performed.',dnsAndHostIntelligence:[],networkSurface:[],webSurface:[{text:'Review the recorded evidence.',confidence:'observed',evidenceRefs:[ref]}],contentDiscovery:[],apiSurface:[],authenticationSurface:[],technologyFingerprint:[],tlsAndTransport:[],notableObservations:[],changesSincePreviousRecon:[],researchHandoff:[{priority:'medium',area:'Authorized surface review',rationale:'Review explicitly authorized evidence manually.',evidenceRefs:[ref]}],limitations:['No finding is confirmed.']})}}));
     });await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));endpoint=`http://127.0.0.1:${(server.address() as {port:number}).port}`;process.env.RESEARCH_TERMINAL_CONTROL_URL=endpoint;
   },30000);
@@ -46,14 +53,37 @@ let server:Server,endpoint:string,root:string,userId:string,programId:string,ass
   afterAll(async()=>{releaseResponse?.();server?.closeAllConnections();if(server)await new Promise<void>(r=>server.close(()=>r()));if(p){await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);await p.$disconnect();}if(root)await rm(root,{recursive:true,force:true});});
   it.each([['COMPLETED','SUCCESS'],['COMPLETED','PARTIAL'],['FAILED','FAILED']])('summarizes terminal %s/%s from Settings without altering Recon',async(status,outcome)=>{
     await p.scanRun.update({where:{id:runId},data:{status:status as 'COMPLETED'|'FAILED',outcome:outcome as 'SUCCESS'|'PARTIAL'|'FAILED'}});
-    const job=await s.scheduleReconSummary(userId,programId,assetId);expect(job).toMatchObject({model:'selected-fixture-model',endpoint,promptVersion:'recon-report/2',status:'PENDING'});
+    const job=await s.scheduleReconSummary(userId,programId,assetId);expect(job).toMatchObject({model:'selected-fixture-model',endpoint,promptVersion:'recon-report/3',status:'PENDING'});
     expect(JSON.stringify(job.input)).not.toContain('SECRET_TEST');expect(JSON.stringify(job.input)).toContain('MANUAL');
     await s.processReconSummary(job.id);expect(await p.reconSummary.findUniqueOrThrow({where:{id:job.id}})).toMatchObject({status:'READY'});expect(received).toMatchObject({model:'selected-fixture-model',format:expect.any(Object)});
     expect(await p.scanRun.findUniqueOrThrow({where:{id:runId}})).toMatchObject({status,outcome});
   });
-  it('records blocked coverage and model failures independently of Recon',async()=>{await p.reconPipelineStep.updateMany({where:{scanRunId:runId},data:{state:'BLOCKED',reason:'429 rate limit'}});mode='fail';const job=await s.scheduleReconSummary(userId,programId,assetId);expect(JSON.stringify(job.input)).toContain('BLOCKED');await s.processReconSummary(job.id);expect(await p.reconSummary.findUniqueOrThrow({where:{id:job.id}})).toMatchObject({status:'FAILED'});expect(await p.scanRun.findUniqueOrThrow({where:{id:runId}})).toMatchObject({status:'COMPLETED',outcome:'SUCCESS'});});
+  it('records blocked coverage and model failures independently of Recon',async()=>{await p.reconPipelineStep.updateMany({where:{scanRunId:runId},data:{state:'BLOCKED',reason:'429 rate limit'}});mode='fail';const job=await s.scheduleReconSummary(userId,programId,assetId);expect(JSON.stringify(job.input)).toContain('BLOCKED');await s.processReconSummary(job.id);expect(await p.reconSummary.findUniqueOrThrow({where:{id:job.id}})).toMatchObject({status:'READY',content:expect.objectContaining({version:3,narrativeStatus:'FACTUAL_ONLY',narrativeFailure:'FAILED_PROVIDER'})});expect(await p.scanRun.findUniqueOrThrow({where:{id:runId}})).toMatchObject({status:'COMPLETED',outcome:'SUCCESS'});});
+
+  it.each(['bad-url','bad-ref'])('keeps factual reports READY after dropping a persistently invalid narrative entry (%s)',async selected=>{
+    mode=selected;const job=await s.scheduleReconSummary(userId,programId,assetId);const before=JSON.stringify((job.input as {factual:unknown}).factual);
+    await s.processReconSummary(job.id);const saved=await p.reconSummary.findUniqueOrThrow({where:{id:job.id}});
+    const content=saved.content as {version:number;factual:unknown;narrativeStatus:string;warnings:{code:string}[];narrative:{webSurface:unknown[]}};
+    expect(saved.status).toBe('READY');expect(content.version).toBe(3);expect(content.narrativeStatus).toBe('RECOVERED');expect(content.narrative.webSurface).toHaveLength(1);expect(content.warnings.length).toBeGreaterThan(0);expect(JSON.stringify(content.factual)).toBe(before);
+    expect(JSON.stringify(received.format)).not.toContain('"facts"');expect(JSON.stringify(received.format)).toContain('E001');
+    expect(await p.scanRun.findUniqueOrThrow({where:{id:runId}})).toMatchObject({status:'COMPLETED',outcome:'SUCCESS'});
+  });
+  it('returns deterministic facts after invalid JSON without overwriting historical failed report2',async()=>{
+    const historic=await p.reconSummary.create({data:{programId,scopeAssetId:assetId,scanRunId:runId,model:'qwen3.6:27b',endpoint,promptVersion:'recon-report/2',sourceFingerprint:'historical-failed',input:{},status:'FAILED',error:'FACTUAL_VALIDATION: historical fixture'}});
+    mode='bad-json';const job=await s.scheduleReconSummary(userId,programId,assetId,true);await s.processReconSummary(job.id);
+    expect(await p.reconSummary.findUniqueOrThrow({where:{id:job.id}})).toMatchObject({status:'READY',error:null,content:expect.objectContaining({version:3,narrativeStatus:'FACTUAL_ONLY',narrativeFailure:'FAILED_SCHEMA'})});
+    expect(await p.reconSummary.findUniqueOrThrow({where:{id:historic.id}})).toEqual(historic);
+  });
   it('automatically schedules child then Target summaries, only once per run',async()=>{await s.scheduleFinishedSummaries();const child=await p.reconSummary.findFirstOrThrow({where:{scanRunId:runId}});await s.processReconSummary(child.id);await s.scheduleFinishedSummaries();const parent=await p.reconSummary.findFirstOrThrow({where:{targetReconRunId:parentId,scopeAssetId:null}});expect(JSON.stringify(parent.input)).toContain(child.id);await s.processReconSummary(parent.id);await s.scheduleFinishedSummaries();expect(await p.reconSummary.count({where:{programId}})).toBe(2);});
   it('keeps history across regeneration, changed model and a new Recon',async()=>{const first=await s.scheduleReconSummary(userId,programId,assetId);await s.processReconSummary(first.id);expect((await s.scheduleReconSummary(userId,programId,assetId)).id).toBe(first.id);const second=await s.scheduleReconSummary(userId,programId,assetId,true);expect(second.id).not.toBe(first.id);await s.processReconSummary(second.id);await p.aiProviderConfig.update({where:{userId_provider:{userId,provider:'OLLAMA'}},data:{model:'new-selected-model'}});const third=await s.scheduleReconSummary(userId,programId,assetId,true);expect(third.model).toBe('new-selected-model');await s.processReconSummary(third.id);await p.scanRun.create({data:{targetId,scopeAssetId:assetId,type:'RECON',status:'QUEUED'}});expect((await s.summaryView(userId,programId,assetId)).stale).toBe(true);expect(await p.reconSummary.count({where:{scanRunId:runId}})).toBe(3);});
+  it('retains Target endpoint facts independently of unavailable child AI and citations',async()=>{
+    const now=new Date();const endpointRow=await p.reconArtifact.create({data:{scanRunId:runId,scopeAssetId:assetId,kind:'endpoint',canonicalKey:'uncited-target-endpoint',value:{url:'https://app.example.test/api/uncited',method:'GET',statusCode:200},scopeState:'IN_SCOPE',verification:'OBSERVED',sources:[],firstSeenAt:now,lastSeenAt:now}});
+    mode='fail';const child=await s.scheduleReconSummary(userId,programId,assetId);await s.processReconSummary(child.id);
+    mode='ok';const target=await s.scheduleReconSummary(userId,programId);await s.processReconSummary(target.id);
+    const input=target.input as {fullEvidenceLedger:{id:string}[];factual:{sections:{rows:{evidenceRefs:string[]}[]}[]}};
+    expect(input.fullEvidenceLedger.some(row=>row.id===endpointRow.id)).toBe(true);expect(input.factual.sections.flatMap(section=>section.rows).some(row=>row.evidenceRefs.includes(endpointRow.id))).toBe(true);
+    expect(await p.reconSummary.findUniqueOrThrow({where:{id:target.id}})).toMatchObject({status:'READY'});
+  });
   it('does not invent configuration or summarize unfinished/empty evidence',async()=>{await p.aiProviderConfig.deleteMany({where:{userId}});await expect(s.scheduleReconSummary(userId,programId,assetId)).rejects.toThrow('Settings');await p.aiProviderConfig.create({data:{userId,provider:'OLLAMA',baseUrl:endpoint,model:'selected'}});await p.scanRun.update({where:{id:runId},data:{status:'RUNNING'}});await expect(s.scheduleReconSummary(userId,programId,assetId)).rejects.toThrow('terminal');});
   it('ignores a late response after asset archive, and never recreates deleted summaries',async()=>{mode='hold';const job=await s.scheduleReconSummary(userId,programId,assetId);const work=s.processReconSummary(job.id);await vi.waitFor(()=>expect(releaseResponse).toBeTypeOf('function'));await p.scopeAsset.update({where:{id:assetId},data:{active:false}});releaseResponse!();await work;expect(await p.reconSummary.findUniqueOrThrow({where:{id:job.id}})).not.toMatchObject({status:'READY'});await p.reconSummary.delete({where:{id:job.id}});expect(await p.reconSummary.count({where:{id:job.id}})).toBe(0);});
   it.each(['codex','claude'])('deletes only the %s console and its exclusive files; repeated missing sessions succeed',async provider=>{
@@ -84,7 +114,8 @@ let server:Server,endpoint:string,root:string,userId:string,programId:string,ass
     const endpointRow=await p.reconArtifact.create({data:{...base,scanRunId:runId,canonicalKey:'cited-entry-point',value:{url:'https://app.example.test/api/orders',method:'GET',statusCode:200}}});
     const foreignRun=await p.scanRun.create({data:{targetId,scopeAssetId:assetId,type:'RECON',status:'COMPLETED'}});
     const foreign=await p.reconArtifact.create({data:{...base,scanRunId:foreignRun.id,canonicalKey:'foreign-entry-point',value:{url:'https://app.example.test/foreign-run-only'}}});
-    const child=await s.scheduleReconSummary(userId,programId,assetId);await s.processReconSummary(child.id);
+    const oldSource=await s.buildSummaryInput(userId,programId,assetId);
+    const child=await p.reconSummary.create({data:{programId,scopeAssetId:assetId,scanRunId:oldSource.scanRunId,model:'selected-fixture-model',endpoint,promptVersion:'recon-report/2',sourceFingerprint:'historical-report2',input:JSON.parse(JSON.stringify(oldSource.input))}});await s.processReconSummary(child.id);
     const saved=await p.reconSummary.findUniqueOrThrow({where:{id:child.id}});
     // The child belongs to the newest individual run, so associate this stored
     // narrative with the parent run explicitly for this provenance regression.
@@ -99,12 +130,12 @@ let server:Server,endpoint:string,root:string,userId:string,programId:string,ass
     expect(narrowed.evidence.filter(row=>row.kind==='auth-surface').every(row=>row.scopeState==='OUT_OF_SCOPE')).toBe(true);
     expect((await p.reconArtifact.findUniqueOrThrow({where:{id:endpointRow.id}})).scopeState).toBe('IN_SCOPE');
   });
-  it('retains historical v1 content and automatically schedules a distinct report2',async()=>{
+  it('retains historical v1 content and automatically schedules a distinct report3',async()=>{
     const oldContent={executiveSummary:'Historical report.',sections:[{title:'Web',items:[{text:'Historical evidence.',evidenceRefs:['legacy']}]}],researchPriorities:[],limitations:[]};
     const old=await p.reconSummary.create({data:{programId,scopeAssetId:assetId,scanRunId:runId,model:'historic-model',endpoint,promptVersion:'recon-summary/1',sourceFingerprint:'legacy-fixture',input:{},content:oldContent,status:'READY',generatedAt:new Date()}});
     expect((await s.summaryView(userId,programId,assetId)).stale).toBe(true);
-    await s.scheduleFinishedSummaries();const next=await p.reconSummary.findFirstOrThrow({where:{scanRunId:runId,promptVersion:'recon-report/2'}});await s.processReconSummary(next.id);
-    expect(await p.reconSummary.findUniqueOrThrow({where:{id:old.id}})).toMatchObject({promptVersion:'recon-summary/1',content:oldContent});expect((await s.summaryView(userId,programId,assetId)).summary?.promptVersion).toBe('recon-report/2');
+    await s.scheduleFinishedSummaries();const next=await p.reconSummary.findFirstOrThrow({where:{scanRunId:runId,promptVersion:'recon-report/3'}});await s.processReconSummary(next.id);
+    expect(await p.reconSummary.findUniqueOrThrow({where:{id:old.id}})).toMatchObject({promptVersion:'recon-summary/1',content:oldContent});expect((await s.summaryView(userId,programId,assetId)).summary?.promptVersion).toBe('recon-report/3');
   });
 
   it('does not publish an in-flight Target report after child scope archive',async()=>{

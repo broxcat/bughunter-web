@@ -9,7 +9,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import bcrypt from 'bcryptjs';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { chromium } from 'playwright-chromium';
 const exec = promisify(execFile), db = process.env.TEST_DATABASE_URL, redis = process.env.TEST_ABUSE_REDIS_URL, container = process.env.TEST_ABUSE_REDIS_CONTAINER;
 assert(db && redis && container, 'Use npm run test:queue -- --target-browser');
@@ -45,8 +45,28 @@ try {
   await page.getByRole('link',{name:'https://app.example.test/api/',exact:true}).click();await page.waitForURL(origin+'/scopes/'+asset.id);await page.getByText('Recon Console',{exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Recon',exact:true}).count(),0);
   assert.equal(await page.getByText(/Browse all structured artifacts|Research priorities|Ports and Services|Recon strategy/).count(),0);
   const summaryContent={executiveSummary:'Structured browser fixture summary.',sections:[{title:'Authentication',items:[{text:'Recorded login route.',evidenceRefs:['browser-0']}]}],researchPriorities:[{text:'Review authorized login.',evidenceRefs:['browser-0']}],limitations:['Controlled browser rendering fixture; no inference.']};
-  await p.reconSummary.create({data:{programId:id,scopeAssetId:asset.id,scanRunId:queued.id,status:'READY',model:'browser-fixture',endpoint:'http://unused.test',promptVersion:'recon-summary/1',sourceFingerprint:'fixture',input:{},content:summaryContent,generatedAt:new Date()}});
+  const storedSummary=await p.reconSummary.create({data:{programId:id,scopeAssetId:asset.id,scanRunId:queued.id,status:'READY',model:'browser-fixture',endpoint:'http://unused.test',promptVersion:'recon-summary/1',sourceFingerprint:'fixture',input:{},content:summaryContent,generatedAt:new Date()}});
   await page.getByRole('button',{name:'Summary',exact:true}).click();await page.getByRole('dialog').getByText('Structured browser fixture summary.').waitFor();assert.equal(await page.getByRole('dialog').locator('pre').count(),0);await page.getByRole('button',{name:'Close',exact:true}).click();
+  // Stored rendering fixtures exercise the actual button/modal and failed API
+  // response handling. They do not simulate a successful Ollama inference.
+  const fact=await p.reconArtifact.findFirstOrThrow({where:{scanRunId:queued.id,canonicalKey:'browser-0'}});
+  const emptyCategories=Object.fromEntries(['dnsAndHostIntelligence','networkSurface','webSurface','contentDiscovery','apiSurface','authenticationSurface','technologyFingerprint','tlsAndTransport','changesSincePreviousRecon'].map(key=>[key,[]]));
+  const reportV3={version:3,assessmentOverview:{objective:'Controlled browser rendering fixture.',scopeBoundary:asset.normalizedValue,asset:asset.normalizedValue,format:'URL',assetType:'API',assetValue:'LOW',reconStatus:'PARTIAL',testedAt:'2026-11-04T00:00:00Z'},methodology:[],coverage:{completed:['HTTP'],fallback:['Content discovery'],partial:[],blocked:[],notApplicable:[],notTested:[],failed:[]},factual:{sections:[{category:'webSurface',title:'Web Surface',rows:[{label:'endpoint',value:fact.value.url,details:{method:'GET'},evidenceRefs:[fact.id],scopeState:'IN_SCOPE',verification:'DISCOVERED',sources:[{tool:'browser-fixture',sourceRef:'controlled:0'}]}]}],totals:{evidence:1,retainedEvidence:1,staticAssets:0,omittedEvidence:0},truncated:false,sourceFingerprint:'browser-fixture'},narrative:{...emptyCategories,title:'Recon report',attackSurfaceSummary:'Controlled v3 browser interpretation.',webSurface:[{text:'Review the recorded login route manually.',confidence:'observed',evidenceRefs:[fact.id]}],notableObservations:[],limitations:[],researchHandoff:[]},warnings:[{code:'UNKNOWN_EVIDENCE_REF',path:'webSurface.1',evidenceRefs:['missing'],message:'ZodError invalid_type raw-schema-diagnostic'}],narrativeStatus:'RECOVERED'};
+  await p.reconSummary.update({where:{id:storedSummary.id},data:{promptVersion:'recon-report/3',content:reportV3}});
+  await page.getByRole('button',{name:'Summary',exact:true}).click();const reportDialog=page.getByRole('dialog');
+  await reportDialog.getByRole('heading',{name:'Recon facts',exact:true}).waitFor();await reportDialog.getByRole('heading',{name:'Ollama synthesis',exact:true}).waitFor();await reportDialog.getByText(/Report ready with warnings/).waitFor();
+  await reportDialog.locator('summary').filter({hasText:'Web Surface (1)'}).click();await reportDialog.getByText(fact.value.url,{exact:true}).waitFor();
+  assert(!(await reportDialog.innerText()).includes('ZodError'));assert.equal(await reportDialog.locator('pre').count(),0);await page.getByRole('button',{name:'Close',exact:true}).click();
+  await p.reconSummary.update({where:{id:storedSummary.id},data:{content:{...reportV3,narrativeStatus:'FACTUAL_ONLY',narrativeFailure:'FAILED_SCHEMA',narrative:{...reportV3.narrative,attackSurfaceSummary:'UNVALIDATED_MODEL_OUTPUT'}}}});
+  await page.getByRole('button',{name:'Summary',exact:true}).click();await reportDialog.getByText(/AI response could not be read as a report/).waitFor();await reportDialog.getByRole('heading',{name:'Recon facts',exact:true}).waitFor();assert(!(await reportDialog.innerText()).includes('UNVALIDATED_MODEL_OUTPUT'));await page.getByRole('button',{name:'Close',exact:true}).click();
+  await p.reconSummary.update({where:{id:storedSummary.id},data:{status:'FAILED',content:Prisma.DbNull,error:'ZodError: [{"code":"invalid_type","path":["facts"]}]'}});
+  await page.getByRole('button',{name:'Summary',exact:true}).click();await reportDialog.getByText(/Review scope.md or regenerate if Recon is still available/).waitFor();assert(!(await reportDialog.innerText()).includes('ZodError'));await page.getByRole('button',{name:'Close',exact:true}).click();
+  await p.reconSummary.update({where:{id:storedSummary.id},data:{status:'CANCELLED',error:'SOURCE_REVOKED: private validation details'}});
+  await page.getByRole('button',{name:'Summary',exact:true}).click();await reportDialog.getByText(/Recon source is unavailable or its authorization has changed/).waitFor();assert(!(await reportDialog.innerText()).includes('private validation details'));await page.getByRole('button',{name:'Close',exact:true}).click();
+  const summaryRoute=`**/api/programs/${id}/assets/${asset.id}/summary`;
+  await page.route(summaryRoute,route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'ZodError invalid_type raw-private-diagnostic'})}));
+  await page.getByRole('button',{name:'Summary',exact:true}).click();await reportDialog.getByRole('alert').filter({hasText:/report is unavailable/i}).waitFor();assert(!(await reportDialog.innerText()).includes('raw-private-diagnostic'));await page.getByRole('button',{name:'Close',exact:true}).click();await page.unroute(summaryRoute);
+  await p.reconSummary.update({where:{id:storedSummary.id},data:{status:'READY',promptVersion:'recon-summary/1',content:summaryContent,error:null}});
   await page.screenshot({path:'/tmp/bughunter-summary-scope-desktop.png',fullPage:true});
 
   for(const path of [`/api/programs/${id}/scope.md`,`/api/programs/${id}/assets/${asset.id}/scope.md`]){const r=await context.request.get(origin+path);assert.equal(r.status(),200);assert(r.headers()['content-disposition'].includes('-scope.md'));const text=await r.text();assert(text.includes('format_version: 2')&&text.includes('Safety Boundary')&&text.includes(asset.id));}

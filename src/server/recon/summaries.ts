@@ -9,6 +9,8 @@ import { reportInput,compactPriorReconReport,ReconReportValidationError,type Rep
 import { assetAllowsHost,assetAllowsUrl,type AssetBoundary } from '@/lib/scopeAssets';
 import { isExcluded } from '@/lib/bountyProgram';
 import { inspectOllamaReportModel,generateReconReport } from './ollamaReport';
+import { generateReconReportV3 } from './ollamaReportV3';
+import { createReconReportV3Input,compactPriorReconReportV3,type ReconReportV3Input } from '@/lib/reconReportV3';
 const terminal=['COMPLETED','FAILED'];
 const staticPattern=String.raw`/_next/static/|\.(js|mjs|css|map|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot)(/|$)`;
 const asJson=(v:unknown)=>v as Prisma.InputJsonValue;
@@ -83,29 +85,33 @@ export async function buildSummaryInput(userId:string,programId:string,assetId?:
       // Target synthesis consumes compact structured child summaries, not raw logs.
       const summary=await prisma.reconSummary.findFirst({where:{scanRunId:run.id,status:'READY'},orderBy:{createdAt:'desc'}});
       if(summary){
-        const brief=compactPriorReconReport(summary.content);
+        const brief=summary.promptVersion==='recon-report/3'?compactPriorReconReportV3(summary.content):compactPriorReconReport(summary.content);
         evidence.push({id:summary.id,kind:'summary',sources:[{sourceRef:'ReconSummary:'+summary.id,promptVersion:summary.promptVersion,sourceFingerprint:summary.sourceFingerprint}],value:{assetId:asset.id,llmGenerated:true,authoritative:false,model:summary.model,promptVersion:summary.promptVersion,generatedAt:summary.generatedAt?.toISOString(),narrative:brief.narrative}});
         if(brief.referencedIds.length){
           const originals=await prisma.reconArtifact.findMany({where:{scanRunId:run.id,scopeState:'IN_SCOPE',id:{in:brief.referencedIds}},orderBy:{id:'asc'},take:80});
           evidence.push(...originals.map(artifactEvidence));
         }
       }
-      const rows=await prisma.reconArtifact.findMany({where:{scanRunId:run.id,scopeState:'IN_SCOPE',kind:{in:['hostname','port','service','technology','api-surface','auth-surface','relation','tls','observation']}},orderBy:[{kind:'asc'},{canonicalKey:'asc'}],take:100});
-      evidence.push(...rows.map(artifactEvidence));
+      // Target factual coverage is independent of child AI citations. Include
+      // bounded original endpoint/parameter evidence even when AI is unavailable.
+      const rows=await prisma.reconArtifact.findMany({where:{scanRunId:run.id,kind:{notIn:['endpoint','url']}},orderBy:[{kind:'asc'},{canonicalKey:'asc'}],take:500});
+      const dynamic=await prisma.$queryRaw<ReconArtifact[]>`SELECT * FROM "ReconArtifact" WHERE "scanRunId"=${run.id} AND kind IN ('endpoint','url') AND split_part(split_part(COALESCE(value->>'url',''), '?', 1), '#', 1) !~* ${staticPattern} ORDER BY "canonicalKey",id LIMIT 1000`;
+      evidence.push(...[...rows,...dynamic].map(artifactEvidence));
     }
   }
   if(!runs.some(r=>r._count.artifacts>0))throw new ResearchError('No usable Recon evidence yet',409);
   if(await currentAuthorizationFingerprint(prisma,userId,programId)!==captured.fingerprint)throw new ResearchError('Scope changed while preparing the report; regenerate from current authorization',409);
   const input=reportInput({sourceAuthorizationFingerprint:captured.fingerprint,untestedCurrentAssets:captured.assets.length-assets.length,rulesOfEngagement:program.rulesOfEngagement,assetCount:assets.length,reconStatus:parent?.outcome??parent?.status,runCount:runs.length,testedAt:runs.map(r=>r.finishedAt?.toISOString()).filter(Boolean).sort().at(-1)??'Not recorded',targetId:programId,target:program.companyName,exclusions:program.outOfScope,authorization:'Only explicit active Scope Assets; discoveries never grant authorization.',source:assetId?'asset':'target',runIds:runs.map(r=>r.id),targetReconRunId:parent?.id,coverageNote:'Input is bounded; omitted evidence remains in artifacts and scope.md.'},evidence,budget);
-  return{input,scanRunId:assetId?runs[0].id:undefined,targetReconRunId:parent?.id,scopeAssetId:assetId};
+  return{input,fullEvidence:evidence,scanRunId:assetId?runs[0].id:undefined,targetReconRunId:parent?.id,scopeAssetId:assetId};
 }
 export async function scheduleReconSummary(userId:string,programId:string,assetId?:string,regenerate=false){
   const config=await ollamaSummaryConfig(userId);if(!config)throw new ResearchError('Configure an Ollama endpoint and model in Settings',409);
   const budget=await inspectOllamaReportModel(config.endpoint,config.model);
   let source;try{source=await buildSummaryInput(userId,programId,assetId,budget);}catch(error){if(error instanceof Error&&error.message.includes('selected model budget'))throw new ResearchError('Selected Ollama context cannot fit the minimum authorization and coverage; scope.md remains available',422);throw error;}
-  const fingerprint=createHash('sha256').update(JSON.stringify(source.input)).digest('hex');
+  const input=createReconReportV3Input(source.input,source.fullEvidence);
+  const fingerprint=createHash('sha256').update(JSON.stringify(input)).digest('hex');
   const key=createHash('sha256').update(JSON.stringify([source.scanRunId??source.targetReconRunId,config,SUMMARY_PROMPT_VERSION,fingerprint])).digest('hex');
-  const data={programId,scopeAssetId:assetId,scanRunId:source.scanRunId,targetReconRunId:source.targetReconRunId,model:config.model,endpoint:config.endpoint,promptVersion:SUMMARY_PROMPT_VERSION,sourceFingerprint:fingerprint,input:asJson(source.input)};
+  const data={programId,scopeAssetId:assetId,scanRunId:source.scanRunId,targetReconRunId:source.targetReconRunId,model:config.model,endpoint:config.endpoint,promptVersion:SUMMARY_PROMPT_VERSION,sourceFingerprint:fingerprint,input:asJson(input)};
   // The FK and committed program tombstone prevent publication after deletion.
   return prisma.$transaction(async tx=>{
     const allowed=await tx.$queryRaw<{id:string}[]>`SELECT id FROM "BountyProgram" WHERE id=${programId} AND "ownerId"=${userId} AND "deletingAt" IS NULL FOR SHARE`;
@@ -139,13 +145,15 @@ export async function processReconSummary(id:string,shutdown?:AbortSignal){
       const input=job.input as unknown as ReturnType<typeof summaryInput>;
       const raw=await client.chat(SUMMARY_SYSTEM+'\nOutput JSON schema:\n'+JSON.stringify(z.toJSONSchema(reconSummarySchema)),JSON.stringify(input),{format:z.toJSONSchema(reconSummarySchema),temperature:0,maxTokens:2400,retries:0,timeoutMs:120000,maxResponseBytes:131072,signal});
       content=validateReconSummary(raw,input);
-    }else content=await generateReconReport(client,job.input as unknown as ReconReportInput,{signal});
+    }else if(job.promptVersion==='recon-report/2')content=await generateReconReport(client,job.input as unknown as ReconReportInput,{signal});
+    else if(job.promptVersion==='recon-report/3')content=await generateReconReportV3(client,job.input as unknown as ReconReportV3Input,{signal});
+    else throw new Error('Unsupported historical report format');
     await prisma.$transaction(async tx=>{
       const authorized=await tx.$queryRaw<{id:string}[]>`SELECT id FROM "BountyProgram" WHERE id=${job.programId} AND "ownerId"=${job.program.ownerId} AND "deletingAt" IS NULL FOR SHARE`;
       if(!authorized.length){controller.abort();return;}
       await lockExecutionScopes(tx,job.programId);
       if(policy&&policy.expected!==await currentAuthorizationFingerprint(tx,policy.userId,policy.programId)){controller.abort();await tx.reconSummary.updateMany({where:{id,status:'RUNNING'},data:{status:'CANCELLED',error:'SOURCE_REVOKED: Authorization changed during report generation.'}});return;}
-      await tx.reconSummary.updateMany({where:{id,status:'RUNNING',program:{deletingAt:null},OR:[{scopeAssetId:null},{scopeAsset:{active:true}}]},data:{status:'READY',content:asJson(content),generatedAt:new Date()}});
+      await tx.reconSummary.updateMany({where:{id,status:'RUNNING',program:{deletingAt:null},OR:[{scopeAssetId:null},{scopeAsset:{active:true}}]},data:{status:'READY',content:asJson(content),generatedAt:new Date(),error:null}});
     });
   }catch(error){
     const cancelled=controller.signal.aborted;
