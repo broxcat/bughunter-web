@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { isExcluded, programSchema, matchesHost } from "@/lib/bountyProgram";
 import { assetAllowsUrl, assetAllowsHost, scopeAssetExecutable, type AssetBoundary } from '@/lib/scopeAssets';
 import type { ReconPlan } from '@/lib/reconPlanner';
+import { isSafeReadUrl } from '@/lib/observationSafety';
 
 export interface TargetRequestGuard {
   assertRequest?(url: string, method: string, body?: string): void;
@@ -14,6 +15,9 @@ export interface TargetRequestGuard {
   signal: AbortSignal;
 }
 export interface TargetExecution {
+  /** Server-only, request-local loader. Never serialized or passed to scanners. */
+  authenticatedOrigin?: string;
+  authenticatedRequestHeaders?: (url: string, method: string) => Promise<Record<string, string>>;
   reconPlan?: ReconPlan;
   contentBaseline?: import('./recon/calibration').UnknownPathBaseline;
   reconTempDir?: string;
@@ -87,6 +91,22 @@ export function executionHeaders(headers?: HeadersInit): Headers {
   result.set("User-Agent", ctx.requiredUserAgent);
   return result;
 }
+/** Scope and read-only checks precede decrypting any context credential. */
+export async function authenticatedExecutionHeaders(url: string, method: string, supplied?: HeadersInit, body?: string) {
+  const ctx = currentTargetExecution();
+  const headers = executionHeaders(supplied);
+  if (!ctx.authenticatedRequestHeaders) return headers;
+  assertExecutionUrl(url, ctx);
+  if (!ctx.authenticatedOrigin || new URL(url).origin !== ctx.authenticatedOrigin || !['GET', 'HEAD'].includes(method) || body !== undefined || !isSafeReadUrl(url)) throw new Error('AUTH_CONTEXT_SCOPE_BLOCKED');
+  if (['cookie', 'authorization', 'proxy-authorization', 'host'].some(key => headers.has(key))) throw new Error('AUTH_CONTEXT_HEADER_OVERRIDE');
+  const privateHeaders = new Headers(await ctx.authenticatedRequestHeaders(url, method));
+  for (const [key, value] of privateHeaders) {
+    if (!['cookie', 'authorization'].includes(key)) throw new Error('AUTH_CONTEXT_HEADER_OVERRIDE');
+    headers.set(key, value);
+  }
+  headers.set('User-Agent', ctx.requiredUserAgent);
+  return headers;
+}
 /** Register launch itself before awaiting it, so cancellation also waits for a
  * browser that is still starting and closes it before confirming cleanup. */
 export async function launchTargetBrowser(options: Parameters<typeof chromium.launch>[0]) {
@@ -117,6 +137,10 @@ export async function newTargetBrowserContext(browser: Browser, syntheticPage?: 
   const stop = () => closing ??= (async () => {
     await context.close();
     await browser.close();
+    // Release only after both resources confirmed closure. An aborted local
+    // mapping guard must not leave a fulfilled stop registered for later
+    // cleanup against an already closed browser connection.
+    untrack?.();
     logger.info({ ...control?.identity, reason: "BROWSER_ABORTED" }, "scan browser context closed");
   })();
   const untrack = control?.track(stop);
@@ -133,6 +157,11 @@ export async function newTargetBrowserContext(browser: Browser, syntheticPage?: 
     }
     try { assertExecutionUrl(url, ctx); } catch { await route.abort("blockedbyclient"); return; }
     const headers = new Headers(route.request().headers());
+    if (ctx.authenticatedRequestHeaders) {
+      // A fresh context may receive Set-Cookie. The next request still uses only
+      // the live verified credential, never browser-controlled auth material.
+      for (const name of ['cookie', 'authorization', 'proxy-authorization', 'host']) headers.delete(name);
+    }
     headers.set("User-Agent", ctx.requiredUserAgent);
     // Chromium does not route every hop of a native redirect chain. Observe
     // redirects without following them, as the internal HTTP probe does.
@@ -143,7 +172,9 @@ export async function newTargetBrowserContext(browser: Browser, syntheticPage?: 
       signal.throwIfAborted();
       await beforeScanNetwork();
       signal.throwIfAborted();
-      const response = await route.fetch({ headers: Object.fromEntries(headers), maxRedirects: 0, timeout: Math.min(5000, ctx.requestGuard?.remainingMs() ?? 5000) });
+      const authorizedHeaders = await authenticatedExecutionHeaders(url, route.request().method(), headers, route.request().postData() ?? undefined);
+      signal.throwIfAborted();
+      const response = await route.fetch({ headers: Object.fromEntries(authorizedHeaders), maxRedirects: 0, timeout: Math.min(5000, ctx.requestGuard?.remainingMs() ?? 5000) });
       await recordUsefulScanWork();
       const responseHeaders = { ...response.headers() };
       if (response.status() >= 300 && response.status() < 400 && responseHeaders.location) {

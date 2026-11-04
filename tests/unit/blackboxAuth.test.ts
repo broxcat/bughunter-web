@@ -26,7 +26,8 @@ describe("black-box authentication input and session state", () => {
   });
   it("accepts usernames without assuming an email address and needs no internal endpoint", () => {
     expect(connectionInputSchema.safeParse({ mode: "EMAIL_PASSWORD", username: "local-user", password: "fixture" }).success).toBe(true);
-    expect(connectionInputSchema.safeParse({ mode: "BEARER", bearerToken: "fixture" }).success).toBe(false);
+    expect(connectionInputSchema.safeParse({ mode: "BEARER", bearerToken: "fixture" }).success).toBe(true);
+    for (const bearerToken of ['', 'fixture\r\nInjected: value', 'x'.repeat(8193)]) expect(connectionInputSchema.safeParse({ mode: 'BEARER', bearerToken }).success).toBe(false);
   });
 
 });
@@ -61,10 +62,11 @@ describe("evidence review replaces the questionnaire", () => {
     for (const status of ["REJECTED", "INCONCLUSIVE"] as const) expect(reviewDecision({ reviewStatus: "EVIDENCE_REVIEW" }, status, "Local controls did not reproduce the claimed behavior", false)).toBeNull();
     expect(evidenceReviewSchema.safeParse({ answers: { q1: true } }).success).toBe(false);
   });
-  it("exposes only two simple authentication modes and no manual internal fields", () => {
+  it("reuses existing authentication modes without exposing internal session-validation fields", () => {
     const ui = readFileSync("src/components/TargetAuthentication.tsx", "utf8");
     expect(ui).toContain("Username / password"); expect(ui).toContain("Session cookie"); expect(ui).toContain("Test connection");
-    expect(ui).not.toMatch(/CSRF token|Login URL|login endpoint|Bearer token|Owned object URL|Credential purpose/);
+    expect(ui).toContain('Bearer token');expect(ui).toContain('Use for Recon');expect(ui).toContain('operator-declared');
+    expect(ui).not.toMatch(/CSRF token|Login URL|login endpoint|Owned object URL|Credential purpose|sessionIdentityHash|validationUrl/);
     expect(existsSync("src/lib/gate.ts")).toBe(false);
     expect(readFileSync("src/app/(dashboard)/targets/[id]/findings/page.tsx", "utf8")).not.toMatch(/7.Question|GATE_QUESTIONS|Run gate/);
   });

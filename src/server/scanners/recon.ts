@@ -17,7 +17,6 @@ import { logLine } from "./context";
 
 import { runCommand } from "./runCommand";
 import { loadScanContext } from "./context";
-import { loadTargetCredentials, credentialHeaders } from "@/server/credentials";
 
 const MINUTE = 60_000;
 
@@ -56,25 +55,8 @@ export async function runRecon(_host: string, scanRunId: string): Promise<ScanEx
   const url = ctx.baseUrl;
   const domain = bareHost.split(":")[0]; // no port — subfinder/nmap want this
 
-  // If the target has a credential, crawl authenticated so katana/httpx reach
-  // session-gated routes (/dashboard, /courses, …). First credential is enough
-  // for broad URL discovery. Passed as argv -H flags (never a shell string).
-  // EMAIL_PASSWORD credentials auto-login here via loadTargetCredentials.
-  const headerArgs: string[] = [];
-  try {
-    const creds = await loadTargetCredentials(ctx.targetId);
-    if (creds.length > 0) {
-      for (const [k, v] of Object.entries(credentialHeaders(creds[0]))) {
-        headerArgs.push("-H", `${k}: ${v}`);
-      }
-    }
-  } catch {
-    await record({ step: "authentication", state: "FAILED", reason: "authenticated crawl unavailable; continuing anonymously" });
-  }
-  if (headerArgs.length > 0) {
-    // (no cookie/token values logged — only that auth is in use)
-    await logLine(scanRunId, "[recon] authenticated crawl enabled");
-  }
+  // Legacy Recon is anonymous. Explicit contextual mapping owns authentication;
+  // credential material is never supplied to scanner argv or inherited flags.
 
   // DNS records only: discovered identities are never auto-authorized.
   // Passive subdomain enumeration belongs to program Recon. This host stage
@@ -100,17 +82,16 @@ export async function runRecon(_host: string, scanRunId: string): Promise<ScanEx
       : { step: "dns", state: "FAILED", reason: "DNS resolution failed" });
   }
 
-  // Live host probing — full URL (authenticated when a credential exists).
-  await command("httpx", ["-silent", "-u", url, ...headerArgs], 5 * MINUTE);
+  // Live host probing remains anonymous.
+  await command("httpx", ["-silent", "-u", url], 5 * MINUTE);
 
   // TCP connect scan only: no service/version detection or HTTP probes.
   await command("nmap", ["-sT", "-Pn", "-n", domain], 10 * MINUTE);
 
-  // URL crawling — full URL, depth 3 to reach dashboard sub-pages, authenticated
-  // when a credential exists.
+  // Historical URL crawling remains anonymous.
   await command(
     "katana",
-    ["-silent", "-u", url, "-d", "3", "-jc", ...headerArgs],
+    ["-silent", "-u", url, "-d", "3", "-jc"],
     10 * MINUTE,
   );
   throwIfScanAborted();

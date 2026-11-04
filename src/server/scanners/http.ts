@@ -1,5 +1,5 @@
 import { beforeScanNetwork, currentScanControl, recordUsefulScanWork, throwIfScanAborted } from "@/server/scanControl";
-import { assertExecutionUrl, executionHeaders, currentTargetExecution } from "@/server/execution";
+import { assertExecutionUrl, authenticatedExecutionHeaders, currentTargetExecution } from "@/server/execution";
 // Minimal HTTP probe helper for the vuln-class scanners. Uses global fetch with
 // a hard per-request timeout and manual redirect handling (so a 30x is observed,
 // not silently followed — important for auth/bypass checks). Never throws: a
@@ -59,9 +59,12 @@ export async function probe(
     await beforeScanNetwork();
     throwIfScanAborted();
     opts.signal?.throwIfAborted();
+    const requestHeaders = await authenticatedExecutionHeaders(url, method, opts.headers, opts.body);
+    throwIfScanAborted();
+    opts.signal?.throwIfAborted();
     const res = await fetch(url, {
       method,
-      headers: executionHeaders(opts.headers),
+      headers: requestHeaders,
       body: opts.body,
       redirect: "manual",
       signal: AbortSignal.any([controller.signal, ...(scan ? [scan.signal] : []), ...(opts.signal ? [opts.signal] : []), ...(guard ? [guard.signal, AbortSignal.timeout(Math.max(1, Math.min(5000, guard.remainingMs())))] : [])]),

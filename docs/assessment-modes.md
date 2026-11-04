@@ -2,9 +2,11 @@
 
 The platform retains one workflow: Targets → Scope → Recon → Research → Findings → Report.
 
-**Black-box** (`BLACK_BOX`, the default) uses authorized externally observable evidence: scope, DNS, HTTP/services, public pages/JavaScript/APIs, passive sources, supplied Recon and existing Burp observations. It assumes no internal source, architecture or private documentation access. This foundation adds no authenticated Recon.
+**Black-box** (`BLACK_BOX`, the default) uses authorized externally observable evidence: scope, DNS, HTTP/services, public pages/JavaScript/APIs, passive sources, supplied Recon and existing Burp observations. It assumes no internal source, architecture or private documentation access. Explicitly enabled verified test sessions can additionally support [authenticated runtime Recon](authenticated-recon.md).
 
 **White-box** (`WHITE_BOX`) registers explicitly authorized source-context metadata alongside the same external assessment. It does **not** fetch repositories, read archives, ingest documentation, run static analysis or inspect source code. Every registered source has `contentAvailable: false`. Neither mode changes Recon tools, budgets, providers or rules of engagement.
+
+Authenticated mapping uses the same scoped runtime engine in both modes. Personas are operator-declared, context differences are observations only, and no source-assisted role correlation is performed. Source metadata never supplies request seeds or authorizes credentials on a new host.
 
 ## Critical boundary
 

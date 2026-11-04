@@ -9,6 +9,7 @@ import { publishScanJob } from '../queue/scanJobPublisher';
 import { requestScanCancellation, settleQueuedCancellations } from '../queue/scanCancellation';
 import { RATE_LIMIT_POLICIES } from '@/lib/abusePolicy';
 import { captureProgramAssessment } from '../assessment';
+import { captureAuthenticatedContexts } from '../authenticatedRecon';
 
 export async function startTargetRecon(userId:string,programId:string) {
   const parent=await prisma.$transaction(async tx=>{
@@ -31,8 +32,9 @@ export async function startTargetRecon(userId:string,programId:string) {
         target=await tx.target.create({data:{userId,programId,scopeId:scope.id,scopeAssetId:asset.id,host,scheme:asset.format==='URL'?new URL(asset.normalizedValue).protocol.slice(0,-1):'https',active:false},include:{scope:true}});
       }
       const host=asset.format==='URL'?new URL(asset.normalizedValue).hostname:asset.normalizedValue;
-      const plan=buildReconPlan(asset,{active:target.scope.status==='APPROVED'&&!(asset.format==='WILDCARD_DOMAIN'?program.outOfScope.some(rule=>matchesHost(host,rule)):isExcluded(host,program.outOfScope)),exclusions:program.outOfScope},{newSurface:!previous.has(asset.id)});
-      const scan=await tx.scanRun.create({data:{targetId:target.id,scopeAssetId:asset.id,targetReconRunId:parent.id,reconOrder,scopeAssetSnapshot:assetSnapshot(asset),assessmentModeSnapshot:parent.assessmentModeSnapshot,assessmentSourcesSnapshot:parent.assessmentSourcesSnapshot as Prisma.InputJsonValue,reconPlan:plan as unknown as Prisma.InputJsonValue,type:'RECON',reconSteps:{create:plan.stages.map((s,position)=>({name:s.name,position,reason:s.reason}))}}});
+      const authContexts=await captureAuthenticatedContexts(tx,target.id);
+      const plan=buildReconPlan(asset,{active:target.scope.status==='APPROVED'&&!(asset.format==='WILDCARD_DOMAIN'?program.outOfScope.some(rule=>matchesHost(host,rule)):isExcluded(host,program.outOfScope)),exclusions:program.outOfScope},{newSurface:!previous.has(asset.id),authenticatedContexts:authContexts.contexts.filter(context=>context.eligibility==='PLANNED').length});
+      const scan=await tx.scanRun.create({data:{targetId:target.id,scopeAssetId:asset.id,targetReconRunId:parent.id,reconOrder,scopeAssetSnapshot:assetSnapshot(asset),assessmentModeSnapshot:parent.assessmentModeSnapshot,assessmentSourcesSnapshot:parent.assessmentSourcesSnapshot as Prisma.InputJsonValue,authenticatedContextsSnapshot:authContexts as unknown as Prisma.InputJsonValue,reconPlan:plan as unknown as Prisma.InputJsonValue,type:'RECON',reconSteps:{create:plan.stages.map((s,position)=>({name:s.name,position,reason:s.reason}))}}});
       await tx.scanJobOutbox.create({data:{scanRunId:scan.id}});
     }
     return tx.targetReconRun.findUniqueOrThrow({where:{id:parent.id},include:{scans:{select:{id:true}}}});

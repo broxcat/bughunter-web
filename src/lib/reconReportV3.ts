@@ -8,6 +8,7 @@ import { classifyReconUrl } from './reconArtifacts';
 import type { SummaryEvidence } from './reconSummary';
 import type { ReconReportInput } from './reconReport';
 import type { AssessmentSnapshot } from './assessment';
+import type { SafeAuthSurface } from './authenticatedRecon';
 
 export const REPORT_V3_PROMPT_VERSION = 'recon-report/3';
 export const REPORT_V3_SYSTEM = `You write a professional Reconnaissance and Attack Surface narrative for an authorized researcher. Prompt version: ${REPORT_V3_PROMPT_VERSION}.
@@ -31,21 +32,21 @@ export type FactRowV3 = { label: string; value: string; details: Record<string, 
 export type FactualReportV3 = { sections: { category: ReportV3Category; title: string; rows: FactRowV3[] }[]; totals: { evidence: number; retainedEvidence: number; staticAssets: number; omittedEvidence: number }; truncated: boolean; sourceFingerprint: string };
 export type NarrativeEntryV3 = { text: string; confidence: 'observed' | 'inferred'; evidenceRefs: string[]; facts?: EvidenceFactsV3 };
 export type ReconNarrativeV3 = Record<ReportV3Category, NarrativeEntryV3[]> & { title: string; attackSurfaceSummary: string; notableObservations: { title: string; observation: string; relevance: string; confidence: 'observed' | 'inferred'; evidenceRefs: string[]; facts?: EvidenceFactsV3 }[]; limitations: string[]; researchHandoff: { priority: 'high' | 'medium' | 'low'; area: string; rationale: string; evidenceRefs: string[]; facts?: EvidenceFactsV3 }[] };
-export type ReconReportV3 = { version: 3; assessmentOverview: ReconReportInput['assessment']; methodology: ReconReportInput['methodology']; coverage: ReconReportInput['coverage']; factual: FactualReportV3; narrative: ReconNarrativeV3; warnings: V3Issue[]; narrativeStatus: 'VALID' | 'RECOVERED' | 'FACTUAL_ONLY'; narrativeFailure?: ReportV3Failure; generation?: Record<string, unknown>; assessmentContext?:AssessmentReportContext };
-export type ReconReportV3Input = Omit<ReconReportInput, 'version'> & { version: 3; fullEvidenceLedger: SummaryEvidence[]; aliases: Record<string, string>; factual: FactualReportV3; preparationWarnings: V3Issue[]; assessmentContext?:AssessmentReportContext };
+export type ReconReportV3 = { version: 3; assessmentOverview: ReconReportInput['assessment']; methodology: ReconReportInput['methodology']; coverage: ReconReportInput['coverage']; factual: FactualReportV3; narrative: ReconNarrativeV3; warnings: V3Issue[]; narrativeStatus: 'VALID' | 'RECOVERED' | 'FACTUAL_ONLY'; narrativeFailure?: ReportV3Failure; generation?: Record<string, unknown>; assessmentContext?:AssessmentReportContext; authenticatedRecon?:SafeAuthSurface[] };
+export type ReconReportV3Input = Omit<ReconReportInput, 'version'> & { version: 3; fullEvidenceLedger: SummaryEvidence[]; aliases: Record<string, string>; factual: FactualReportV3; preparationWarnings: V3Issue[]; assessmentContext?:AssessmentReportContext; authenticatedRecon?:SafeAuthSurface[] };
 const obj = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const uniq = (values: string[]) => [...new Set(values)].sort();
 const strings = (value: unknown) => Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
 const jsonHash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const safeText = (value: string, limit = 2048) => redactObservationText(value).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, ' ').slice(0, limit);
-const evidenceValueFields = new Set(['url', 'hostname', 'host', 'ip', 'ips', 'addresses', 'port', 'protocol', 'service', 'state', 'statusCode', 'statusCodes', 'method', 'declaredMethod', 'name', 'version', 'versionConfirmed', 'parameters', 'parameter', 'parameterNames', 'type', 'category', 'description', 'title', 'contentType', 'redirect', 'location', 'origin', 'relationship', 'from', 'fromType', 'to', 'toType', 'tlsVersion', 'tlsVersions', 'tls', 'issuer', 'subject', 'validFrom', 'validTo', 'fingerprint', 'classification', 'stable', 'sampleCount', 'baselineEquivalent', 'safeForActiveReview', 'normalized', 'original', 'format', 'formatSource', 'active', 'authorizationState', 'recon', 'outcome', 'value', 'artifactCount', 'depth', 'activityMode', 'boundary', 'capturedPlan', 'rationale', 'tools', 'reason', 'capability', 'details', 'counts', 'staticAssetCount', 'staticAssets', 'sampledRecords', 'truncated', 'comparable', 'new', 'removed', 'changed', 'llmGenerated', 'authoritative', 'narrative', 'model', 'promptVersion', 'generatedAt', 'firstSeenAt', 'lastSeenAt']);
+const evidenceValueFields = new Set(['contextKey', 'contextMode', 'contextLabel', 'persona', 'responseClass', 'url', 'hostname', 'host', 'ip', 'ips', 'addresses', 'port', 'protocol', 'service', 'state', 'statusCode', 'statusCodes', 'method', 'declaredMethod', 'name', 'version', 'versionConfirmed', 'parameters', 'parameter', 'parameterNames', 'type', 'category', 'description', 'title', 'contentType', 'redirect', 'location', 'origin', 'relationship', 'from', 'fromType', 'to', 'toType', 'tlsVersion', 'tlsVersions', 'tls', 'issuer', 'subject', 'validFrom', 'validTo', 'fingerprint', 'classification', 'stable', 'sampleCount', 'baselineEquivalent', 'safeForActiveReview', 'normalized', 'original', 'format', 'formatSource', 'active', 'authorizationState', 'recon', 'outcome', 'value', 'artifactCount', 'depth', 'activityMode', 'boundary', 'capturedPlan', 'rationale', 'tools', 'reason', 'capability', 'details', 'counts', 'staticAssetCount', 'staticAssets', 'sampledRecords', 'truncated', 'comparable', 'new', 'removed', 'changed', 'llmGenerated', 'authoritative', 'narrative', 'model', 'promptVersion', 'generatedAt', 'firstSeenAt', 'lastSeenAt']);
 function cleanValue(value: unknown, depth = 0, field = ''): unknown {
   if (depth > 5) return '[omitted]';
   if (typeof value === 'string') return safeText(value, ['url', 'normalized', 'original', 'boundary'].includes(field) ? 4096 : 1200);
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value === 'boolean' || value === null) return value;
   if (Array.isArray(value)) return value.slice(0, 40).map(v => cleanValue(v, depth + 1, field));
-  return Object.fromEntries(Object.entries(obj(value)).sort(([a], [b]) => a.localeCompare(b)).filter(([key]) => !/^(?:html|body|raw|rawOutput|headers|request|response|authorization|cookie|set-cookie|password|secret|token|apiKey)$/i.test(key) && (depth > 0 || evidenceValueFields.has(key))).slice(0, 40).map(([key, v]) => [key, cleanValue(v, depth + 1, key)]));
+  return Object.fromEntries(Object.entries(obj(value)).sort(([a], [b]) => a.localeCompare(b)).filter(([key]) => !/^(?:html|body|raw|rawOutput|headers|request|response|authorization|cookie|set-cookie|password|secret|token|apiKey|credentialId|username|email|sessionIdentityHash|sessionCheckId|cookiesCipher|headerCipher|validationUrl|ownedObjectUrl|bodyHash|bodyLength)$/i.test(key) && (depth > 0 || evidenceValueFields.has(key))).slice(0, 40).map(([key, v]) => [key, cleanValue(v, depth + 1, key)]));
 }
 function cleanEvidence(row: SummaryEvidence): SummaryEvidence {
   const sources = Array.isArray(row.sources) ? row.sources.slice(0, 8).map(source => { const v = obj(source); return Object.fromEntries(['tool', 'sourceRef', 'observedAt'].filter(k => typeof v[k] === 'string').map(k => [k, safeText(String(v[k]), 300)])); }) : [];
@@ -100,7 +101,7 @@ function factualRows(ledger: SummaryEvidence[]): FactualReportV3['sections'] {
   for (const row of ledger) {
     if (['asset', 'coverage', 'summary'].includes(row.kind)) continue;
     const value = obj(row.value), details: FactRowV3['details'] = {};
-    for (const key of ['hostname', 'ip', 'addresses', 'ips', 'method', 'declaredMethod', 'contentType', 'redirect', 'location', 'relationship', 'origin', 'from', 'to', 'type', 'name', 'port', 'protocol', 'service', 'state', 'classification', 'stable', 'sampleCount', 'parameters', 'tlsVersion', 'issuer', 'subject', 'validFrom', 'validTo', 'description', 'firstSeenAt', 'lastSeenAt']) { const v = value[key]; if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || Array.isArray(v) && v.every(s => typeof s === 'string')) details[key] = v as string | number | boolean | string[]; }
+    for (const key of ['contextLabel', 'contextMode', 'persona', 'responseClass', 'hostname', 'ip', 'addresses', 'ips', 'method', 'declaredMethod', 'contentType', 'redirect', 'location', 'relationship', 'origin', 'from', 'to', 'type', 'name', 'port', 'protocol', 'service', 'state', 'classification', 'stable', 'sampleCount', 'parameters', 'tlsVersion', 'issuer', 'subject', 'validFrom', 'validTo', 'description', 'firstSeenAt', 'lastSeenAt']) { const v = value[key]; if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || Array.isArray(v) && v.every(s => typeof s === 'string')) details[key] = v as string | number | boolean | string[]; }
     if (typeof value.statusCode === 'number') details.statusCode = value.statusCode;
     if (Array.isArray(value.statusCodes)) details.negativeControlStatusCodes = value.statusCodes.map(String);
     if (row.kind === 'technology') details.version = value.versionConfirmed === true && typeof value.version === 'string' ? value.version : 'Not confirmed';
@@ -114,7 +115,7 @@ function factualRows(ledger: SummaryEvidence[]): FactualReportV3['sections'] {
 }
 /** The existing model budget is unchanged. The independent factual ledger has
  * its own 1,000-row / 512-KiB bound and always declares omissions. */
-export function createReconReportV3Input(source: ReconReportInput, fullStructuredEvidence: SummaryEvidence[] = source.evidence, assessmentContext?:AssessmentReportContext): ReconReportV3Input {
+export function createReconReportV3Input(source: ReconReportInput, fullStructuredEvidence: SummaryEvidence[] = source.evidence, assessmentContext?:AssessmentReportContext, authenticatedRecon?:SafeAuthSurface[]): ReconReportV3Input {
   const original = [...new Map([...source.evidence, ...fullStructuredEvidence].map(row => [row.id, row])).values()];
   const priority = (row: SummaryEvidence) => { const index = ['asset', 'coverage', 'auth-surface', 'api-surface', 'port', 'service', 'hostname', 'technology', 'tls', 'parameter', 'relation', 'observation', 'change', 'endpoint', 'url', 'summary'].indexOf(row.kind); return index < 0 ? 99 : index; };
   let staticAssets = 0;
@@ -127,7 +128,7 @@ export function createReconReportV3Input(source: ReconReportInput, fullStructure
   const omitted = rows.length - ledger.length;
   const factual: FactualReportV3 = { sections: factualRows(ledger), totals: { evidence: original.length, retainedEvidence: ledger.length, staticAssets, omittedEvidence: omitted }, truncated: omitted > 0, sourceFingerprint: jsonHash(original.map(row => ({ id: row.id, kind: row.kind, value: cleanValue(row.value), scopeState: row.scopeState, verification: row.verification })).sort((a, b) => a.id.localeCompare(b.id))) };
   const preparationWarnings: V3Issue[] = omitted ? [{ code: 'FACTUAL_INPUT_TRUNCATED', path: 'factual', evidenceRefs: [], message: `${omitted} evidence records exceed the factual-table limit. Original artifacts and scope.md remain available.` }] : [];
-  return { ...source, version: 3, metadata: JSON.parse(redactObservationText(JSON.stringify(source.metadata))), evidence, fullEvidenceLedger: ledger, aliases, factual, preparationWarnings, ...(assessmentContext?{assessmentContext}:{}) };
+  return { ...source, version: 3, metadata: JSON.parse(redactObservationText(JSON.stringify(source.metadata))), evidence, fullEvidenceLedger: ledger, aliases, factual, preparationWarnings, ...(assessmentContext?{assessmentContext}:{}), ...(authenticatedRecon?{authenticatedRecon}:{}) };
 }
 function stripNestedRefs(value: unknown): unknown { if (Array.isArray(value)) return value.map(stripNestedRefs); if (!value || typeof value !== 'object') return value; return Object.fromEntries(Object.entries(obj(value)).filter(([key]) => !/^(?:id|evidenceRefs|artifactId|scanId|scanRunId|runId|sourceRef|requestRef|responseRef)$/i.test(key)).map(([key, v]) => [key, stripNestedRefs(v)])); }
 export function modelInputForReconReportV3(input: ReconReportV3Input) {
@@ -141,7 +142,7 @@ export function reconReportV3NarrativeSchemaFor(input: ReconReportV3Input) {
   return z.strictObject({ title: z.string().min(1).max(180), attackSurfaceSummary: z.string().min(1).max(2000), sections: z.array(z.strictObject({ category: z.enum(reportV3Categories), entries: z.array(entry).max(12) })).max(9), notableObservations: z.array(z.strictObject({ title: z.string().min(1).max(180), observation: z.string().min(1).max(700), relevance: z.string().min(1).max(500), confidence: z.enum(['observed', 'inferred']), evidenceRefs: refs })).max(12), limitations: z.array(z.string().min(1).max(500)).max(20), researchHandoff: z.array(z.strictObject({ priority: z.enum(['high', 'medium', 'low']), area: z.string().min(1).max(180), rationale: z.string().min(1).max(700), evidenceRefs: refs })).max(12) });
 }
 function emptyNarrative(): ReconNarrativeV3 { return { title: 'Reconnaissance & Attack Surface Assessment', attackSurfaceSummary: 'Structured Recon evidence is available in the factual tables. The AI narrative is unavailable.', ...Object.fromEntries(reportV3Categories.map(category => [category, []])) as unknown as Record<ReportV3Category, NarrativeEntryV3[]>, notableObservations: [], limitations: [], researchHandoff: [] }; }
-export function fallbackReconReportV3(input: ReconReportV3Input, issues: V3Issue[] = [], failureKind: ReportV3Failure = 'FAILED_VALIDATION'): ReconReportV3 { return { version: 3, assessmentOverview: input.assessment, methodology: input.methodology, coverage: input.coverage, factual: input.factual, narrative: emptyNarrative(), warnings: [...input.preparationWarnings, ...(issues.length ? issues : [{ code: failureKind, path: 'narrative', evidenceRefs: [], message: 'The AI narrative is unavailable. Application-generated factual tables remain complete within their declared limits.' }])], narrativeStatus: 'FACTUAL_ONLY', narrativeFailure: failureKind, ...(input.assessmentContext?{assessmentContext:input.assessmentContext}:{}) }; }
+export function fallbackReconReportV3(input: ReconReportV3Input, issues: V3Issue[] = [], failureKind: ReportV3Failure = 'FAILED_VALIDATION'): ReconReportV3 { return { version: 3, assessmentOverview: input.assessment, methodology: input.methodology, coverage: input.coverage, factual: input.factual, narrative: emptyNarrative(), warnings: [...input.preparationWarnings, ...(issues.length ? issues : [{ code: failureKind, path: 'narrative', evidenceRefs: [], message: 'The AI narrative is unavailable. Application-generated factual tables remain complete within their declared limits.' }])], narrativeStatus: 'FACTUAL_ONLY', narrativeFailure: failureKind, ...(input.assessmentContext?{assessmentContext:input.assessmentContext}:{}), ...(input.authenticatedRecon?{authenticatedRecon:input.authenticatedRecon}:{}) }; }
 export function compactPriorReconReportV3(content: unknown): { narrative: Record<string, unknown>; referencedIds: string[] } {
   const value = obj(content), narrative = obj(value.narrative);
   if (value.version !== 3) return { narrative: { unavailable: 'Unrecognized historical report format.' }, referencedIds: [] };
@@ -155,13 +156,25 @@ function canonicalUrl(value: string): string | null {
 }
 const trimPunctuation = (value: string) => value.replace(/[.,;:)\]]+$/, '');
 function pathKey(value: string) { return value.length > 1 ? value.replace(/\/+$/, '') : value; }
+/** Context visibility is evidence for manual review, never proof of a bypass.
+ * A negative caveat applies only to its own clause; it cannot excuse a later
+ * affirmative claim after a sentence, semicolon or contrast. */
+function affirmativeAccessControlClaim(text: string): boolean {
+  const claims = /\bcan\s+bypass\s+(?:authorization|authentication)\b|\b(?:confirmed|demonstrated)\s+(?:(?:an?|the)\s+)?(?:IDOR|BOLA|privilege\s+escalation)\b|\b(?:IDOR|BOLA|privilege\s+escalation)\s+(?:(?:is|was|has\s+been)\s+)?(?:confirmed|demonstrated)\b/gi;
+  for (const match of text.matchAll(claims)) {
+    const prefix = text.slice(0, match.index).split(/[.!?;\n]|\b(?:but|however|nevertheless|yet)\b/i).at(-1) ?? '';
+    const negated = /\b(?:no|without)\s+(?:evidence|proof|indication|demonstration)\b|\b(?:no|without)\s*$|\bnot\s+(?:an?\s+)?$|\b(?:does|do|did)\s+not\s+(?:establish|demonstrate|prove|show|mean|imply|confirm|conclude)\b|\b(?:has|have)\s+not\s+been\s+(?:established|demonstrated|proved|shown|confirmed)\b|\b(?:cannot|can't)\s+(?:conclude|establish|demonstrate|prove|confirm)\b/i.test(prefix);
+    if (!negated) return true;
+  }
+  return false;
+}
 function proseIssues(text: string, input: ReconReportV3Input, facts: EvidenceFactsV3, path: string, refs: string[], handoff = false): V3Issue[] {
   const found: V3Issue[] = [], add = (code: string, message: string) => found.push(issue(code, path, refs, message));
   const directActions = [...text.matchAll(/\b(?:scan|probe|fuzz|crawl|test|investigate|tester|scanner|analyser)\s+(?:https?:\/\/|(?:[a-z0-9-]+\.)+[a-z0-9-]+|\/[a-z0-9])/gi)];
   const scopeSensitive = handoff || directActions.some(match => !/(?:do not|never|avoid|ne pas|pas)\s*$/i.test(text.slice(0, match.index)));
   const rows = input.fullEvidenceLedger.filter(row => refs.includes(row.id));
   const all = extractFacts(input.fullEvidenceLedger);
-  if (/(?:critical vulnerability|confirmed vulnerability|confirmed compromise|\bis vulnerable to\b|\bvulnerable to\b|\bexploitable\b|(?:authentication|authorization) bypass (?:confirmed|demonstrated)|vulnérabilité (?:critique|confirmée)|est vulnérable|exploitation confirmée)/i.test(text)) add('UNSUPPORTED_VULNERABILITY_CLAIM', 'Recon evidence does not demonstrate the vulnerability or exploitability claim.');
+  if (/(?:critical vulnerability|confirmed vulnerability|confirmed compromise|\bis vulnerable to\b|\bvulnerable to\b|\bexploitable\b|(?:authentication|authorization) bypass (?:confirmed|demonstrated)|vulnérabilité (?:critique|confirmée)|est vulnérable|exploitation confirmée)/i.test(text) || affirmativeAccessControlClaim(text)) add('UNSUPPORTED_VULNERABILITY_CLAIM', 'Recon evidence does not demonstrate the vulnerability or exploitability claim.');
   const allowedUrls = new Set(facts.urls.map(canonicalUrl).filter(Boolean));
   const allowedPaths = new Set<string>();
   const allowedHosts = new Set(facts.hostnames.map(host => host.toLowerCase()));
@@ -270,5 +283,5 @@ export function validateReconReportV3(raw: string, input: ReconReportV3Input, op
   }
   const usefulNarrative = !overviewIssues.length || reportV3Categories.some(category => narrative[category].length) || narrative.notableObservations.length || narrative.researchHandoff.length;
   if (!usefulNarrative) return fallbackReconReportV3(input, warnings, 'FAILED_VALIDATION');
-  return { version: 3, assessmentOverview: input.assessment, methodology: input.methodology, coverage: input.coverage, factual: input.factual, narrative, warnings: [...input.preparationWarnings, ...warnings], narrativeStatus: warnings.length ? 'RECOVERED' : 'VALID', ...(input.assessmentContext?{assessmentContext:input.assessmentContext}:{}) };
+  return { version: 3, assessmentOverview: input.assessment, methodology: input.methodology, coverage: input.coverage, factual: input.factual, narrative, warnings: [...input.preparationWarnings, ...warnings], narrativeStatus: warnings.length ? 'RECOVERED' : 'VALID', ...(input.assessmentContext?{assessmentContext:input.assessmentContext}:{}), ...(input.authenticatedRecon?{authenticatedRecon:input.authenticatedRecon}:{}) };
 }

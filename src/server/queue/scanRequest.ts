@@ -7,6 +7,7 @@ import { RATE_LIMIT_POLICIES } from "@/lib/abusePolicy";
 import { assetSnapshot } from '@/server/scopeAssets';
 import { RECON_STAGE_NAMES } from '@/lib/reconPlanner';
 import { captureProgramAssessment } from '@/server/assessment';
+import { captureAuthenticatedContexts } from '@/server/authenticatedRecon';
 
 // Empty legacy hashing fields preserve existing Recon idempotency keys; approvals cannot execute.
 export type ScanRequest = { targetId: string; type: "RECON"; scopeAssetId?: string; approvedTechniques?: string[]; approveBoundedTiming?: true };
@@ -61,7 +62,8 @@ export async function createScanRequest(userId: string, input: ScanRequest, key:
         if (!owned.length) throw new ScanRequestNotFound();
         assessment = await captureProgramAssessment(tx, target.programId);
       }
-      const run = await tx.scanRun.create({ data: { targetId: input.targetId, type: input.type, status: "QUEUED", ...(assessment ? { assessmentModeSnapshot: assessment.assessmentMode, assessmentSourcesSnapshot: assessment.authorizedSources as unknown as Prisma.InputJsonValue } : {}), ...(asset ? { scopeAssetId: asset.id, scopeAssetSnapshot: assetSnapshot(asset), reconSteps: { create: RECON_STAGE_NAMES.map((name, position) => ({ name, position })) } } : {}) } });
+      const authenticated = await captureAuthenticatedContexts(tx,input.targetId);
+      const run = await tx.scanRun.create({ data: { targetId: input.targetId, type: input.type, status: "QUEUED", authenticatedContextsSnapshot: authenticated as unknown as Prisma.InputJsonValue, ...(assessment ? { assessmentModeSnapshot: assessment.assessmentMode, assessmentSourcesSnapshot: assessment.authorizedSources as unknown as Prisma.InputJsonValue } : {}), ...(asset ? { scopeAssetId: asset.id, scopeAssetSnapshot: assetSnapshot(asset), reconSteps: { create: RECON_STAGE_NAMES.map((name, position) => ({ name, position })) } } : {}) } });
       const jobOutbox = await tx.scanJobOutbox.create({ data: { scanRunId: run.id }, select: dispatchSelect });
       if (key) await tx.scanRequestKey.create({ data: { userId, key, scanRunId: run.id, requestHash: requestHash(input) } });
       return { ...run, jobOutbox };

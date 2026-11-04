@@ -27,7 +27,7 @@ let server: Server, base: string, behavior = "normal";
 const seen: { path: string; ua?: string; at: number; method?: string; csrf?: string | string[] }[] = [];
 const password = "local-fixture-password";
 function makeRow(data: Partial<TargetCredential> = {}): TargetCredential {
-  return { id: `credential-${++state.serial}`, targetId: `target-${state.serial}`, label: "Fixture account", mode: "COOKIES", purpose: "ACCOUNT_A", ownedObjectUrl: null, cookiesCipher: encryptSecret(JSON.stringify({ session: "fixture-a" })), headerCipher: null, emailCipher: null, passwordCipher: null, loginUrl: null, sessionCookiesCipher: null, sessionRefreshedAt: null, createdAt: new Date(), sessionStatus: "UNKNOWN", sessionCheckedAt: null, sessionExpiresAt: null, validationUrl: null, sessionIdentityHash: null, sessionCheckId: null, ...data };
+  return { id: `credential-${++state.serial}`, targetId: `target-${state.serial}`, label: "Fixture account", mode: "COOKIES", purpose: "ACCOUNT_A", persona:null,reconEnabled:false,ownedObjectUrl: null, cookiesCipher: encryptSecret(JSON.stringify({ session: "fixture-a" })), headerCipher: null, emailCipher: null, passwordCipher: null, loginUrl: null, sessionCookiesCipher: null, sessionRefreshedAt: null, createdAt: new Date(), sessionStatus: "UNKNOWN", sessionCheckedAt: null, sessionExpiresAt: null, validationUrl: null, sessionIdentityHash: null, sessionCheckId: null, ...data };
 }
 function store(data: Partial<TargetCredential> = {}) { const row = makeRow(data); state.rows.set(row.id, row); return row; }
 beforeAll(async () => {

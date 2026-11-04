@@ -7,13 +7,16 @@ import { ResearchError,exportText } from './research/workspace';
 import { reconHash,reconJson } from './research/reconContext';
 import { backfillProgramAssets,lockOwnedProgram } from './scopeAssets';
 import { assessmentSnapshotFromRun,assessmentMarkdown,type AssessmentSnapshot } from '@/lib/assessment';
+import type { SafeAuthSurface } from '@/lib/authenticatedRecon';
+import { readAuthSurface } from './authenticatedRecon';
+import { exportAuthSurfaces } from './recon/authExport';
 
 export const SCOPE_MARKDOWN_VERSION=2,SCOPE_MARKDOWN_BYTES=128*1024;
 export const markdownText=(value:string)=>exportText(value).replace(/[\r\n]+/g,' ').replace(/[\\`*_{}[\]()#+.!|<>~-]/g,'\\$&');
 export const scopeFilename=(kind:'target'|'asset',value:string)=>`${kind}-${value.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,80)||'scope'}-scope.md`;
 type RunSummary={id:string;status:string;outcome:string|null;finishedAt:Date|null;artifacts:number};
 type Detail=Awaited<ReturnType<typeof loadAssetReconDetail>>;
-export type ScopeIntelligenceBrief={program:{id:string;companyName:string;platform:string|null;programUrl:string|null;requiredUserAgent:string;rulesOfEngagement:string|null;outOfScope:string[];updatedAt:Date};assets:Detail['asset'][];details:Map<string,Detail>;summaries?:Map<string,RunSummary>;generatedAt:string;parentId?:string;bounded:boolean;assessment?:AssessmentSnapshot};
+export type ScopeIntelligenceBrief={program:{id:string;companyName:string;platform:string|null;programUrl:string|null;requiredUserAgent:string;rulesOfEngagement:string|null;outOfScope:string[];updatedAt:Date};assets:Detail['asset'][];details:Map<string,Detail>;summaries?:Map<string,RunSummary>;generatedAt:string;parentId?:string;bounded:boolean;assessment?:AssessmentSnapshot;authenticatedRecon?:SafeAuthSurface[]};
 export async function loadScopeBrief(userId:string,programId:string,assetId?:string,runId?:string,parentId?:string):Promise<ScopeIntelligenceBrief> {
   const program=await prisma.bountyProgram.findFirst({where:{id:programId,ownerId:userId},select:{id:true,companyName:true,platform:true,programUrl:true,requiredUserAgent:true,rulesOfEngagement:true,outOfScope:true,updatedAt:true}});if(!program)throw new ResearchError('Target not found',404);
   await prisma.$transaction(async tx=>{await lockOwnedProgram(tx,userId,programId);await backfillProgramAssets(tx,programId,userId);},{timeout:30000});
@@ -29,7 +32,8 @@ export async function loadScopeBrief(userId:string,programId:string,assetId?:str
   }
   if(parent?.finishedAt)dates.push(parent.finishedAt);
   const assessment=assessmentSnapshotFromRun(assetId?details.get(assetId)?.run??{}:parent??{});
-  return{program,assets,details,summaries,generatedAt:new Date(Math.max(...dates.map(d=>d.getTime()))).toISOString(),...(parent?{parentId:parent.id}:{}),bounded:ids.length>30,assessment};
+  const authenticatedRecon=exportAuthSurfaces(await readAuthSurface([...details.values()].flatMap(detail=>detail.run?[detail.run.id]:[])));
+  return{program,assets,details,summaries,generatedAt:new Date(Math.max(...dates.map(d=>d.getTime()))).toISOString(),...(parent?{parentId:parent.id}:{}),bounded:ids.length>30,assessment,authenticatedRecon};
 }
 const empty='No data collected yet.';
 const table=(heads:string[],rows:(string|number|boolean|null|undefined)[][])=>rows.length?`| ${heads.join(' | ')} |\n|${heads.map(()=> '---').join('|')}|\n${rows.map(row=>'| '+row.map(v=>markdownText(String(v??'Unknown'))).join(' | ')+' |').join('\n')}\n`:empty+'\n';
@@ -70,6 +74,11 @@ export function renderScopeMarkdown(brief:ScopeIntelligenceBrief,assetId?:string
   const summary=(id:string)=>brief.summaries?.get(id)??brief.details.get(id)?.run;
   let text=`---\nformat_version: 2\ntarget_id: ${p.id}\ngenerated_at: ${brief.generatedAt}\n${assetId?`scope_asset_id: ${assetId}\nrecon_run_id: ${detail?.run?.id??'none'}\nrecon_status: ${assetReconStatus(detail?.run??null,0).toLowerCase()}\n`:`target_recon_run_id: ${brief.parentId??'none'}\n`}---\n\n# ${assetId?'Scope Intelligence':'Bug Bounty Target Intelligence'}\n\nTarget ID: ${p.id}\nFormat version: 2\nGenerated at (latest included data): ${brief.generatedAt}\n\n`;
   text+=assessmentMarkdown(brief.assessment??assessmentSnapshotFromRun(detail?.run??{}))+'\n\n';
+  text+='## Observed Authentication Contexts\n\nContext visibility is observed Recon evidence, not proof of an authorization vulnerability. Missing historical context is unknown, not anonymous. Context labels are opaque and personas are operator-declared. Redacted route identities must not be reconstructed or used as request targets.\n\n';
+  const authenticated=brief.authenticatedRecon??[];
+  text+=table(['Run','Context','Declared persona','State'],authenticated.flatMap(surface=>surface.legacy?[[surface.scanRunId,'Legacy / context not captured','Unknown','Unknown']]:surface.contexts.map(context=>[surface.scanRunId,context.label,context.persona??'Not captured',context.state])))+'\n';
+  text+=data('Observed Surface Visibility',authenticated.flatMap(surface=>surface.surfaceVisibility.slice(0,20).map(item=>({scanRunId:surface.scanRunId,url:item.url,method:item.method,classification:item.classification,visibility:item.visibility,evidenceRefs:item.evidenceRefs}))));
+  if(authenticated.some(surface=>surface.truncated))text+='Context comparison export is bounded; consult the original structured Recon observations for details.\n\n';
   if(detail)text+=`## Target\n\nProgram: ${markdownText(p.companyName)}\nRequired User-Agent: ${markdownText(p.requiredUserAgent)}\nRules of engagement: ${markdownText(p.rulesOfEngagement??'No additional rules recorded.')}\n\n`+assetBody(detail);
   else {
     text+=`## Mission\n\nTarget / Program: ${markdownText(p.companyName)}\nPlatform: ${markdownText(p.platform??'Not specified')}\nProgram URL: ${markdownText(p.programUrl??'Not specified')}\nRequired User-Agent: ${markdownText(p.requiredUserAgent)}\n\n## Authorization Boundary\n\nOnly explicitly authorized, active assets below are covered. Exact domains never imply wildcards. URL origin, port and path boundaries remain binding. Exclusions always win: ${p.outOfScope.map(markdownText).join(', ')||'None recorded.'}\nRules of engagement: ${markdownText(p.rulesOfEngagement??'No additional rules recorded.')}\n\n`;

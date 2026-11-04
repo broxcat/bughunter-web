@@ -14,7 +14,7 @@ export interface DecryptedTargetCredential {
   bearerToken?: string;
 }
 /** Internal decoder for an explicit connection check; never returned to clients. */
-export function decodeTargetCredential(row: TargetCredential): DecryptedTargetCredential | null {
+export function decodeTargetCredential(row: Pick<TargetCredential, 'id' | 'label' | 'purpose' | 'ownedObjectUrl' | 'validationUrl' | 'sessionIdentityHash' | 'mode' | 'sessionCookiesCipher' | 'cookiesCipher' | 'headerCipher'>): DecryptedTargetCredential | null {
   const cred: DecryptedTargetCredential = { id: row.id, label: row.label, purpose: row.purpose, ownedObjectUrl: row.ownedObjectUrl, validationUrl: row.validationUrl, identityHash: row.sessionIdentityHash };
   try {
     const cipher = row.mode === "EMAIL_PASSWORD" ? row.sessionCookiesCipher : row.cookiesCipher;

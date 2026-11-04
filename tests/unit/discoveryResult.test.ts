@@ -23,9 +23,13 @@ describe("structured discovery diagnostics", () => {
     expect((await collect([ctx.baseUrl + "/other"])).execution).toEqual({ successfulRequests: 0, failedRequests: 1, issues: [error] });
     expect(mocks.probe).toHaveBeenCalledOnce();
   });
-  it("auth failure remains visible while anonymous crawling continues", async () => {
+  it("legacy discovery stays anonymous and never selects an implicit first credential", async () => {
     mocks.credentials.mockRejectedValue(new Error("secret"));
     mocks.probe.mockResolvedValue({ status: 200, body: "", headers: {} });
-    expect((await collect()).execution?.issues).toEqual(["AUTHENTICATED_DISCOVERY_UNAVAILABLE"]);
+    const result=await collect();
+    expect(result.execution?.issues).toEqual([]);
+    expect(result.authenticated).toBe(false);
+    expect(mocks.credentials).not.toHaveBeenCalled();
+    expect(mocks.probe.mock.calls.every(call=>!call[1]?.headers)).toBe(true);
   });
 });

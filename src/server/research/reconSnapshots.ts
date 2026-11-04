@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { expandAssetReconRuns } from './reconInputs';
 import { assetSelect, scopeAssetSourceIds } from '../scopeAssets';
 import { artifactData, artifactSelect, ensureLegacyArtifacts } from '../recon/artifacts';
+import { readAuthSurface } from '../authenticatedRecon';
 
 const snapshotSelect = { id: true, sourceFingerprint: true, contentSha256: true, summarySha256: true, createdAt: true, summary: true } as const;
 const deliverySelect = { id: true, snapshotId: true, provider: true, status: true, createdAt: true } as const;
@@ -34,11 +35,13 @@ async function loadInputs(tx: Prisma.TransactionClient, target: ResearchTarget) 
       _count: { select: { discoveries: true, logs: true, artifacts: true } } },
   });
   const result: ReconRun[] = [];
+  const authenticated=await readAuthSurface(runs.map(run=>run.id),tx);
   for (const run of runs) {
-    if(run.artifactVersion>=2){result.push({...run,artifacts:run.artifacts.map(artifactData),artifactInputTruncated:run._count.artifacts>run.artifacts.length,_count:{logs:0,discoveries:0},logs:[],discoveries:[]});continue;}
+    const authentication=authenticated.find(surface=>surface.scanRunId===run.id);
+    if(run.artifactVersion>=2){result.push({...run,authentication,artifacts:run.artifacts.map(artifactData),artifactInputTruncated:run._count.artifacts>run.artifacts.length,_count:{logs:0,discoveries:0},logs:[],discoveries:[]});continue;}
     // SQL bounds each line before transferring it. Raw output remains untouched in ScanLog.
     const logs = await tx.$queryRaw<ReconRun['logs']>`SELECT id, left(line, 16385) AS line, stream::text AS stream, "createdAt" FROM "ScanLog" WHERE "scanRunId" = ${run.id} ORDER BY "createdAt", id LIMIT ${RECON_INPUT_LIMITS.logs}`;
-    result.push({ ...run, artifacts:undefined, logs });
+    result.push({ ...run,authentication, artifacts:undefined, logs });
   }
   return result;
 }
@@ -87,7 +90,7 @@ async function ownedTarget(tx: Prisma.TransactionClient, userId: string, targetI
 }
 function fingerprint(target: ResearchTarget, runs: ReconRun[], assets: unknown[], sessionSnapshot: unknown) {
   const captured = researchAssessmentSnapshot(sessionSnapshot);
-  return reconHash(reconJson({ normalizerVersion: 4, limits: RECON_INPUT_LIMITS, policy: researchAuthorizationSnapshot(target), assessment:{assessmentMode:captured.assessmentMode,authorizedSourceCount:captured.authorizedSources.length}, runs, assets }));
+  return reconHash(reconJson({ normalizerVersion: 5, limits: RECON_INPUT_LIMITS, policy: researchAuthorizationSnapshot(target), assessment:{assessmentMode:captured.assessmentMode,authorizedSourceCount:captured.authorizedSources.length}, runs, assets }));
 }
 async function loadAssets(tx: Prisma.TransactionClient, target: ResearchTarget) { return tx.scopeAsset.findMany({ where: { programId: target.program!.id, ...((target.scopeAsset ?? target.discoveredFromAsset) ? { id: (target.scopeAsset ?? target.discoveredFromAsset)!.id } : { active: true }) }, orderBy: { id: 'asc' }, take: 1000, select: assetSelect }); }
 export async function reconPanelState(userId: string, targetId: string): Promise<ReconPanelState> {

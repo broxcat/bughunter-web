@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { prisma } from "@/lib/prisma";
 import { publishScanLog } from "@/server/queue/logBus";
+import { scannerEnvironment } from './environment.mjs';
 
 export type RunCommandOptions = {
   scanRunId: string;
@@ -90,9 +91,10 @@ export async function runCommand(
 
     // shell: false is the whole point — argv array, no shell interpretation.
     const grouped = process.platform !== "win32";
+    const env = scannerEnvironment();
     const child = grouped
-      ? spawn(process.execPath, [join(process.cwd(), "src/server/scanners/toolProcess.mjs"), cmd, ...args], { shell: false, detached: true, stdio: ["pipe", "pipe", "pipe", "ipc"] })
-      : spawn(cmd, args, { shell: false });
+      ? spawn(process.execPath, [join(process.cwd(), "src/server/scanners/toolProcess.mjs"), cmd, ...args], { env, shell: false, detached: true, stdio: ["pipe", "pipe", "pipe", "ipc"] })
+      : spawn(cmd, args, { env, shell: false });
     let toolExit: { code: number | null } | undefined;
     let toolSpawnFailed = false;
     child.on("message", message => {

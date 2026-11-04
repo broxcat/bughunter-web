@@ -23,6 +23,8 @@ export async function GET(
     include: {
       scope: true,
       program: true,
+      scopeAsset: { select: { id: true, programId: true, normalizedValue: true, format: true, active: true } },
+      discoveredFromAsset: { select: { id: true, programId: true, normalizedValue: true, format: true, active: true } },
       scanRuns: { orderBy: { createdAt: "desc" }, include: { executionAttempts: executionSelect, jobOutbox: { select: dispatchSelect } } },
       findings: { orderBy: { createdAt: "desc" } },
     },
@@ -32,5 +34,5 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ ...target, scanRuns: target.scanRuns.map(withScanDispatch), scanRejection: scanRejection(target, 'RECON') });
+  return NextResponse.json({ ...target, scanRuns: target.scanRuns.map(withScanDispatch), scanRejection: scanRejection(target, 'RECON') }, {headers:{'Cache-Control':'private, no-store'}});
 }

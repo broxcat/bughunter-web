@@ -4,6 +4,8 @@ import { normalizeArtifact } from '@/lib/reconArtifacts';
 import { buildReconPlan } from '@/lib/reconPlanner';
 import type { Prisma } from '@prisma/client';
 import { captureAssessmentSnapshot } from '@/lib/assessment';
+import { exportAuthSurfaces } from '@/server/recon/authExport';
+import type { SafeAuthSurface } from '@/lib/authenticatedRecon';
 function fixture():ScopeIntelligenceBrief{
   const at=new Date('2026-11-03T00:00:00Z'),program={id:'target',companyName:'Équipe | **scope**',platform:null,programUrl:null,requiredUserAgent:'Fixture/1',rulesOfEngagement:'Only authorized scope.',outOfScope:['excluded.example.test'],updatedAt:at};
   const assets:ScopeIntelligenceBrief['assets']=[{id:'critical',programId:'target',originalValue:'*.example.test',normalizedValue:'*.example.test',format:'WILDCARD_DOMAIN',type:'WILDCARD',formatSource:'AUTO',typeSource:'USER',assetValue:'CRITICAL',active:true,createdAt:at,updatedAt:at,program,executionTarget:null},{id:'low',programId:'target',originalValue:'low.example.test',normalizedValue:'low.example.test',format:'SUBDOMAIN',type:'WEB_APPLICATION',formatSource:'AUTO',typeSource:'HEURISTIC',assetValue:'LOW',active:true,createdAt:at,updatedAt:at,program,executionTarget:null}];
@@ -28,6 +30,17 @@ describe('concise, deterministic v2 Scope intelligence',()=>{
     brief.assessment=captureAssessmentSnapshot({assessmentMode:'WHITE_BOX'},[{id:'source',label:'Captured source label',kind:'GIT_REPOSITORY',locator:'https://git.example.test/approved/repo',reference:'main',includePaths:['src/'],excludePaths:['vendor/'],updatedAt:brief.generatedAt}]);
     Object.assign(brief.program,{assessmentMode:'BLACK_BOX'});
     for(const asset of [undefined,'critical']){const text=renderScopeMarkdown(brief,asset);expect(text).toContain('White-box');expect(text).toContain('Captured source label');expect(text).toContain('No source-assisted analysis was executed');expect(text).not.toContain('Black-box.');}
+  });
+  it('preserves context coverage and exact references in Asset and Target Markdown without private identities',()=>{
+    const brief=fixture(),source:SafeAuthSurface={scanRunId:'context-run',legacy:false,contexts:[{contextKey:'ANONYMOUS',mode:'ANONYMOUS',label:'Anonymous',state:'MAPPED'},{contextKey:'AUTH_A',mode:'AUTHENTICATED',label:'Private Alice',persona:'ADMIN',state:'MAPPED'},{contextKey:'AUTH_B',mode:'AUTHENTICATED',label:'Private Bob',state:'MAPPED'}],observations:[],surfaceVisibility:[],totals:{public:0,authenticatedOnly:0,sharedAuthenticated:0,contextDifferentials:0,observations:0},warnings:[]};
+    source.observations=['ANONYMOUS','AUTH_A','AUTH_B'].map((contextKey,index)=>({id:'auth-observation-'+index,contextKey,contextType:index?'AUTHENTICATED':'ANONYMOUS',canonicalKey:'GET:'+('a'.repeat(64)),url:'https://app.example.test/dashboard',method:'GET',statusCode:[401,200,403][index],contentType:'text/html',redirect:null,redirectPattern:null,responseClass:index===1?'CONTENT':'DENIED',observedAt:brief.generatedAt,source:'private-source'}));
+    brief.authenticatedRecon=exportAuthSurfaces([source]);
+    for(const assetId of [undefined,'critical']){
+      const text=renderScopeMarkdown(brief,assetId);
+      for(const expected of ['Observed Authentication Contexts','Authenticated context 1','Declared persona','ADMIN','CONTEXT_DIFFERENTIAL','auth-observation-1','401','200','403','not proof of an authorization vulnerability','unknown, not anonymous'])expect(text).toContain(expected);
+      expect(text).not.toMatch(/Private Alice|Private Bob|private-source/);expect(Buffer.byteLength(text)).toBeLessThanOrEqual(SCOPE_MARKDOWN_BYTES);
+    }
+    brief.authenticatedRecon=exportAuthSurfaces([{...source,legacy:true}]);expect(renderScopeMarkdown(brief,'critical')).toContain('Legacy / context not captured');
   });
   it('redacts credential-like text, fences untrusted instructions, handles Unicode and long URLs, and bounds whole sections',()=>{
     const b=fixture(),item=b.assets[0];b.program.rulesOfEngagement='Authorization: Bearer DO_NOT_LEAK\nCookie: sid=DO_NOT_LEAK';

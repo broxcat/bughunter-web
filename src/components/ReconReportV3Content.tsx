@@ -51,6 +51,18 @@ export default function ReconReportV3Content({ report, provider }: { report: Rec
         <p className="text-sm text-muted">{assessmentContext?.assessmentMode?'Source content available: No. Source-assisted analysis: Not performed.':'Source-assisted analysis is not recorded in this historical assessment metadata.'}</p>
         <p className="text-xs text-muted">{assessmentContext?.assessmentMode?'Captured by BugHunter for this run.':'No assessment declaration was captured for this historical run.'} Source authorization is separate from network authorization, which remains defined by Scope Assets.</p>
       </section>
+      <section className="space-y-2" aria-label="Observed authentication contexts"><h4 className="font-medium">Observed authentication contexts</h4>
+        <p className="text-xs text-muted">Context visibility differences are observations, not proof of broken authorization. Personas are operator-declared. Missing comparisons remain unknown. Sanitized route identities are evidence only; never reconstruct redacted request targets.</p>
+        {report.authenticatedRecon?.some(surface=>!surface.legacy)?report.authenticatedRecon.map(surface=><div key={surface.scanRunId} className="space-y-2 text-sm">
+          <p className="text-xs text-muted">Run {surface.scanRunId}</p>
+          {surface.legacy?<p>Historical context not captured; anonymous access is unknown.</p>:<>
+            <ul>{surface.contexts.map(context=><li key={context.contextKey}>{context.label} · {human(context.state)}{context.persona?` · declared persona: ${context.persona}`:''}</li>)}</ul>
+            <p>{surface.totals.public} public · {surface.totals.authenticatedOnly} authenticated only · {surface.totals.sharedAuthenticated} shared across authenticated contexts · {surface.totals.contextDifferentials} observed context differentials</p>
+            <ul className="space-y-2">{surface.surfaceVisibility.slice(0,12).map(item=><li key={item.canonicalKey} className="break-words"><p>{item.method} {item.url} · {human(item.classification)}</p><p className="text-xs text-muted">{item.visibility.map(observation=>`${observation.label}: ${observation.observed?observation.statusCode??observation.outcome:'Not observed / unknown'}`).join('; ')}</p><Evidence refs={item.evidenceRefs} /></li>)}</ul>
+            {surface.truncated&&<p className="text-xs text-muted">Context details are bounded; the original Recon retains the structured observations.</p>}
+          </>}
+        </div>):<p className="text-sm text-muted">Historical context not captured; anonymous access is unknown.</p>}
+      </section>
       <p className="text-sm text-muted">{facts.count} factual entries · {facts.staticAssets} static assets summarized</p>
       {report.factual.truncated && <p role="status" className="text-sm">{report.factual.totals.omittedEvidence} additional evidence records exceed this report’s size limit. Full details remain in Recon artifacts and scope.md.</p>}
       {facts.sections.map(section => <section key={section.category} className="space-y-2" aria-label={section.title}>

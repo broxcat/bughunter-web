@@ -34,6 +34,7 @@ const providerCalls:{path:string;authorization:string;body:Record<string,unknown
         const narrative={title:'Recon Report',attackSurfaceSummary:'Observed evidence; further testing remains manual.',sections:[{category:'webSurface',entries:[{text:'Review the supplied evidence.',confidence:'observed',evidenceRefs:[ref]}]}],notableObservations:[],researchHandoff:[],limitations:['No finding is confirmed.']};
         if(mode==='bad-url')narrative.sections[0].entries.push({text:'Inspect https://unsupported.invalid/private.',confidence:'observed',evidenceRefs:[ref]});
         if(mode==='bad-ref')narrative.sections[0].entries.push({text:'Unsupported citation.',confidence:'observed',evidenceRefs:['E999999']});
+        if(mode==='bad-auth-claim')narrative.sections[0].entries.push({text:'Account A can bypass authorization.',confidence:'observed',evidenceRefs:[ref]});
         res.setHeader('Content-Type','application/json');res.end(modelReply(JSON.stringify(narrative)));return;
       }
       res.setHeader('Content-Type','application/json');res.end(JSON.stringify({message:{content:JSON.stringify({title:'Reconnaissance & Attack Surface Assessment',attackSurfaceSummary:'Observed evidence; further tests are not performed.',dnsAndHostIntelligence:[],networkSurface:[],webSurface:[{text:'Review the recorded evidence.',confidence:'observed',evidenceRefs:[ref]}],contentDiscovery:[],apiSurface:[],authenticationSurface:[],technologyFingerprint:[],tlsAndTransport:[],notableObservations:[],changesSincePreviousRecon:[],researchHandoff:[{priority:'medium',area:'Authorized surface review',rationale:'Review explicitly authorized evidence manually.',evidenceRefs:[ref]}],limitations:['No finding is confirmed.']})}}));
@@ -63,7 +64,7 @@ const providerCalls:{path:string;authorization:string;body:Record<string,unknown
   });
   it('records blocked coverage and model failures independently of Recon',async()=>{await p.reconPipelineStep.updateMany({where:{scanRunId:runId},data:{state:'BLOCKED',reason:'429 rate limit'}});mode='fail';const job=await s.scheduleReconSummary(userId,programId,assetId);expect(JSON.stringify(job.input)).toContain('BLOCKED');await s.processReconSummary(job.id);expect(await p.reconSummary.findUniqueOrThrow({where:{id:job.id}})).toMatchObject({status:'READY',content:expect.objectContaining({version:3,narrativeStatus:'FACTUAL_ONLY',narrativeFailure:'FAILED_PROVIDER'})});expect(await p.scanRun.findUniqueOrThrow({where:{id:runId}})).toMatchObject({status:'COMPLETED',outcome:'SUCCESS'});});
 
-  it.each(['bad-url','bad-ref'])('keeps factual reports READY after dropping a persistently invalid narrative entry (%s)',async selected=>{
+  it.each(['bad-url','bad-ref','bad-auth-claim'])('keeps factual reports READY after dropping a persistently invalid narrative entry (%s)',async selected=>{
     mode=selected;const job=await s.scheduleReconSummary(userId,programId,assetId);const before=JSON.stringify((job.input as {factual:unknown}).factual);
     await s.processReconSummary(job.id);const saved=await p.reconSummary.findUniqueOrThrow({where:{id:job.id}});
     const content=saved.content as {version:number;factual:unknown;narrativeStatus:string;warnings:{code:string}[];narrative:{webSurface:unknown[]}};
@@ -92,6 +93,30 @@ const providerCalls:{path:string;authorization:string;body:Record<string,unknown
       expect(saved).toMatchObject({status:'READY',content:{assessmentContext:{assessmentMode:'WHITE_BOX',authorizedSourceCount:1,sourceAnalysisPerformed:false}}});
       const sent=JSON.stringify(received);for(const forbidden of ['assessmentContext','WHITE_BOX','private-source-identity','Authorized private metadata','git.example.test','protected-reference','internal/src/'])expect(sent).not.toContain(forbidden);
     }
+  });
+  it('sends only opaque authentication contexts to the AI HTTP endpoint and retains observed distinctions in factual reports',async()=>{
+    const at=new Date(),keys=['AUTH_'+('a'.repeat(24)),'AUTH_'+('b'.repeat(24))];
+    const contexts=keys.map((contextKey,index)=>({contextKey,credentialId:'PRIVATE_CREDENTIAL_ID_'+index,label:'Private Fullname '+index,persona:index?'ADMIN':'private-login@example.test',purpose:index?'ACCOUNT_B':'ACCOUNT_A',sessionIdentityHash:'PRIVATE_SESSION_IDENTITY_'+index,sessionCheckId:'PRIVATE_SESSION_CHECK_'+index,sessionStatus:'VALID',checkedAt:at.toISOString(),expiresAt:null,validationUrl:'https://app.example.test/accounts/private-login@example.test?token=PRIVATE_VALIDATION_TOKEN',ownedObjectUrl:'https://app.example.test/orders/123456789?account=PRIVATE_ACCOUNT_VALUE',eligibility:'PLANNED',username:'PRIVATE_LOGIN_NAME',cookiesCipher:'PRIVATE_COOKIE_CIPHER',headerCipher:'PRIVATE_HEADER_CIPHER'}));
+    await p.scanRun.update({where:{id:runId},data:{authenticatedContextsSnapshot:{version:1,anonymous:{contextKey:'ANONYMOUS',mode:'ANONYMOUS'},contextLimit:4,contexts},authenticatedReconResult:{contexts:keys.map(contextKey=>({contextKey,state:'MAPPED'}))}}});
+    const observations=[];
+    for(const[index,contextKey]of ['ANONYMOUS',...keys].entries())observations.push(await p.reconSurfaceObservation.create({data:{scanRunId:runId,scopeAssetId:assetId,contextKey,contextType:index?'AUTHENTICATED':'ANONYMOUS',canonicalKey:'GET:'+('d'.repeat(64)),url:'https://app.example.test/dashboard',method:'GET',statusCode:[401,200,403][index],contentType:'text/html',responseClass:index===1?'CONTENT':'DENIED',observedAt:at,source:'PRIVATE_CREDENTIAL_LOOKUP',bodyHash:'PRIVATE_BODY_HASH',bodyLength:12345}}));
+    const {exportAuthSurfaces}=await import('@/server/recon/authExport'),{readAuthSurface}=await import('@/server/authenticatedRecon');
+    const expected=exportAuthSurfaces(await readAuthSurface([runId]));
+    for(const id of [assetId,undefined]){
+      providerCalls.length=0;const job=await s.scheduleReconSummary(userId,programId,id);await s.processReconSummary(job.id);
+      const saved=await p.reconSummary.findUniqueOrThrow({where:{id:job.id}});
+      expect(saved).toMatchObject({status:'READY',content:{version:3,narrativeStatus:'VALID',authenticatedRecon:expected}});
+      const chats=providerCalls.filter(call=>call.path==='/api/chat');expect(chats).toHaveLength(1);
+      const sent=JSON.stringify(chats[0].body),persisted=JSON.stringify({input:job.input,content:saved.content});
+      for(const forbidden of ['PRIVATE_CREDENTIAL_ID','Private Fullname','private-login@example.test','PRIVATE_SESSION_IDENTITY','PRIVATE_SESSION_CHECK','PRIVATE_VALIDATION_TOKEN','PRIVATE_ACCOUNT_VALUE','PRIVATE_LOGIN_NAME','PRIVATE_COOKIE_CIPHER','PRIVATE_HEADER_CIPHER','PRIVATE_CREDENTIAL_LOOKUP','PRIVATE_BODY_HASH','bodyLength']){expect(sent).not.toContain(forbidden);expect(persisted).not.toContain(forbidden);}
+      expect(sent).toContain('Authenticated context 1');expect(sent).toContain('contextMode');expect(sent).toContain('context-surface');expect(persisted).toContain('context-http');expect(persisted).toContain('ReconSurfaceObservation:');
+      const input=job.input as {factual:{sections:{rows:{evidenceRefs:string[];details:Record<string,unknown>}[]}[]}};
+      const rows=input.factual.sections.flatMap(section=>section.rows);
+      for(const observation of observations)expect(rows.some(row=>row.evidenceRefs.includes(observation.id)&&row.details.statusCode===observation.statusCode)).toBe(true);
+      expect(expected[0].surfaceVisibility[0]).toMatchObject({classification:'CONTEXT_DIFFERENTIAL',classifications:expect.arrayContaining(['AUTHENTICATED_ONLY','CONTEXT_DIFFERENTIAL'])});
+    }
+    expect(await p.scanRun.findUniqueOrThrow({where:{id:runId}})).toMatchObject({authenticatedContextsSnapshot:{contexts:expect.arrayContaining([expect.objectContaining({credentialId:'PRIVATE_CREDENTIAL_ID_0'})])}});
+    expect(await p.reconSurfaceObservation.count({where:{scanRunId:runId}})).toBe(3);
   });
   it('keeps history across regeneration, changed model and a new Recon',async()=>{const first=await s.scheduleReconSummary(userId,programId,assetId);await s.processReconSummary(first.id);expect((await s.scheduleReconSummary(userId,programId,assetId)).id).toBe(first.id);const second=await s.scheduleReconSummary(userId,programId,assetId,true);expect(second.id).not.toBe(first.id);await s.processReconSummary(second.id);await p.aiProviderConfig.update({where:{userId_provider:{userId,provider:'OLLAMA'}},data:{model:'new-selected-model'}});const third=await s.scheduleReconSummary(userId,programId,assetId,true);expect(third.model).toBe('new-selected-model');await s.processReconSummary(third.id);await p.scanRun.create({data:{targetId,scopeAssetId:assetId,type:'RECON',status:'QUEUED'}});expect((await s.summaryView(userId,programId,assetId)).stale).toBe(true);expect(await p.reconSummary.count({where:{scanRunId:runId}})).toBe(3);});
   it('retains Target endpoint facts independently of unavailable child AI and citations',async()=>{

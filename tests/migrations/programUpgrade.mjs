@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
+import { encryptSecret, decryptSecret } from '../../src/lib/crypto.ts';
 const url = process.env.TEST_MIGRATION_DATABASE_URL;
 assert(url, "TEST_MIGRATION_DATABASE_URL must point at an EMPTY disposable PostgreSQL database");
 const client = new PrismaClient({ datasourceUrl: url });
@@ -82,7 +83,21 @@ try {
     research: await client.$queryRaw`SELECT id,"authorizationSnapshot","scopeMarkdown",files,"updatedAt" FROM "ResearchSession" ORDER BY id`,
     findings: await client.$queryRaw`SELECT id,"targetId","scanRunId",title,"updatedAt" FROM "Finding" ORDER BY id`,
   };
+  // Exercise the exact pre-authenticated-Recon schema and a real AES-GCM
+  // historical session. Migration must neither invalidate nor opt it in.
+  await cp(join('prisma/migrations', '20261104150000_assessment_modes'), join(temp, 'migrations', '20261104150000_assessment_modes'), { recursive: true });
+  migrate(join(temp, 'schema.prisma'));
+  process.env.CREDENTIALS_ENCRYPTION_KEY = 'ac'.repeat(32);
+  const legacySession = encryptSecret(JSON.stringify({ session: 'UPGRADE_SESSION_FIXTURE' }));
+  await client.$executeRaw`INSERT INTO "TargetCredential" (id,"targetId",label,mode,purpose,"sessionStatus","sessionCheckedAt","sessionExpiresAt","cookiesCipher") VALUES ('preauth-credential','preasset-host','Existing account','COOKIES','ACCOUNT_A','VALID',now(),now()+interval '10 minutes',${legacySession})`;
+  const beforeAuthentication = await client.$queryRaw`SELECT id,"targetId",label,mode,purpose,"sessionStatus","sessionCheckedAt","sessionExpiresAt","cookiesCipher","headerCipher","emailCipher","passwordCipher","sessionCookiesCipher","createdAt" FROM "TargetCredential" ORDER BY id`;
   migrate(schema);
+  assert.deepEqual(await client.$queryRaw`SELECT id,"targetId",label,mode,purpose,"sessionStatus","sessionCheckedAt","sessionExpiresAt","cookiesCipher","headerCipher","emailCipher","passwordCipher","sessionCookiesCipher","createdAt" FROM "TargetCredential" ORDER BY id`,beforeAuthentication);
+  const upgradedCredential=await client.targetCredential.findUniqueOrThrow({where:{id:'preauth-credential'}});
+  assert.equal(upgradedCredential.persona,null);assert.equal(upgradedCredential.reconEnabled,false);
+  assert.equal(decryptSecret(upgradedCredential.cookiesCipher),JSON.stringify({session:'UPGRADE_SESSION_FIXTURE'}));
+  assert((await client.scanRun.findMany({select:{authenticatedContextsSnapshot:true,authenticatedReconResult:true}})).every(run=>run.authenticatedContextsSnapshot===null&&run.authenticatedReconResult===null));
+  assert.equal(await client.reconSurfaceObservation.count(),0,'Do not invent anonymous/authenticated historical observations');
   assert.deepEqual(await client.$queryRaw`SELECT id,"ownerId","scopeRules","outOfScope","createdAt","updatedAt" FROM "BountyProgram" ORDER BY id`, beforeAssessment.programs);
   assert.deepEqual(await client.$queryRaw`SELECT id,"programId",status,outcome,"scopeMarkdown","createdAt" FROM "TargetReconRun" ORDER BY id`, beforeAssessment.parents);
   assert.deepEqual(await client.$queryRaw`SELECT id,"authorizationSnapshot","scopeMarkdown",files,"updatedAt" FROM "ResearchSession" ORDER BY id`, beforeAssessment.research);

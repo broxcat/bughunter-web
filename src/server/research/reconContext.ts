@@ -9,11 +9,14 @@ import { assetAllowsHost, assetAllowsUrl, assetValueRank } from '@/lib/scopeAsse
 import type { AssetEvidence } from '@/server/recon/assetEvidence';
 import type { ReconArtifactData } from '@/lib/reconArtifacts';
 import { assessmentSnapshotFromRun, type AssessmentSnapshot, type AssessmentMode } from '@/lib/assessment';
+import type { SafeAuthSurface } from '@/lib/authenticatedRecon';
+import { exportAuthSurfaces } from '../recon/authExport';
 
 export const RECON_DETAIL_BYTES = 1024 * 1024;
 export const RECON_SUMMARY_BYTES = 24 * 1024;
 export const RECON_INPUT_LIMITS = { scans: 60, discoveries: 500, logs: 1000 } as const;
 export type ReconRun = {
+  authentication?:SafeAuthSurface;
   assessmentModeSnapshot?: AssessmentMode | null; assessmentSourcesSnapshot?: unknown;
   artifacts?: ReconArtifactData[];
   artifactInputTruncated?: boolean;
@@ -66,6 +69,8 @@ export function buildReconContext(input: {
   const maps = { assets: new Map<string, typeof context.assets[number]>(), endpoints: new Map<string, typeof context.endpoints[number]>(),
     technologies: new Map<string, typeof context.technologies[number]>(), observations: new Map<string, typeof context.observations[number]>() };
   const runs = [...input.runs].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
+  const authenticated=exportAuthSurfaces([...new Map(runs.flatMap(run=>run.authentication?[[run.id,run.authentication] as const]:[])).values()]);
+  if(authenticated.length)context.authenticatedRecon=authenticated;
   const assessment = input.assessmentSnapshot ?? assessmentSnapshotFromRun(runs.at(-1));
   context.assessment = { assessmentMode: assessment.assessmentMode, authorizedSourceCount: assessment.authorizedSources.length, sourceContentAvailable: false, sourceAnalysisPerformed: false, assessmentPolicyFile: assessment.assessmentMode ? 'assessment-policy.json' : null };
   const latest = new Map<string, string>();
@@ -127,6 +132,13 @@ export function buildReconContext(input: {
       asset(new URL(parsed.url).hostname, tool, ref, at, verification);
       return record;
     };
+    const runAuthentication=authenticated.find(surface=>surface.scanRunId===run.id);
+    for(const observation of runAuthentication?.observations??[]){
+      const auth=runAuthentication?.contexts.find(item=>item.contextKey===observation.contextKey);if(!auth||!observation.id)continue;
+      const reference='ReconSurfaceObservation:'+observation.id;
+      const e=endpoint(observation.url,'context-http',reference,new Date(observation.observedAt),observation.method,[],undefined,observation.responseClass==='UNAVAILABLE'?'DISCOVERED':'PROBED');
+      if(e){e.contextObservations??=[];if(!e.contextObservations.some(item=>item.reference===reference))e.contextObservations.push({scanRunId:run.id,contextKey:auth.contextKey,label:auth.label,responseClass:observation.responseClass,...(observation.statusCode?{statusCode:observation.statusCode}:{}),reference});if(observation.urlRedacted)e.safeForActiveReview=false;}
+    }
     for (const d of run.discoveries) {
       const tool = ['SUBFINDER', 'CERTIFICATE_TRANSPARENCY', 'SCOPE_RULE', 'GAU'].includes(d.source) ? d.source.toLowerCase() : 'discovery';
       asset(d.host, tool, `HostDiscovery:${d.id}`, d.createdAt);
@@ -261,7 +273,7 @@ export function buildReconContext(input: {
   warnings.add('Discovered URLs, route names, port labels and technology signatures are observations, not verified reachability, versions or vulnerabilities. Missing observations are not negative security evidence.');
   if (context.observations.some(o => o.historical) || context.endpoints.some(o => o.historical)) warnings.add('Historical observations are retained; absence from a later scan may reflect coverage differences.');
   for (const name of ['assets', 'endpoints', 'technologies', 'observations', 'sources', 'suggestions'] as const) context.counts[name] = context[name].length;
-  const graph=deriveAssetGraph(runs.flatMap(r=>r.artifacts??[]),{nodes:100,edges:150});
+  const graph=deriveAssetGraph(runs.flatMap(r=>r.artifacts??[]),{nodes:100,edges:150},authenticated);
   while(Buffer.byteLength(reconJson(graph))>131072){if(graph.edges.length)graph.edges.pop();else graph.nodes.pop();graph.truncated=true;}
   if(graph.nodes.length){context.assetGraph={...graph,nodes:graph.nodes.map(n=>({...n,inScope:['HOSTNAME','ENDPOINT'].includes(n.type)&&input.inScope(n.value)}))};}
   context.warnings = [...warnings].sort();
@@ -279,6 +291,7 @@ export function buildReconContext(input: {
 export function compactReconContext(context: ResearchReconContext): ResearchReconContext {
   const compact = structuredClone(context);
   if(compact.assetGraph){delete compact.assetGraph;compact.truncated=true;}
+  if(compact.authenticatedRecon){compact.authenticatedRecon=compact.authenticatedRecon.slice(0,4).map(surface=>({...surface,observations:surface.observations.slice(0,8),surfaceVisibility:surface.surfaceVisibility.slice(0,6),truncated:true}));compact.truncated=true;}
   // Prioritized endpoints first; complete bounded evidence remains in the immutable detail file.
   const rank = new Map(compact.suggestions.flatMap((s, i) => s.observationIds.map(id => [id, i] as const)));
   compact.endpoints.sort((a, b) => (rank.get(a.id) ?? 100) - (rank.get(b.id) ?? 100) || a.id.localeCompare(b.id));
@@ -290,6 +303,7 @@ export function compactReconContext(context: ResearchReconContext): ResearchReco
   compact.sources = compact.sources.filter(s => selected.has(s.id));
   while (Buffer.byteLength(reconJson(compact)) > RECON_SUMMARY_BYTES) {
     if (compact.scopeAssets?.length && Buffer.byteLength(reconJson(compact.scopeAssets)) > RECON_SUMMARY_BYTES / 3) { compact.scopeAssets.pop(); compact.truncated = true; continue; }
+    if(compact.authenticatedRecon?.length&&Buffer.byteLength(reconJson(compact.authenticatedRecon))>RECON_SUMMARY_BYTES/3){compact.authenticatedRecon.pop();compact.truncated=true;continue;}
     const key = [...(['endpoints', 'assets', 'technologies', 'observations', 'suggestions', 'sources', 'warnings'] as const)].sort((a, b) => JSON.stringify(compact[b]).length - JSON.stringify(compact[a]).length)[0];
     compact[key].pop(); compact.truncated = true;
   }

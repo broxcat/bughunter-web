@@ -62,6 +62,8 @@ Nuclei remains 3.11.1. Its [go.mod](https://github.com/projectdiscovery/nuclei/b
 
 ## Evidence and handoff
 
+[Authenticated Recon](authenticated-recon.md) adds an explicitly enabled, verified-session mapping capability inside the existing Web / API phase. Anonymous and authenticated observations share the existing request ceiling, remain isolated by exact Target/origin/path, and use GET/HEAD only. No login, per-account DNS/ports/Nuclei or authorization exploitation occurs. Canonical artifacts describe surface; separate context observations preserve response differences. Missing evidence is not denial, and a differential is not a vulnerability. Summary, scope.md, graph and Research consume a bounded secret-free projection. Black-box and White-box share this runtime behavior; source analysis remains unimplemented.
+
 ReconArtifact remains the source of truth, with run/tool/time/source references. DNS/CNAME, observed references/calls, parameters, auth/reset routes, services and technologies produce deterministic typed graph edges carrying artifact IDs. IPs/vendor relationships remain documentary. Graphs and current scope states enrich the immutable Research JSON; compact prompts remain bounded. No model or graph expands active scope.
 
 scope.md remains deterministic, versioned and independent of Ollama. It records authorization, captured plan, factual surface, differences, coverage and limitations. New step states/nullable metadata and manifest fields are additive; historical runs/snapshots/summary1 records are preserved.

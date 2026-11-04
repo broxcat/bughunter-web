@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { RECON_TEMPLATE_IDS } from './nucleiPolicy';
+import { scannerEnvironment } from '../scanners/environment.mjs';
 const execute = promisify(execFile);
 export const TOOL_PROBES = { subfinder: ['-version'], amass: ['-version'], assetfinder: ['-h'], httpx: ['-version'], nmap: ['--version'], ffuf: ['-V'], gobuster: ['--version'], nuclei: ['-version'] } as const;
 export type ReconToolName = keyof typeof TOOL_PROBES;
@@ -78,10 +79,11 @@ async function probeTool(tool: ReconToolName, path: string | null): Promise<Tool
   try {
     const handle = await open(path, 'r'); const header = Buffer.alloc(64); try { await handle.read(header, 0, 64, 0); } finally { await handle.close(); }
     const architecture = executableArchitecture(header);
-    const probe = await execute(path, [...TOOL_PROBES[tool]], { timeout: 5000, maxBuffer: 65536 }).catch(e => ({ stdout: e.stdout ?? '', stderr: e.stderr ?? '' }));
+    const env=scannerEnvironment();
+    const probe = await execute(path, [...TOOL_PROBES[tool]], { env, timeout: 5000, maxBuffer: 65536 }).catch(e => ({ stdout: e.stdout ?? '', stderr: e.stderr ?? '' }));
     const helpArgs = tool === 'amass' ? ['enum', '-h'] : tool === 'gobuster' ? ['dir', '--help'] : ['-h'];
-    const help = tool === 'assetfinder' ? probe : await execute(path, helpArgs, { timeout: 5000, maxBuffer: 131072 }).catch(e => ({ stdout: e.stdout ?? '', stderr: e.stderr ?? '' }));
-    const dynamic = await execute('ldd', [path], { timeout: 5000, maxBuffer: 65536 }).then(r=>({...r,success:true})).catch(e => ({ stdout: e.stdout ?? '', stderr: e.stderr ?? '',success:false }));
+    const help = tool === 'assetfinder' ? probe : await execute(path, helpArgs, { env, timeout: 5000, maxBuffer: 131072 }).catch(e => ({ stdout: e.stdout ?? '', stderr: e.stderr ?? '' }));
+    const dynamic = await execute('ldd', [path], { env, timeout: 5000, maxBuffer: 65536 }).then(r=>({...r,success:true})).catch(e => ({ stdout: e.stdout ?? '', stderr: e.stderr ?? '',success:false }));
     const output = String(probe.stdout) + String(probe.stderr), flags = String(help.stdout) + String(help.stderr);
     const version = parseToolVersion(tool, output), identity = await binaryIdentity(path), sha256=identity.sha256;
     const runtime = runtimeDependencyEvidence(String(dynamic.stdout) + String(dynamic.stderr),dynamic.success);

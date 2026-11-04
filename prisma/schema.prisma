@@ -265,6 +265,9 @@ enum CredentialPurpose {
 }
 
 model TargetCredential {
+  // Operator-declared context; never a verified role or an execution permission.
+  persona String?
+  reconEnabled Boolean @default(false)
   sessionStatus        TargetSessionStatus @default(UNKNOWN)
   sessionCheckedAt     DateTime?
   sessionExpiresAt     DateTime?
@@ -312,6 +315,9 @@ enum CredentialMode {
 // ---------------------------------------------------------------------------
 
 model ScanRun {
+  authenticatedContextsSnapshot Json?
+  authenticatedReconResult Json?
+  surfaceObservations ReconSurfaceObservation[]
   // Null means historical mode was not captured; never infer from today's program.
   assessmentModeSnapshot AssessmentMode?
   assessmentSourcesSnapshot Json?
@@ -827,6 +833,7 @@ enum AssetValue {
   LOW
 }
 model ScopeAsset {
+  surfaceObservations ReconSurfaceObservation[]
   id String @id @default(cuid())
   programId String
   originalValue String
@@ -927,6 +934,33 @@ model ReconArtifact {
   scopeAsset ScopeAsset @relation(fields: [scopeAssetId], references: [id], onDelete: Cascade)
   @@unique([scanRunId, kind, canonicalKey])
   @@index([scopeAssetId, kind])
+}
+
+// How an endpoint was observed in one context; no raw bodies or credentials.
+model ReconSurfaceObservation {
+  id String @id @default(cuid())
+  scanRunId String
+  scopeAssetId String
+  contextKey String
+  contextType String
+  canonicalKey String
+  url String @db.Text
+  urlRedacted Boolean @default(false)
+  method String
+  statusCode Int?
+  contentType String?
+  redirect String? @db.Text
+  redirectPattern String? @db.Text
+  bodyHash String?
+  bodyLength Int?
+  responseClass String
+  observedAt DateTime @default(now())
+  source String
+  scanRun ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  scopeAsset ScopeAsset @relation(fields: [scopeAssetId], references: [id], onDelete: Cascade)
+  @@unique([scanRunId, contextKey, canonicalKey])
+  @@index([scanRunId])
+  @@index([scopeAssetId])
 }
 
 // Durable post-Recon tasks; never an investigation provider or source of facts.

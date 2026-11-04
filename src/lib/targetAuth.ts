@@ -30,4 +30,5 @@ export function normalizeCookies(input: string | Record<string, string>): Record
 export const connectionInputSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("EMAIL_PASSWORD"), username: z.string().trim().min(1).max(320), password: z.string().min(1).max(1024) }),
   z.object({ mode: z.literal("COOKIES"), cookies: z.string().min(1).max(8192) }),
+  z.object({ mode: z.literal('BEARER'), bearerToken: z.string().trim().min(1).max(8192).refine(value => !/[\r\n\x00]/.test(value), 'Invalid bearer token') }),
 ]);

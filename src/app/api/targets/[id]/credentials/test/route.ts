@@ -5,12 +5,14 @@ import { encryptSecret } from "@/lib/crypto";
 import { connectionInputSchema, normalizeCookies } from "@/lib/targetAuth";
 import { loadTargetExecution } from "@/server/execution";
 import { testStoredConnection } from "@/server/credentials/connection";
+import { foreignOrigin } from '@/lib/requestOrigin';
 
 export const runtime = "nodejs";
 /** Test connection also saves encrypted inputs; only status metadata is returned. */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (foreignOrigin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   const { id } = await params;
   if (!await prisma.target.findFirst({ where: { id, userId: session.user.id }, select: { id: true } })) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const body = await req.json().catch(() => null);
@@ -24,7 +26,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     credentialId = row.id;
   } else {
     const parsed = connectionInputSchema.safeParse({ ...body, mode: body.mode ?? (body.cookies !== undefined ? "COOKIES" : "EMAIL_PASSWORD"), username: body.username ?? body.email });
-    if (!parsed.success) return NextResponse.json({ error: "Provide username/password or a session cookie" }, { status: 400 });
+    if (!parsed.success) return NextResponse.json({ error: "Provide username/password, a session cookie or a bearer token" }, { status: 400 });
     let cookies: Record<string, string> | undefined;
     if (parsed.data.mode === "COOKIES") {
       try { cookies = normalizeCookies(parsed.data.cookies); }
@@ -34,7 +36,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const purpose = !previous.some(c => c.purpose === "ACCOUNT_A") ? "ACCOUNT_A" : !previous.some(c => c.purpose === "ACCOUNT_B") ? "ACCOUNT_B" : "OTHER";
     const created = await prisma.targetCredential.create({ data: {
       targetId: id, label: `Account ${previous.length + 1}`, mode: parsed.data.mode, purpose,
-      ...(parsed.data.mode === "COOKIES" ? { cookiesCipher: encryptSecret(JSON.stringify(cookies)) } : { emailCipher: encryptSecret(parsed.data.username), passwordCipher: encryptSecret(parsed.data.password) }),
+      ...(parsed.data.mode === 'BEARER' ? { headerCipher: encryptSecret(parsed.data.bearerToken) } : parsed.data.mode === "COOKIES" ? { cookiesCipher: encryptSecret(JSON.stringify(cookies)) } : { emailCipher: encryptSecret(parsed.data.username), passwordCipher: encryptSecret(parsed.data.password) }),
     } });
     credentialId = created.id;
   }

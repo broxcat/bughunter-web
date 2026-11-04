@@ -55,8 +55,11 @@ describe("best-effort Recon", () => {
     await expect(runRecon("example.test", "run")).rejects.toThrow("Missing authorized scan context");
     expect(mocks.command).not.toHaveBeenCalled();
   });
-  it("authenticated discovery failure reduces coverage", async () => {
+  it("legacy Recon is anonymous and never puts a selected session into scanner argv", async () => {
     mocks.credentials.mockRejectedValue(new Error("secret"));
-    expect((await runRecon("example.test", "run")).outcome).toBe("PARTIAL");
+    expect((await runRecon("example.test", "run")).outcome).toBe("SUCCESS");
+    expect(mocks.credentials).not.toHaveBeenCalled();
+    expect(mocks.command.mock.calls.every(call=>!call[1].includes('-H'))).toBe(true);
+    expect(JSON.stringify(mocks.command.mock.calls)).not.toContain('secret');
   });
 });

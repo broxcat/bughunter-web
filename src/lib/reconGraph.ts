@@ -2,23 +2,26 @@ import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { normalizeFqdn } from './bountyProgram';
 import { canonicalReconUrl, type ReconArtifactData } from './reconArtifacts';
+import { safeSurfaceUrl,type SafeAuthSurface } from './authenticatedRecon';
 
 export type ReconGraphNode = {
-  id: string; type: 'HOSTNAME' | 'IP' | 'ENDPOINT' | 'PARAMETER' | 'SERVICE' | 'TECHNOLOGY';
+  id: string; type: 'HOSTNAME' | 'IP' | 'ENDPOINT' | 'PARAMETER' | 'SERVICE' | 'TECHNOLOGY' | 'AUTH_CONTEXT';
   value: string; inScope: boolean; evidenceRefs: string[]; firstSeenAt: string; lastSeenAt: string;
+  contextKey?:string;contextMode?:'ANONYMOUS'|'AUTHENTICATED';persona?:string|null;urlRedacted?:boolean;
 };
 export type ReconGraphEdge = {
   id: string; from: string; to: string;
   relation: 'RESOLVES_TO' | 'CNAME' | 'REFERENCES' | 'CALLS' | 'HAS_PARAMETER' |
-    'AUTHENTICATION_SURFACE' | 'RESET_ROUTE' | 'HOSTS_SERVICE' | 'USES_TECHNOLOGY';
+    'AUTHENTICATION_SURFACE' | 'RESET_ROUTE' | 'HOSTS_SERVICE' | 'USES_TECHNOLOGY' | 'OBSERVED_IN_CONTEXT';
   verification: 'OBSERVED' | 'DISCOVERED' | 'DECLARED'; evidenceRefs: string[];
   firstSeenAt: string; lastSeenAt: string;
+  responseClass?:string;statusCode?:number;
 };
 export type ReconAssetGraph = { version: 1; authorizationGranted: false; nodes: ReconGraphNode[]; edges: ReconGraphEdge[]; truncated: boolean };
 
 /** Derived relationships only. DNS/CDN/remote references never authorize the
  * destination and do not prove common ownership. IPs remain documentary. */
-export function deriveAssetGraph(artifacts: ReconArtifactData[], limits = { nodes: 1000, edges: 2000 }): ReconAssetGraph {
+export function deriveAssetGraph(artifacts: ReconArtifactData[], limits = { nodes: 1000, edges: 2000 },authenticated:SafeAuthSurface[]=[]): ReconAssetGraph {
   const nodes = new Map<string, ReconGraphNode>(), edges = new Map<string, ReconGraphEdge>(); let truncated = false;
   const ordered = [...artifacts].sort((a, b) => a.kind.localeCompare(b.kind) || a.canonicalKey.localeCompare(b.canonicalKey) || (a.id ?? '').localeCompare(b.id ?? ''));
   const unique = (values: string[]) => [...new Set(values)].sort();
@@ -82,6 +85,23 @@ export function deriveAssetGraph(artifacts: ReconArtifactData[], limits = { node
     }
     if (artifact.kind === 'technology' && typeof value.name === 'string') {
       edge(host(value.hostname, inScope), node('TECHNOLOGY', value.name, false), 'USES_TECHNOLOGY');
+    }
+  }
+  for(const surface of [...authenticated].sort((a,b)=>a.scanRunId.localeCompare(b.scanRunId))){
+    if(surface.legacy)continue;
+    for(const observation of [...surface.observations].sort((a,b)=>(a.id??'').localeCompare(b.id??''))){
+      const context=surface.contexts.find(item=>item.contextKey===observation.contextKey);
+      if(!context||!observation.id||observation.responseClass==='UNAVAILABLE'||!observation.statusCode)continue;
+      const refs=['ReconSurfaceObservation:'+observation.id],at=observation.observedAt;
+      let url:string;try{url=canonicalReconUrl(safeSurfaceUrl(observation.url));}catch{continue;}
+      const identity=observation.urlRedacted?'context-surface:'+observation.canonicalKey:url;
+      const endpointId='endpoint:'+createHash('sha256').update(identity).digest('hex'),contextId='auth_context:'+createHash('sha256').update(surface.scanRunId+'\0'+context.contextKey).digest('hex');
+      const addNode=(id:string,row:Omit<ReconGraphNode,'id'>)=>{const old=nodes.get(id);if(old){old.evidenceRefs=unique([...old.evidenceRefs,...refs]);old.firstSeenAt=[old.firstSeenAt,at].sort()[0];old.lastSeenAt=[old.lastSeenAt,at].sort().at(-1)!;return true;}if(nodes.size>=limits.nodes){truncated=true;return false;}nodes.set(id,{id,...row});return true;};
+      const label=context.mode==='ANONYMOUS'?'Anonymous':`Authenticated context ${[...surface.contexts].filter(item=>item.mode==='AUTHENTICATED').sort((a,b)=>a.contextKey.localeCompare(b.contextKey)).findIndex(item=>item.contextKey===context.contextKey)+1}`;
+      if(!addNode(endpointId,{type:'ENDPOINT',value:url,inScope:false,evidenceRefs:refs,firstSeenAt:at,lastSeenAt:at,...(observation.urlRedacted?{urlRedacted:true}:{})})||!addNode(contextId,{type:'AUTH_CONTEXT',value:label,contextKey:context.contextKey,contextMode:context.mode,inScope:false,evidenceRefs:refs,firstSeenAt:at,lastSeenAt:at}))continue;
+      const id='edge:'+createHash('sha256').update('OBSERVED_IN_CONTEXT\0'+endpointId+'\0'+contextId).digest('hex'),old=edges.get(id);
+      if(old){old.evidenceRefs=unique([...old.evidenceRefs,...refs]);old.firstSeenAt=[old.firstSeenAt,at].sort()[0];old.lastSeenAt=[old.lastSeenAt,at].sort().at(-1)!;}
+      else if(edges.size<limits.edges)edges.set(id,{id,from:endpointId,to:contextId,relation:'OBSERVED_IN_CONTEXT',verification:'OBSERVED',evidenceRefs:refs,firstSeenAt:at,lastSeenAt:at,responseClass:observation.responseClass,statusCode:observation.statusCode});else truncated=true;
     }
   }
   return { version: 1, authorizationGranted: false, nodes: [...nodes.values()].sort((a, b) => a.id.localeCompare(b.id)), edges: [...edges.values()].sort((a, b) => a.id.localeCompare(b.id)), truncated };

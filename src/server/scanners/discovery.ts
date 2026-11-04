@@ -1,12 +1,11 @@
 import { throwIfScanAborted } from "@/server/scanControl";
 import { isSafeReadUrl } from "@/lib/observationSafety";
 import { assertExecutionUrl } from '@/server/execution';
-// Authenticated, depth-limited Recon observation collection. Discovered URLs
+// Anonymous, depth-limited Recon observation collection. Discovered URLs
 // remain confined to the selected host and never expand authorization.
 // Bodies are transient only; the persisted corpus contains sanitized metadata.
 
 import { probe } from "./http";
-import { loadTargetCredentials, credentialHeaders } from "@/server/credentials";
 import type { ScanContext } from "./context";
 
 const MAX_PAGES = 25;
@@ -63,19 +62,9 @@ async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryC
     return { html: "", urls: [], authenticated: false };
   }
 
-  // Authenticate with the first available credential (if any). loadTargetCredentials
-  // decrypts in-process and, for EMAIL_PASSWORD, auto-logs-in to mint cookies.
-  let headers: Record<string, string> = {};
-  let authenticated = false;
-  try {
-    const creds = await loadTargetCredentials(ctx.targetId);
-    if (creds.length > 0) {
-      headers = credentialHeaders(creds[0]);
-      authenticated = Object.keys(headers).length > 0;
-    }
-  } catch {
-    execution.issues.push("AUTHENTICATED_DISCOVERY_UNAVAILABLE");
-  }
+  // Authentication is never inferred from available credentials. Explicit,
+  // per-context mapping runs separately and does not share this cache.
+  const authenticated = false;
 
   const bodies: string[] = [];
   const pages: NonNullable<DiscoveryCorpus["pages"]> = [];
@@ -91,7 +80,7 @@ async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryC
     try { assertExecutionUrl(norm); } catch { continue; }
     visited.add(norm);
 
-    const res = await probe(norm, { headers, timeoutMs: PAGE_TIMEOUT_MS });
+    const res = await probe(norm, { timeoutMs: PAGE_TIMEOUT_MS });
     if (res.error) {
       execution.failedRequests++;
       const code = interruptionCodes.has(res.error) ? res.error : "DISCOVERY_TRANSPORT_ERROR";
@@ -123,11 +112,11 @@ async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryC
 }
 
 /**
- * Authenticated, depth-limited crawl of the target, cached per scan run. Returns
+ * Anonymous, depth-limited crawl of the target, cached per scan run. Returns
  * a corpus the families parse for candidate URLs/params. Never throws.
  */
 export function discoverCorpus(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryCorpus> {
-  const key = `${ctx.scanRunId}:${ctx.baseUrl}`;
+  const key = `${ctx.scanRunId}:ANONYMOUS:${ctx.baseUrl}`;
   const cached = cache.get(key);
   if (cached) return cached;
   const p = crawl(ctx, seeds).catch(() => {

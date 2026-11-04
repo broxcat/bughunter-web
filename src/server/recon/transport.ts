@@ -10,18 +10,19 @@ import { ReconProtection } from './protection';
  * guarded client owns every remote request, scope check, budget and backoff.
  * CONNECT, arbitrary destinations, redirects and target-supplied commands are
  * never forwarded. The worker still runs the actual installed scanner binary. */
-export async function createReconRelay(execution:TargetExecution,targetUrl:string,protection:ReconProtection,signal:AbortSignal,onResponse:(page:ProbeResult)=>Promise<void>,budget:{remaining:number}) {
+export async function createReconRelay(execution:TargetExecution,targetUrl:string,protection:ReconProtection,signal:AbortSignal,onResponse:(page:ProbeResult)=>Promise<void>,budget:{remaining:number},options:{requestHeaders?:(url:string,method:string)=>Promise<Record<string,string>>}={}) {
   const target=new URL(targetUrl),control=currentScanControl(),pending=new Set<Promise<unknown>>();let origin='';
+  if(options.requestHeaders)execution={...execution,authenticatedOrigin:target.origin,authenticatedRequestHeaders:options.requestHeaders};
   const mapUrl=(raw:string)=>{const u=new URL(raw,origin);if(u.origin!==origin)throw new Error('Foreign relay origin');const result=new URL(u.pathname+u.search,target.origin).toString();if(!assetAllowsUrl(execution.scopeAsset!,result)||!isSafeReadUrl(result))throw new Error('Relay scope denied');return result;};
-  const request=async(url:string)=>withTargetExecution(execution,async()=>{
-    if(!assetAllowsUrl(execution.scopeAsset!,url)||!isSafeReadUrl(url))throw new Error('Scope denied');
+  const request=async(url:string,method:'GET'|'HEAD'='GET')=>withTargetExecution(execution,async()=>{
+    if(!assetAllowsUrl(execution.scopeAsset!,url)||!isSafeReadUrl(url)||options.requestHeaders&&new URL(url).origin!==target.origin)throw new Error('Scope denied');
     signal.throwIfAborted();if(budget.remaining--<=0){protection.blocked=true;protection.reason='Asset request budget exhausted';protection.reasonCode='RESOURCE_LIMIT';throw new Error('PARTIAL: Asset request budget exhausted');}
-    await protection.beforeRequest(signal);const page=await probe(url,{timeoutMs:8000,signal});protection.observe(page.error?undefined:page.status,page.error);await onResponse(page);return page;
+    await protection.beforeRequest(signal);const page=await probe(url,{method,timeoutMs:8000,signal});protection.observe(page.error?undefined:page.status,page.error);await onResponse(page);return page;
   });
   const server=createServer((req,res)=>{const work=async()=>{
     try {
       if(!['GET','HEAD'].includes(req.method??'')||req.headers.host!==new URL(origin).host||!req.url?.startsWith('/')||req.url.startsWith('//')){res.writeHead(403).end();return;}
-      const page=await request(mapUrl(origin+req.url));
+      const page=await request(mapUrl(origin+req.url),req.method as 'GET'|'HEAD');
       if(page.error){res.writeHead(502).end();return;}
       for(const name of ['content-type','server','location','www-authenticate','x-powered-by','retry-after'])if(page.headers[name])res.setHeader(name,page.headers[name]);
       res.statusCode=page.status;res.end(req.method==='HEAD'?'':page.body);

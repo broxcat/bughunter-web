@@ -2,6 +2,7 @@
 // SIGKILLed, so an orphaned scanner cannot keep issuing requests after a crash.
 // The tool inherits this process group; no shell or command-string parsing.
 import { spawn } from "node:child_process";
+import { scannerEnvironment } from './environment.mjs';
 const [command, ...args] = process.argv.slice(2);
 const killGroup = () => { try { process.kill(-process.pid, "SIGKILL"); } catch { process.exit(1); } };
 process.on("disconnect", killGroup);
@@ -9,7 +10,7 @@ process.on("disconnect", killGroup);
 // that need the parent's subsequent SIGKILL after their grace period.
 process.on("SIGTERM", () => {});
 if (!process.connected || !command) killGroup();
-const tool = spawn(command, args, { shell: false, stdio: ["ignore", "inherit", "inherit"] });
+const tool = spawn(command, args, { env: scannerEnvironment(), shell: false, stdio: ["ignore", "inherit", "inherit"] });
 let spawnFailed = false;
 tool.on("error", () => {
   spawnFailed = true;

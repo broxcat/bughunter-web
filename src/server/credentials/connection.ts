@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { createHash, randomUUID } from "node:crypto";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { SESSION_TTL_MS, type SessionState } from "@/lib/targetAuth";
-import { assertExecutionUrl } from "@/server/execution";
+import { assertExecutionUrl, currentTargetExecution } from "@/server/execution";
 import { probe, type ProbeResult } from "@/server/scanners/http";
 import { isSafeReadUrl, safeObservationUrl } from "@/lib/observationSafety";
 import { bodyHash } from "@/server/credentials/responseFingerprint";
@@ -62,7 +62,8 @@ async function ownedObject(base: string, headers: Record<string, string>, urls: 
 }
 async function checkRow(row: TargetCredential, login: boolean, allowLoginAction?: (url: string, detectedPasswordForm?: boolean, passwordField?: string) => void): Promise<ConnectionResult> {
   const target = await prisma.target.findUniqueOrThrow({ where: { id: row.targetId }, select: { host: true, scheme: true } });
-  const base = `${target.scheme === "http" ? "http" : "https"}://${target.host}`;
+  const execution = currentTargetExecution();
+  const base = execution.scopeAsset?.format === 'URL' ? execution.scopeAsset.normalizedValue : `${target.scheme === "http" ? "http" : "https"}://${execution.host}`;
   const checked = new Date();
   const checkId = randomUUID();
   const claim = await prisma.targetCredential.updateMany({ where: { id: row.id, sessionCheckId: row.sessionCheckId }, data: { sessionCheckId: checkId, sessionStatus: "UNKNOWN" } });

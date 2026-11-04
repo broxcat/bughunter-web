@@ -79,9 +79,26 @@ describe('Recon Report v3: deterministic facts, narrative-only model', () => {
     ['POST was observed.', 'artifact-http-001', 'UNSUPPORTED_METHOD'],
     ['The route is accessible.', 'artifact-discovered-001', 'UNVERIFIED_ACCESSIBILITY'],
     ['Critical vulnerability confirmed.', 'artifact-http-001', 'UNSUPPORTED_VULNERABILITY_CLAIM'],
+    ['Account A can bypass authorization.', 'artifact-http-001', 'UNSUPPORTED_VULNERABILITY_CLAIM'],
+    ['Account A can bypass authentication.', 'artifact-http-001', 'UNSUPPORTED_VULNERABILITY_CLAIM'],
+    ['Confirmed IDOR was found.', 'artifact-http-001', 'UNSUPPORTED_VULNERABILITY_CLAIM'],
+    ['BOLA has been demonstrated.', 'artifact-http-001', 'UNSUPPORTED_VULNERABILITY_CLAIM'],
+    ['Privilege escalation is confirmed.', 'artifact-http-001', 'UNSUPPORTED_VULNERABILITY_CLAIM'],
+    ['No evidence is available; Account A can bypass authorization.', 'artifact-http-001', 'UNSUPPORTED_VULNERABILITY_CLAIM'],
+    ['This does not establish a flaw, but Account A can bypass authentication.', 'artifact-http-001', 'UNSUPPORTED_VULNERABILITY_CLAIM'],
   ])('rejects unsupported per-entry prose without rejecting stored facts: %s', (text, id, code) => {
     const data = input(), proposed = narrative(data); proposed.sections[0].entries = [entry(data, text, id)];
     expect(issueCode(() => validateReconReportV3(JSON.stringify(proposed), data))).toBe(code);
+  });
+  it.each([
+    'No confirmed BOLA is established by the observed context differential.',
+    'This does not establish that Account A can bypass authorization.',
+    'The observations do not demonstrate that Account A can bypass authentication.',
+    'Account A cannot bypass authorization based on this evidence alone.',
+    'Context visibility differences require manual review; no confirmed IDOR is established.',
+  ])('retains an explicit negative access-control caveat: %s', text => {
+    const data=input(),proposed=narrative(data);proposed.sections[0].entries=[entry(data,text)];
+    expect(validateReconReportV3(JSON.stringify(proposed),data).narrativeStatus).toBe('VALID');
   });
   it('recovers only the bad entry, preserves correct entries, provenance and every factual row', () => {
     const data = input(), proposed = narrative(data), before = JSON.stringify(data.factual); proposed.sections[0].entries.push(entry(data, 'HTTP 500 was observed.'));

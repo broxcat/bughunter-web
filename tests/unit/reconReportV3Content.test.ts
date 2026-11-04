@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import type { ReconReportV3 } from '@/lib/reconReportV3';
 import ReconReportV3Content from '@/components/ReconReportV3Content';
 import { ReconSummaryUnavailable } from '@/components/ReconSummaryButton';
+import { exportAuthSurfaces } from '@/server/recon/authExport';
+import type { SafeAuthSurface } from '@/lib/authenticatedRecon';
 
 const report = (override: Partial<ReconReportV3> = {}): ReconReportV3 => ({
   version: 3,
@@ -21,6 +23,15 @@ describe('Recon report v3 facts and AI interpretation rendering', () => {
     const html=render(report({assessmentContext:{assessmentMode:'WHITE_BOX',authorizedSourceCount:2,sourceContentAvailable:false,sourceAnalysisPerformed:false,networkAuthorizationSource:'ScopeAsset',sourceAuthorizationSeparate:true}}));
     expect(html).toContain('White-box');expect(html).toContain('Authorized sources captured: 2');expect(html).toContain('Source-assisted analysis: Not performed');expect(html).toContain('network authorization');
     expect(render()).toContain('Legacy / mode not captured');expect(render()).toContain('Unknown (historical run)');
+  });
+  it('renders observed context differences and missing comparisons as facts, with opaque personas and no authorization finding',()=>{
+    const source:SafeAuthSurface={scanRunId:'context-run',legacy:false,contexts:[{contextKey:'ANONYMOUS',mode:'ANONYMOUS',label:'Anonymous',state:'MAPPED'},{contextKey:'AUTH_A',mode:'AUTHENTICATED',label:'Private Alice',persona:'ADMIN',state:'MAPPED'},{contextKey:'AUTH_B',mode:'AUTHENTICATED',label:'Private Bob',persona:'private-bob@example.test',state:'MAPPED'}],observations:[],surfaceVisibility:[],totals:{public:0,authenticatedOnly:0,sharedAuthenticated:0,contextDifferentials:0,observations:0},warnings:[]};
+    source.observations=['ANONYMOUS','AUTH_A','AUTH_B'].map((contextKey,index)=>({id:'observation-'+index,contextKey,contextType:index?'AUTHENTICATED':'ANONYMOUS',canonicalKey:'GET:'+('a'.repeat(64)),url:'https://app.example.test/dashboard',method:'GET',statusCode:[401,200,403][index],contentType:'text/html',redirect:null,redirectPattern:null,responseClass:index===1?'CONTENT':'DENIED',observedAt:'2026-11-04T00:00:00Z',source:'private-source'}));
+    source.observations.push({...source.observations[1],id:'single-observation',canonicalKey:'GET:'+('b'.repeat(64)),url:'https://app.example.test/profile'});
+    const html=render(report({authenticatedRecon:exportAuthSurfaces([source])}));
+    for(const text of ['Observed authentication contexts','Authenticated context 1','declared persona: ADMIN','Anonymous: 401','Authenticated context 1: 200','Authenticated context 2: 403','Not observed / unknown','1 observed context differentials','not proof of broken authorization','operator-declared','observation-1'])expect(html).toContain(text);
+    for(const privateValue of ['Private Alice','Private Bob','private-bob@','private-source'])expect(html).not.toContain(privateValue);
+    expect(render()).toContain('Historical context not captured; anonymous access is unknown.');
   });
   it('separates application-owned facts and coverage from the AI interpretation', () => {
     const html = render();

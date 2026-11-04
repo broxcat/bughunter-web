@@ -3,6 +3,7 @@ import {
   createDecipheriv,
   randomBytes,
   timingSafeEqual,
+  createHmac,
 } from "node:crypto";
 
 // AES-256-GCM secret encryption for stored AI provider API keys.
@@ -43,6 +44,16 @@ function loadKey(): Buffer {
     );
   }
   return key;
+}
+
+/** Non-reversible, domain-separated identity for private runtime references.
+ * Reuses the existing backend key; neither input nor key is persisted. */
+export function privateReferenceFingerprint(domain: string, value: string): string {
+  // Anonymous-only deployments need no credential encryption configuration;
+  // their already-required authentication signing secret supplies the key.
+  const key = process.env.CREDENTIALS_ENCRYPTION_KEY ? loadKey() : process.env.AUTH_SECRET;
+  if (!key) throw new Error('Backend privacy key unavailable');
+  return createHmac('sha256', key).update(domain + '\0' + value).digest('hex');
 }
 
 /**

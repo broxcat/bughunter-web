@@ -4,6 +4,7 @@ export const RECON_CAPABILITIES = [
   'DNS_RESOLUTION', 'HTTP_DISCOVERY', 'PORT_DISCOVERY',
   'TECHNOLOGY_FINGERPRINTING', 'CONTENT_CALIBRATION', 'CONTENT_DISCOVERY',
   'CRAWLING', 'ENTRY_POINT_MAPPING', 'API_MAPPING', 'AUTH_MAPPING',
+  'AUTHENTICATED_MAPPING',
   'TLS_MAPPING', 'PASSIVE_BURP_ENRICHMENT', 'SURFACE_TEMPLATE_MATCHING',
   'NORMALIZATION', 'ATTACK_SURFACE_INTELLIGENCE',
 ] as const;
@@ -14,7 +15,9 @@ export type ReconFailureReason = 'MISSING_TOOL' | 'INCOMPATIBLE_TOOL' | 'MISSING
   'MISSING_TEMPLATE' | 'SOFT_404' | 'WILDCARD_REDIRECT' | 'NON_DISCRIMINATING_WILDCARD_RESPONSE' |
   'RATE_LIMITED' | 'WAF_BLOCKED' | 'DNS_FAILURE' | 'TIMEOUT' | 'NETWORK_UNREACHABLE' |
   'SCOPE_BLOCKED' | 'PARSER_FAILURE' | 'TOOL_EXIT_ERROR' | 'RESOURCE_LIMIT' | 'CANCELLED' |
-  'TEMPORARY_UPSTREAM' | 'WORKER_LEASE_LOST' | 'INVALID_TARGET';
+  'TEMPORARY_UPSTREAM' | 'WORKER_LEASE_LOST' | 'INVALID_TARGET' |
+  'SESSION_UNAVAILABLE' | 'SESSION_EXPIRED' | 'SESSION_LOST' | 'AUTH_CONTEXT_LIMIT' |
+  'AUTH_CONTEXT_DUPLICATE_IDENTITY' | 'AUTH_RELAY_FAILURE' | 'AUTH_CONTEXT_SCOPE_BLOCKED' | 'INTERNAL_AUTH_RECON_FAILURE';
 export type CoverageImpact = 'NONE' | 'REDUCED' | 'BLOCKED';
 export type ReconFailure = {
   reason: ReconFailureReason;
@@ -62,15 +65,15 @@ export type ReconCapabilityResult = {
   reason: string;
 };
 
-const environment = new Set<ReconFailureReason>(['MISSING_TOOL', 'MISSING_WORDLIST', 'MISSING_TEMPLATE', 'RESOURCE_LIMIT']);
+const environment = new Set<ReconFailureReason>(['MISSING_TOOL', 'MISSING_WORDLIST', 'MISSING_TEMPLATE', 'RESOURCE_LIMIT', 'AUTH_RELAY_FAILURE', 'INTERNAL_AUTH_RECON_FAILURE']);
 const incompatible = new Set<ReconFailureReason>(['INCOMPATIBLE_TOOL', 'PARSER_FAILURE', 'TOOL_EXIT_ERROR']);
-const behavior = new Set<ReconFailureReason>(['SOFT_404', 'WILDCARD_REDIRECT', 'NON_DISCRIMINATING_WILDCARD_RESPONSE']);
+const behavior = new Set<ReconFailureReason>(['SOFT_404', 'WILDCARD_REDIRECT', 'NON_DISCRIMINATING_WILDCARD_RESPONSE', 'SESSION_UNAVAILABLE', 'SESSION_EXPIRED', 'SESSION_LOST', 'AUTH_CONTEXT_LIMIT', 'AUTH_CONTEXT_DUPLICATE_IDENTITY']);
 export function reconFailure(reason: ReconFailureReason, options: {
   capability: ReconCapability; tool?: string; message?: string; transient?: boolean;
   coverageImpact?: CoverageImpact; fallbackUsed?: boolean;
 }): ReconFailure {
   const category = environment.has(reason) ? 'ENVIRONMENT' : incompatible.has(reason) ? 'TOOL' :
-    behavior.has(reason) ? 'EXPECTED_BEHAVIOR' : ['SCOPE_BLOCKED', 'INVALID_TARGET', 'CANCELLED'].includes(reason) ? 'POLICY' : 'TARGET';
+    behavior.has(reason) ? 'EXPECTED_BEHAVIOR' : ['SCOPE_BLOCKED', 'AUTH_CONTEXT_SCOPE_BLOCKED', 'INVALID_TARGET', 'CANCELLED'].includes(reason) ? 'POLICY' : 'TARGET';
   const retryable = ['TIMEOUT', 'TEMPORARY_UPSTREAM', 'WORKER_LEASE_LOST'].includes(reason) ||
     options.transient === true && ['DNS_FAILURE', 'NETWORK_UNREACHABLE'].includes(reason);
   return { reason, category, retryable, coverageImpact: options.coverageImpact ?? 'REDUCED',
@@ -90,6 +93,14 @@ export function classifyReconFailure(error: unknown, capability: ReconCapability
   const message = error instanceof Error ? error.message : String(error);
   let reason: ReconFailureReason = 'TOOL_EXIT_ERROR', transient = false;
   if (error instanceof Error && error.name === 'TimeoutError') reason = 'TIMEOUT';
+  else if (/AUTH_CONTEXT_SESSION_UNAVAILABLE|\bSESSION_UNAVAILABLE\b/.test(message)) reason = 'SESSION_UNAVAILABLE';
+  else if (/\bSESSION_EXPIRED\b/.test(message)) reason = 'SESSION_EXPIRED';
+  else if (/AUTH_CONTEXT_SESSION_LOST|\bSESSION_LOST\b/.test(message)) reason = 'SESSION_LOST';
+  else if (/AUTH_CONTEXT_DUPLICATE_IDENTITY/.test(message)) reason = 'AUTH_CONTEXT_DUPLICATE_IDENTITY';
+  else if (/AUTH_CONTEXT_LIMIT/.test(message)) reason = 'AUTH_CONTEXT_LIMIT';
+  else if (/AUTH_CONTEXT_SCOPE_BLOCKED/.test(message)) reason = 'AUTH_CONTEXT_SCOPE_BLOCKED';
+  else if (/AUTH_RELAY_FAILURE/.test(message)) reason = 'AUTH_RELAY_FAILURE';
+  else if (/INTERNAL_AUTH_RECON_FAILURE/.test(message)) reason = 'INTERNAL_AUTH_RECON_FAILURE';
   else if (/scope|authorization|out.of.scope/i.test(message)) reason = 'SCOPE_BLOCKED';
   else if (/cancel|abort/i.test(message)) reason = 'CANCELLED';
   else if (/missing.*wordlist|wordlist.*(?:missing|unavailable|ENOENT)/i.test(message)) reason = 'MISSING_WORDLIST';
@@ -154,8 +165,10 @@ export function requiredCoverageSatisfied(results: ReconCapabilityResult[]) {
 export function buildCapabilityPlans(input: {
   wildcard: boolean; active: boolean; assetActive: boolean; httpOnly: boolean;
   type: string; depth: 'LIGHT' | 'STANDARD' | 'DEEP'; gobusterDir: boolean; gobusterDns: boolean;
+  authenticatedContexts?: number;
 }): ReconCapabilityPlan[] {
   const web = input.httpOnly || ['WEB_APPLICATION', 'API', 'WILDCARD'].includes(input.type);
+  const authenticated = Boolean(input.authenticatedContexts) && !input.wildcard;
   const contentProviders = input.gobusterDir && input.depth === 'LIGHT' ? ['gobuster', 'ffuf', 'bounded-crawler'] :
     ['ffuf', ...(input.gobusterDir ? ['gobuster'] : []), 'bounded-crawler'];
   const add = (id: ReconCapability, stage: string, providers: string[], required: boolean, enabled: boolean,
@@ -168,7 +181,7 @@ export function buildCapabilityPlans(input: {
     add('PASSIVE_SUBDOMAIN_DISCOVERY', 'Passive discovery', ['subfinder', 'amass', 'assetfinder'], input.wildcard, input.wildcard && input.assetActive, 'PASSIVE', 'At least two independently completed passive discovery sources', 2),
     add('ACTIVE_DNS_DISCOVERY', 'Scope validation / DNS', ['gobuster'], false, input.gobusterDns, 'ACTIVE', 'Bounded descendant-only DNS expansion'),
     add('DNS_RESOLUTION', 'Scope validation / DNS', ['native-dns'], input.active, input.active, 'ACTIVE', 'Authorized host resolution with address/CNAME provenance'),
-    add('HTTP_DISCOVERY', 'HTTP surface', ['httpx', 'guarded-http'], input.active && web, input.active, 'ACTIVE', 'Authorized HTTP availability mapped with verified responses'),
+    add('HTTP_DISCOVERY', 'HTTP surface', ['httpx', 'guarded-http'], input.active && (web||authenticated), input.active, 'ACTIVE', 'Authorized HTTP availability mapped with verified responses'),
     add('TECHNOLOGY_FINGERPRINTING', 'Web / API mapping', ['native-fingerprint', 'httpx'], false, input.active, 'ACTIVE', 'Evidence-backed technology signatures without invented versions'),
     add('TLS_MAPPING', 'Web / API mapping', ['native-tls'], false, input.active, 'ACTIVE', 'Transport/certificate observations on selected HTTPS services'),
     add('PORT_DISCOVERY', 'Ports / services', ['nmap'], input.active && !web, input.active && !input.httpOnly, 'ACTIVE', 'Bounded authorized host service inventory'),
@@ -178,6 +191,7 @@ export function buildCapabilityPlans(input: {
     add('ENTRY_POINT_MAPPING', 'Web / API mapping', ['bounded-crawler', 'burp'], input.active && web, input.active, 'ACTIVE', 'Analyzed entry-page/link/form inventory without submitting forms'),
     add('API_MAPPING', 'Web / API mapping', ['bounded-crawler', 'burp'], false, input.active, 'ACTIVE', 'Observable specifications, API paths, methods and parameters'),
     add('AUTH_MAPPING', 'Web / API mapping', ['bounded-crawler', 'burp'], false, input.active, 'ACTIVE', 'Observable authentication routes/challenges; no bypass/exploitation'),
+    add('AUTHENTICATED_MAPPING', 'Web / API mapping', ['guarded-auth-mapper'], authenticated, input.active && authenticated, 'ACTIVE', 'Bounded read-only mapping of explicitly captured verified contexts; no login or scanner credential arguments'),
     add('SURFACE_TEMPLATE_MATCHING', 'Nuclei Recon', ['nuclei'], false, input.active, 'ACTIVE', 'Only the pinned allowlisted surface-mapping templates'),
     add('PASSIVE_BURP_ENRICHMENT', 'Burp enrichment', ['burp'], false, input.active, 'PASSIVE', 'Authorized existing history references without active replay'),
     add('NORMALIZATION', 'Normalization', ['artifact-normalizer'], true, true, 'PASSIVE', 'Validated structured artifacts, scope states, deduplication and provenance'),

@@ -22,4 +22,9 @@ suite('real HTTP Recon relay guards (authorization DB fixture only; no CLI simul
     const request=fetch(r.origin+'/app/one').catch(()=>null);await started;let closed=false;const closing=r.close().then(()=>{closed=true;});await new Promise(r=>setTimeout(r,20));expect(closed).toBe(false);release();await closing;await request;
   });
   it('checks live revocation again before every request',async()=>{const r=await relay();try{expect((await fetch(r.origin+'/app/one')).status).toBe(200);active=false;expect((await fetch(r.origin+'/app/two')).status).toBeGreaterThanOrEqual(400);expect(seen).toHaveLength(1);}finally{await r.close();}});
+  it('preserves HEAD instead of silently converting it into a GET request',async()=>{
+    const methods:string[]=[];
+    const r=await withTargetExecution(execution,()=>createReconRelay(execution,base+'/app/',new ReconProtection(1000,20),new AbortController().signal,async page=>{methods.push(page.method);},{remaining:20}));
+    try{const response=await fetch(r.origin+'/app/one',{method:'HEAD'});expect(response.status).toBe(200);expect(await response.text()).toBe('');expect(methods).toEqual(['HEAD']);expect(seen).toHaveLength(1);}finally{await r.close();}
+  });
 });

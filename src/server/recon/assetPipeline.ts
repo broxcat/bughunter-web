@@ -27,6 +27,9 @@ import { ReconCoverage } from './coverage';
 import { calibrateContent,compareWithBaseline,gobusterCalibrationPolicy,type UnknownPathBaseline } from './calibration';
 import { reconFailure,classifyReconFailure,reconRetryDelay } from '@/lib/reconCapabilities';
 import { deriveAssetGraph } from '@/lib/reconGraph';
+import { authContextsSnapshot } from '@/lib/authenticatedRecon';
+import { recordSurfaceObservation } from '@/server/authenticatedRecon';
+import { mapAuthenticatedSurfaces } from './authenticatedMapping';
 import { persistProgramDiscovery } from './program';
 import type { ScanExecutionResult } from '../scanners/result';
 import type { ProbeResult } from '../scanners/http';
@@ -41,11 +44,13 @@ export async function assertLiveAsset() {
 }
 export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResult> {
   const initial=currentTargetExecution(),asset=await assertLiveAsset();
-  const saved=await prisma.scanRun.findUniqueOrThrow({where:{id:scanRunId},select:{reconPlan:true,scopeAssetSnapshot:true}});
+  const saved=await prisma.scanRun.findUniqueOrThrow({where:{id:scanRunId},select:{reconPlan:true,scopeAssetSnapshot:true,authenticatedContextsSnapshot:true}});
+  const authSnapshot=authContextsSnapshot(saved.authenticatedContextsSnapshot);
+  const plannedAuthContexts=authSnapshot?.contexts.filter(c=>c.eligibility==='PLANNED').length??0;
   const captured=saved.scopeAssetSnapshot as {type?:string;assetValue?:string}|null;
   const oldPlan=(saved.reconPlan as ReconPlan|null)??buildReconPlan({...asset,type:captured?.type??asset.type,assetValue:captured?.assetValue??asset.assetValue},{active:true,exclusions:asset.program.outOfScope});
-  const modern=buildReconPlan({...asset,type:captured?.type??asset.type,assetValue:captured?.assetValue??asset.assetValue},{active:oldPlan.activityMode==='ACTIVE',exclusions:asset.program.outOfScope});
-  const plan:ReconPlan={...oldPlan,methodologyVersion:2,strategy:oldPlan.strategy??modern.strategy,capabilities:oldPlan.capabilities??modern.capabilities};
+  const modern=buildReconPlan({...asset,type:captured?.type??asset.type,assetValue:captured?.assetValue??asset.assetValue},{active:oldPlan.activityMode==='ACTIVE',exclusions:asset.program.outOfScope},{authenticatedContexts:plannedAuthContexts});
+  const plan:ReconPlan={...oldPlan,methodologyVersion:2,strategy:oldPlan.strategy??modern.strategy,authenticatedMapping:oldPlan.authenticatedMapping??modern.authenticatedMapping,capabilities:[...(oldPlan.capabilities??modern.capabilities??[]).filter(c=>c.id!=='AUTHENTICATED_MAPPING'),...modern.capabilities!.filter(c=>c.id==='AUTHENTICATED_MAPPING')]};
   const coverage=new ReconCoverage(scanRunId,plan);
   const baselines=new Map<string,UnknownPathBaseline>();
   const relays=new Map<string,Awaited<ReturnType<typeof createReconRelay>>>();
@@ -54,7 +59,10 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
   let resources:Awaited<ReturnType<typeof collectReconDoctor>>['checks']={};
   let interrupted=false,toolchain:Record<string,ToolStatus>={},activeTool:AbortController|undefined,bounded=false;
   let receipt=0,commandReceiptFloor=0;const responseReceipts=new Map<string,number>();
-  const budget={remaining:plan.limits.maxRequests},hosts=new Map<string,{resolved:boolean;alive:boolean;url?:string;rank:ReturnType<typeof rankReconHost>;pages:Map<string,ProbeResult>}>();
+  const reservedAuthRequests=plannedAuthContexts?Math.min(plan.authenticatedMapping!.maxRequests,plan.limits.maxRequests):0;
+  const budget={remaining:plan.limits.maxRequests-reservedAuthRequests},hosts=new Map<string,{resolved:boolean;alive:boolean;url?:string;rank:ReturnType<typeof rankReconHost>;pages:Map<string,ProbeResult>}>();
+  let authReserveReleased=false;
+  const releaseAuthReserve=()=>{if(!authReserveReleased){budget.remaining+=reservedAuthRequests;authReserveReleased=true;}};
   const stage=coverage.stage.bind(coverage);
   const add=async(kind:ArtifactKind,value:Record<string,unknown>,tool:string,observed=false,provider?:string)=>{
     signal.throwIfAborted();throwIfScanAborted();
@@ -170,7 +178,9 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
     const capture=async(host:string,page:ProbeResult)=>{
       const data=hosts.get(host)!;data.pages.set(page.url,page);responseReceipts.set(page.url,++receipt);if(page.error||page.status<=0)return;
       if(protections.get(host)?.blocked)activeTool?.abort(reconFailure(page.status===429?'RATE_LIMITED':page.status===403?'WAF_BLOCKED':page.status>=500?'TEMPORARY_UPSTREAM':'RESOURCE_LIMIT',{capability:'CONTENT_DISCOVERY',message:protections.get(host)!.reason}));
-      if(/\/__bughunter_/.test(new URL(page.url).pathname)||[404,410].includes(page.status))return;
+      if(/\/__bughunter_/.test(new URL(page.url).pathname))return;
+      if(authSnapshot)await recordSurfaceObservation(scanRunId,asset.id,'ANONYMOUS',page,'anonymous-recon');
+      if([404,410].includes(page.status))return;
       const baseline=baselines.get(host);if(baseline&&compareWithBaseline(page,baseline).equivalent)return;
       if(baseline&&!baseline.stable&&page.url!==data.url){await add('observation',{url:page.url,type:'unverified-http-response',statusCode:page.status,baselineEquivalent:false,routeConfidence:'UNSTABLE_BASELINE'},'http',true);return;}
       await add('endpoint',{url:page.url,method:'GET',authentication:'unknown',statusCode:page.status,contentType:(page.headers['content-type']??'unknown').split(';')[0]},'http',true);
@@ -263,7 +273,7 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
       if(!baseline.stable)throw new Error('PARTIAL: unknown-path baseline is unstable; route discrimination remains unverified');
       if(!completed)throw new Error('PARTIAL: bounded content enumeration objective not met by any provider');
     }),!selected.length?'No validated HTTP service.':undefined);
-    await stage('Web / API mapping',()=>eachWeb(async(host,data,relay)=>{
+    await stage('Web / API mapping',async()=>{await eachWeb(async(host,data,relay)=>{
       const base=data.url!,queue=[base,...(asset.type==='API'?['openapi.json','swagger.json','api-docs','graphql','v1','v2'].map(p=>new URL(p,base.endsWith('/')?base:base+'/').toString()):[])],visited=new Set<string>();const pages:ProbeResult[]=[];
       while(queue.length&&visited.size<plan.limits.crawlPages){const url=queue.shift()!;if(visited.has(url)||!assetAllowsUrl(asset,url)||!isSafeReadUrl(url))continue;visited.add(url);
         const page=data.pages.get(url)??await relay.request(url);if(page.error)continue;const baseline=baselines.get(host);if(url!==base&&baseline&&compareWithBaseline(page,baseline).equivalent)continue;pages.push(page);
@@ -291,7 +301,19 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
           socket.once('secureConnect',()=>{const cert=socket.getPeerCertificate();void add('tls',{hostname:host,type:'tls-certificate',fingerprint:cert.fingerprint256??'unknown',validFrom:cert.valid_from??'unknown',validTo:cert.valid_to??'unknown'},'tls',true).then(()=>finish(),finish);});
         }));}catch{throwIfScanAborted();}
       }else coverage.note('TLS_MAPPING','native-tls',false,{state:'SKIPPED_NOT_APPLICABLE'});
-    }),!selected.length?'No validated HTTP service; no web content requests.':undefined);
+    });
+      releaseAuthReserve();
+      if(authSnapshot&&plannedAuthContexts){
+        const anonymousPages=new Map(selected.flatMap(([,data])=>[...data.pages.entries()]));
+        const seeds=[...new Set(selected.flatMap(([host,data])=>[data.url!,...[...data.pages.values()].filter(page=>!page.error&&page.status>0&&page.status<400&&!/__bughunter_/.test(page.url)&&(!baselines.has(host)||!compareWithBaseline(page,baselines.get(host)!).equivalent)).map(page=>page.url)]))];
+        const originSeed=seeds.find(url=>authSnapshot.contexts.some(context=>context.validationUrl&&new URL(context.validationUrl).origin===new URL(url).origin))??seeds[0];
+        const result=await coverage.provider('AUTHENTICATED_MAPPING','guarded-auth-mapper',()=>withTargetExecution({...execution,programReconId:undefined,host:new URL(originSeed).host},()=>mapAuthenticatedSurfaces({scanRunId,scopeAssetId:asset.id,snapshot:authSnapshot,plan,signal,seeds,anonymousPages,budget,assertLive:assertLiveAsset,onArtifact:(kind,value,sourceRef,contextKey)=>recordArtifact(scanRunId,asset,asset.program.outOfScope,kind,value,{tool:'authenticated-mapper',sourceRef,provider:contextKey,observedAt:new Date().toISOString()},'DISCOVERED')})),r=>r.complete);
+        coverage.annotate('authenticatedMapping',{contexts:result.contexts,requests:result.requests,browserRequests:result.browserRequests,warnings:result.warnings});
+        await prisma.scanRun.update({where:{id:scanRunId},data:{authenticatedReconResult:result as unknown as Prisma.InputJsonValue}});
+        await coverage.log(`Authenticated surface: ${result.complete?'COMPLETED':'PARTIAL'} · ${result.contexts.filter(context=>context.state==='COMPLETED').length}/${result.contexts.length} contexts mapped.`);
+      }
+    },!selected.length?'No validated HTTP service; no web content requests.':undefined);
+    releaseAuthReserve();
     await stage('Nuclei Recon',()=>eachWeb(async(_host,data,relay)=>{
       await command('nuclei',['-u',relay.toRelay(data.url!)],async line=>{try{const r=JSON.parse(line);if(typeof r['matched-at']==='string')r['matched-at']=relay.mapUrl(r['matched-at']);const parsed=parseNuclei(JSON.stringify(r),RECON_TEMPLATE_IDS.slice(0,plan.limits.templates),RECON_TEMPLATE_VERSION);if(!parsed.length)throw new Error('PARSER_FAILURE: unapproved Nuclei structured result');await rows(parsed,'nuclei');}catch(e){throw new Error('PARSER_FAILURE: malformed Nuclei result: '+(e as Error).message);}},Math.min(90,plan.limits.ffufSeconds+15));
     }),!selected.length?'No validated HTTP service.':undefined);

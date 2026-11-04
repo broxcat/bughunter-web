@@ -1,10 +1,12 @@
 import { normalizeCookies, sessionState } from "@/lib/targetAuth";
-import { credentialMetadataSchema, ownedReferenceUrl } from "@/lib/credentialMetadata";
+import { credentialMetadataSchema,credentialMetadataPatchSchema, ownedReferenceUrl } from "@/lib/credentialMetadata";
+import { foreignOrigin } from '@/lib/requestOrigin';
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { encryptSecret } from "@/lib/crypto";
+import { assetAllowsUrl, type AssetBoundary } from '@/lib/scopeAssets';
 
 // Per-target credentials — session cookies / bearer token FOR THE SCANNED
 // TARGET (a bug-bounty program's app), NEVER the bughunter-web login.
@@ -28,7 +30,7 @@ const createSchema = z.object({
   cookies: z
     .union([z.record(z.string(), z.string()), z.string()])
     .optional(),
-  bearerToken: z.string().optional(),
+  bearerToken: z.string().max(8192).refine(value=>!/[\r\n\x00]/.test(value),'Invalid bearer token').optional(),
   // EMAIL_PASSWORD mode: the app logs in via headless Chromium to mint cookies.
   loginUrl: z.string().trim().url().optional(),
   email: z.string().trim().min(1).optional(),
@@ -51,6 +53,8 @@ function toSafe(r: {
   sessionStatus?: string;
   sessionCheckedAt?: Date | null;
   sessionExpiresAt?: Date | null;
+  persona?:string|null;
+  reconEnabled?:boolean;
   createdAt: Date;
 }) {
   return {
@@ -58,6 +62,8 @@ function toSafe(r: {
     label: r.label,
     mode: r.mode,
     purpose: r.purpose,
+    persona:r.persona??null,
+    reconEnabled:r.reconEnabled??false,
     ownedObjectUrl: r.ownedObjectUrl,
     createdAt: r.createdAt,
     hasCookies: Boolean(r.cookiesCipher),
@@ -66,6 +72,7 @@ function toSafe(r: {
     hasAutoLogin: r.mode === "EMAIL_PASSWORD" && Boolean(r.emailCipher),
     sessionStatus: sessionState(r),
     sessionCheckedAt: r.sessionCheckedAt ?? null,
+    sessionVerifiedAt:r.sessionStatus==='VALID'?r.sessionCheckedAt??null:null,
     sessionExpiresAt: r.sessionExpiresAt ?? null,
     sessionRefreshedAt: r.sessionRefreshedAt,
   };
@@ -75,8 +82,17 @@ function toSafe(r: {
 async function loadOwnedTarget(targetId: string, userId: string) {
   return prisma.target.findFirst({
     where: { id: targetId, userId },
-    select: { id: true, host: true },
+    select: { id: true, host: true, scopeAsset: { select: { normalizedValue: true, format: true, active: true } }, discoveredFromAsset: { select: { normalizedValue: true, format: true, active: true } } },
   });
+}
+
+/** Preserve an exact URL asset's port/path; a discovered host never widens its parent boundary. */
+function ownedObjectReference(target: { host: string; scopeAsset?: AssetBoundary | null; discoveredFromAsset?: AssetBoundary | null }, value: string | null | undefined) {
+  const exactUrl=target.scopeAsset?.format==='URL'?target.scopeAsset:target.discoveredFromAsset?.format==='URL'?target.discoveredFromAsset:null;
+  const host=exactUrl?new URL(exactUrl.normalizedValue).host:target.host;
+  const result=ownedReferenceUrl(value,host);
+  if(result && [target.scopeAsset,target.discoveredFromAsset].some(boundary=>boundary&&!assetAllowsUrl(boundary,result)))throw new Error('Owned object is outside the selected Scope Asset boundary');
+  return result;
 }
 
 /**
@@ -106,7 +122,7 @@ export async function GET(
 
   const credentials = rows.map(toSafe);
 
-  return NextResponse.json({ credentials });
+  return NextResponse.json({ credentials },{headers:{'Cache-Control':'private, no-store'}});
 }
 
 /**
@@ -122,6 +138,7 @@ export async function POST(
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if(foreignOrigin(req))return NextResponse.json({error:'Forbidden'},{status:403});
   const { id } = await params;
 
   const target = await loadOwnedTarget(id, session.user.id);
@@ -147,9 +164,9 @@ export async function POST(
   const { label, cookies, bearerToken, loginUrl, password } = parsed.data;
   const email = parsed.data.username ?? parsed.data.email;
   let ownedObjectUrl: string | null;
-  try { ownedObjectUrl = ownedReferenceUrl(parsed.data.ownedObjectUrl, target.host); }
-  catch { return NextResponse.json({ error: "Owned object must be a same-host URL without secrets" }, { status: 400 }); }
-  const metadata = { purpose: parsed.data.purpose, ownedObjectUrl };
+  try { ownedObjectUrl = ownedObjectReference(target,parsed.data.ownedObjectUrl); }
+  catch { return NextResponse.json({ error: "Owned object must be an authorized same-host URL without secrets" }, { status: 400 }); }
+  const metadata = { purpose: parsed.data.purpose, ownedObjectUrl,persona:parsed.data.persona??null,reconEnabled:parsed.data.reconEnabled };
 
   // EMAIL_PASSWORD: store encrypted email/password + loginUrl; cookies are minted
   // later by headless auto-login. Requires all three.
@@ -226,6 +243,7 @@ export async function DELETE(
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if(foreignOrigin(req))return NextResponse.json({error:'Forbidden'},{status:403});
   const { id } = await params;
 
   const target = await loadOwnedTarget(id, session.user.id);
@@ -256,15 +274,16 @@ export async function DELETE(
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if(foreignOrigin(req))return NextResponse.json({error:'Forbidden'},{status:403});
   const { id } = await params;
   const target = await loadOwnedTarget(id, session.user.id);
   if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const parsed = credentialMetadataSchema.extend({ credentialId: z.string().min(1) }).safeParse(await req.json().catch(() => null));
+  const parsed = credentialMetadataPatchSchema.extend({ credentialId: z.string().min(1) }).refine(value=>Object.keys(value).some(key=>key!=='credentialId'),'Provide credential metadata to change').safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid credential metadata" }, { status: 400 });
   const credential = await prisma.targetCredential.findFirst({ where: { id: parsed.data.credentialId, targetId: id } });
   if (!credential) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
-    const data = { purpose: parsed.data.purpose, ownedObjectUrl: ownedReferenceUrl(parsed.data.ownedObjectUrl, target.host) };
+    const data = {...(parsed.data.purpose!==undefined?{purpose:parsed.data.purpose}:{}),...(parsed.data.ownedObjectUrl!==undefined?{ownedObjectUrl:ownedObjectReference(target,parsed.data.ownedObjectUrl)}:{}),...(parsed.data.persona!==undefined?{persona:parsed.data.persona}:{}),...(parsed.data.reconEnabled!==undefined?{reconEnabled:parsed.data.reconEnabled}:{})};
     return NextResponse.json({ credential: toSafe(await prisma.targetCredential.update({ where: { id: credential.id }, data })) });
-  } catch { return NextResponse.json({ error: "Owned object must be a same-host URL without secrets" }, { status: 400 }); }
+  } catch { return NextResponse.json({ error: "Owned object must be an authorized same-host URL without secrets" }, { status: 400 }); }
 }
