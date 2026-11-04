@@ -20,17 +20,20 @@ function NarrativeEntries({ title, entries }: { title: string; entries: ReconRep
 }
 
 /** Recon evidence is application-owned; model prose never replaces this record. */
-export default function ReconReportV3Content({ report }: { report: ReconReportV3 }) {
+export default function ReconReportV3Content({ report, provider }: { report: ReconReportV3; provider?: string }) {
   const assessment = report.assessmentOverview, narrative = report.narrative;
   const factualOnly = report.narrativeStatus === 'FACTUAL_ONLY';
   const warnings = factualOnly || report.narrativeStatus === 'RECOVERED' || report.warnings.length > 0;
+  const unsupportedStructure=report.warnings.some(warning=>warning.code==='STRUCTURED_OUTPUT_UNSUPPORTED');
   const sourceRows = report.factual.sections.reduce((count, section) => count + section.rows.length, 0);
-  const fallbackText = report.narrativeFailure === 'FAILED_PROVIDER' ? 'Ollama did not return a usable response. Review the Recon facts and scope.md, or regenerate the AI synthesis later.' :
+  const fallbackText = String(report.narrativeFailure) === 'FAILED_PROVIDER_CONFIGURATION' ? 'The captured AI provider configuration is unavailable. Check its credentials in Settings, or regenerate with your current default. The Recon facts remain available.' :
+    report.narrativeFailure === 'FAILED_PROVIDER' ? 'The AI provider did not return a usable response. Review the Recon facts and scope.md, or regenerate the AI synthesis later.' :
     report.narrativeFailure === 'FAILED_SCHEMA' ? 'The AI response could not be read as a report. Review the Recon facts and scope.md, or regenerate.' :
     report.narrativeFailure === 'FAILED_VALIDATION' ? 'The AI interpretation could not be verified against Recon evidence. Review the Recon facts and scope.md, or regenerate.' :
     'A validated AI narrative could not be produced. Review the Recon facts and scope.md, or regenerate the report.';
   return <>
     {warnings && <p role="status" className="text-sm">{factualOnly ? 'Recon facts are ready. The AI synthesis is unavailable; the evidence below remains usable.' : 'Report ready with warnings. Only interpretations supported by the retained evidence are shown.'}</p>}
+    {unsupportedStructure&&<p role="status" className="text-sm">{provider==='OPENROUTER'?'This OpenRouter model or route':'The selected AI model or provider route'} does not support the required structured output. Choose a compatible model in Settings. Recon facts remain available.</p>}
     <section className="space-y-3" aria-label="Recon facts">
       <h3 className="font-semibold">Recon facts</h3>
       <p className="text-sm text-muted">Generated from structured Recon evidence. Discovered routes do not establish reachability, authorization or a vulnerability.</p>
@@ -52,8 +55,8 @@ export default function ReconReportV3Content({ report }: { report: ReconReportV3
       </details>)}
       {!sourceRows && <p className="text-sm text-muted">No structured observations were retained for this report.</p>}
     </section>
-    <section className="space-y-3" aria-label="Ollama synthesis">
-      <h3 className="font-semibold">Ollama synthesis</h3>
+    <section className="space-y-3" aria-label="AI synthesis">
+      <h3 className="font-semibold">AI synthesis</h3>
       <p className="text-xs text-muted">AI interpretation of the facts above. Verify it against the evidence; it is not a confirmed Finding.</p>
       {factualOnly ? <p className="text-sm">{fallbackText}</p> : <>
         <p className="whitespace-pre-wrap break-words">{narrative.attackSurfaceSummary}</p>
@@ -75,7 +78,7 @@ export default function ReconReportV3Content({ report }: { report: ReconReportV3
         {narrative.limitations.length > 0 && <section><h4 className="font-medium">AI interpretation limits</h4><ul className="list-inside list-disc text-sm">{narrative.limitations.map((limit, index) => <li key={index}>{limit}</li>)}</ul></section>}
       </>}
     </section>
-    <section className="space-y-2"><h3 className="font-semibold">Recon coverage</h3><p className="text-xs text-muted">Recorded by BugHunter from the completed run, independently of Ollama.</p>
+    <section className="space-y-2"><h3 className="font-semibold">Recon coverage</h3><p className="text-xs text-muted">Recorded by BugHunter from the completed run, independently of AI.</p>
       <dl className="space-y-2 text-sm">{(Object.keys(coverageLabels) as (keyof typeof coverageLabels)[]).filter(key => report.coverage[key].length > 0).map(key => <div key={key}><dt className="font-medium">{coverageLabels[key]}</dt><dd className="break-words text-muted">{report.coverage[key].join('; ')}</dd></div>)}</dl>
       <details className="text-sm"><summary>Methodology</summary><ol className="space-y-2 pt-2">{report.methodology.map((phase, index) => <li key={index}><p>{phase.phase} · {human(phase.status)}</p><p className="text-xs text-muted">{phase.tools.join(', ')}{phase.tools.length > 0 && ' · '}{phase.description}</p></li>)}</ol></details>
     </section>

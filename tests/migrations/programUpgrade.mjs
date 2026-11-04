@@ -66,7 +66,17 @@ try {
   migrate(join(temp,'schema.prisma'));
   await client.$executeRaw`UPDATE "ScopeAsset" SET "assetValue"='CRITICAL', type='API', "typeSource"='USER' WHERE "programId"='preasset-program' AND "normalizedValue"='api.example.test'`;
   const assetBefore=await client.$queryRaw`SELECT id,"originalValue","normalizedValue",format,type,"assetValue","typeSource","createdAt","updatedAt" FROM "ScopeAsset" ORDER BY id`;
+  // Exercise the exact pre-default-provider schema and its Ollama-only history.
+  for (const entry of await readdir('prisma/migrations')) if (entry > '20261102220000_scope_assets' && entry < '20261104100000_default_ai_provider') await cp(join('prisma/migrations', entry), join(temp, 'migrations', entry), { recursive: true });
+  migrate(join(temp,'schema.prisma'));
+  for(const [index,prompt] of ['recon-summary/1','recon-report/2','recon-report/3'].entries())await client.$executeRaw`INSERT INTO "ReconSummary" (id,"programId","scanRunId",model,endpoint,"promptVersion","sourceFingerprint",input,status) VALUES (${`old-summary-${index}`},'preasset-program','preasset-scan','historical-model','http://ollama.invalid',${prompt},'historic-fingerprint','{}'::jsonb,'FAILED')`;
+  const priorSummaries=await client.$queryRaw`SELECT id,model,endpoint,"promptVersion","sourceFingerprint",input,status,"createdAt" FROM "ReconSummary" ORDER BY id`;
+  await client.$executeRaw`INSERT INTO "AiProviderConfig" (id,"userId",provider,model,"apiKeyCipher","isActive","updatedAt") VALUES ('older-ai','upgrade-user','OLLAMA','old-local','fixture-cipher',true,'2026-01-01'),('newer-ai','upgrade-user','OPENROUTER','selected-router','fixture-cipher',true,'2026-01-02')`;
   migrate(schema);
+  assert.deepEqual(await client.$queryRaw`SELECT id,model,endpoint,"promptVersion","sourceFingerprint",input,status,"createdAt" FROM "ReconSummary" ORDER BY id`,priorSummaries);
+  assert.deepEqual((await client.reconSummary.findMany({orderBy:{id:'asc'},select:{provider:true}})).map(row=>row.provider),['OLLAMA','OLLAMA','OLLAMA']);
+  assert.deepEqual((await client.aiProviderConfig.findMany({where:{userId:'upgrade-user',isActive:true},select:{provider:true}})).map(row=>row.provider),['OPENROUTER']);
+  await assert.rejects(client.aiProviderConfig.update({where:{id:'older-ai'},data:{isActive:true}}));
   assert.deepEqual(await client.$queryRaw`SELECT id,"originalValue","normalizedValue",format,type,"assetValue","typeSource","createdAt","updatedAt" FROM "ScopeAsset" ORDER BY id`,assetBefore);
   assert.equal(await client.targetReconRun.count(),0,'No invented parent Recon history');
   assert.equal(await client.reconArtifact.count(),0,'No invented historical scanner artifacts');

@@ -1,15 +1,10 @@
-// Brain entry point. Resolves the caller's active AI provider from the database,
-// decrypts its API key IN-PROCESS (never exported to another runtime or the
-// client), and hands back a configured BrainClient.
-//
-// This is the only place a provider key is decrypted for inference use. The
-// decrypted key lives only inside the returned BrainClient's config for the
-// duration of the call.
+// Brain entry point. The shared configuration resolver selects the persisted
+// default and decrypts credentials server-side only for inference.
 
-import { prisma } from "@/lib/prisma";
-import { decryptSecret } from "@/lib/crypto";
 import { BrainClient } from "./client";
-import type { AiProviderName } from "./providers";
+import { resolveDefaultAiConfig } from './config';
+export { resolveDefaultAiConfig, resolveAiConfigForProvider, resolveProviderApiKey, resolveConfiguredProviderFields, AiConfigurationError } from './config';
+export type { ResolvedAiConfig } from './config';
 
 export { BrainClient, BrainError } from "./client";
 export type { BrainConfig, ChatOptions } from "./client";
@@ -27,25 +22,19 @@ export type {
 } from "./triage";
 
 /**
- * Build a BrainClient for a user's active provider, or null if they have none.
- * OLLAMA is keyless, so a null cipher is fine there; any other provider with a
- * missing key still returns a client (the call will fail with a clear error).
+ * Build a BrainClient for a user's valid default, or null if none is selected.
  */
-export async function resolveActiveBrain(
+export async function resolveDefaultBrain(
   userId: string,
 ): Promise<BrainClient | null> {
-  const cfg = await prisma.aiProviderConfig.findFirst({
-    where: { userId, isActive: true },
-  });
+  const cfg = await resolveDefaultAiConfig(userId);
   if (!cfg) return null;
 
-  const apiKey = cfg.apiKeyCipher ? decryptSecret(cfg.apiKeyCipher) : null;
-
   return new BrainClient({
-    provider: cfg.provider as AiProviderName,
-    apiKey,
+    provider: cfg.provider,
+    apiKey: cfg.apiKey,
     model: cfg.model,
-    baseUrl: cfg.baseUrl,
+    baseUrl: cfg.effectiveBaseUrl,
   });
 }
 
@@ -53,13 +42,16 @@ export async function resolveActiveBrain(
  * Convenience: run one chat against the user's active provider. Returns null if
  * no provider is configured (so callers can degrade to non-LLM behavior).
  */
-export async function chatWithActiveProvider(
+export async function chatDefault(
   userId: string,
   system: string,
   user: string,
   opts?: Parameters<BrainClient["chat"]>[2],
 ): Promise<string | null> {
-  const brain = await resolveActiveBrain(userId);
+  const brain = await resolveDefaultBrain(userId);
   if (!brain) return null;
   return brain.chat(system, user, opts);
 }
+// Backward-compatible names for existing finding-assistance callers.
+export const resolveActiveBrain = resolveDefaultBrain;
+export const chatWithActiveProvider = chatDefault;

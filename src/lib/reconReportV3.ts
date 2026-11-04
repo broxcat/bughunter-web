@@ -22,7 +22,7 @@ export type V3Issue = { code: string; path: string; evidenceRefs: string[]; mess
 export class ReconReportV3ValidationError extends Error {
   constructor(readonly issues: V3Issue[]) { super('Recon report narrative failed validation'); this.name = 'ReconReportV3ValidationError'; }
 }
-export type ReportV3Failure = 'FAILED_PROVIDER' | 'FAILED_SCHEMA' | 'FAILED_VALIDATION';
+export type ReportV3Failure = 'FAILED_PROVIDER' | 'FAILED_SCHEMA' | 'FAILED_VALIDATION' | 'FAILED_PROVIDER_CONFIGURATION';
 export type EvidenceFactsV3 = { urls: string[]; hostnames: string[]; ips: string[]; ports: { port: number; protocol: 'tcp' | 'udp'; service?: string }[]; services: { name: string; hostname?: string; port?: number; protocol?: string }[]; technologies: { name: string; version?: string }[]; statusCodes: number[]; methods: string[]; parameters: string[]; tls: string[]; redirects: string[] };
 export type FactRowV3 = { label: string; value: string; details: Record<string, string | number | boolean | string[]>; evidenceRefs: string[]; scopeState: 'IN_SCOPE' | 'OUT_OF_SCOPE' | 'UNKNOWN'; verification: string; sources: { tool?: string; sourceRef?: string; observedAt?: string }[] };
 export type FactualReportV3 = { sections: { category: ReportV3Category; title: string; rows: FactRowV3[] }[]; totals: { evidence: number; retainedEvidence: number; staticAssets: number; omittedEvidence: number }; truncated: boolean; sourceFingerprint: string };

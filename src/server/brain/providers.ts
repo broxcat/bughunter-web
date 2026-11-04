@@ -6,6 +6,11 @@
 // names "claude"/"grok" map to ANTHROPIC/XAI here.
 
 export type ProviderKind = "anthropic" | "openai" | "ollama";
+/** Transport capability only; each response is still validated by the caller.
+ * OpenRouter support varies per model AND endpoint. require_parameters keeps
+ * a structured call from silently routing to a non-supporting endpoint.
+ * https://openrouter.ai/docs/guides/features/structured-outputs */
+export type StructuredOutputPolicy = "OLLAMA_FORMAT" | "OPENAI_JSON_SCHEMA" | "PROMPT_VALIDATED";
 
 export type AiProviderName =
   | "OLLAMA"
@@ -23,6 +28,7 @@ export type AiProviderName =
 export interface ProviderSpec {
   /** Which request/response shape the provider speaks. */
   kind: ProviderKind;
+  structuredOutput: StructuredOutputPolicy;
   /** Default API base URL. null for Ollama (resolved from OLLAMA_HOST/localhost). */
   defaultBaseUrl: string | null;
   /** Default model. null for Ollama (resolved dynamically). */
@@ -61,57 +67,67 @@ const ATTRIBUTION_HEADERS: Record<string, string> = {
 export const PROVIDERS: Record<AiProviderName, ProviderSpec> = {
   OLLAMA: {
     kind: "ollama",
+    structuredOutput: "OLLAMA_FORMAT",
     defaultBaseUrl: null,
     defaultModel: null,
     keyless: true,
   },
   ANTHROPIC: {
     kind: "anthropic",
+    structuredOutput: "PROMPT_VALIDATED",
     defaultBaseUrl: "https://api.anthropic.com",
     defaultModel: "claude-sonnet-4-6",
   },
   OPENAI: {
     kind: "openai",
+    structuredOutput: "OPENAI_JSON_SCHEMA",
     defaultBaseUrl: "https://api.openai.com/v1",
     defaultModel: "gpt-4o",
   },
   XAI: {
     kind: "openai",
+    structuredOutput: "PROMPT_VALIDATED",
     defaultBaseUrl: "https://api.x.ai/v1",
     defaultModel: "grok-4.5",
     legacyAliases: GROK_LEGACY_ALIASES,
   },
   GROQ: {
     kind: "openai",
+    structuredOutput: "PROMPT_VALIDATED",
     defaultBaseUrl: "https://api.groq.com/openai/v1",
     defaultModel: "openai/gpt-oss-20b",
     legacyAliases: GROQ_LEGACY_ALIASES,
   },
   DEEPSEEK: {
     kind: "openai",
+    structuredOutput: "PROMPT_VALIDATED",
     defaultBaseUrl: "https://api.deepseek.com/v1",
     defaultModel: "deepseek-v4-flash",
   },
   OPENROUTER: {
     kind: "openai",
+    structuredOutput: "OPENAI_JSON_SCHEMA",
     defaultBaseUrl: "https://openrouter.ai/api/v1",
     defaultModel: "anthropic/claude-sonnet-4.6",
     extraHeaders: ATTRIBUTION_HEADERS,
   },
   ORCAROUTER: {
     kind: "openai",
+    structuredOutput: "PROMPT_VALIDATED",
     defaultBaseUrl: "https://api.orcarouter.ai/v1",
     defaultModel: "openai/gpt-4o",
     extraHeaders: ATTRIBUTION_HEADERS,
   },
   FLUXION: {
     kind: "openai",
+    structuredOutput: "PROMPT_VALIDATED",
     defaultBaseUrl: "https://fluxionai.world/v1",
     defaultModel: "openai/gpt-4o",
     extraHeaders: ATTRIBUTION_HEADERS,
   },
   REQUESTY: {
     kind: "openai",
+    structuredOutput: "PROMPT_VALIDATED",
     defaultBaseUrl: "https://router.requesty.ai/v1",
     defaultModel: "anthropic/claude-sonnet-4-6",
     extraHeaders: ATTRIBUTION_HEADERS,
@@ -120,6 +136,7 @@ export const PROVIDERS: Record<AiProviderName, ProviderSpec> = {
   // the config's baseUrl; the model id carries the provider prefix as usual.
   LITELLM: {
     kind: "openai",
+    structuredOutput: "PROMPT_VALIDATED",
     defaultBaseUrl: null,
     defaultModel: "gpt-4o",
   },

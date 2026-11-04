@@ -17,9 +17,9 @@ const report = (override: Partial<ReconReportV3> = {}): ReconReportV3 => ({
 const render = (value = report()) => renderToStaticMarkup(createElement(ReconReportV3Content, { report: value }));
 
 describe('Recon report v3 facts and AI interpretation rendering', () => {
-  it('separates application-owned facts and coverage from the Ollama interpretation', () => {
+  it('separates application-owned facts and coverage from the AI interpretation', () => {
     const html = render();
-    expect(html.indexOf('Recon facts')).toBeLessThan(html.indexOf('Ollama synthesis'));
+    expect(html.indexOf('Recon facts')).toBeLessThan(html.indexOf('AI synthesis'));
     for (const text of ['Équipe application', 'HTTP endpoint', 'artifact-http-1', 'ScanRun:fixture:httpx', '43 static assets summarized', 'The observed login surface', 'Recon coverage', 'Partial', 'Completed with a fallback']) expect(html).toContain(text);
     expect(html).not.toContain('<pre'); expect(html).not.toContain('"version":3');
   });
@@ -28,8 +28,14 @@ describe('Recon report v3 facts and AI interpretation rendering', () => {
     expect(html).toContain('Report ready with warnings'); expect(html).toContain('HTTP endpoint'); expect(html).toContain('A login route was observed');
     expect(html).not.toContain('ZodError'); expect(html).not.toContain('invalid_type'); expect(html).not.toContain('UNKNOWN_EVIDENCE_REF');
   });
+  it('explains an unsupported OpenRouter model without displaying raw provider errors',()=>{
+    const value=report({narrativeStatus:'FACTUAL_ONLY',narrativeFailure:'FAILED_PROVIDER',warnings:[{code:'STRUCTURED_OUTPUT_UNSUPPORTED',path:'provider',evidenceRefs:[],message:'RAW_PROVIDER_BODY_WITH_PRIVATE_DETAILS'}]});
+    const html=renderToStaticMarkup(createElement(ReconReportV3Content,{report:value,provider:'OPENROUTER'}));
+    expect(html).toContain('This OpenRouter model or route');expect(html).toContain('does not support the required structured output');expect(html).toContain('Recon facts remain available');expect(html).not.toContain('RAW_PROVIDER_BODY');
+  });
   it.each([
-    ['FAILED_PROVIDER', 'Ollama did not return a usable response'],
+    ['FAILED_PROVIDER_CONFIGURATION', 'captured AI provider configuration is unavailable'],
+    ['FAILED_PROVIDER', 'AI provider did not return a usable response'],
     ['FAILED_SCHEMA', 'AI response could not be read as a report'],
     ['FAILED_VALIDATION', 'AI interpretation could not be verified'],
   ] as const)('keeps factual Recon readable when the narrative is %s', (narrativeFailure, message) => {

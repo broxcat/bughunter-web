@@ -27,6 +27,9 @@ export interface BrainConfig {
 
 export interface ChatOptions {
   model?: string;
+  /** Preserve a captured Recon model literally; legacy generic callers still
+   * receive the registry's historical alias compatibility behavior. */
+  preserveModel?: boolean;
   maxTokens?: number;
   temperature?: number;
   timeoutMs?: number;
@@ -60,6 +63,9 @@ export class BrainError extends Error {
     message: string,
     readonly provider: AiProviderName,
     readonly status?: number,
+    readonly code?: "STRUCTURED_OUTPUT_UNSUPPORTED" | "STRUCTURED_OUTPUT_INVALID_SCHEMA" | "THINKING_MODE_UNSUPPORTED" | "PROVIDER_HTTP_ERROR" | "INVALID_PROVIDER_RESPONSE" | "PROVIDER_REQUEST_FAILED",
+    /** Allowlisted public provider error code only, never its response body. */
+    readonly providerCode?: string,
   ) {
     super(message);
     this.name = "BrainError";
@@ -107,13 +113,21 @@ export class BrainClient {
         lastErr = err;
         const retryable =
           err instanceof BrainError
-            ? err.status === undefined || isRetryableStatus(err.status)
+            ? !["STRUCTURED_OUTPUT_UNSUPPORTED", "STRUCTURED_OUTPUT_INVALID_SCHEMA", "THINKING_MODE_UNSUPPORTED"].includes(err.code ?? "") && (err.status === undefined || isRetryableStatus(err.status))
             : true; // network/abort-type errors are retryable
         if (!retryable || attempt === retries) break;
         await delay(backoffMs(attempt));
       }
     }
     if (lastErr instanceof BrainError) throw lastErr;
+    if (opts.format) throw new BrainError(
+      opts.signal?.aborted || lastErr instanceof Error && /timeout|timed out|aborted/i.test(lastErr.message)
+        ? "Provider request timed out or was cancelled"
+        : "Provider request failed or returned invalid JSON",
+      this.config.provider,
+      undefined,
+      lastErr instanceof SyntaxError ? "INVALID_PROVIDER_RESPONSE" : "PROVIDER_REQUEST_FAILED",
+    );
     throw new BrainError(
       `chat failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
       this.config.provider,
@@ -128,7 +142,7 @@ export class BrainClient {
         this.config.provider,
       );
     }
-    const aliased = this.spec.legacyAliases?.[model];
+    const aliased = opts.preserveModel ? undefined : this.spec.legacyAliases?.[model];
     return aliased ?? model;
   }
 
@@ -157,7 +171,11 @@ export class BrainClient {
         signal,
       });
       if (!res.ok) {
-        const detail = await res.text().catch(() => "");
+        const detail = opts.format ? await boundedErrorDetail(res) : await res.text().catch(() => "");
+        if (opts.format) {
+          const classified = structuredFailure(this.config.provider, this.spec.structuredOutput, res.status, detail);
+          throw new BrainError(classified.message, this.config.provider, res.status, classified.code, classified.providerCode);
+        }
         throw new BrainError(
           `${this.config.provider} HTTP ${res.status}${detail ? `: ${truncate(detail, 300)}` : ""}`,
           this.config.provider,
@@ -231,10 +249,14 @@ export class BrainClient {
         { role: "user", content: user },
       ],
     };
+    if (opts.format && this.spec.structuredOutput === "OPENAI_JSON_SCHEMA") {
+      body.response_format = { type: "json_schema", json_schema: { name: "bughunter_structured_response", strict: true, schema: opts.format } };
+      if (this.config.provider === "OPENROUTER") body.provider = { require_parameters: true };
+    }
     // DeepSeek V4 defaults thinking ON (bills extra); pin it explicitly off
     // unless the model name is the "reasoner" legacy alias.
     if (this.config.provider === "DEEPSEEK") {
-      const alias = DEEPSEEK_LEGACY_ALIASES[model];
+      const alias = opts.preserveModel ? undefined : DEEPSEEK_LEGACY_ALIASES[model];
       let thinking = false;
       if (alias) {
         model = alias.model;
@@ -308,6 +330,31 @@ export class BrainClient {
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+async function boundedErrorDetail(response: Response): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader(), chunks: Uint8Array[] = []; let bytes = 0;
+  try {
+    while (bytes < 16384) { const item = await reader.read(); if (item.done) break; const chunk = item.value.subarray(0, 16384 - bytes); chunks.push(chunk); bytes += chunk.length; }
+    return Buffer.concat(chunks).toString("utf8");
+  } catch { return ""; } finally { await reader.cancel().catch(() => {}); }
+}
+
+function structuredFailure(provider: AiProviderName, policy: ProviderSpec["structuredOutput"], status: number, detail: string): { code: NonNullable<BrainError["code"]>; message: string; providerCode?: string } {
+  let providerCode: string | undefined;
+  try {
+    const parsed = JSON.parse(detail), candidate = parsed?.error?.code ?? parsed?.code;
+    const allowed = ["unsupported_parameter", "unsupported_value", "unsupported_response_format", "invalid_parameter", "invalid_request_error", "invalid_json_schema", "model_not_found", "not_found", "no_endpoints_found", "validation_error", "provider_error"];
+    if (typeof candidate === "number" && Number.isInteger(candidate) && candidate >= 100 && candidate <= 599) providerCode = String(candidate);
+    else if (typeof candidate === "string" && allowed.includes(candidate)) providerCode = candidate;
+  } catch { /* The upstream body is inspected only for classification. */ }
+  if (policy === "OLLAMA_FORMAT" && /thinking|think|token repeat|prediction aborted/i.test(detail)) return { code: "THINKING_MODE_UNSUPPORTED", message: "Ollama thinking control or decoder is incompatible with this request", providerCode };
+  if (policy === "OPENAI_JSON_SCHEMA" && [400, 404, 422, 500].includes(status)) {
+    if (/invalid_json_schema|invalid\s+(?:json\s+)?schema|schema[^\n]{0,80}(?:is invalid|not valid)/i.test(detail)) return { code: "STRUCTURED_OUTPUT_INVALID_SCHEMA", message: `${provider} rejected the structured-output schema`, providerCode };
+    if (/(?:response[_ -]?format|json[_ -]?schema|structured[_ -]?(?:output|response)|require_parameters)[^\n]{0,160}(?:unsupported|not supported|not available|incompatible|unrecognized|unknown parameter)|(?:unsupported|not supported|does not support)[^\n]{0,160}(?:response[_ -]?format|json[_ -]?schema|structured)|no endpoints[^\n]{0,160}(?:support|parameters)/i.test(detail)) return { code: "STRUCTURED_OUTPUT_UNSUPPORTED", message: `${provider} has no compatible structured-output endpoint for the selected model`, providerCode };
+  }
+  return { code: "PROVIDER_HTTP_ERROR", message: `${provider} HTTP ${status}`, providerCode };
 }
 
 function backoffMs(attempt: number): number {

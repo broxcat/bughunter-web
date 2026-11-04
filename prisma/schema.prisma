@@ -893,6 +893,7 @@ model ReconArtifact {
 // Durable post-Recon tasks; never an investigation provider or source of facts.
 model ReconSummary {
   id String @id @default(cuid())
+  provider AiProvider @default(OLLAMA)
   programId String
   scopeAssetId String?
   scanRunId String?

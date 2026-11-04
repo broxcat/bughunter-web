@@ -13,6 +13,7 @@ const db=process.env.TEST_DATABASE_URL,schema='summaries_'+randomUUID().replaceA
 if(db){const u=new URL(db);u.searchParams.set('schema',schema);process.env.DATABASE_URL=u.toString();}
 let p:typeof import('@/lib/prisma').prisma,s:typeof import('@/server/recon/summaries'),consoleDelete:typeof import('@/server/research/deleteConsole'),programDelete:typeof import('@/server/programDeletion');
 let server:Server,endpoint:string,root:string,userId:string,programId:string,assetId:string,targetId:string,runId:string,parentId:string,mode='ok',releaseResponse:(()=>void)|undefined,received:Record<string,unknown>,stops=0;
+const providerCalls:{path:string;authorization:string;body:Record<string,unknown>}[]=[];
 (db?describe:describe.skip)('post-Recon summaries and deletion PostgreSQL lifecycle (mock Ollama/control HTTP, no provider CLI claim)',()=>{
   beforeAll(async()=>{
     execFileSync('npx',['prisma','migrate','deploy'],{env:process.env,stdio:'pipe'});({prisma:p}=await import('@/lib/prisma'));s=await import('@/server/recon/summaries');consoleDelete=await import('@/server/research/deleteConsole');programDelete=await import('@/server/programDeletion');
@@ -20,24 +21,26 @@ let server:Server,endpoint:string,root:string,userId:string,programId:string,ass
     const keys=generateKeyPairSync('ed25519');const key=join(root,'signer.pem');await writeFile(key,keys.privateKey.export({format:'pem',type:'pkcs8'}),{mode:0o600});process.env.RESEARCH_TERMINAL_PRIVATE_KEY_FILE=key;
     server=createServer(async(req,res)=>{
       if(req.url==='/control/stop'){stops++;res.setHeader('Content-Type','application/json');res.end(JSON.stringify({stopped:true}));return;}
-      let text='';for await(const b of req)text+=b;received=JSON.parse(text);
+      let text='';for await(const b of req)text+=b;received=JSON.parse(text);providerCalls.push({path:req.url??'',authorization:req.headers.authorization??'',body:received});
+      const modelReply=(content:string)=>JSON.stringify(req.url==='/chat/completions'?{choices:[{message:{content}}]}:{message:{content}});
       if(req.url==='/api/show'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({model_info:{'fixture.context_length':32768},thinking:{values:[false,true],default:true}}));return;}
       if(mode==='hold')await new Promise<void>(r=>{releaseResponse=r;});
       if(mode==='fail'){res.statusCode=503;res.end('Unavailable');return;}
-      if(mode==='bad-json'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({message:{content:'not JSON'}}));return;}
+      if(mode==='unsupported'){res.statusCode=404;res.setHeader('Content-Type','application/json');res.end(JSON.stringify({error:{code:404,message:'No endpoints found that support response_format json_schema'}}));return;}
+      if(mode==='bad-json'){res.setHeader('Content-Type','application/json');res.end(modelReply('not JSON'));return;}
       const input=JSON.parse(((received.messages as {content:string}[])[1]).content),ref=input.evidence[0].id;
       if(mode==='legacy'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({message:{content:JSON.stringify({executiveSummary:'Historical pending summary.',sections:[{title:'Web',items:[{text:'Historical evidence.',evidenceRefs:[ref]}]}],researchPriorities:[],limitations:[]})}}));return;}
-      if((received.format as {properties?:{sections?:unknown}})?.properties?.sections){
+      if(((received.format??(received.response_format as {json_schema?:{schema:unknown}})?.json_schema?.schema) as {properties?:{sections?:unknown}})?.properties?.sections){
         const narrative={title:'Recon Report',attackSurfaceSummary:'Observed evidence; further testing remains manual.',sections:[{category:'webSurface',entries:[{text:'Review the supplied evidence.',confidence:'observed',evidenceRefs:[ref]}]}],notableObservations:[],researchHandoff:[],limitations:['No finding is confirmed.']};
         if(mode==='bad-url')narrative.sections[0].entries.push({text:'Inspect https://unsupported.invalid/private.',confidence:'observed',evidenceRefs:[ref]});
         if(mode==='bad-ref')narrative.sections[0].entries.push({text:'Unsupported citation.',confidence:'observed',evidenceRefs:['E999999']});
-        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({message:{content:JSON.stringify(narrative)}}));return;
+        res.setHeader('Content-Type','application/json');res.end(modelReply(JSON.stringify(narrative)));return;
       }
       res.setHeader('Content-Type','application/json');res.end(JSON.stringify({message:{content:JSON.stringify({title:'Reconnaissance & Attack Surface Assessment',attackSurfaceSummary:'Observed evidence; further tests are not performed.',dnsAndHostIntelligence:[],networkSurface:[],webSurface:[{text:'Review the recorded evidence.',confidence:'observed',evidenceRefs:[ref]}],contentDiscovery:[],apiSurface:[],authenticationSurface:[],technologyFingerprint:[],tlsAndTransport:[],notableObservations:[],changesSincePreviousRecon:[],researchHandoff:[{priority:'medium',area:'Authorized surface review',rationale:'Review explicitly authorized evidence manually.',evidenceRefs:[ref]}],limitations:['No finding is confirmed.']})}}));
     });await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));endpoint=`http://127.0.0.1:${(server.address() as {port:number}).port}`;process.env.RESEARCH_TERMINAL_CONTROL_URL=endpoint;
   },30000);
   beforeEach(async()=>{
-    mode='ok';releaseResponse=undefined;stops=0;
+    mode='ok';releaseResponse=undefined;stops=0;providerCalls.length=0;process.env.CREDENTIALS_ENCRYPTION_KEY='cd'.repeat(32);
     userId=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;
     programId=(await p.bountyProgram.create({data:{ownerId:userId,companyName:'Summary fixture',requiredUserAgent:'Fixture/1',scopeRules:['app.example.test']}})).id;
     assetId=(await p.scopeAsset.create({data:{programId,originalValue:'app.example.test',normalizedValue:'app.example.test',format:'SUBDOMAIN',formatSource:'MANUAL',type:'API',assetValue:'HIGH'}})).id;
@@ -84,7 +87,42 @@ let server:Server,endpoint:string,root:string,userId:string,programId:string,ass
     expect(input.fullEvidenceLedger.some(row=>row.id===endpointRow.id)).toBe(true);expect(input.factual.sections.flatMap(section=>section.rows).some(row=>row.evidenceRefs.includes(endpointRow.id))).toBe(true);
     expect(await p.reconSummary.findUniqueOrThrow({where:{id:target.id}})).toMatchObject({status:'READY'});
   });
-  it('does not invent configuration or summarize unfinished/empty evidence',async()=>{await p.aiProviderConfig.deleteMany({where:{userId}});await expect(s.scheduleReconSummary(userId,programId,assetId)).rejects.toThrow('Settings');await p.aiProviderConfig.create({data:{userId,provider:'OLLAMA',baseUrl:endpoint,model:'selected'}});await p.scanRun.update({where:{id:runId},data:{status:'RUNNING'}});await expect(s.scheduleReconSummary(userId,programId,assetId)).rejects.toThrow('terminal');});
+
+  async function router(){const{encryptSecret}=await import('@/lib/crypto');return p.aiProviderConfig.create({data:{userId,provider:'OPENROUTER',model:'router-selected-model',baseUrl:endpoint,apiKeyCipher:encryptSecret('ROUTER_FIXTURE_KEY'),isActive:false}});}
+  async function choose(provider:'OLLAMA'|'OPENROUTER'){await p.$transaction(async tx=>{await tx.aiProviderConfig.updateMany({where:{userId},data:{isActive:false}});await tx.aiProviderConfig.update({where:{userId_provider:{userId,provider}},data:{isActive:true}});});}
+  it('automatically routes through default OpenRouter, with structured output and no Ollama call',async()=>{
+    await router();await choose('OPENROUTER');providerCalls.length=0;await s.scheduleFinishedSummaries();const job=await p.reconSummary.findFirstOrThrow({where:{scanRunId:runId}});expect(job).toMatchObject({provider:'OPENROUTER',model:'router-selected-model',endpoint});await s.processReconSummary(job.id);
+    expect(await p.reconSummary.findUniqueOrThrow({where:{id:job.id}})).toMatchObject({status:'READY'});expect(providerCalls.map(c=>c.path)).toEqual(['/chat/completions']);
+    expect(providerCalls[0]).toMatchObject({authorization:'Bearer ROUTER_FIXTURE_KEY',body:{model:'router-selected-model',response_format:{type:'json_schema',json_schema:{strict:true,schema:expect.any(Object)}},provider:{require_parameters:true}}});
+    expect(JSON.stringify(job)).not.toContain('ROUTER_FIXTURE_KEY');expect(JSON.stringify((await s.summaryView(userId,programId,assetId)))).not.toContain('ROUTER_FIXTURE_KEY');
+  });
+  it('keeps credentials out of automatic identity while rotating the inference key',async()=>{
+    const cfg=await router();await choose('OPENROUTER');const first=await s.scheduleReconSummary(userId,programId,assetId);const{encryptSecret}=await import('@/lib/crypto');await p.aiProviderConfig.update({where:{id:cfg.id},data:{apiKeyCipher:encryptSecret('NEW_KEY_FIXTURE')}});const next=await s.scheduleReconSummary(userId,programId,assetId);expect(next.id).toBe(first.id);await s.processReconSummary(first.id);expect(providerCalls.at(-1)?.authorization).toBe('Bearer NEW_KEY_FIXTURE');
+  });
+  it('keeps provider/model/endpoint snapshots while using current credentials for the captured provider',async()=>{
+    const cfg=await router();await choose('OPENROUTER');const job=await s.scheduleReconSummary(userId,programId,assetId);const{encryptSecret}=await import('@/lib/crypto');await p.aiProviderConfig.update({where:{id:cfg.id},data:{model:null,baseUrl:null,apiKeyCipher:encryptSecret('ROTATED_FIXTURE_KEY')}});await choose('OLLAMA');providerCalls.length=0;await s.processReconSummary(job.id);
+    expect(providerCalls[0]).toMatchObject({authorization:'Bearer ROTATED_FIXTURE_KEY',body:{model:'router-selected-model'}});expect(await p.reconSummary.findUniqueOrThrow({where:{id:job.id}})).toMatchObject({provider:'OPENROUTER',model:'router-selected-model',endpoint,status:'READY'});
+    expect(await s.summaryView(userId,programId,assetId)).toMatchObject({defaultChanged:true,stale:false,defaultProvider:{provider:'OLLAMA'}});
+  });
+  it('preserves both switch directions and does not auto-regenerate existing history',async()=>{
+    const first=await s.scheduleReconSummary(userId,programId,assetId);await s.processReconSummary(first.id);const parent=await s.scheduleReconSummary(userId,programId);await s.processReconSummary(parent.id);
+    await router();await choose('OPENROUTER');await s.scheduleFinishedSummaries();expect(await p.reconSummary.count({where:{programId}})).toBe(2);
+    const second=await s.scheduleReconSummary(userId,programId,assetId,true);await s.processReconSummary(second.id);await choose('OLLAMA');const third=await s.scheduleReconSummary(userId,programId,assetId,true);await s.processReconSummary(third.id);
+    expect([first.provider,second.provider,third.provider]).toEqual(['OLLAMA','OPENROUTER','OLLAMA']);expect(await p.reconSummary.findUniqueOrThrow({where:{id:first.id}})).toMatchObject({provider:'OLLAMA',model:first.model});
+  });
+  it('never falls back to configured Ollama when no default is selected',async()=>{
+    await router();await p.aiProviderConfig.updateMany({where:{userId},data:{isActive:false}});providerCalls.length=0;await s.scheduleFinishedSummaries();expect(await p.reconSummary.count({where:{programId}})).toBe(0);expect(providerCalls).toEqual([]);
+    await expect(s.scheduleReconSummary(userId,programId,assetId)).rejects.toThrow('NO_DEFAULT_PROVIDER');expect(await s.summaryView(userId,programId,assetId)).toMatchObject({defaultProvider:null,configurationIssue:'NO_DEFAULT_PROVIDER'});
+  });
+  it('keeps facts with explicit configuration error when queued provider credentials disappear',async()=>{
+    await router();await choose('OPENROUTER');const job=await s.scheduleReconSummary(userId,programId,assetId);await p.aiProviderConfig.delete({where:{userId_provider:{userId,provider:'OPENROUTER'}}});providerCalls.length=0;await s.processReconSummary(job.id);
+    expect(providerCalls).toEqual([]);expect(await p.reconSummary.findUniqueOrThrow({where:{id:job.id}})).toMatchObject({status:'READY',provider:'OPENROUTER',content:expect.objectContaining({narrativeFailure:'FAILED_PROVIDER_CONFIGURATION',factual:expect.any(Object)})});
+  });
+  it('classifies unsupported OpenRouter routes without changing model/provider or losing facts',async()=>{
+    await router();await choose('OPENROUTER');mode='unsupported';const job=await s.scheduleReconSummary(userId,programId,assetId);await s.processReconSummary(job.id);const saved=await p.reconSummary.findUniqueOrThrow({where:{id:job.id}});
+    expect(saved).toMatchObject({status:'READY',provider:'OPENROUTER',model:'router-selected-model',content:expect.objectContaining({narrativeFailure:'FAILED_PROVIDER',warnings:expect.arrayContaining([expect.objectContaining({code:'STRUCTURED_OUTPUT_UNSUPPORTED'})])})});expect(providerCalls.map(c=>c.path)).toEqual(['/chat/completions']);
+  });
+  it('does not invent configuration or summarize unfinished/empty evidence',async()=>{await p.aiProviderConfig.deleteMany({where:{userId}});await expect(s.scheduleReconSummary(userId,programId,assetId)).rejects.toThrow('Settings');await p.aiProviderConfig.create({data:{userId,provider:'OLLAMA',baseUrl:endpoint,model:'selected',isActive:true}});await p.scanRun.update({where:{id:runId},data:{status:'RUNNING'}});await expect(s.scheduleReconSummary(userId,programId,assetId)).rejects.toThrow('terminal');});
   it('ignores a late response after asset archive, and never recreates deleted summaries',async()=>{mode='hold';const job=await s.scheduleReconSummary(userId,programId,assetId);const work=s.processReconSummary(job.id);await vi.waitFor(()=>expect(releaseResponse).toBeTypeOf('function'));await p.scopeAsset.update({where:{id:assetId},data:{active:false}});releaseResponse!();await work;expect(await p.reconSummary.findUniqueOrThrow({where:{id:job.id}})).not.toMatchObject({status:'READY'});await p.reconSummary.delete({where:{id:job.id}});expect(await p.reconSummary.count({where:{id:job.id}})).toBe(0);});
   it.each(['codex','claude'])('deletes only the %s console and its exclusive files; repeated missing sessions succeed',async provider=>{
     const {ensureTargetConsole}=await import('@/server/research/consoleWorkspace');const c=await ensureTargetConsole(userId,targetId);await p.researchSession.update({where:{id:c.session.id},data:{provider:provider as 'codex'|'claude'}});
@@ -130,11 +168,11 @@ let server:Server,endpoint:string,root:string,userId:string,programId:string,ass
     expect(narrowed.evidence.filter(row=>row.kind==='auth-surface').every(row=>row.scopeState==='OUT_OF_SCOPE')).toBe(true);
     expect((await p.reconArtifact.findUniqueOrThrow({where:{id:endpointRow.id}})).scopeState).toBe('IN_SCOPE');
   });
-  it('retains historical v1 content and automatically schedules a distinct report3',async()=>{
+  it('retains historical v1 content until explicit regeneration creates a distinct report3',async()=>{
     const oldContent={executiveSummary:'Historical report.',sections:[{title:'Web',items:[{text:'Historical evidence.',evidenceRefs:['legacy']}]}],researchPriorities:[],limitations:[]};
     const old=await p.reconSummary.create({data:{programId,scopeAssetId:assetId,scanRunId:runId,model:'historic-model',endpoint,promptVersion:'recon-summary/1',sourceFingerprint:'legacy-fixture',input:{},content:oldContent,status:'READY',generatedAt:new Date()}});
     expect((await s.summaryView(userId,programId,assetId)).stale).toBe(true);
-    await s.scheduleFinishedSummaries();const next=await p.reconSummary.findFirstOrThrow({where:{scanRunId:runId,promptVersion:'recon-report/3'}});await s.processReconSummary(next.id);
+    await s.scheduleFinishedSummaries();expect(await p.reconSummary.count({where:{scanRunId:runId,promptVersion:'recon-report/3'}})).toBe(0);const next=await s.scheduleReconSummary(userId,programId,assetId,true);await s.processReconSummary(next.id);
     expect(await p.reconSummary.findUniqueOrThrow({where:{id:old.id}})).toMatchObject({promptVersion:'recon-summary/1',content:oldContent});expect((await s.summaryView(userId,programId,assetId)).summary?.promptVersion).toBe('recon-report/3');
   });
 

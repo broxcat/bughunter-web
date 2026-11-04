@@ -18,6 +18,9 @@ const image = process.env.RECON_REPORT_V3_IMAGE ?? process.env.RESEARCH_TEST_APP
 // prevent accidental selection of an existing `db` or `redis` service.
 const namespace = process.env.RECON_REPORT_V3_NETWORK_CONTAINER;
 if (namespace) assert(/^[A-Za-z0-9_.-]+$/.test(namespace), 'Invalid application network namespace');
+const routerOnly=process.argv.includes('--openrouter-only');
+const routing = process.argv.includes('--routing')||routerOnly;
+const configsFile = resolve(process.env.RECON_ROUTING_CONFIGS_FILE ?? '/tmp/bughunter-ai-routing-configs.json');
 const browserOnly = process.argv.includes('--browser-only'), modelOnly = process.argv.includes('--model-only');
 assert(!(browserOnly && modelOnly), 'Choose one acceptance mode');
 const sourceStat = await stat(source);
@@ -33,7 +36,8 @@ if (browserOnly) {
 }
 const prefix = 'bh-report-v3-' + randomUUID().slice(0, 8), containers = [];
 let ownsNetwork = false;
-const docker = async (...args) => (await execute('docker', args, { timeout: 720000, maxBuffer: 1024 * 1024 })).stdout.trim();
+let dockerEnv = process.env;
+const docker = async (...args) => (await execute('docker', args, { timeout: 1200000, maxBuffer: 1024 * 1024, env: dockerEnv })).stdout.trim();
 const emitMetadata = output => {
   for (const line of String(output ?? '').split('\n')) {
     if (!line.startsWith('{')) continue;
@@ -43,6 +47,17 @@ const emitMetadata = output => {
 };
 try {
   await copyFile(source, join(directory, 'source.json')); await chmod(join(directory, 'source.json'), 0o600);
+  if (routing) {
+    assert(namespace, 'Routing acceptance needs the explicitly authorized application namespace');
+    assert(((await stat(configsFile)).mode & 0o077) === 0, 'Encrypted configuration fixture must be private');
+    await copyFile(configsFile, join(directory, 'configs.json')); await chmod(join(directory, 'configs.json'), 0o600);
+    // Ciphertext stays encrypted on disk. The master exists only in backend
+    // process memory/environment and is inherited by Docker with `-e NAME`.
+    const master = await docker('exec', namespace, 'node', '-e', 'process.stdout.write(process.env.CREDENTIALS_ENCRYPTION_KEY??"")');
+    assert(/^[a-f0-9]{64}$/i.test(master), 'Backend encryption environment unavailable');
+    dockerEnv = { ...process.env, CREDENTIALS_ENCRYPTION_KEY: master };
+    if(routerOnly){const baseline=resolve(process.env.RECON_ROUTING_BASELINE_FILE??'/tmp/bughunter-report-v3-generated.json');assert(((await stat(baseline)).mode&0o077)===0,'Real Ollama baseline must be private');await copyFile(baseline,join(directory,'baseline.json'));await chmod(join(directory,'baseline.json'),0o600);}
+  }
   if (browserOnly) { await copyFile(reports, join(directory, 'replay.json')); await chmod(join(directory, 'replay.json'), 0o600); }
   const network = namespace ? Object.keys(JSON.parse(await docker('inspect', '--format', '{{json .NetworkSettings.Networks}}', namespace)))[0] : prefix;
   assert(network, 'Application network namespace has no attached network');
@@ -58,8 +73,10 @@ try {
     try { await docker('exec', prefix + '-db', 'pg_isready', '-U', 'postgres'); break; }
     catch { assert(n < 100, 'Disposable database readiness timeout'); await new Promise(r => setTimeout(r, 100)); }
   }
-  const env = ['-e', 'BH_DISPOSABLE_REPORT_V3=1', '-e', `DATABASE_URL=postgresql://postgres:disposable-report@${prefix}-db:5432/report_v3_real_test`, '-e', `REDIS_URL=redis://${prefix}-redis:6379`, '-e', 'AUTH_URL=http://127.0.0.1:3000', '-e', 'AUTH_SECRET=disposable-report-acceptance', '-e', 'CREDENTIALS_ENCRYPTION_KEY=' + 'ab'.repeat(32), '-e', 'LOG_LEVEL=silent', '-e', 'RECON_REPORT_V3_SOURCE_FILE=/acceptance/source.json', '-e', 'RECON_REPORT_V3_OUTPUT_FILE=/acceptance/reports.json', '-e', 'RECON_REPORT_V3_BROWSER=' + String(!modelOnly), ...(browserOnly ? ['-e', 'RECON_REPORT_V3_REPLAY_FILE=/acceptance/replay.json'] : [])];
+  const env = ['-e', 'BH_DISPOSABLE_REPORT_V3=1', '-e', `DATABASE_URL=postgresql://postgres:disposable-report@${prefix}-db:5432/report_v3_real_test`, '-e', `REDIS_URL=redis://${prefix}-redis:6379`, '-e', 'AUTH_URL=http://127.0.0.1:3000', '-e', 'AUTH_SECRET=disposable-report-acceptance', '-e', routing ? 'CREDENTIALS_ENCRYPTION_KEY' : 'CREDENTIALS_ENCRYPTION_KEY=' + 'ab'.repeat(32), '-e', 'LOG_LEVEL=silent', '-e', 'RECON_REPORT_V3_SOURCE_FILE=/acceptance/source.json', '-e', 'RECON_REPORT_V3_OUTPUT_FILE=/acceptance/reports.json', '-e', 'RECON_REPORT_V3_BROWSER=' + String(!modelOnly), ...(routing ? ['-e', 'RECON_REPORT_MULTI_PROVIDER=1', '-e', 'RECON_ROUTING_CONFIGS_FILE=/acceptance/configs.json'] : []), ...(browserOnly ? ['-e', 'RECON_REPORT_V3_REPLAY_FILE=/acceptance/replay.json'] : [])];
   if (process.getuid && process.getgid) env.push('-e', 'RECON_REPORT_V3_OUTPUT_UID=' + process.getuid(), '-e', 'RECON_REPORT_V3_OUTPUT_GID=' + process.getgid());
+  if(routerOnly)env.push('-e','RECON_ROUTING_ROUTER_ONLY=1','-e','RECON_ROUTING_BASELINE_FILE=/acceptance/baseline.json');
+  if(process.argv.includes('--allow-factual-only'))env.push('-e','RECON_ROUTING_ALLOW_FACTUAL_ONLY=1');
   const mounts = [['src', '/app/src'], ['prisma', '/app/prisma'], ['tsconfig.json', '/app/tsconfig.json'], ['tests/recon/reportV3Real.mts', '/app/tests/recon/reportV3Real.mts'], ['node_modules/.prisma', '/app/node_modules/.prisma']].flatMap(([path, destination]) => ['--mount', `type=bind,source=${resolve(path)},target=${destination},readonly`]);
   mounts.push('--mount', `type=bind,source=${directory},target=/acceptance`);
   const executionNetwork = namespace ? 'container:' + namespace : network;
@@ -87,4 +104,5 @@ try {
   for (const id of containers.reverse()) await docker('rm', '-f', id).catch(() => { process.exitCode = 1; });
   if (ownsNetwork) await docker('network', 'rm', prefix).catch(() => { process.exitCode = 1; });
   await rm(directory, { recursive: true, force: true });
+  dockerEnv = process.env;
 }

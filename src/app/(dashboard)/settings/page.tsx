@@ -49,7 +49,7 @@ export default function SettingsPage() {
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
-  const [isActive, setIsActive] = useState(false);
+  const [selectingDefault, setSelectingDefault] = useState<Provider | null>(null);
 
   const keyless = KEYLESS.has(provider);
 
@@ -71,7 +71,10 @@ export default function SettingsPage() {
   useEffect(() => {
     fetch("/api/ai-providers", { cache: "no-store" }).then(async res => {
       if (!res.ok) throw new Error(`Failed to load (${res.status})`);
-      setConfigs((await res.json()).providers ?? []);
+      const saved = (await res.json()).providers ?? [];
+      setConfigs(saved);
+      const selected = saved.find((config: ProviderConfig) => config.provider === 'ANTHROPIC');
+      if (selected) { setModel(selected.model ?? ''); setBaseUrl(selected.baseUrl ?? ''); }
     }).catch(e => setError(e.message)).finally(() => setLoading(false));
   }, []);
 
@@ -81,12 +84,10 @@ export default function SettingsPage() {
     setError(null);
     setNotice(null);
     try {
-      const body: Record<string, unknown> = { provider, isActive };
+      const body: Record<string, unknown> = { provider, model: model.trim(), baseUrl: baseUrl.trim() };
       // Only send apiKey when the user typed one, so saving without re-entering
       // the key leaves the stored cipher untouched.
       if (!keyless && apiKey.trim()) body.apiKey = apiKey.trim();
-      if (model.trim()) body.model = model.trim();
-      if (baseUrl.trim()) body.baseUrl = baseUrl.trim();
 
       const res = await fetch("/api/ai-providers", {
         method: "POST",
@@ -107,14 +108,29 @@ export default function SettingsPage() {
     }
   }
 
+  function selectProvider(next: Provider) {
+    const saved = configs.find(config => config.provider === next);
+    setProvider(next); setApiKey(''); setModel(saved?.model ?? ''); setBaseUrl(saved?.baseUrl ?? '');
+  }
+  async function setDefault(next: Provider) {
+    setSelectingDefault(next); setError(null); setNotice(null);
+    try {
+      const response = await fetch('/api/ai-providers/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: next }) });
+      if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error ?? 'The default provider could not be changed.'); }
+      await load(); setNotice(`${next} is the default AI provider.`);
+    } catch (error) { setError(error instanceof Error ? error.message : 'The default provider could not be changed.'); }
+    finally { setSelectingDefault(null); }
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-5 px-4 py-8">
       <h1 className="text-2xl font-semibold">AI Provider Settings</h1>
       <p className="mt-1 text-sm text-muted">
-        Configure the AI provider used for finding assistance. API keys are encrypted at
-        rest and never returned to the browser. Only one provider is active at a
-        time.
+        Configure the default AI provider for Recon reports and AI assistance. API keys are encrypted at
+        rest and never returned to the browser. Research consoles keep their own provider.
       </p>
+      {error && <p role="alert" className="text-sm text-brand">{error}</p>}
+      {notice && <p role="status" className="text-sm"><Badge tone="proven">{notice}</Badge></p>}
 
       {/* Configured providers */}
       <section className="mt-8">
@@ -130,6 +146,8 @@ export default function SettingsPage() {
             {configs.map((c) => (
               <div
                 key={c.id}
+                role="group"
+                aria-label={`Configured ${c.provider} provider`}
                 className="flex items-center justify-between gap-4 px-4 py-3"
               >
                 <div>
@@ -137,7 +155,7 @@ export default function SettingsPage() {
                     <span className="font-mono font-medium">{c.provider}</span>
                     {c.isActive && (
                       <Badge tone="proven" mono>
-                        ACTIVE
+                        DEFAULT
                       </Badge>
                     )}
                   </span>
@@ -154,6 +172,7 @@ export default function SettingsPage() {
                   ) : (
                     <Badge tone="medium">no key</Badge>
                   )}
+                  {!c.isActive && <Button size="sm" variant="secondary" className="ml-3" aria-label={`Set ${c.provider} as default`} disabled={saving || selectingDefault !== null} onClick={() => void setDefault(c.provider)}>{selectingDefault === c.provider ? 'Selecting…' : 'Set as default'}</Button>}
                 </div>
               </div>
             ))}
@@ -176,7 +195,7 @@ export default function SettingsPage() {
               <select
                 id="provider"
                 value={provider}
-                onChange={(e) => setProvider(e.target.value as Provider)}
+                onChange={(e) => selectProvider(e.target.value as Provider)}
                 className={FIELD_CLASS}
               >
                 {PROVIDERS.map((p) => (
@@ -233,7 +252,7 @@ export default function SettingsPage() {
                 htmlFor="baseUrl"
                 className="block text-sm font-medium text-foreground"
               >
-                Base URL <span className="text-subtle">(optional)</span>
+                Base URL <span className="text-subtle">({keyless || provider === 'LITELLM' ? 'required for default' : 'optional override'})</span>
               </label>
               <input
                 id="baseUrl"
@@ -241,35 +260,16 @@ export default function SettingsPage() {
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
                 placeholder={
-                  keyless ? "http://localhost:11434" : "https://api.provider.com"
+                  keyless ? "Your configured Ollama endpoint" : "Leave blank to use the provider URL"
                 }
                 className={FIELD_CLASS}
               />
             </div>
 
-            <div className="flex items-center gap-2">
-              <input
-                id="isActive"
-                type="checkbox"
-                checked={isActive}
-                onChange={(e) => setIsActive(e.target.checked)}
-                className="h-4 w-4 rounded border-border-strong accent-brand"
-              />
-              <label htmlFor="isActive" className="text-sm text-foreground">
-                Make this the active provider
-              </label>
-            </div>
-
-            {error && <p className="text-sm text-brand">{error}</p>}
-            {notice && (
-              <p className="text-sm">
-                <Badge tone="proven">{notice}</Badge>
-              </p>
-            )}
-
-            <Button type="submit" disabled={saving}>
+            <Button type="submit" disabled={saving || selectingDefault !== null}>
               {saving ? "Saving…" : "Save provider"}
             </Button>
+            <p className="text-xs text-muted">Save the configuration, then choose Set as default above. Saving alone keeps the current default.</p>
           </form>
         </Card>
       </section>

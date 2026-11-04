@@ -8,7 +8,10 @@ import { z } from 'zod';
 import { reportInput,compactPriorReconReport,ReconReportValidationError,type ReportBudget,type ReconReportInput } from '@/lib/reconReport';
 import { assetAllowsHost,assetAllowsUrl,type AssetBoundary } from '@/lib/scopeAssets';
 import { isExcluded } from '@/lib/bountyProgram';
-import { inspectOllamaReportModel,generateReconReport } from './ollamaReport';
+import { generateReconReport } from './ollamaReport';
+import { resolveReconReportBudget } from './reportProvider';
+import { resolveDefaultAiConfig,resolveProviderApiKey,resolveConfiguredProviderFields,AiConfigurationError } from '../brain/config';
+import { fallbackReconReportV3 } from '@/lib/reconReportV3';
 import { generateReconReportV3 } from './ollamaReportV3';
 import { createReconReportV3Input,compactPriorReconReportV3,type ReconReportV3Input } from '@/lib/reconReportV3';
 const terminal=['COMPLETED','FAILED'];
@@ -20,12 +23,6 @@ function currentEvidenceScope(asset:AssetBoundary,value:unknown,exclusions:strin
     const url=typeof data.url==='string'?data.url:undefined,host=url?new URL(url).hostname:typeof data.hostname==='string'?data.hostname:typeof data.host==='string'?data.host:'';
     return asset.active!==false&&!isExcluded(host,exclusions)&&(url?assetAllowsUrl(asset,url):assetAllowsHost(asset,host))?'IN_SCOPE':'OUT_OF_SCOPE';
   }catch{return'OUT_OF_SCOPE';}
-}
-export async function ollamaSummaryConfig(userId:string){
-  const config=await prisma.aiProviderConfig.findUnique({where:{userId_provider:{userId,provider:'OLLAMA'}}});
-  if(!config?.baseUrl?.trim()||!config.model?.trim())return null;
-  const url=new URL(config.baseUrl);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)return null;
-  return {endpoint:config.baseUrl.replace(/\/+$/,''),model:config.model};
 }
 type AuthorizationDb=Pick<Prisma.TransactionClient,'bountyProgram'|'scopeAsset'>;
 function authorizationHash(program:{outOfScope:string[];rulesOfEngagement:string|null;requiredUserAgent:string;updatedAt:Date},assets:{id:string;format:string;normalizedValue:string;updatedAt:Date;executionTarget?:{scope:{id:string;status:string;updatedAt:Date}}|null}[]){return createHash('sha256').update(JSON.stringify({exclusions:[...program.outOfScope].sort(),rulesOfEngagement:program.rulesOfEngagement,userAgent:program.requiredUserAgent,policyRevision:program.updatedAt,assets:[...assets].sort((a,b)=>a.id.localeCompare(b.id)).map(a=>({id:a.id,format:a.format,boundary:a.normalizedValue,revision:a.updatedAt,executionScope:a.executionTarget?.scope??null}))})).digest('hex');}
@@ -105,13 +102,14 @@ export async function buildSummaryInput(userId:string,programId:string,assetId?:
   return{input,fullEvidence:evidence,scanRunId:assetId?runs[0].id:undefined,targetReconRunId:parent?.id,scopeAssetId:assetId};
 }
 export async function scheduleReconSummary(userId:string,programId:string,assetId?:string,regenerate=false){
-  const config=await ollamaSummaryConfig(userId);if(!config)throw new ResearchError('Configure an Ollama endpoint and model in Settings',409);
-  const budget=await inspectOllamaReportModel(config.endpoint,config.model);
-  let source;try{source=await buildSummaryInput(userId,programId,assetId,budget);}catch(error){if(error instanceof Error&&error.message.includes('selected model budget'))throw new ResearchError('Selected Ollama context cannot fit the minimum authorization and coverage; scope.md remains available',422);throw error;}
+  let config;try{config=await resolveDefaultAiConfig(userId,{includeApiKey:false});}catch(error){if(error instanceof AiConfigurationError)throw new ResearchError('FAILED_PROVIDER_CONFIGURATION: '+error.message,error.status);throw error;}
+  if(!config)throw new ResearchError('NO_DEFAULT_PROVIDER: No default AI provider configured. Select one in Settings.',409);
+  const budget=await resolveReconReportBudget(config);
+  let source;try{source=await buildSummaryInput(userId,programId,assetId,budget);}catch(error){if(error instanceof Error&&error.message.includes('selected model budget'))throw new ResearchError('Selected AI model context cannot fit the minimum authorization and coverage; scope.md remains available',422);throw error;}
   const input=createReconReportV3Input(source.input,source.fullEvidence);
   const fingerprint=createHash('sha256').update(JSON.stringify(input)).digest('hex');
-  const key=createHash('sha256').update(JSON.stringify([source.scanRunId??source.targetReconRunId,config,SUMMARY_PROMPT_VERSION,fingerprint])).digest('hex');
-  const data={programId,scopeAssetId:assetId,scanRunId:source.scanRunId,targetReconRunId:source.targetReconRunId,model:config.model,endpoint:config.endpoint,promptVersion:SUMMARY_PROMPT_VERSION,sourceFingerprint:fingerprint,input:asJson(input)};
+  const key=createHash('sha256').update(JSON.stringify([source.scanRunId??source.targetReconRunId,config.provider,config.model,config.effectiveBaseUrl,SUMMARY_PROMPT_VERSION,fingerprint])).digest('hex');
+  const data={programId,scopeAssetId:assetId,scanRunId:source.scanRunId,targetReconRunId:source.targetReconRunId,provider:config.provider,model:config.model,endpoint:config.effectiveBaseUrl,promptVersion:SUMMARY_PROMPT_VERSION,sourceFingerprint:fingerprint,input:asJson(input)};
   // The FK and committed program tombstone prevent publication after deletion.
   return prisma.$transaction(async tx=>{
     const allowed=await tx.$queryRaw<{id:string}[]>`SELECT id FROM "BountyProgram" WHERE id=${programId} AND "ownerId"=${userId} AND "deletingAt" IS NULL FOR SHARE`;
@@ -123,12 +121,15 @@ export async function scheduleReconSummary(userId:string,programId:string,assetI
 export async function summaryView(userId:string,programId:string,assetId?:string){
   if(!await prisma.bountyProgram.count({where:{id:programId,ownerId:userId,deletingAt:null}}))throw new ResearchError('Target unavailable',404);
   if(assetId&&!await prisma.scopeAsset.count({where:{id:assetId,programId}}))throw new ResearchError('Scope unavailable',404);
-  const row=await prisma.reconSummary.findFirst({where:{programId,...(assetId?{scopeAssetId:assetId}:{scopeAssetId:null})},orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true,status:true,model:true,promptVersion:true,sourceFingerprint:true,scanRunId:true,targetReconRunId:true,createdAt:true,generatedAt:true,content:true,error:true,input:true}});
+  const row=await prisma.reconSummary.findFirst({where:{programId,...(assetId?{scopeAssetId:assetId}:{scopeAssetId:null})},orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true,status:true,provider:true,model:true,endpoint:true,promptVersion:true,sourceFingerprint:true,scanRunId:true,targetReconRunId:true,createdAt:true,generatedAt:true,content:true,error:true,input:true}});
   const run=assetId?await prisma.scanRun.findFirst({where:{scopeAssetId:assetId,type:'RECON'},orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true}}):await prisma.targetReconRun.findFirst({where:{programId},orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true}});
-  if(!row)return{summary:null,stale:false};
+  const cfg=await prisma.aiProviderConfig.findFirst({where:{userId,isActive:true},select:{provider:true,model:true,baseUrl:true,apiKeyCipher:true}});
+  let defaultProvider:{provider:string;model:string;endpoint:string}|null=null;let configurationIssue:string|undefined;
+  if(!cfg)configurationIssue='NO_DEFAULT_PROVIDER';else try{const fields=resolveConfiguredProviderFields({...cfg,hasApiKey:Boolean(cfg.apiKeyCipher)});defaultProvider={provider:fields.provider,model:fields.model,endpoint:fields.effectiveBaseUrl};}catch{configurationIssue='INVALID_DEFAULT_PROVIDER';}
+  if(!row)return{summary:null,stale:false,defaultProvider,defaultChanged:false,configurationIssue};
   const{input:source,...visible}=row;const expected=(source as unknown as {metadata?:{sourceAuthorizationFingerprint?:string}})?.metadata?.sourceAuthorizationFingerprint;
   const policyChanged=Boolean(expected&&expected!==await currentAuthorizationFingerprint(prisma,userId,programId));
-  return{summary:visible,stale:policyChanged||row.promptVersion!==SUMMARY_PROMPT_VERSION||Boolean(run&&(row.scanRunId??row.targetReconRunId)!==run.id)};
+  return{summary:visible,defaultProvider,configurationIssue,defaultChanged:Boolean(defaultProvider&&(row.provider!==defaultProvider.provider||row.model!==defaultProvider.model||row.endpoint!==defaultProvider.endpoint)),stale:policyChanged||row.promptVersion!==SUMMARY_PROMPT_VERSION||Boolean(run&&(row.scanRunId??row.targetReconRunId)!==run.id)};
 }
 export async function processReconSummary(id:string,shutdown?:AbortSignal){
   const claimed=await prisma.reconSummary.updateMany({where:{id,status:'PENDING',program:{deletingAt:null},OR:[{scopeAssetId:null},{scopeAsset:{active:true}}]},data:{status:'RUNNING',startedAt:new Date()}});if(!claimed.count)return;
@@ -138,10 +139,16 @@ export async function processReconSummary(id:string,shutdown?:AbortSignal){
     const job=await prisma.reconSummary.findUniqueOrThrow({where:{id},include:{program:{select:{ownerId:true}}}});
     const expected=(job.input as unknown as {metadata?:{sourceAuthorizationFingerprint?:string}})?.metadata?.sourceAuthorizationFingerprint;
     if(expected){policy={expected,userId:job.program.ownerId,programId:job.programId};if(expected!==await currentAuthorizationFingerprint(prisma,policy.userId,policy.programId)){controller.abort();throw new Error('Source authorization changed');}}
-    const client=new BrainClient({provider:'OLLAMA',baseUrl:job.endpoint,model:job.model});
     const signal=AbortSignal.any([controller.signal,...(shutdown?[shutdown]:[])]);
     let content:unknown;
-    if(job.promptVersion==='recon-summary/1'){
+    let apiKey:string|undefined;let configurationFailed=false;
+    try{apiKey=await resolveProviderApiKey(job.program.ownerId,job.provider);}catch(error){
+      if(!(error instanceof AiConfigurationError)||job.promptVersion!=='recon-report/3')throw error;
+      configurationFailed=true;content=fallbackReconReportV3(job.input as unknown as ReconReportV3Input,[{code:'FAILED_PROVIDER_CONFIGURATION',path:'provider',evidenceRefs:[],message:'The captured provider credentials are unavailable. Review Settings; the factual Recon report remains available.'}],'FAILED_PROVIDER_CONFIGURATION');
+    }
+    const client=new BrainClient({provider:job.provider,baseUrl:job.endpoint,model:job.model,apiKey});
+    if(configurationFailed){/* Keep the factual report; never switch provider. */}
+    else if(job.promptVersion==='recon-summary/1'){
       const input=job.input as unknown as ReturnType<typeof summaryInput>;
       const raw=await client.chat(SUMMARY_SYSTEM+'\nOutput JSON schema:\n'+JSON.stringify(z.toJSONSchema(reconSummarySchema)),JSON.stringify(input),{format:z.toJSONSchema(reconSummarySchema),temperature:0,maxTokens:2400,retries:0,timeoutMs:120000,maxResponseBytes:131072,signal});
       content=validateReconSummary(raw,input);
@@ -157,17 +164,19 @@ export async function processReconSummary(id:string,shutdown?:AbortSignal){
     });
   }catch(error){
     const cancelled=controller.signal.aborted;
-    const reason=cancelled?'SOURCE_REVOKED: Source authorization changed; report discarded.':shutdown?.aborted?'WORKER_RESTART: Report will resume after restart.':error instanceof ReconReportValidationError?'FACTUAL_VALIDATION: Model proposed unsupported facts or evidence references.':error instanceof z.ZodError||error instanceof SyntaxError?'REPORT_SCHEMA: Model output remained invalid after bounded correction.':error instanceof BrainError&&error.status?'OLLAMA_UNAVAILABLE: Configured server returned HTTP '+error.status+'.':/timeout|timed out|aborted/i.test(error instanceof Error?error.message:'')?'OLLAMA_TIMEOUT: Model response exceeded the bounded timeout.':'REPORT_UNAVAILABLE: Report could not be generated.';
+    const reason=cancelled?'SOURCE_REVOKED: Source authorization changed; report discarded.':shutdown?.aborted?'WORKER_RESTART: Report will resume after restart.':error instanceof ReconReportValidationError?'FACTUAL_VALIDATION: Model proposed unsupported facts or evidence references.':error instanceof z.ZodError||error instanceof SyntaxError?'REPORT_SCHEMA: Model output remained invalid after bounded correction.':error instanceof AiConfigurationError?'FAILED_PROVIDER_CONFIGURATION: Captured provider credentials are unavailable.':error instanceof BrainError&&error.status?'AI_PROVIDER_UNAVAILABLE: Configured server returned HTTP '+error.status+'.':/timeout|timed out|aborted/i.test(error instanceof Error?error.message:'')?'AI_PROVIDER_TIMEOUT: Model response exceeded the bounded timeout.':'REPORT_UNAVAILABLE: Report could not be generated.';
     await prisma.reconSummary.updateMany({where:{id,status:'RUNNING'},data:{status:cancelled?'CANCELLED':shutdown?.aborted?'PENDING':'FAILED',...(shutdown?.aborted&&!cancelled?{startedAt:null}:{}),error:reason+' Recon evidence remains valid.'}});
   }finally{clearInterval(check);}
 }
 export async function scheduleFinishedSummaries(){
-  const assets=await prisma.scopeAsset.findMany({where:{active:true,program:{deletingAt:null,owner:{aiProviderConfig:{some:{provider:'OLLAMA',model:{not:null},baseUrl:{not:null}}}}}},orderBy:{updatedAt:'desc'},take:1000,select:{id:true,programId:true,program:{select:{ownerId:true}},scanRuns:{where:{type:'RECON'},orderBy:[{createdAt:'desc'},{id:'desc'}],take:1,select:{id:true,status:true,_count:{select:{artifacts:true,reconSummaries:{where:{promptVersion:SUMMARY_PROMPT_VERSION}}}}}}}});
+  const assets=await prisma.scopeAsset.findMany({where:{active:true,program:{deletingAt:null,owner:{aiProviderConfig:{some:{isActive:true}}}}},orderBy:{updatedAt:'desc'},take:1000,select:{id:true,programId:true,program:{select:{ownerId:true}},scanRuns:{where:{type:'RECON'},orderBy:[{createdAt:'desc'},{id:'desc'}],take:1,select:{id:true,status:true,_count:{select:{artifacts:true,reconSummaries:true}}}}}});
+  const eligibleOwners=new Map<string,boolean>();
+  for(const ownerId of new Set(assets.map(a=>a.program.ownerId))){try{eligibleOwners.set(ownerId,Boolean(await resolveDefaultAiConfig(ownerId,{includeApiKey:false})));}catch{eligibleOwners.set(ownerId,false);}}
   let scheduled=0;
-  for(const a of assets){const run=a.scanRuns[0];if(run&&terminal.includes(run.status)&&run._count.artifacts&&!run._count.reconSummaries){try{await scheduleReconSummary(a.program.ownerId,a.programId,a.id);}catch{/* Optional. */}if(++scheduled>=5)break;}}
+  for(const a of assets){if(!eligibleOwners.get(a.program.ownerId))continue;const run=a.scanRuns[0];if(run&&terminal.includes(run.status)&&run._count.artifacts&&!run._count.reconSummaries){try{await scheduleReconSummary(a.program.ownerId,a.programId,a.id);}catch{/* Optional. */}if(++scheduled>=5)break;}}
   const programs=[...new Set(assets.map(a=>a.programId))];
-  const parents=await prisma.targetReconRun.findMany({where:{programId:{in:programs}},orderBy:[{createdAt:'desc'},{id:'desc'}],distinct:['programId'],take:1000,select:{id:true,programId:true,status:true,program:{select:{ownerId:true}},_count:{select:{reconSummaries:{where:{promptVersion:SUMMARY_PROMPT_VERSION}}}},scans:{select:{status:true,_count:{select:{artifacts:true}},reconSummaries:{where:{promptVersion:SUMMARY_PROMPT_VERSION},select:{status:true}}}}}});
-  for(const p of parents)if(terminal.includes(p.status)&&!p._count.reconSummaries&&p.scans.some(s=>s._count.artifacts)&&!p.scans.some(s=>s._count.artifacts&&(!s.reconSummaries.length||s.reconSummaries.some(j=>['PENDING','RUNNING'].includes(j.status)))))try{await scheduleReconSummary(p.program.ownerId,p.programId);}catch{/* Optional. */}
+  const parents=await prisma.targetReconRun.findMany({where:{programId:{in:programs}},orderBy:[{createdAt:'desc'},{id:'desc'}],distinct:['programId'],take:1000,select:{id:true,programId:true,status:true,program:{select:{ownerId:true}},_count:{select:{reconSummaries:true}},scans:{select:{status:true,_count:{select:{artifacts:true}},reconSummaries:{select:{status:true}}}}}});
+  for(const p of parents)if(eligibleOwners.get(p.program.ownerId)&&terminal.includes(p.status)&&!p._count.reconSummaries&&p.scans.some(s=>s._count.artifacts)&&!p.scans.some(s=>s._count.artifacts&&(!s.reconSummaries.length||s.reconSummaries.some(j=>['PENDING','RUNNING'].includes(j.status)))))try{await scheduleReconSummary(p.program.ownerId,p.programId);}catch{/* Optional. */}
 
 }
 export function startReconSummaryWorker(){

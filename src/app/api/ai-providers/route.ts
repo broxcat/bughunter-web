@@ -4,6 +4,8 @@ import { AiProvider } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { encryptSecret } from "@/lib/crypto";
+import { foreignOrigin } from '@/lib/requestOrigin';
+import { AiConfigurationError, lockAiProviderSettings, resolveConfiguredProviderFields } from '@/server/brain/config';
 
 // Per-user AI provider configuration.
 //
@@ -56,6 +58,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const userId = session.user.id;
+  if (foreignOrigin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   let body: unknown;
   try {
@@ -88,7 +91,15 @@ export async function POST(req: Request) {
 
   // Enforce "only one active provider per user": if this one is being activated,
   // deactivate all the others first, atomically with the upsert.
-  const config = await prisma.$transaction(async (tx) => {
+  let config;
+  try { config = await prisma.$transaction(async (tx) => {
+    await lockAiProviderSettings(tx, userId);
+    const current = await tx.aiProviderConfig.findUnique({ where: { userId_provider: { userId, provider: providerEnum } } });
+    if (isActive === true || isActive !== false && current?.isActive) resolveConfiguredProviderFields({
+      provider, model: normModel === undefined ? current?.model : normModel,
+      baseUrl: normBaseUrl === undefined ? current?.baseUrl : normBaseUrl,
+      hasApiKey: Boolean(apiKeyCipher ?? current?.apiKeyCipher),
+    });
     if (isActive === true) {
       await tx.aiProviderConfig.updateMany({
         where: { userId, provider: { not: providerEnum } },
@@ -113,7 +124,9 @@ export async function POST(req: Request) {
         ...(isActive !== undefined ? { isActive } : {}),
       },
     });
-  });
+  }); } catch (error) {
+    return NextResponse.json({ error: error instanceof AiConfigurationError ? error.message : 'Provider configuration could not be saved.' }, { status: error instanceof AiConfigurationError ? error.status : 503 });
+  }
 
   // Return the safe shape only — never the cipher.
   return NextResponse.json({

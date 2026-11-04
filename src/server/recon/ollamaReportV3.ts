@@ -33,7 +33,7 @@ const correctionMessages: Record<string, string> = {
   UNSUPPORTED_VULNERABILITY_CLAIM: 'Recon does not establish the claimed vulnerability. Remove the claim.',
 };
 type Issue = ReconReportV3['warnings'][number];
-type Attempt = { attempt: number; thinkingMode: boolean|string|null; status: string; responseBytes?: number; issues?: Array<{code:string;path:string}> };
+type Attempt = { attempt: number; thinkingMode: boolean|string|null; status: string; responseBytes?: number; httpStatus?: number; providerErrorCode?:string; issues?: Array<{code:string;path:string}> };
 const validatedModes = new Map<string, {think:boolean|string|undefined; expires:number}>();
 function safeIssues(issues: Issue[]) {
   return issues.map(i => ({code: Object.hasOwn(correctionMessages,i.code)?i.code:'FAILED_SCHEMA',path: /^[A-Za-z0-9_.[\]]{1,160}$/.test(i.path)?i.path:'narrative'}));
@@ -61,7 +61,7 @@ export async function generateReconReportV3(client: BrainClient, input: ReconRep
     let raw:string;
     try{
       raw=await client.chat(system+(repair?'\nPrevious response rejected.\n'+repair+'\nRemove or rephrase unsupported interpretations. Keep every field qualitative without exact URLs, paths, hosts, IPs, ports, versions, statuses or HTTP verbs; those belong exclusively to the application factual tables. Never guess replacement facts.':''),payload,{
-        format:schema,temperature:0,maxTokens:input.budget.outputTokens,contextWindow:input.budget.contextTokens,
+        format:schema,preserveModel:true,temperature:0,maxTokens:input.budget.outputTokens,contextWindow:input.budget.contextTokens,
         ...(think!==undefined?{think}:{}),retries:0,timeoutMs:options.timeoutMs??180000,maxResponseBytes:262144,signal,
       });
     }catch(error){
@@ -69,7 +69,11 @@ export async function generateReconReportV3(client: BrainClient, input: ReconRep
       if(attempt===0&&input.budget.thinkingTrial&&error instanceof BrainError&&[400,422].includes(error.status??0)){
         trace({attempt:1,thinkingMode:think??null,status:'MODE_REJECTED'});think=undefined;repair='The requested generation control was incompatible. Return the narrative schema.';continue;
       }
-      trace({attempt:attempt+1,thinkingMode:think??null,status:'FAILED_PROVIDER'});
+      trace({attempt:attempt+1,thinkingMode:think??null,status:'FAILED_PROVIDER',...(error instanceof BrainError?{httpStatus:error.status,providerErrorCode:error.code}: {})});
+      if(error instanceof BrainError&&error.code==='STRUCTURED_OUTPUT_UNSUPPORTED'){
+        const message=error.provider==='OPENROUTER'?'The selected OpenRouter model/provider route does not support the required structured output.':'The selected model/provider route does not support the required structured output.';
+        return finish(fallbackReconReportV3(input,[{code:'STRUCTURED_OUTPUT_UNSUPPORTED',path:'provider',evidenceRefs:[],message}],'FAILED_PROVIDER'));
+      }
       logger.warn({promptVersion:'recon-report/3',code:'FAILED_PROVIDER',httpStatus:error instanceof BrainError?error.status:undefined},'AI narrative unavailable; deterministic Recon facts retained');
       return finish(fallbackReconReportV3(input,issues,'FAILED_PROVIDER'));
     }
