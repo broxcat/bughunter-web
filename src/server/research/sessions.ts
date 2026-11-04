@@ -5,6 +5,8 @@ import { resolve, join } from "node:path";
 import { rm } from "node:fs/promises";
 import { assertResearchTarget, researchAuthorizationSnapshot, researchAuthorizationMatches, createResearchBundle, newWorkspaceId, researchTargetSelect, ResearchError, workspacePath, writeResearchWorkspace } from "./workspace";
 import { captureProgramAssessment } from '@/server/assessment';
+import { captureResearchPlanForTarget } from './plans';
+import { reconJson } from './reconContext';
 
 export const researchRoot = () => process.env.RESEARCH_WORKSPACE_ROOT ?? resolve("data/research/workspaces");
 export const researchRootFor = (workspaceId: string) => workspaceId.startsWith("research_") ? process.env.RESEARCH_CONSOLE_ROOT ?? resolve("data/research/targets") : researchRoot();
@@ -12,7 +14,7 @@ export const ownedResearch = (userId: string) => ({ userId, target: { userId, OR
 // The same bounded metadata response is used for list/detail; no paths or secrets.
 export const researchSessionSelect = {
   id: true, workspaceId: true, consoleTargetId: true, provider: true, targetId: true, targetHost: true, programName: true,
-  authorizationSnapshot: true, reconScanRunId: true, status: true, createdAt: true, updatedAt: true,
+  authorizationSnapshot: true, reconScanRunId: true, researchPlanId: true, status: true, createdAt: true, updatedAt: true,
   scopeMarkdown: true, files: true, hypothesesSyncedAt: true, hypothesesSourceSha256: true,
 } as const;
 
@@ -34,12 +36,14 @@ export async function createResearchSession(userId: string, targetId: string) {
       assertResearchTarget(current, userId);
       if (current.scopeAsset && ['URL', 'WILDCARD_DOMAIN'].includes(current.scopeAsset.format)) throw new ResearchError('Use the persistent asset Research console for URL/path or wildcard scope. Historical ZIP workspaces remain unchanged.');
       if (await tx.researchSession.count({ where: { userId, createdAt: { gt: new Date(Date.now() - 3600_000) } } }) >= 20) throw new ResearchError("Research workspace quota reached (20 per hour)", 429);
-      const recon = await tx.scanRun.findFirst({ where: { targetId, type: "RECON", status: "COMPLETED", reconCorpus: { not: Prisma.DbNull } }, orderBy: { createdAt: "desc" }, select: { id: true, reconCorpus: true } });
+      let recon = await tx.scanRun.findFirst({ where: { targetId, type: "RECON", status: "COMPLETED", OR: [{reconCorpus: { not: Prisma.DbNull }},{artifacts:{some:{}}},{surfaceObservations:{some:{}}}] }, orderBy: [{createdAt:'desc'},{id:'desc'}], select: { id: true, reconCorpus: true } });
       const findings = await tx.finding.findMany({ where: { targetId }, orderBy: { createdAt: "asc" }, take: 1000, select: { id: true, title: true, severity: true, vulnClass: true, reviewStatus: true, location: true } });
       const assessment = await captureProgramAssessment(tx, current.program!.id);
-      const session = await tx.researchSession.create({ data: { userId, targetId, workspaceId, authorizationSnapshot: { ...researchAuthorizationSnapshot(current), ...assessment }, targetHost: current.host, programName: current.program!.companyName, scopeMarkdown: "", reconScanRunId: recon?.id } });
+      const plan = await captureResearchPlanForTarget(tx,userId,targetId,{scanRunId:recon?.id});
+      if(plan&&plan.selectedScanRunId!==recon?.id)recon=await tx.scanRun.findUnique({where:{id:plan.selectedScanRunId},select:{id:true,reconCorpus:true}});
+      const session = await tx.researchSession.create({ data: { userId, targetId, workspaceId, authorizationSnapshot: { ...researchAuthorizationSnapshot(current), ...assessment }, targetHost: current.host, programName: current.program!.companyName, scopeMarkdown: "", reconScanRunId: recon?.id,researchPlanId:plan?.id } });
       sessionId = session.id;
-      const bundle = createResearchBundle(current, recon, findings, session);
+      const bundle = createResearchBundle(current, recon, findings, session,false,plan?{id:plan.id,contentSha256:plan.contentSha256,jsonText:reconJson(plan.plan),markdownText:plan.markdown}:undefined);
       const result = await writeResearchWorkspace(root, workspaceId, bundle);
       published = true;
       return tx.researchSession.update({ where: { id: session.id }, data: { status: "READY", scopeMarkdown: bundle["scope.md"], ...result }, select: researchSessionSelect });

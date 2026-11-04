@@ -8,6 +8,12 @@ describe("strict hypothesis JSON contract", () => {
     expect(hypothesesDocumentSchema.parse(hypothesesFixture()).hypotheses).toHaveLength(1);
     expect(hypothesesJsonSchema()).toMatchObject({ type: "object", additionalProperties: false });
   });
+  it('retains only explicit, portable plan-item identities and keeps historical hypotheses unlinked',()=>{
+    expect(hypothesisSnapshot(hypothesisFixture()).planItemId).toBeNull();
+    expect(hypothesisSnapshot(hypothesisSchema.parse(hypothesisFixture({planItemId:'captured_item_01'}))).planItemId).toBe('captured_item_01');
+    expect(hypothesisSchema.safeParse(hypothesisFixture({planItemId:null})).success).toBe(true);
+    for(const planItemId of ['../other','https://other.test/item','item\nnext','item with spaces'])expect(hypothesisSchema.safeParse({...hypothesisFixture(),planItemId}).success).toBe(false);
+  });
   it.each([
     { version: 2 }, { secretField: "DO_NOT_ECHO_SECRET" }, { hypotheses: [hypothesisFixture(), hypothesisFixture()] },
     { hypotheses: Array.from({ length: 201 }, (_, i) => hypothesisFixture({ externalId: `H-${String(i).padStart(3, "0")}` })) },

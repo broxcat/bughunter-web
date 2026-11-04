@@ -13,11 +13,14 @@ import { researchAssessmentSnapshot, researchAssessmentInstructions } from './wo
 import { researchSessionSelect } from './sessions';
 import { CONSOLE_RULES, PROGRAM_CONSOLE_RULES, consoleBootstrap } from './consoleRules';
 import { exportText, researchIsPassive } from './workspace';
+import type { ResearchPlanPublication } from './planFiles';
+import { captureResearchPlanForTarget } from './plans';
+import { reconJson } from './reconContext';
 
 export const consoleRoot = () => process.env.RESEARCH_CONSOLE_ROOT ?? resolve('data/research/targets');
-export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, findings: ResearchFinding[], session: { id: string; workspaceId: string; createdAt: Date; authorizationSnapshot?: unknown }) {
+export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, findings: ResearchFinding[], session: { id: string; workspaceId: string; createdAt: Date; authorizationSnapshot?: unknown }, plan?:ResearchPlanPublication) {
   if (session.workspaceId !== targetWorkspaceId(target.id)) throw new ResearchError('Invalid workspace identity');
-  const old = createResearchBundle(target, recon, findings, session, true);
+  const old = createResearchBundle(target, recon, findings, session, true, plan);
   const passive = researchIsPassive(target), asset = target.scopeAsset ?? target.discoveredFromAsset;
   const effectiveHost = target.host.startsWith('*.') ? target.host.slice(2) : target.host;
   const port = asset?.format === 'URL' ? Number(new URL(asset.normalizedValue).port || (target.scheme === 'http' ? 80 : 443)) : target.scheme === 'http' ? 80 : 443;
@@ -51,7 +54,7 @@ export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, find
     'findings/notes.md': old['research/notes.md'],
     'findings/rejected.md': '# Rejected hypotheses\n\nRetain falsified explanations, exact tests and opposing evidence. Do not repeat equivalent failed tests.\n',
   };
-  for (const [path, contents] of Object.entries(old)) if (path.startsWith('recon/') || path === 'findings/existing-findings.json') files[path] = contents;
+  for (const [path, contents] of Object.entries(old)) if (path.startsWith('recon/') || path.startsWith('research/plan') || path === 'findings/existing-findings.json') files[path] = contents;
   return files;
 }
 async function refreshConsoleInventory(tx: Prisma.TransactionClient, target: ResearchTarget, workspaceId: string) {
@@ -85,7 +88,7 @@ export async function writeConsoleWorkspace(root: string, id: string, files: Rec
   await mkdir(temporary, { mode: 0o700 });
   try {
     // Root and inputs are web-owned; operator-owned research subdirectories are writable.
-    for (const dir of ['recon', 'requests', 'requests/burp', 'scripts', 'findings', '.codex', '.agents', '.agents/bughunter']) {
+    for (const dir of ['recon', 'research', 'requests', 'requests/burp', 'scripts', 'findings', '.codex', '.agents', '.agents/bughunter']) {
       const writable = /^(requests|scripts|findings)/.test(dir);
       await mkdir(join(temporary, dir), { recursive: true }); await chown(join(temporary, dir), writable ? uid : process.getuid!(), gid); await chmod(join(temporary, dir), writable ? 0o2770 : 0o2750);
     }
@@ -118,11 +121,13 @@ export async function ensureTargetConsole(userId: string, targetId: string) {
       await refreshConsoleInventory(tx, target, existing.workspaceId);
       return { session: existing, target };
     }
-    const recon = await tx.scanRun.findFirst({ where: { targetId, type: 'RECON', status: 'COMPLETED', reconCorpus: { not: Prisma.DbNull } }, orderBy: { createdAt: 'desc' }, select: { id: true, reconCorpus: true } });
+    let recon = await tx.scanRun.findFirst({ where: { targetId, type: 'RECON', status: 'COMPLETED', OR: [{reconCorpus: { not: Prisma.DbNull }},{artifacts:{some:{}}},{surfaceObservations:{some:{}}}] }, orderBy: [{createdAt:'desc'},{id:'desc'}], select: { id: true, reconCorpus: true } });
     const findings = await tx.finding.findMany({ where: { targetId }, orderBy: { createdAt: 'asc' }, take: 1000, select: { id: true, title: true, severity: true, vulnClass: true, reviewStatus: true, location: true } });
     const assessment = await captureProgramAssessment(tx, target.program!.id);
-    const session = await tx.researchSession.create({ data: { userId, targetId, consoleTargetId: targetId, workspaceId: targetWorkspaceId(targetId), targetHost: target.host, programName: target.program!.companyName, scopeMarkdown: '', reconScanRunId: recon?.id, authorizationSnapshot: { ...current, ...assessment } } });
-    const files = consoleBundle(target, recon, findings, session);
+    const plan=await captureResearchPlanForTarget(tx,userId,targetId,{scanRunId:recon?.id});
+    if(plan&&plan.selectedScanRunId!==recon?.id)recon=await tx.scanRun.findUnique({where:{id:plan.selectedScanRunId},select:{id:true,reconCorpus:true}});
+    const session = await tx.researchSession.create({ data: { userId, targetId, consoleTargetId: targetId, workspaceId: targetWorkspaceId(targetId), targetHost: target.host, programName: target.program!.companyName, scopeMarkdown: '', reconScanRunId: recon?.id,researchPlanId:plan?.id, authorizationSnapshot: { ...current, ...assessment } } });
+    const files = consoleBundle(target, recon, findings, session,plan?{id:plan.id,contentSha256:plan.contentSha256,jsonText:reconJson(plan.plan),markdownText:plan.markdown}:undefined);
     await writeConsoleWorkspace(consoleRoot(), targetId, files);
     await refreshConsoleInventory(tx, target, session.workspaceId);
     const ready = await tx.researchSession.update({ where: { id: session.id }, data: { status: 'READY', scopeMarkdown: files['scope.md'], files: Object.keys(files).sort() }, select: researchSessionSelect });

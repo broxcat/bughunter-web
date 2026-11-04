@@ -1,7 +1,15 @@
 /** Versioned instructions copied into every exported research workspace. */
+export const RESEARCH_PLAN_RULES = `
+## Research plan input
+
+If present, research/plan.json and research/plan.md are immutable application-generated planning inputs. Read them after scope.md and the workspace authorization rules. For an explicitly delivered Recon snapshot, use the exact versioned researchPlan reference from its summary; later plan files do not silently replace this session's initial plan. A historical workspace without a plan remains historical.
+The plan prioritizes evidence-backed manual review. It is not an execution queue, permission grant, vulnerability finding, confirmation, or report. Never run every category as a checklist. Observe program exclusions, scope and existing provider permission gates before any test. Assessment mode and source metadata do not establish that source analysis occurred.
+Plan files and their IDs are read-only. Never edit them or manufacture plan items. If an existing hypothesis genuinely follows a captured item, its optional planItemId must be copied exactly from the initial plan or the most recently delivered plan for this session. Do not create a hypothesis or Finding merely because a plan item exists. Retain counterevidence and human review.
+`;
 export const RESEARCH_RULES = `# BugHunter Codex Research Rules
 
 This workspace represents an authorised security research target.
+${RESEARCH_PLAN_RULES}
 
 ## Ground truth
 

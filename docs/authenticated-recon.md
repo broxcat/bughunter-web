@@ -2,6 +2,8 @@
 
 Authenticated Recon maps read-only runtime surface through explicitly supplied test sessions. It adds context observations to the existing Target → Scope → Recon → Research workflow. It performs no authorization exploitation, IDOR/BOLA testing, privilege escalation, form submission or Finding creation.
 
+[Research plans](research-plan.md) can route authenticated-only surfaces and actual context differentials into advisory objectives with observation references. They never create hypotheses, Findings or tested-coverage claims automatically.
+
 ## Authentication contexts
 
 Use the existing Target settings → Authentication section. Configure Cookies, Bearer, or Email/password; run **Test connection** explicitly; then enable **Use for authenticated Recon**. The optional persona is operator-declared, not a verified application role. Last verification and expiration remain visible. Historical credentials default to Recon OFF.

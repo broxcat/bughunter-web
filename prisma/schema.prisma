@@ -157,6 +157,7 @@ enum AssessmentSourceKind {
 }
 
 model BountyProgram {
+  researchPlans ResearchPlan[]
   assessmentMode AssessmentMode @default(BLACK_BOX)
   assessmentSources AssessmentSource[]
   scopeRules        String[]        @default([])
@@ -206,6 +207,7 @@ model AssessmentSource {
 }
 
 model Target {
+  researchPlans ResearchPlan[]
   consoleDeletingAt DateTime?
   scopeAssetId String? @unique
   scopeAsset ScopeAsset? @relation("AssetExecution", fields: [scopeAssetId], references: [id], onDelete: SetNull)
@@ -315,6 +317,7 @@ enum CredentialMode {
 // ---------------------------------------------------------------------------
 
 model ScanRun {
+  researchPlans ResearchPlan[]
   authenticatedContextsSnapshot Json?
   authenticatedReconResult Json?
   surfaceObservations ReconSurfaceObservation[]
@@ -668,6 +671,8 @@ enum ResearchSessionStatus {
 }
 
 model ResearchSession {
+  researchPlanId String?
+  researchPlan ResearchPlan? @relation(fields: [researchPlanId], references: [id], onDelete: SetNull)
   id             String @id @default(cuid())
   userId         String
   targetId       String
@@ -725,6 +730,8 @@ enum ResearchHypothesisRevisionSource {
 }
 
 model ResearchHypothesis {
+  planItemId String?
+  planItem ResearchPlanItem? @relation(fields: [planItemId], references: [id], onDelete: SetNull)
   id                     String @id @default(cuid())
   sessionId              String
   externalId             String
@@ -754,6 +761,7 @@ model ResearchHypothesis {
   promotion ResearchFindingPromotion?
 
   @@unique([sessionId, externalId])
+  @@index([planItemId])
   @@index([sessionId, status])
 }
 
@@ -796,6 +804,8 @@ enum ResearchProvider {
 
 // Derived, immutable evidence. Original ScanRun/HostDiscovery/ScanLog stay authoritative.
 model ResearchReconSnapshot {
+  researchPlanId String?
+  researchPlan ResearchPlan? @relation(fields: [researchPlanId], references: [id], onDelete: SetNull)
   id String @id @default(cuid())
   sessionId String
   sourceFingerprint String
@@ -833,6 +843,7 @@ enum AssetValue {
   LOW
 }
 model ScopeAsset {
+  researchPlans ResearchPlan[]
   surfaceObservations ReconSurfaceObservation[]
   id String @id @default(cuid())
   programId String
@@ -990,4 +1001,87 @@ model ReconSummary {
   @@index([status, createdAt])
   @@index([programId, createdAt])
   @@index([scopeAssetId, createdAt])
+}
+
+// Advisory objectives derived only from immutable runtime Recon evidence.
+enum ResearchPlanStatus {
+  CURRENT
+  SUPERSEDED
+  STALE
+}
+enum ResearchPlanPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+enum ResearchPlanCategory {
+  AUTHORIZATION
+  AUTHENTICATION
+  SESSION_MANAGEMENT
+  API
+  API_VERSIONING
+  GRAPHQL
+  FILE_UPLOAD
+  SERVER_SIDE_REQUEST
+  REDIRECT_HANDLING
+  BUSINESS_LOGIC
+  PRIVILEGED_FUNCTIONS
+  ACCOUNT_LIFECYCLE
+  TENANT_ISOLATION
+  INPUT_HANDLING
+}
+enum ResearchPlanItemStatus {
+  READY
+  NOT_APPLICABLE_BY_PROGRAM
+}
+model ResearchPlan {
+  id String @id @default(cuid())
+  targetId String
+  programId String
+  scopeAssetId String?
+  scanRunId String
+  sourceFingerprint String
+  methodologyVersion String
+  assessmentMode AssessmentMode?
+  status ResearchPlanStatus @default(CURRENT)
+  metadata Json
+  createdAt DateTime @default(now())
+  supersededAt DateTime?
+  target Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  scopeAsset ScopeAsset? @relation(fields: [scopeAssetId], references: [id], onDelete: SetNull)
+  scanRun ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  items ResearchPlanItem[]
+  sessions ResearchSession[]
+  reconSnapshots ResearchReconSnapshot[]
+  @@unique([targetId, sourceFingerprint])
+  @@index([targetId, createdAt])
+  @@index([programId])
+  @@index([scanRunId])
+}
+model ResearchPlanItem {
+  id String @id @default(cuid())
+  planId String
+  stableKey String
+  category ResearchPlanCategory
+  priority ResearchPlanPriority
+  title String
+  objective String @db.Text
+  rationale String @db.Text
+  methodology String @db.Text
+  surfaceRefs Json
+  evidenceRefs Json
+  contextRefs Json
+  runtimeSignals Json
+  sourceSignals Json
+  sourceEvidenceRefs Json
+  score Int
+  evidenceStrength Int
+  status ResearchPlanItemStatus @default(READY)
+  isNew Boolean @default(true)
+  createdAt DateTime @default(now())
+  plan ResearchPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  hypotheses ResearchHypothesis[]
+  @@unique([planId, stableKey])
+  @@index([planId, priority])
 }

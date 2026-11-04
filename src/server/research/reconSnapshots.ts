@@ -1,13 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { matchesHost, isExcluded } from '@/lib/bountyProgram';
-import { assetAllowsUrl, assetAllowsHost } from '@/lib/scopeAssets';
-import { assertExecutionUrl } from '@/server/execution';
-import { discoveryState } from '@/server/recon/program';
 import type { ResearchProvider } from '@/lib/research/provider';
 import type { ResearchReconContext, ReconPanelState } from '@/lib/research/recon';
 import { issueReconDelivery } from '@/lib/research/reconDelivery';
-import { assertResearchTarget, researchTargetSelect, researchAuthorizationSnapshot, researchAuthorizationMatches, researchAssessmentSnapshot, researchIsPassive, ResearchError, type ResearchTarget } from './workspace';
+import { assertResearchTarget, researchTargetSelect, researchAuthorizationSnapshot, researchAuthorizationMatches, researchAssessmentSnapshot, ResearchError, type ResearchTarget } from './workspace';
 import { buildReconContext, compactReconContext, reconHash, reconJson, RECON_INPUT_LIMITS, type ReconRun } from './reconContext';
 import { ensureTargetConsole, consoleRoot } from './consoleWorkspace';
 import { publishReconFiles } from './reconFiles';
@@ -19,6 +15,10 @@ import { expandAssetReconRuns } from './reconInputs';
 import { assetSelect, scopeAssetSourceIds } from '../scopeAssets';
 import { artifactData, artifactSelect, ensureLegacyArtifacts } from '../recon/artifacts';
 import { readAuthSurface } from '../authenticatedRecon';
+import { reconScopePolicy } from './reconPolicy';
+import { captureResearchPlanForTarget, readCapturedResearchPlan } from './plans';
+import { publishResearchPlanFiles, researchPlanReference, verifyResearchPlanFiles, type ResearchPlanPublication } from './planFiles';
+export { reconScopePolicy } from './reconPolicy';
 
 const snapshotSelect = { id: true, sourceFingerprint: true, contentSha256: true, summarySha256: true, createdAt: true, summary: true } as const;
 const deliverySelect = { id: true, snapshotId: true, provider: true, status: true, createdAt: true } as const;
@@ -45,38 +45,6 @@ async function loadInputs(tx: Prisma.TransactionClient, target: ResearchTarget) 
   }
   return result;
 }
-export function reconScopePolicy(target: ResearchTarget, scopeAssets: NonNullable<ResearchReconContext['scopeAssets']> = []) {
-  // Structured asset boundaries are enforced below. Additional legacy prose
-  // requires human review and never expands active authorization.
-  const manualReview = Boolean(target.scope.scopeDetails?.trim() || target.scope.outOfScope?.trim());
-  return {
-    activeSuggestionsAllowed: !researchIsPassive(target) && !manualReview,
-    warnings: [
-      ...(manualReview ? ['Legacy free-text scope restrictions require manual review; suggestions are passive only. Additional prose restrictions are not interpreted as structured authorization.'] : []),
-      ...(researchIsPassive(target) ? ['Program/wildcard console is passive only. Open an individually authorized host console before active investigation.'] : []),
-    ],
-    inScope(value: string) {
-      try {
-        const url = value.startsWith('http') ? new URL(value) : null;
-        const host = url?.hostname ?? value;
-        const boundary = target.scopeAsset ?? target.discoveredFromAsset;
-        if (boundary) return boundary.active && (target.scopeAsset || host === target.host) && !isExcluded(host, target.program!.outOfScope) && (url ? assetAllowsUrl(boundary, value) : assetAllowsHost(boundary, host));
-        if (target.contextOnly) {
-          const legacyExclusions = target.scope.outOfScope?.toLowerCase().match(/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+/g) ?? [];
-          return target.scope.status === 'APPROVED' && !legacyExclusions.some(r => matchesHost(host, r)) && !isExcluded(host, target.program!.outOfScope) && (scopeAssets.length ? scopeAssets.some(a => a.active && (url ? assetAllowsUrl(a, value) : assetAllowsHost(a, host))) : discoveryState(host, target.program!.scopeRules, target.program!.outOfScope) === 'VALIDATED');
-        }
-        assertResearchTarget(target, target.userId);
-        if (host !== target.host) return false;
-        if (url) {
-          assertExecutionUrl(value, { targetId: target.id, host: target.host, requiredUserAgent: target.program!.requiredUserAgent, qualifying: target.program!.qualifying, nonQualifying: target.program!.nonQualifying });
-          // Persistent console's existing service restriction (ConsolePolicy).
-          if (url.protocol !== `${target.scheme ?? 'https'}:` || Number(url.port || (url.protocol === 'https:' ? 443 : 80)) !== (target.scheme === 'http' ? 80 : 443)) return false;
-        }
-        return true;
-      } catch { return false; }
-    },
-  };
-}
 async function ownedTarget(tx: Prisma.TransactionClient, userId: string, targetId: string, lock = false) {
   if (lock) await tx.$queryRaw`SELECT id FROM "Target" WHERE id=${targetId} AND "userId"=${userId} FOR UPDATE`;
   let target = await tx.target.findFirst({ where: { id: targetId, userId, program: { ownerId: userId } }, select: researchTargetSelect });
@@ -90,7 +58,7 @@ async function ownedTarget(tx: Prisma.TransactionClient, userId: string, targetI
 }
 function fingerprint(target: ResearchTarget, runs: ReconRun[], assets: unknown[], sessionSnapshot: unknown) {
   const captured = researchAssessmentSnapshot(sessionSnapshot);
-  return reconHash(reconJson({ normalizerVersion: 5, limits: RECON_INPUT_LIMITS, policy: researchAuthorizationSnapshot(target), assessment:{assessmentMode:captured.assessmentMode,authorizedSourceCount:captured.authorizedSources.length}, runs, assets }));
+  return reconHash(reconJson({ normalizerVersion: 6, limits: RECON_INPUT_LIMITS, policy: researchAuthorizationSnapshot(target), assessment:{assessmentMode:captured.assessmentMode,authorizedSourceCount:captured.authorizedSources.length}, runs, assets }));
 }
 async function loadAssets(tx: Prisma.TransactionClient, target: ResearchTarget) { return tx.scopeAsset.findMany({ where: { programId: target.program!.id, ...((target.scopeAsset ?? target.discoveredFromAsset) ? { id: (target.scopeAsset ?? target.discoveredFromAsset)!.id } : { active: true }) }, orderBy: { id: 'asc' }, take: 1000, select: assetSelect }); }
 export async function reconPanelState(userId: string, targetId: string): Promise<ReconPanelState> {
@@ -121,11 +89,14 @@ export async function generateReconSnapshot(userId: string, targetId: string) {
     const runs = await loadInputs(tx, target), assets = await loadAssets(tx, target), sourceFingerprint = fingerprint(target, runs, assets, session.authorizationSnapshot);
     let snapshot = await tx.researchReconSnapshot.findUnique({ where: { sessionId_sourceFingerprint: { sessionId: session.id, sourceFingerprint } } });
     if (!snapshot) {
+      const plan=await captureResearchPlanForTarget(tx,userId,targetId);
       const context = buildReconContext({ programId: target.program!.id, targetId, scopeId: target.scope.id, generatedAt: new Date().toISOString(), runs: expandAssetReconRuns(runs), scopeAssets: assets, assessmentSnapshot:researchAssessmentSnapshot(session.authorizationSnapshot), ...reconScopePolicy(target, assets),
         warnings: [...reconScopePolicy(target, assets).warnings, ...(runs.length === RECON_INPUT_LIMITS.scans ? ['Retained scan limit reached; older scans remain available in Recon.'] : [])] });
+      if(plan)context.researchPlan=researchPlanReference({id:plan.id,contentSha256:plan.contentSha256,jsonText:reconJson(plan.plan),markdownText:plan.markdown});
       const summary = compactReconContext(context), contentSha256 = reconHash(reconJson(context)), summarySha256 = reconHash(reconJson(summary));
-      snapshot = await tx.researchReconSnapshot.create({ data: { sessionId: session.id, sourceFingerprint, contentSha256, summarySha256, context: context as unknown as Prisma.InputJsonValue, summary: summary as unknown as Prisma.InputJsonValue } });
+      snapshot = await tx.researchReconSnapshot.create({ data: { sessionId: session.id,researchPlanId:plan?.id, sourceFingerprint, contentSha256, summarySha256, context: context as unknown as Prisma.InputJsonValue, summary: summary as unknown as Prisma.InputJsonValue } });
     }
+    await publishCapturedPlan(tx,userId,targetId,session.workspaceId,snapshot);
     await publishReconFiles(consoleRoot(), session.workspaceId, { contentSha256: snapshot.contentSha256, contextText: reconJson(snapshot.context), summaryText: reconJson(snapshot.summary) });
   }, { timeout: 30000 });
   return reconPanelState(userId, targetId);
@@ -143,6 +114,7 @@ export async function transmitReconSnapshot(userId: string, targetId: string, sn
     if (!snapshot) throw new ResearchError('Snapshot not found', 404);
     if (!researchAuthorizationMatches(snapshot.session.authorizationSnapshot, target)) throw new ResearchError('Research policy changed', 409);
     if (await tx.researchReconDelivery.count({ where: { sessionId: snapshot.sessionId, createdAt: { gt: new Date(Date.now() - 60000) } } }) >= 10) throw new ResearchError('Recon delivery limit reached; wait one minute', 429);
+    await publishCapturedPlan(tx,userId,targetId,snapshot.session.workspaceId,snapshot);
     await publishReconFiles(consoleRoot(), snapshot.session.workspaceId, { contentSha256: snapshot.contentSha256, contextText: reconJson(snapshot.context), summaryText: reconJson(snapshot.summary) });
     // Policy is read through fixed server-owned paths, never from browser input.
     const workspace = await open(join(consoleRoot(), snapshot.session.workspaceId), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
@@ -169,6 +141,18 @@ export async function transmitReconSnapshot(userId: string, targetId: string, sn
     } catch { /* A lost acknowledgement does not mean delivery failed. */ }
     return tx.researchReconDelivery.update({ where: { id: delivery.id }, data: { status }, select: deliverySelect });
   }, { timeout: 20000 });
+}
+
+async function publishCapturedPlan(tx:Prisma.TransactionClient,userId:string,targetId:string,workspaceId:string,snapshot:{researchPlanId:string|null;context:Prisma.JsonValue}){
+  const reference=(snapshot.context as unknown as ResearchReconContext).researchPlan;
+  if(!snapshot.researchPlanId){if(reference)throw new ResearchError('Research plan reference mismatch',409);return;}
+  if(!reference||reference.id!==snapshot.researchPlanId)throw new ResearchError('Research plan reference mismatch',409);
+  const plan=await readCapturedResearchPlan(tx,snapshot.researchPlanId,userId,targetId);
+  if(!plan)throw new ResearchError('Captured Research plan is unavailable',409);
+  const publication:ResearchPlanPublication={id:plan.id,contentSha256:plan.contentSha256,jsonText:reconJson(plan.plan),markdownText:plan.markdown};
+  if(reconJson(reference)!==reconJson(researchPlanReference(publication)))throw new ResearchError('Captured Research plan integrity mismatch',409);
+  await publishResearchPlanFiles(consoleRoot(),workspaceId,publication);
+  await verifyResearchPlanFiles(consoleRoot(),workspaceId,reference);
 }
 
 async function normalizeOwnedHistory(userId:string,targetId:string){

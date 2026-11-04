@@ -61,6 +61,17 @@ try {
  const first=await pane();assert(first.endsWith(cwd),`Pane observed ${JSON.stringify(first)}, expected cwd ${cwd}`);for(let n=0;n<3;n++){await page.reload();await page.getByText('Terminal: connected',{exact:true}).waitFor();assert.equal(await pane(),first);}
  let running=false;for(let i=0;i<50;i++){const ps=await dexec('ps','-eo','user:20,args');running=ps.split('\n').some(l=>l.includes('researcher')&&l.includes('codex')&&l.includes('--yolo'));if(running)break;await wait(200);}assert(running,'Native Codex must run as researcher with --yolo');
  const codexConfig=await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','sh','-c',`cd ${cwd} && bughunter-codex mcp get bughunter_burp --json`);assert(codexConfig.includes('bughunter-burp-mcp'));
+ // The local validator ships the shared hypothesis schema. Linking an item is
+ // optional and structural here; server sync separately checks plan ownership.
+ const planValidation=await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','node','--input-type=module','-e',`
+   import fs from 'node:fs';import {spawnSync} from 'node:child_process';
+   const cwd=${JSON.stringify(cwd)},session=JSON.parse(fs.readFileSync(cwd+'/.agents/bughunter/session.json','utf8'));
+   const sessionId=session.source.replace(/^ResearchSession /,'');
+   fs.writeFileSync(cwd+'/requests/plan-validator-evidence.txt','Local fixture observation.');
+   fs.writeFileSync(cwd+'/findings/hypotheses.json',JSON.stringify({version:1,sessionId,hypotheses:[{externalId:'H-001',planItemId:'fixture-plan-item',title:'Plan-linked fixture',status:'OPEN',hypothesis:'An observed boundary needs manual validation.',evidenceFor:[{ref:'requests/plan-validator-evidence.txt',summary:'Local fixture evidence.'}],evidenceAgainst:[],nextTest:'Review captured scope.',expectedSignal:'Recorded response.',falsificationCondition:'Consistent denial.',tags:[]}]}));
+   const result=spawnSync('bughunter-validate-hypotheses',[],{cwd,encoding:'utf8'});if(result.status!==0)throw new Error('Embedded hypothesis validator rejected planItemId');console.log('PLAN_ITEM_VALIDATOR_NATIVE_PASS');
+ `);assert(planValidation.includes('PLAN_ITEM_VALIDATOR_NATIVE_PASS'));
+ console.log('PLAN_ITEM_VALIDATOR_NATIVE_PASS: embedded CLI schema accepts optional plan item references; server ownership is checked separately, without automatic sync or Findings.');
  const skills=JSON.parse(await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','sh','-c',`cd ${cwd} && node --input-type=module -e 'import {codexRead} from "/opt/bughunter/docker/research/validator/codex-rpc.mjs";console.log(JSON.stringify(await codexRead("skills/list",{cwds:[process.cwd()],forceReload:true})));'`));
  for(const name of ['web-security-testing','api-fuzzing-bug-bounty','idor-testing','ffuf-web-fuzzing'])assert(skills.data.some(group=>group.skills.some(s=>s.name===name)),`Codex did not discover ${name}`);
  await dexec('sh','-c','cd /etc/codex/skills && sha256sum --check ../skills.sha256');

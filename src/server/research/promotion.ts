@@ -35,6 +35,7 @@ export async function promoteHypothesis(sessionId: string, hypothesisId: string,
     if (!snapshot) throw new HypothesisSyncError("LEGACY_AUTHORIZATION", "Legacy authorization snapshot: create a current Research Workspace before promotion", 409);
     if (!researchAuthorizationMatches(snapshot, target)) throw new HypothesisSyncError("POLICY_CHANGED", "Program or scope changed since export. Create a current workspace before promotion.", 409);
     const candidate = hypothesisV2Schema.safeParse({
+      planItemId:h.planItemId,
       externalId: h.externalId, title: h.title, status: h.status, hypothesis: h.hypothesis,
       evidenceFor: h.evidenceFor, evidenceAgainst: h.evidenceAgainst, nextTest: h.nextTest,
       expectedSignal: h.expectedSignal, falsificationCondition: h.falsificationCondition,
@@ -46,6 +47,7 @@ export async function promoteHypothesis(sessionId: string, hypothesisId: string,
     const safe = hypothesisSnapshot(candidate.data), proof = researchDataSchema.parse(safe.researchData);
     const evidence = {
       source: "RESEARCH_HUMAN_PROMOTION", sessionId, hypothesisId, externalId: h.externalId,
+      planItemId: h.planItemId,
       revision: h.revision, workspaceId: session.workspaceId, targetHost: target.host,
       evidenceFor: safe.evidenceFor, evidenceAgainst: safe.evidenceAgainst,
       observations: proof.initialObservations, tests: proof.tests,

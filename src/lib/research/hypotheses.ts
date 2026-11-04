@@ -21,6 +21,7 @@ export const evidenceReferenceSchema = z.strictObject({
 });
 export type ResearchEvidenceReference = z.infer<typeof evidenceReferenceSchema>;
 const legacyFields = z.strictObject({
+  planItemId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,149}$/).nullable().optional(),
   externalId: z.string().regex(/^H-[0-9]{3,6}$/),
   title: text(200),
   status: z.enum(["OPEN", "BLOCKED", "REJECTED", "CONFIRMED"]),

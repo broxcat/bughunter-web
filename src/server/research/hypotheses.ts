@@ -21,6 +21,7 @@ export function hypothesisSnapshot(h: ResearchHypothesisInput) {
   const sanitize = (value: unknown): unknown => typeof value === "string" ? exportText(value) : Array.isArray(value) ? value.map(sanitize) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, sanitize(v)])) : value;
   const researchData = "targetId" in h ? researchDataSchema.parse(sanitize(Object.fromEntries(Object.keys(researchDataSchema.shape).map(key => [key, h[key as keyof typeof h]])))) : undefined;
   return {
+    planItemId: h.planItemId ?? null,
     ...(researchData ? { researchData } : {}),
     externalId: h.externalId, title: exportText(h.title), status: h.status,
     hypothesis: exportText(h.hypothesis),
@@ -39,7 +40,7 @@ export async function syncHypotheses(sessionId: string, userId: string) {
     // One import per session at a time; revision increment and all snapshots are
     // committed atomically. No filesystem watcher or workspace writes.
     await tx.$queryRaw`SELECT "id" FROM "ResearchSession" WHERE "id" = ${sessionId} AND "userId" = ${userId} FOR UPDATE`;
-    const session = await tx.researchSession.findFirst({ where: { id: sessionId, ...ownedResearch(userId) }, select: { id: true, workspaceId: true, status: true, targetId: true, targetHost: true, authorizationSnapshot: true, target: { select: { scheme: true } } } });
+    const session = await tx.researchSession.findFirst({ where: { id: sessionId, ...ownedResearch(userId) }, select: { id: true, workspaceId: true, status: true, targetId: true, targetHost: true, authorizationSnapshot: true, researchPlanId: true, target: { select: { scheme: true } } } });
     if (!session) throw new HypothesisSyncError("NOT_FOUND", "Research session not found", 404);
     if (session.status !== "READY") throw new HypothesisSyncError("SESSION_NOT_READY", "Only READY sessions can sync; archived sessions are read-only", 409);
     // Scope revocation does not prohibit importing historical notes. No target
@@ -53,6 +54,13 @@ export async function syncHypotheses(sessionId: string, userId: string) {
       const parsed = hypothesesDocumentSchema.safeParse(input);
       if (!parsed.success) throw new HypothesisSyncError("INVALID_DOCUMENT", "Hypotheses validation failed. Run bughunter-validate-hypotheses inside the research workspace.", 400, safeHypothesisIssues(parsed.error));
       if (parsed.data.sessionId !== session.id) throw new HypothesisSyncError("SESSION_MISMATCH", "hypotheses.json sessionId does not match this Research Session");
+      const linkedItemIds=[...new Set(parsed.data.hypotheses.flatMap(h=>h.planItemId?[h.planItemId]:[]))];
+      if(linkedItemIds.length){
+        const delivered=await tx.researchReconDelivery.findFirst({where:{sessionId:session.id,status:'STAGED'},orderBy:[{createdAt:'desc'},{id:'desc'}],select:{snapshot:{select:{researchPlanId:true}}}});
+        const planIds=[session.researchPlanId,delivered?.snapshot.researchPlanId].filter((id):id is string=>Boolean(id));
+        const items=await tx.researchPlanItem.findMany({where:{id:{in:linkedItemIds},plan:{id:{in:planIds},targetId:session.targetId,program:{ownerId:userId}}},select:{id:true}});
+        if(items.length!==linkedItemIds.length)throw new HypothesisSyncError('INVALID_PLAN_ITEM','A linked plan item must belong to this session’s initial or most recently delivered plan for the same Target.',400);
+      }
       const checked = new Set<string>();
       for (const [index, h] of parsed.data.hypotheses.entries()) {
         if ("targetId" in h) {
