@@ -4,6 +4,7 @@ import {
   POC_PLACEHOLDER,
   REMEDIATION_PLACEHOLDER,
   renderReport,
+  capturedFindingAssessment,
   type ReportFinding,
   type ReportPlatform,
 } from "@/lib/reportTemplates";
@@ -40,6 +41,19 @@ function sectionOrder(md: string): number[] {
 }
 
 describe("report skeleton", () => {
+  it('prefers the captured Research mode and keeps legacy provenance unknown',()=>{
+    expect(capturedFindingAssessment({scanRun:{assessmentModeSnapshot:'BLACK_BOX'},researchPromotion:{hypothesis:{session:{authorizationSnapshot:{assessmentMode:'WHITE_BOX',authorizedSources:[{locator:'PRIVATE_SOURCE_NOT_FOR_REPORT'}]}}}}})).toEqual({assessmentMode:'WHITE_BOX',assessmentModeSource:'RESEARCH_SESSION'});
+    expect(capturedFindingAssessment({scanRun:{assessmentModeSnapshot:'WHITE_BOX'},researchPromotion:{hypothesis:{session:{authorizationSnapshot:{}}}}})).toEqual({assessmentMode:null,assessmentModeSource:'RESEARCH_SESSION'});
+    expect(capturedFindingAssessment({scanRun:{assessmentModeSnapshot:'BLACK_BOX'}})).toEqual({assessmentMode:'BLACK_BOX',assessmentModeSource:'SCAN_RUN'});
+    expect(capturedFindingAssessment({})).toEqual({assessmentMode:null,assessmentModeSource:'UNKNOWN'});
+  });
+  it('renders deterministic mode headers and per-finding provenance for mixed and historical reports',()=>{
+    const black={...FULL,assessmentMode:'BLACK_BOX' as const,assessmentModeSource:'SCAN_RUN' as const},white={...FULL,assessmentMode:'WHITE_BOX' as const,assessmentModeSource:'RESEARCH_SESSION' as const};
+    const mixed=renderReport('GENERIC',{title:'Captured report',findings:[black,white]});expect(mixed).toContain('Assessment mode: Mixed captured modes');expect(mixed).toContain('Assessment mode: Black-box');expect(mixed).toContain('Assessment mode: White-box');expect(mixed).toContain('Research session authorization snapshot');
+    expect(renderReport('GENERIC',{title:'Legacy',findings:[EMPTY]})).toContain('Assessment mode: Legacy / mode not captured');
+    expect(renderReport('GENERIC',{title:'Partial history',findings:[black,EMPTY]})).toContain('Mixed / includes legacy uncaptured modes');
+    expect(renderReport('GENERIC',{title:'Explicit',findings:[],assessmentMode:'WHITE_BOX'})).toContain('Assessment mode: White-box');
+  });
   it.each(PLATFORMS)("%s: every finding follows the standard section order", (p) => {
     const md = renderReport(p, { title: "T", findings: [FULL, EMPTY] });
     const first = md.split("\n\n---\n\n")[0];

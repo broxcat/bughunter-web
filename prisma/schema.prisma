@@ -142,7 +142,23 @@ enum BountyPlatform {
 }
 
 // Business Target. Technical Target identities and their historical FKs stay intact.
+enum AssessmentMode {
+  BLACK_BOX
+  WHITE_BOX
+}
+
+enum AssessmentSourceKind {
+  GIT_REPOSITORY
+  SOURCE_ARCHIVE
+  API_SPECIFICATION
+  ARCHITECTURE_DOCUMENTATION
+  CONFIGURATION
+  OTHER
+}
+
 model BountyProgram {
+  assessmentMode AssessmentMode @default(BLACK_BOX)
+  assessmentSources AssessmentSource[]
   scopeRules        String[]        @default([])
   rulesOfEngagement String?         @db.Text
   deletingAt        DateTime?
@@ -169,6 +185,24 @@ model BountyProgram {
   reconSummaries ReconSummary[]
 
   @@index([ownerId])
+}
+
+// Data authorization metadata only. This relation never grants network scope.
+model AssessmentSource {
+  id String @id @default(cuid())
+  programId String
+  label String
+  kind AssessmentSourceKind
+  locator String
+  reference String?
+  includePaths String[] @default([])
+  excludePaths String[] @default([])
+  active Boolean @default(true)
+  notes String? @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  @@index([programId, active])
 }
 
 model Target {
@@ -278,6 +312,9 @@ enum CredentialMode {
 // ---------------------------------------------------------------------------
 
 model ScanRun {
+  // Null means historical mode was not captured; never infer from today's program.
+  assessmentModeSnapshot AssessmentMode?
+  assessmentSourcesSnapshot Json?
   reconSummaries ReconSummary[]
   targetReconRunId String?
   targetReconRun TargetReconRun? @relation(fields: [targetReconRunId], references: [id], onDelete: SetNull)
@@ -855,6 +892,8 @@ model ResearchReconDelivery {
 
 // Parent execution contains immutable child membership, not another scan engine.
 model TargetReconRun {
+  assessmentModeSnapshot AssessmentMode?
+  assessmentSourcesSnapshot Json?
   reconSummaries ReconSummary[]
   id String @id @default(cuid())
   programId String

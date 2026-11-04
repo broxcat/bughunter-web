@@ -3,6 +3,7 @@ import { renderScopeMarkdown,SCOPE_MARKDOWN_BYTES,type ScopeIntelligenceBrief } 
 import { normalizeArtifact } from '@/lib/reconArtifacts';
 import { buildReconPlan } from '@/lib/reconPlanner';
 import type { Prisma } from '@prisma/client';
+import { captureAssessmentSnapshot } from '@/lib/assessment';
 function fixture():ScopeIntelligenceBrief{
   const at=new Date('2026-11-03T00:00:00Z'),program={id:'target',companyName:'Équipe | **scope**',platform:null,programUrl:null,requiredUserAgent:'Fixture/1',rulesOfEngagement:'Only authorized scope.',outOfScope:['excluded.example.test'],updatedAt:at};
   const assets:ScopeIntelligenceBrief['assets']=[{id:'critical',programId:'target',originalValue:'*.example.test',normalizedValue:'*.example.test',format:'WILDCARD_DOMAIN',type:'WILDCARD',formatSource:'AUTO',typeSource:'USER',assetValue:'CRITICAL',active:true,createdAt:at,updatedAt:at,program,executionTarget:null},{id:'low',programId:'target',originalValue:'low.example.test',normalizedValue:'low.example.test',format:'SUBDOMAIN',type:'WEB_APPLICATION',formatSource:'AUTO',typeSource:'HEURISTIC',assetValue:'LOW',active:true,createdAt:at,updatedAt:at,program,executionTarget:null}];
@@ -19,8 +20,14 @@ describe('concise, deterministic v2 Scope intelligence',()=>{
   it('summarizes static assets and preserves Partial/BLOCKED coverage with exact artifact provenance',()=>{
     const b=fixture(),detail=b.details.get('critical')!,at=new Date(b.generatedAt),plan=buildReconPlan(detail.asset,{active:true,exclusions:[]});
     detail.artifacts=Array.from({length:43},(_,i)=>({...normalizeArtifact('endpoint',{url:`https://app.example.test/_next/static/chunk${i}.js`},{tool:'crawler',sourceRef:'scan:crawler',observedAt:b.generatedAt},detail.asset,[])!,id:'a'+i}));detail.discoveryCount=43;
-    detail.run={id:'scan',status:'COMPLETED',outcome:'PARTIAL',createdAt:at,startedAt:at,finishedAt:at,error:'Rate limiting',targetReconRunId:'parent',scopeMarkdownSha256:null,reconPlan:plan as unknown as Prisma.JsonValue,toolVersions:{httpx:{version:'1.12.0'}},changeSet:{new:[],removed:[],changed:[],coverageWarning:'Coverage differs'},reconSteps:[{id:'stage',scanRunId:'scan',name:'Content discovery',capability:null,details:null,position:7,state:'BLOCKED',reason:'HTTP 429',startedAt:at,finishedAt:at}],_count:{artifacts:43}};
+    detail.run={id:'scan',status:'COMPLETED',outcome:'PARTIAL',createdAt:at,startedAt:at,finishedAt:at,error:'Rate limiting',targetReconRunId:'parent',scopeMarkdownSha256:null,assessmentModeSnapshot:null,assessmentSourcesSnapshot:null,reconPlan:plan as unknown as Prisma.JsonValue,toolVersions:{httpx:{version:'1.12.0'}},changeSet:{new:[],removed:[],changed:[],coverageWarning:'Coverage differs'},reconSteps:[{id:'stage',scanRunId:'scan',name:'Content discovery',capability:null,details:null,position:7,state:'BLOCKED',reason:'HTTP 429',startedAt:at,finishedAt:at}],_count:{artifacts:43}};
     const text=renderScopeMarkdown(b,'critical');expect(text).toContain('recon_status: partial');expect(text).toContain('Static assets summarized: 43');expect(text).toContain('BLOCKED');expect(text).toContain('HTTP 429');expect(text).not.toContain('chunk42.js');expect(text).toContain('Recon run: scan');expect(text).toContain('Artifact IDs: a0');
+  });
+  it('renders captured assessment metadata and keeps historical missing modes unknown',()=>{
+    const brief=fixture();expect(renderScopeMarkdown(brief,'critical')).toContain('Legacy / mode not captured');
+    brief.assessment=captureAssessmentSnapshot({assessmentMode:'WHITE_BOX'},[{id:'source',label:'Captured source label',kind:'GIT_REPOSITORY',locator:'https://git.example.test/approved/repo',reference:'main',includePaths:['src/'],excludePaths:['vendor/'],updatedAt:brief.generatedAt}]);
+    Object.assign(brief.program,{assessmentMode:'BLACK_BOX'});
+    for(const asset of [undefined,'critical']){const text=renderScopeMarkdown(brief,asset);expect(text).toContain('White-box');expect(text).toContain('Captured source label');expect(text).toContain('No source-assisted analysis was executed');expect(text).not.toContain('Black-box.');}
   });
   it('redacts credential-like text, fences untrusted instructions, handles Unicode and long URLs, and bounds whole sections',()=>{
     const b=fixture(),item=b.assets[0];b.program.rulesOfEngagement='Authorization: Bearer DO_NOT_LEAK\nCookie: sid=DO_NOT_LEAK';

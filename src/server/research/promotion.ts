@@ -5,7 +5,7 @@ import { suggestCwe } from "@/lib/cwe";
 import { hypothesisV2Schema, researchBindingError, researchDataSchema } from "@/lib/research/hypotheses";
 import { HypothesisSyncError, hypothesisSnapshot } from "./hypotheses";
 import { ownedResearch } from "./sessions";
-import { assertResearchTarget, researchTargetSelect, researchAuthorizationSnapshot, exportText } from "./workspace";
+import { assertResearchTarget, researchTargetSelect, researchAuthorizationMatches, exportText } from "./workspace";
 
 export const promoteHypothesisSchema = z.strictObject({ expectedRevision: z.number().int().min(1).max(2147483647), acknowledgeHumanReview: z.literal(true) });
 export async function promoteHypothesis(sessionId: string, hypothesisId: string, userId: string, expectedRevision: number) {
@@ -33,7 +33,7 @@ export async function promoteHypothesis(sessionId: string, hypothesisId: string,
     try { assertResearchTarget(target, userId); } catch { throw new HypothesisSyncError("SCOPE_UNAVAILABLE", "Target authorization is no longer active", 409); }
     const snapshot = session.authorizationSnapshot as Record<string, unknown> | null;
     if (!snapshot) throw new HypothesisSyncError("LEGACY_AUTHORIZATION", "Legacy authorization snapshot: create a current Research Workspace before promotion", 409);
-    if (Object.entries(researchAuthorizationSnapshot(target)).some(([key, value]) => snapshot[key] !== value)) throw new HypothesisSyncError("POLICY_CHANGED", "Program or scope changed since export. Create a current workspace before promotion.", 409);
+    if (!researchAuthorizationMatches(snapshot, target)) throw new HypothesisSyncError("POLICY_CHANGED", "Program or scope changed since export. Create a current workspace before promotion.", 409);
     const candidate = hypothesisV2Schema.safeParse({
       externalId: h.externalId, title: h.title, status: h.status, hypothesis: h.hypothesis,
       evidenceFor: h.evidenceFor, evidenceAgainst: h.evidenceAgainst, nextTest: h.nextTest,

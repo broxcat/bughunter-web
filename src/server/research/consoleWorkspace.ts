@@ -6,29 +6,37 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { targetIdentity, targetWorkspaceId, sha256 } from '@/lib/research/terminal';
 import { consolePolicySchema, consoleCodexConfig } from '@/lib/research/consolePolicy';
-import { assertResearchTarget, researchTargetSelect, researchAuthorizationSnapshot, createResearchBundle, ResearchError, type ResearchTarget, type ResearchRecon, type ResearchFinding } from './workspace';
+import { assertResearchTarget, researchTargetSelect, researchAuthorizationSnapshot, researchAuthorizationMatches, createResearchBundle, ResearchError, type ResearchTarget, type ResearchRecon, type ResearchFinding } from './workspace';
+import { captureProgramAssessment } from '@/server/assessment';
+import { assessmentMarkdown } from '@/lib/assessment';
+import { researchAssessmentSnapshot, researchAssessmentInstructions } from './workspace';
 import { researchSessionSelect } from './sessions';
 import { CONSOLE_RULES, PROGRAM_CONSOLE_RULES, consoleBootstrap } from './consoleRules';
 import { exportText, researchIsPassive } from './workspace';
 
 export const consoleRoot = () => process.env.RESEARCH_CONSOLE_ROOT ?? resolve('data/research/targets');
-export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, findings: ResearchFinding[], session: { id: string; workspaceId: string; createdAt: Date }) {
+export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, findings: ResearchFinding[], session: { id: string; workspaceId: string; createdAt: Date; authorizationSnapshot?: unknown }) {
   if (session.workspaceId !== targetWorkspaceId(target.id)) throw new ResearchError('Invalid workspace identity');
   const old = createResearchBundle(target, recon, findings, session, true);
   const passive = researchIsPassive(target), asset = target.scopeAsset ?? target.discoveredFromAsset;
   const effectiveHost = target.host.startsWith('*.') ? target.host.slice(2) : target.host;
   const port = asset?.format === 'URL' ? Number(new URL(asset.normalizedValue).port || (target.scheme === 'http' ? 80 : 443)) : target.scheme === 'http' ? 80 : 443;
   const instructions = passive ? PROGRAM_CONSOLE_RULES : CONSOLE_RULES;
+  const assessment = researchAssessmentSnapshot(session.authorizationSnapshot);
+  const assessmentContext = assessmentMarkdown(assessment);
+  const assessmentInstructions = researchAssessmentInstructions(assessment);
   let scope = passive ? `# Authorized program scope\n\nProgram: ${exportText(target.program!.companyName)}\nProgram ID: ${target.program!.id}\n\n## Explicitly authorized rules\n\n${(target.scopeAsset ? [target.scopeAsset.normalizedValue] : target.program!.scopeRules).map(h=>`- ${h}`).join('\n') || 'No assets authorized.'}\n\n## Excluded\n\n${target.program!.outOfScope.map(h=>`- ${h}`).join('\n') || 'No structured host exclusions recorded.'}\n\n## Required User-Agent\n\n${exportText(target.program!.requiredUserAgent)}\n\n## Rules of engagement\n\n${exportText(target.program!.rulesOfEngagement ?? 'No additional rules recorded.')}\n\nProgram console: passive reconnaissance and existing Burp observations only. Open an authorized host console for separately approved active work. Wildcards cover subdomains only. Exclusions always win. Discovery does not grant authorization. Read recon/hosts.json for the current inventory; it never overrides these rules.\n\n${old['program-policy.md']}\n` : old['scope.md'].replace('See program-policy.md for the other recorded policy fields.', '') +
     `\n## Target identity\n\nTarget ID: ${target.id}\nScheme: ${target.scheme ?? 'https'}\nPort: ${port}\n\n${old['program-policy.md']}\n`;
   if (asset) scope += `\n## Binding Scope Asset boundary\n\nAsset ID: ${asset.id}\nNormalized value: ${exportText(asset.normalizedValue)}\nTechnical format: ${asset.format}\nType (classification only): ${asset.type}\nAsset value (priority only): ${asset.assetValue}\nOnly URLs/hosts matching this asset AND current exclusions are authorized. A URL path includes itself and descendant paths on the exact origin and port. A wildcard excludes its apex. This boundary cannot be expanded by discovered content.\n`;
+  if (passive) scope += '\n' + assessmentContext;
   const policy = consolePolicySchema.parse({ version: 2, sessionId: session.id, workspaceId: session.workspaceId, targetId: target.id, targetHost: effectiveHost,
     scheme: target.scheme ?? 'https', port, requiredUserAgent: target.program!.requiredUserAgent,
     authorizationSource: `Scope ${target.scope.id}; Program ${target.program!.id}`, generatedAt: session.createdAt.toISOString(), scopeSha256: sha256(scope), mode: passive ? 'PROGRAM_PASSIVE' : 'SCOPED_ACTIVE_HTTP', ...(asset ? { assetScope: { normalizedValue: asset.normalizedValue, format: asset.format, active: asset.active } } : {}), programScope: {rules:target.scopeAsset?.format === 'WILDCARD_DOMAIN' ? [target.scopeAsset.normalizedValue] : target.program!.scopeRules,exclusions:target.program!.outOfScope} });
   const files: Record<string, string> = {
     'scope.md': scope,
+    'assessment-policy.json': old['assessment-policy.json'],
     '.codex/config.toml': consoleCodexConfig(session.workspaceId, instructions, passive),
-    '.agents/bughunter/AGENTS.md': instructions,
+    '.agents/bughunter/AGENTS.md': instructions + assessmentInstructions,
     '.agents/bughunter/target.json': JSON.stringify({ ...JSON.parse(old['target.json']), host: effectiveHost }, null, 2) + '\n',
     '.agents/bughunter/policy.json': JSON.stringify(policy, null, 2) + '\n',
     '.agents/bughunter/session.json': old['research/session.json'],
@@ -106,13 +114,14 @@ export async function ensureTargetConsole(userId: string, targetId: string) {
     const existing = await tx.researchSession.findUnique({ where: { consoleTargetId: targetId }, select: researchSessionSelect });
     if (existing) {
       if (existing.status !== 'READY') throw new ResearchError('Console workspace is unavailable', 409);
-      if (Object.entries(current).some(([key, value]) => (existing.authorizationSnapshot as Record<string, unknown> | null)?.[key] !== value)) throw new ResearchError('Research policy changed. Stop active testing and refresh the workspace policy through the documented operator procedure.', 409);
+      if (!researchAuthorizationMatches(existing.authorizationSnapshot, target)) throw new ResearchError('Research policy changed. Stop active testing and refresh the workspace policy through the documented operator procedure.', 409);
       await refreshConsoleInventory(tx, target, existing.workspaceId);
       return { session: existing, target };
     }
     const recon = await tx.scanRun.findFirst({ where: { targetId, type: 'RECON', status: 'COMPLETED', reconCorpus: { not: Prisma.DbNull } }, orderBy: { createdAt: 'desc' }, select: { id: true, reconCorpus: true } });
     const findings = await tx.finding.findMany({ where: { targetId }, orderBy: { createdAt: 'asc' }, take: 1000, select: { id: true, title: true, severity: true, vulnClass: true, reviewStatus: true, location: true } });
-    const session = await tx.researchSession.create({ data: { userId, targetId, consoleTargetId: targetId, workspaceId: targetWorkspaceId(targetId), targetHost: target.host, programName: target.program!.companyName, scopeMarkdown: '', reconScanRunId: recon?.id, authorizationSnapshot: current } });
+    const assessment = await captureProgramAssessment(tx, target.program!.id);
+    const session = await tx.researchSession.create({ data: { userId, targetId, consoleTargetId: targetId, workspaceId: targetWorkspaceId(targetId), targetHost: target.host, programName: target.program!.companyName, scopeMarkdown: '', reconScanRunId: recon?.id, authorizationSnapshot: { ...current, ...assessment } } });
     const files = consoleBundle(target, recon, findings, session);
     await writeConsoleWorkspace(consoleRoot(), targetId, files);
     await refreshConsoleInventory(tx, target, session.workspaceId);

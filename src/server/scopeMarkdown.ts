@@ -6,17 +6,18 @@ import { loadAssetReconDetail } from './recon/intelligence';
 import { ResearchError,exportText } from './research/workspace';
 import { reconHash,reconJson } from './research/reconContext';
 import { backfillProgramAssets,lockOwnedProgram } from './scopeAssets';
+import { assessmentSnapshotFromRun,assessmentMarkdown,type AssessmentSnapshot } from '@/lib/assessment';
 
 export const SCOPE_MARKDOWN_VERSION=2,SCOPE_MARKDOWN_BYTES=128*1024;
 export const markdownText=(value:string)=>exportText(value).replace(/[\r\n]+/g,' ').replace(/[\\`*_{}[\]()#+.!|<>~-]/g,'\\$&');
 export const scopeFilename=(kind:'target'|'asset',value:string)=>`${kind}-${value.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,80)||'scope'}-scope.md`;
 type RunSummary={id:string;status:string;outcome:string|null;finishedAt:Date|null;artifacts:number};
 type Detail=Awaited<ReturnType<typeof loadAssetReconDetail>>;
-export type ScopeIntelligenceBrief={program:{id:string;companyName:string;platform:string|null;programUrl:string|null;requiredUserAgent:string;rulesOfEngagement:string|null;outOfScope:string[];updatedAt:Date};assets:Detail['asset'][];details:Map<string,Detail>;summaries?:Map<string,RunSummary>;generatedAt:string;parentId?:string;bounded:boolean};
+export type ScopeIntelligenceBrief={program:{id:string;companyName:string;platform:string|null;programUrl:string|null;requiredUserAgent:string;rulesOfEngagement:string|null;outOfScope:string[];updatedAt:Date};assets:Detail['asset'][];details:Map<string,Detail>;summaries?:Map<string,RunSummary>;generatedAt:string;parentId?:string;bounded:boolean;assessment?:AssessmentSnapshot};
 export async function loadScopeBrief(userId:string,programId:string,assetId?:string,runId?:string,parentId?:string):Promise<ScopeIntelligenceBrief> {
   const program=await prisma.bountyProgram.findFirst({where:{id:programId,ownerId:userId},select:{id:true,companyName:true,platform:true,programUrl:true,requiredUserAgent:true,rulesOfEngagement:true,outOfScope:true,updatedAt:true}});if(!program)throw new ResearchError('Target not found',404);
   await prisma.$transaction(async tx=>{await lockOwnedProgram(tx,userId,programId);await backfillProgramAssets(tx,programId,userId);},{timeout:30000});
-  const parent=await prisma.targetReconRun.findFirst({where:{programId,...(parentId?{id:parentId}:{})},orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true,createdAt:true,finishedAt:true,scans:{select:{id:true,scopeAssetId:true}}}});
+  const parent=await prisma.targetReconRun.findFirst({where:{programId,...(parentId?{id:parentId}:{})},orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true,createdAt:true,finishedAt:true,assessmentModeSnapshot:true,assessmentSourcesSnapshot:true,scans:{select:{id:true,scopeAssetId:true}}}});
   if(parentId&&!parent)throw new ResearchError('Recon parent not found',404);
   const membership=new Map(parentId?parent?.scans.filter(s=>s.scopeAssetId).map(s=>[s.scopeAssetId!,s.id]):[]);
   const ids=await prisma.scopeAsset.findMany({where:{programId,...(assetId?{id:assetId}:parentId?{id:{in:[...membership.keys()]}}:{active:true})},orderBy:[{assetValue:'asc'},{normalizedValue:'asc'}],select:{id:true},take:1000});
@@ -27,7 +28,8 @@ export async function loadScopeBrief(userId:string,programId:string,assetId?:str
     else{const {scanRuns,...asset}=await prisma.scopeAsset.findUniqueOrThrow({where:{id:row.id},include:{scanRuns:{where:{type:'RECON',...(parentId?{targetReconRunId:parentId}:{})},take:1,orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true,status:true,outcome:true,finishedAt:true,_count:{select:{artifacts:true}}}},program:{select:{id:true,companyName:true,platform:true,programUrl:true,requiredUserAgent:true,outOfScope:true,rulesOfEngagement:true,updatedAt:true}},executionTarget:{select:{id:true,_count:{select:{researchSessions:true,findings:true}}}}}});assets.push(asset);const latest=scanRuns[0];if(latest){summaries.set(row.id,{...latest,artifacts:latest._count.artifacts});if(latest.finishedAt)dates.push(latest.finishedAt);}dates.push(asset.updatedAt);}
   }
   if(parent?.finishedAt)dates.push(parent.finishedAt);
-  return{program,assets,details,summaries,generatedAt:new Date(Math.max(...dates.map(d=>d.getTime()))).toISOString(),...(parent?{parentId:parent.id}:{}),bounded:ids.length>30};
+  const assessment=assessmentSnapshotFromRun(assetId?details.get(assetId)?.run??{}:parent??{});
+  return{program,assets,details,summaries,generatedAt:new Date(Math.max(...dates.map(d=>d.getTime()))).toISOString(),...(parent?{parentId:parent.id}:{}),bounded:ids.length>30,assessment};
 }
 const empty='No data collected yet.';
 const table=(heads:string[],rows:(string|number|boolean|null|undefined)[][])=>rows.length?`| ${heads.join(' | ')} |\n|${heads.map(()=> '---').join('|')}|\n${rows.map(row=>'| '+row.map(v=>markdownText(String(v??'Unknown'))).join(' | ')+' |').join('\n')}\n`:empty+'\n';
@@ -67,6 +69,7 @@ export function renderScopeMarkdown(brief:ScopeIntelligenceBrief,assetId?:string
   const detail=assetId?brief.details.get(assetId):undefined;
   const summary=(id:string)=>brief.summaries?.get(id)??brief.details.get(id)?.run;
   let text=`---\nformat_version: 2\ntarget_id: ${p.id}\ngenerated_at: ${brief.generatedAt}\n${assetId?`scope_asset_id: ${assetId}\nrecon_run_id: ${detail?.run?.id??'none'}\nrecon_status: ${assetReconStatus(detail?.run??null,0).toLowerCase()}\n`:`target_recon_run_id: ${brief.parentId??'none'}\n`}---\n\n# ${assetId?'Scope Intelligence':'Bug Bounty Target Intelligence'}\n\nTarget ID: ${p.id}\nFormat version: 2\nGenerated at (latest included data): ${brief.generatedAt}\n\n`;
+  text+=assessmentMarkdown(brief.assessment??assessmentSnapshotFromRun(detail?.run??{}))+'\n\n';
   if(detail)text+=`## Target\n\nProgram: ${markdownText(p.companyName)}\nRequired User-Agent: ${markdownText(p.requiredUserAgent)}\nRules of engagement: ${markdownText(p.rulesOfEngagement??'No additional rules recorded.')}\n\n`+assetBody(detail);
   else {
     text+=`## Mission\n\nTarget / Program: ${markdownText(p.companyName)}\nPlatform: ${markdownText(p.platform??'Not specified')}\nProgram URL: ${markdownText(p.programUrl??'Not specified')}\nRequired User-Agent: ${markdownText(p.requiredUserAgent)}\n\n## Authorization Boundary\n\nOnly explicitly authorized, active assets below are covered. Exact domains never imply wildcards. URL origin, port and path boundaries remain binding. Exclusions always win: ${p.outOfScope.map(markdownText).join(', ')||'None recorded.'}\nRules of engagement: ${markdownText(p.rulesOfEngagement??'No additional rules recorded.')}\n\n`;

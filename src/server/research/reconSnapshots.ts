@@ -7,7 +7,7 @@ import { discoveryState } from '@/server/recon/program';
 import type { ResearchProvider } from '@/lib/research/provider';
 import type { ResearchReconContext, ReconPanelState } from '@/lib/research/recon';
 import { issueReconDelivery } from '@/lib/research/reconDelivery';
-import { assertResearchTarget, researchTargetSelect, researchAuthorizationSnapshot, researchIsPassive, ResearchError, type ResearchTarget } from './workspace';
+import { assertResearchTarget, researchTargetSelect, researchAuthorizationSnapshot, researchAuthorizationMatches, researchAssessmentSnapshot, researchIsPassive, ResearchError, type ResearchTarget } from './workspace';
 import { buildReconContext, compactReconContext, reconHash, reconJson, RECON_INPUT_LIMITS, type ReconRun } from './reconContext';
 import { ensureTargetConsole, consoleRoot } from './consoleWorkspace';
 import { publishReconFiles } from './reconFiles';
@@ -29,7 +29,7 @@ async function loadInputs(tx: Prisma.TransactionClient, target: ResearchTarget) 
       ...(asset ? { OR: [{ scopeAssetId: { in: sourceIds } }, { targetId: target.id }, { target: { discoveredFromAssetId: asset.id } }] }
         : target.contextOnly ? {} : { OR: [{ targetId: target.id }, { target: { contextOnly: true, scopeAssetId: null } }] }) },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: RECON_INPUT_LIMITS.scans,
-    select: { id: true, targetId: true, status: true, outcome: true, createdAt: true, startedAt: true, finishedAt: true, reconCorpus: true, assetResults: true, artifactVersion: true, artifacts: {select:artifactSelect,take:2000,orderBy:[{kind:'asc'},{canonicalKey:'asc'}]}, target: { select: { host: true } },
+    select: { id: true, targetId: true, status: true, outcome: true, createdAt: true, startedAt: true, finishedAt: true, reconCorpus: true, assetResults: true, artifactVersion: true, assessmentModeSnapshot:true, artifacts: {select:artifactSelect,take:2000,orderBy:[{kind:'asc'},{canonicalKey:'asc'}]}, target: { select: { host: true } },
       discoveries: { take: RECON_INPUT_LIMITS.discoveries, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true, host: true, source: true, state: true, createdAt: true } },
       _count: { select: { discoveries: true, logs: true, artifacts: true } } },
   });
@@ -85,15 +85,16 @@ async function ownedTarget(tx: Prisma.TransactionClient, userId: string, targetI
   }
   assertResearchTarget(target, userId); return target;
 }
-function fingerprint(target: ResearchTarget, runs: ReconRun[], assets: unknown[]) {
-  return reconHash(reconJson({ normalizerVersion: 3, limits: RECON_INPUT_LIMITS, policy: researchAuthorizationSnapshot(target), runs, assets }));
+function fingerprint(target: ResearchTarget, runs: ReconRun[], assets: unknown[], sessionSnapshot: unknown) {
+  const captured = researchAssessmentSnapshot(sessionSnapshot);
+  return reconHash(reconJson({ normalizerVersion: 4, limits: RECON_INPUT_LIMITS, policy: researchAuthorizationSnapshot(target), assessment:{assessmentMode:captured.assessmentMode,authorizedSourceCount:captured.authorizedSources.length}, runs, assets }));
 }
 async function loadAssets(tx: Prisma.TransactionClient, target: ResearchTarget) { return tx.scopeAsset.findMany({ where: { programId: target.program!.id, ...((target.scopeAsset ?? target.discoveredFromAsset) ? { id: (target.scopeAsset ?? target.discoveredFromAsset)!.id } : { active: true }) }, orderBy: { id: 'asc' }, take: 1000, select: assetSelect }); }
 export async function reconPanelState(userId: string, targetId: string): Promise<ReconPanelState> {
   await normalizeOwnedHistory(userId,targetId);
   return prisma.$transaction(async tx => {
     const target = await ownedTarget(tx, userId, targetId);
-    const session = await tx.researchSession.findUnique({ where: { consoleTargetId: targetId }, select: { id: true } });
+    const session = await tx.researchSession.findUnique({ where: { consoleTargetId: targetId }, select: { id: true,authorizationSnapshot:true } });
     if (!session) return { sessionId: '', snapshot: null, updateAvailable: false, aged: false, deliveries: [] };
     const [snapshot, deliveries, runs, assets] = await Promise.all([
       tx.researchReconSnapshot.findFirst({ where: { sessionId: session.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: snapshotSelect }),
@@ -102,7 +103,7 @@ export async function reconPanelState(userId: string, targetId: string): Promise
       loadAssets(tx, target),
     ]);
     return { sessionId: session.id, snapshot: snapshot ? { id: snapshot.id, contentSha256: snapshot.contentSha256, createdAt: snapshot.createdAt.toISOString(), context: snapshot.summary as unknown as ResearchReconContext } : null,
-      updateAvailable: Boolean(snapshot && snapshot.sourceFingerprint !== fingerprint(target, runs, assets)),
+      updateAvailable: Boolean(snapshot && snapshot.sourceFingerprint !== fingerprint(target, runs, assets, session.authorizationSnapshot)),
       aged: Boolean(snapshot && Date.now() - snapshot.createdAt.getTime() > 7 * 86400000),
       deliveries: deliveries.map(d => ({ ...d, createdAt: d.createdAt.toISOString() })) };
   }, { timeout: 20000, isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
@@ -113,11 +114,11 @@ export async function generateReconSnapshot(userId: string, targetId: string) {
   await prisma.$transaction(async tx => {
     const target = await ownedTarget(tx, userId, targetId, true);
     const session = await tx.researchSession.findUniqueOrThrow({ where: { consoleTargetId: targetId } });
-    if (session.status !== 'READY' || Object.entries(researchAuthorizationSnapshot(target)).some(([k, v]) => (session.authorizationSnapshot as Record<string, unknown> | null)?.[k] !== v)) throw new ResearchError('Research policy changed', 409);
-    const runs = await loadInputs(tx, target), assets = await loadAssets(tx, target), sourceFingerprint = fingerprint(target, runs, assets);
+    if (session.status !== 'READY' || !researchAuthorizationMatches(session.authorizationSnapshot, target)) throw new ResearchError('Research policy changed', 409);
+    const runs = await loadInputs(tx, target), assets = await loadAssets(tx, target), sourceFingerprint = fingerprint(target, runs, assets, session.authorizationSnapshot);
     let snapshot = await tx.researchReconSnapshot.findUnique({ where: { sessionId_sourceFingerprint: { sessionId: session.id, sourceFingerprint } } });
     if (!snapshot) {
-      const context = buildReconContext({ programId: target.program!.id, targetId, scopeId: target.scope.id, generatedAt: new Date().toISOString(), runs: expandAssetReconRuns(runs), scopeAssets: assets, ...reconScopePolicy(target, assets),
+      const context = buildReconContext({ programId: target.program!.id, targetId, scopeId: target.scope.id, generatedAt: new Date().toISOString(), runs: expandAssetReconRuns(runs), scopeAssets: assets, assessmentSnapshot:researchAssessmentSnapshot(session.authorizationSnapshot), ...reconScopePolicy(target, assets),
         warnings: [...reconScopePolicy(target, assets).warnings, ...(runs.length === RECON_INPUT_LIMITS.scans ? ['Retained scan limit reached; older scans remain available in Recon.'] : [])] });
       const summary = compactReconContext(context), contentSha256 = reconHash(reconJson(context)), summarySha256 = reconHash(reconJson(summary));
       snapshot = await tx.researchReconSnapshot.create({ data: { sessionId: session.id, sourceFingerprint, contentSha256, summarySha256, context: context as unknown as Prisma.InputJsonValue, summary: summary as unknown as Prisma.InputJsonValue } });
@@ -137,7 +138,7 @@ export async function transmitReconSnapshot(userId: string, targetId: string, sn
     const target = await ownedTarget(tx, userId, targetId, true);
     const snapshot = await tx.researchReconSnapshot.findFirst({ where: { id: snapshotId, session: { userId, consoleTargetId: targetId, status: 'READY' } }, include: { session: true } });
     if (!snapshot) throw new ResearchError('Snapshot not found', 404);
-    if (Object.entries(researchAuthorizationSnapshot(target)).some(([k, v]) => (snapshot.session.authorizationSnapshot as Record<string, unknown> | null)?.[k] !== v)) throw new ResearchError('Research policy changed', 409);
+    if (!researchAuthorizationMatches(snapshot.session.authorizationSnapshot, target)) throw new ResearchError('Research policy changed', 409);
     if (await tx.researchReconDelivery.count({ where: { sessionId: snapshot.sessionId, createdAt: { gt: new Date(Date.now() - 60000) } } }) >= 10) throw new ResearchError('Recon delivery limit reached; wait one minute', 429);
     await publishReconFiles(consoleRoot(), snapshot.session.workspaceId, { contentSha256: snapshot.contentSha256, contextText: reconJson(snapshot.context), summaryText: reconJson(snapshot.summary) });
     // Policy is read through fixed server-owned paths, never from browser input.

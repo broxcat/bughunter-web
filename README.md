@@ -4,6 +4,8 @@ License: AGPL-3.0-only ([LICENSE](LICENSE))
 
 Bug bounty workflow: **Targets → Scope → Recon → Research → Findings → Report**.
 
+Targets support [Black-box and White-box assessment modes](docs/assessment-modes.md). White-box currently registers authorized source metadata only; source authorization never expands network scope.
+
 A Target is a company or bug bounty program.
 Create it at `/targets` with a company name and an explicit **Required User-Agent**.
 Platform, program URL, rewards, scope hosts and vulnerability families are optional.

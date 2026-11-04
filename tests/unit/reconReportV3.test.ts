@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { reportBudget, reportInput } from '@/lib/reconReport';
 import type { SummaryEvidence } from '@/lib/reconSummary';
-import { REPORT_V3_SYSTEM, createReconReportV3Input, modelInputForReconReportV3, reconReportV3NarrativeSchemaFor, factsForEvidenceRefs, validateReconReportV3, fallbackReconReportV3, ReconReportV3ValidationError, compactPriorReconReportV3, type ReconReportV3Input } from '@/lib/reconReportV3';
+import { captureAssessmentSnapshot } from '@/lib/assessment';
+import { REPORT_V3_SYSTEM, createReconReportV3Input, modelInputForReconReportV3, reconReportV3NarrativeSchemaFor, factsForEvidenceRefs, validateReconReportV3, fallbackReconReportV3, ReconReportV3ValidationError, compactPriorReconReportV3,reportAssessmentContext, type ReconReportV3Input } from '@/lib/reconReportV3';
 
 const rows: SummaryEvidence[] = [
   { id: 'asset-identity-001', kind: 'asset', value: { normalized: 'https://app.example.test/app/', format: 'URL', active: true, type: 'WEB_APPLICATION', value: 'HIGH' } },
@@ -23,6 +24,14 @@ const narrative = (data: ReconReportV3Input) => ({ title: 'Reconnaissance & Atta
 function issueCode(run: () => unknown) { try { run(); throw new Error('Expected validation to reject'); } catch (error) { expect(error).toBeInstanceOf(ReconReportV3ValidationError); return (error as ReconReportV3ValidationError).issues[0].code; } }
 
 describe('Recon Report v3: deterministic facts, narrative-only model', () => {
+  it('keeps assessment mode/source counts deterministic and never includes source pointers in the AI contract',()=>{
+    const snapshot=captureAssessmentSnapshot({assessmentMode:'WHITE_BOX'},[{id:'private-source-id',label:'Private source registration',kind:'GIT_REPOSITORY',locator:'https://git.example.test/private/repository',reference:'protected-branch',includePaths:['private/src/'],excludePaths:['private/vendor/'],updatedAt:'2026-11-04T00:00:00Z'}]);
+    const context=reportAssessmentContext(snapshot),data=createReconReportV3Input(reportInput({},rows,reportBudget(32768)),rows,context);
+    expect(context).toEqual({assessmentMode:'WHITE_BOX',authorizedSourceCount:1,sourceContentAvailable:false,sourceAnalysisPerformed:false,networkAuthorizationSource:'ScopeAsset',sourceAuthorizationSeparate:true});
+    const model=JSON.stringify(modelInputForReconReportV3(data))+JSON.stringify(z.toJSONSchema(reconReportV3NarrativeSchemaFor(data)));
+    for(const forbidden of ['WHITE_BOX','assessmentContext','private-source-id','Private source registration','git.example.test','protected-branch','private/src/'])expect(model).not.toContain(forbidden);
+    expect(validateReconReportV3(JSON.stringify(narrative(data)),data).assessmentContext).toEqual(context);expect(fallbackReconReportV3(data).assessmentContext).toEqual(context);
+  });
   it('uses short aliases in the dynamic schema and model cards, resolves real IDs only after validation', () => {
     const data = input(), proposed = narrative(data), model = modelInputForReconReportV3(data), schema = reconReportV3NarrativeSchemaFor(data);
     expect(schema.safeParse(proposed).success).toBe(true); expect(Object.keys(data.aliases).every(key => /^E\d{3}$/.test(key))).toBe(true);

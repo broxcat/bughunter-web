@@ -8,11 +8,13 @@ import type { ReconEvidence, ResearchReconContext } from '@/lib/research/recon';
 import { assetAllowsHost, assetAllowsUrl, assetValueRank } from '@/lib/scopeAssets';
 import type { AssetEvidence } from '@/server/recon/assetEvidence';
 import type { ReconArtifactData } from '@/lib/reconArtifacts';
+import { assessmentSnapshotFromRun, type AssessmentSnapshot, type AssessmentMode } from '@/lib/assessment';
 
 export const RECON_DETAIL_BYTES = 1024 * 1024;
 export const RECON_SUMMARY_BYTES = 24 * 1024;
 export const RECON_INPUT_LIMITS = { scans: 60, discoveries: 500, logs: 1000 } as const;
 export type ReconRun = {
+  assessmentModeSnapshot?: AssessmentMode | null; assessmentSourcesSnapshot?: unknown;
   artifacts?: ReconArtifactData[];
   artifactInputTruncated?: boolean;
   partialCoverage?: boolean;
@@ -53,6 +55,7 @@ export function buildReconContext(input: {
   programId: string; scopeId: string; targetId: string; generatedAt: string; runs: ReconRun[];
   inScope: (value: string) => boolean; activeSuggestionsAllowed: boolean; warnings?: string[];
   scopeAssets?: ResearchReconContext['scopeAssets'];
+  assessmentSnapshot?: AssessmentSnapshot;
 }): ResearchReconContext {
   const warnings = new Set(input.warnings ?? []);
   const context: ResearchReconContext = { schemaVersion: 1, programId: input.programId, scopeId: input.scopeId, targetId: input.targetId,
@@ -63,6 +66,8 @@ export function buildReconContext(input: {
   const maps = { assets: new Map<string, typeof context.assets[number]>(), endpoints: new Map<string, typeof context.endpoints[number]>(),
     technologies: new Map<string, typeof context.technologies[number]>(), observations: new Map<string, typeof context.observations[number]>() };
   const runs = [...input.runs].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
+  const assessment = input.assessmentSnapshot ?? assessmentSnapshotFromRun(runs.at(-1));
+  context.assessment = { assessmentMode: assessment.assessmentMode, authorizedSourceCount: assessment.authorizedSources.length, sourceContentAvailable: false, sourceAnalysisPerformed: false, assessmentPolicyFile: assessment.assessmentMode ? 'assessment-policy.json' : null };
   const latest = new Map<string, string>();
   const latestTime = new Map<string, string>();
   const previousCompleted = new Map<string, string>();

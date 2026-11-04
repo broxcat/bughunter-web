@@ -15,6 +15,7 @@
 
 import { cvssRating } from "@/lib/cvss";
 import { cweUrl } from "@/lib/cwe";
+import { assessmentModeLabel,type AssessmentMode } from "@/lib/assessment";
 
 export type ReportPlatform =
   | "HACKERONE"
@@ -31,6 +32,9 @@ export interface ReportOobHit {
 }
 
 export interface ReportFinding {
+  /** Captured execution provenance, never the current Program setting. */
+  assessmentMode?: AssessmentMode | null;
+  assessmentModeSource?: "RESEARCH_SESSION" | "SCAN_RUN" | "UNKNOWN";
   title: string;
   vulnClass?: string | null;
   severity?: string | null;
@@ -49,6 +53,26 @@ export interface ReportFinding {
 export interface ReportInput {
   title: string;
   findings: ReportFinding[];
+  /** Optional application-owned captured aggregate; the API derives it from findings. */
+  assessmentMode?: AssessmentMode | "MIXED" | null;
+}
+
+/** A promoted finding belongs to its actual Research session. An uncaptured
+ * legacy session stays unknown instead of borrowing the preceding Recon mode. */
+export function capturedFindingAssessment(finding:{scanRun?:{assessmentModeSnapshot?:unknown}|null;researchPromotion?:{hypothesis?:{session?:{authorizationSnapshot?:unknown}|null}|null}|null}):Pick<ReportFinding,'assessmentMode'|'assessmentModeSource'>{
+  if(finding.researchPromotion){
+    const raw=finding.researchPromotion.hypothesis?.session?.authorizationSnapshot;
+    const mode=raw&&typeof raw==='object'&&!Array.isArray(raw)?(raw as Record<string,unknown>).assessmentMode:null;
+    return{assessmentMode:mode==='BLACK_BOX'||mode==='WHITE_BOX'?mode:null,assessmentModeSource:'RESEARCH_SESSION'};
+  }
+  const mode=finding.scanRun?.assessmentModeSnapshot;
+  return{assessmentMode:mode==='BLACK_BOX'||mode==='WHITE_BOX'?mode:null,assessmentModeSource:finding.scanRun?'SCAN_RUN':'UNKNOWN'};
+}
+function aggregateAssessmentMode(input:ReportInput):string{
+  if(input.assessmentMode!==undefined)return input.assessmentMode==='MIXED'?'Mixed captured modes':assessmentModeLabel(input.assessmentMode);
+  const modes=new Set(input.findings.map(finding=>finding.assessmentMode??null));
+  if(modes.size>1)return modes.has(null)?'Mixed / includes legacy uncaptured modes':'Mixed captured modes';
+  return assessmentModeLabel(input.findings[0]?.assessmentMode);
 }
 
 export const IMPACT_PLACEHOLDER = "À compléter : impact business/technique démontré";
@@ -112,6 +136,8 @@ function renderFinding(
   return [
     heading,
     meta,
+    `Assessment mode: ${assessmentModeLabel(f.assessmentMode)}`,
+    `Assessment provenance: ${f.assessmentModeSource==='RESEARCH_SESSION'?'Research session authorization snapshot':f.assessmentModeSource==='SCAN_RUN'?'Recon ScanRun snapshot':'Not captured'}`,
     "",
     cweLine(f),
     cvssLine(f),
@@ -213,6 +239,8 @@ export function renderReport(platform: ReportPlatform, input: ReportInput): stri
     `# ${title}`,
     "",
     `_${r.heading} — ${findings.length} finding${findings.length === 1 ? "" : "s"}_`,
+    `Assessment mode: ${aggregateAssessmentMode(input)}`,
+    "The mode describes captured assessment context; it does not establish source-analysis coverage or expand authorization.",
     "",
   ].join("\n");
 

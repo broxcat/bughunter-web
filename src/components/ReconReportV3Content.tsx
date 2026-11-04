@@ -1,4 +1,5 @@
 import type { ReconReportV3 } from '@/lib/reconReportV3';
+import { assessmentModeLabel } from '@/lib/assessment';
 import { presentReconFacts, reconSynthesisPresentation } from '@/lib/reconFactPresentation';
 
 const coverageLabels = {
@@ -22,7 +23,7 @@ function NarrativeEntries({ title, entries }: { title: string; entries: ReconRep
 
 /** Recon evidence is application-owned; model prose never replaces this record. */
 export default function ReconReportV3Content({ report, provider }: { report: ReconReportV3; provider?: string }) {
-  const assessment = report.assessmentOverview, narrative = report.narrative;
+  const assessment = report.assessmentOverview, narrative = report.narrative, assessmentContext=report.assessmentContext;
   const factualOnly = report.narrativeStatus === 'FACTUAL_ONLY';
   const warnings = factualOnly || report.narrativeStatus === 'RECOVERED' || report.warnings.length > 0;
   const unsupportedStructure=report.warnings.some(warning=>warning.code==='STRUCTURED_OUTPUT_UNSUPPORTED');
@@ -44,6 +45,12 @@ export default function ReconReportV3Content({ report, provider }: { report: Rec
         ['Asset', assessment.asset], ['Authorized scope', assessment.scopeBoundary], ['Format', formatLabel(assessment.format)],
         ['Type', typeLabel(assessment.assetType)], ['Asset Value', human(assessment.assetValue)], ['Recon status', human(assessment.reconStatus)], ['Tested at', assessment.testedAt],
       ].map(([label, value]) => <div key={label} className="contents"><dt className="text-muted">{label}</dt><dd className="min-w-0 break-words">{value}</dd></div>)}</dl>
+      <section className="space-y-2" aria-label="Assessment mode"><h4 className="font-medium">Assessment mode</h4>
+        <p className="text-sm">{assessmentModeLabel(assessmentContext?.assessmentMode)}</p>
+        <p className="text-sm text-muted">Authorized sources captured: {assessmentContext?.assessmentMode?assessmentContext.authorizedSourceCount:'Unknown (historical run)'}</p>
+        <p className="text-sm text-muted">{assessmentContext?.assessmentMode?'Source content available: No. Source-assisted analysis: Not performed.':'Source-assisted analysis is not recorded in this historical assessment metadata.'}</p>
+        <p className="text-xs text-muted">{assessmentContext?.assessmentMode?'Captured by BugHunter for this run.':'No assessment declaration was captured for this historical run.'} Source authorization is separate from network authorization, which remains defined by Scope Assets.</p>
+      </section>
       <p className="text-sm text-muted">{facts.count} factual entries · {facts.staticAssets} static assets summarized</p>
       {report.factual.truncated && <p role="status" className="text-sm">{report.factual.totals.omittedEvidence} additional evidence records exceed this report’s size limit. Full details remain in Recon artifacts and scope.md.</p>}
       {facts.sections.map(section => <section key={section.category} className="space-y-2" aria-label={section.title}>

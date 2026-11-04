@@ -17,6 +17,11 @@ const report = (override: Partial<ReconReportV3> = {}): ReconReportV3 => ({
 const render = (value = report()) => renderToStaticMarkup(createElement(ReconReportV3Content, { report: value }));
 
 describe('Recon report v3 facts and AI interpretation rendering', () => {
+  it('shows captured assessment mode and source counts as deterministic metadata, with an explicit analysis limit',()=>{
+    const html=render(report({assessmentContext:{assessmentMode:'WHITE_BOX',authorizedSourceCount:2,sourceContentAvailable:false,sourceAnalysisPerformed:false,networkAuthorizationSource:'ScopeAsset',sourceAuthorizationSeparate:true}}));
+    expect(html).toContain('White-box');expect(html).toContain('Authorized sources captured: 2');expect(html).toContain('Source-assisted analysis: Not performed');expect(html).toContain('network authorization');
+    expect(render()).toContain('Legacy / mode not captured');expect(render()).toContain('Unknown (historical run)');
+  });
   it('separates application-owned facts and coverage from the AI interpretation', () => {
     const html = render();
     expect(html.indexOf('Recon facts')).toBeLessThan(html.indexOf('AI synthesis'));

@@ -7,6 +7,7 @@ import { isExcluded } from './bountyProgram';
 import { classifyReconUrl } from './reconArtifacts';
 import type { SummaryEvidence } from './reconSummary';
 import type { ReconReportInput } from './reconReport';
+import type { AssessmentSnapshot } from './assessment';
 
 export const REPORT_V3_PROMPT_VERSION = 'recon-report/3';
 export const REPORT_V3_SYSTEM = `You write a professional Reconnaissance and Attack Surface narrative for an authorized researcher. Prompt version: ${REPORT_V3_PROMPT_VERSION}.
@@ -23,13 +24,15 @@ export class ReconReportV3ValidationError extends Error {
   constructor(readonly issues: V3Issue[]) { super('Recon report narrative failed validation'); this.name = 'ReconReportV3ValidationError'; }
 }
 export type ReportV3Failure = 'FAILED_PROVIDER' | 'FAILED_SCHEMA' | 'FAILED_VALIDATION' | 'FAILED_PROVIDER_CONFIGURATION';
+export type AssessmentReportContext = Pick<AssessmentSnapshot,'assessmentMode'|'sourceContentAvailable'|'sourceAnalysisPerformed'|'networkAuthorizationSource'|'sourceAuthorizationSeparate'> & { authorizedSourceCount:number };
+export function reportAssessmentContext(snapshot:AssessmentSnapshot):AssessmentReportContext { return {assessmentMode:snapshot.assessmentMode,authorizedSourceCount:snapshot.authorizedSources.length,sourceContentAvailable:false,sourceAnalysisPerformed:false,networkAuthorizationSource:'ScopeAsset',sourceAuthorizationSeparate:true}; }
 export type EvidenceFactsV3 = { urls: string[]; hostnames: string[]; ips: string[]; ports: { port: number; protocol: 'tcp' | 'udp'; service?: string }[]; services: { name: string; hostname?: string; port?: number; protocol?: string }[]; technologies: { name: string; version?: string }[]; statusCodes: number[]; methods: string[]; parameters: string[]; tls: string[]; redirects: string[] };
 export type FactRowV3 = { label: string; value: string; details: Record<string, string | number | boolean | string[]>; evidenceRefs: string[]; scopeState: 'IN_SCOPE' | 'OUT_OF_SCOPE' | 'UNKNOWN'; verification: string; sources: { tool?: string; sourceRef?: string; observedAt?: string }[] };
 export type FactualReportV3 = { sections: { category: ReportV3Category; title: string; rows: FactRowV3[] }[]; totals: { evidence: number; retainedEvidence: number; staticAssets: number; omittedEvidence: number }; truncated: boolean; sourceFingerprint: string };
 export type NarrativeEntryV3 = { text: string; confidence: 'observed' | 'inferred'; evidenceRefs: string[]; facts?: EvidenceFactsV3 };
 export type ReconNarrativeV3 = Record<ReportV3Category, NarrativeEntryV3[]> & { title: string; attackSurfaceSummary: string; notableObservations: { title: string; observation: string; relevance: string; confidence: 'observed' | 'inferred'; evidenceRefs: string[]; facts?: EvidenceFactsV3 }[]; limitations: string[]; researchHandoff: { priority: 'high' | 'medium' | 'low'; area: string; rationale: string; evidenceRefs: string[]; facts?: EvidenceFactsV3 }[] };
-export type ReconReportV3 = { version: 3; assessmentOverview: ReconReportInput['assessment']; methodology: ReconReportInput['methodology']; coverage: ReconReportInput['coverage']; factual: FactualReportV3; narrative: ReconNarrativeV3; warnings: V3Issue[]; narrativeStatus: 'VALID' | 'RECOVERED' | 'FACTUAL_ONLY'; narrativeFailure?: ReportV3Failure; generation?: Record<string, unknown> };
-export type ReconReportV3Input = Omit<ReconReportInput, 'version'> & { version: 3; fullEvidenceLedger: SummaryEvidence[]; aliases: Record<string, string>; factual: FactualReportV3; preparationWarnings: V3Issue[] };
+export type ReconReportV3 = { version: 3; assessmentOverview: ReconReportInput['assessment']; methodology: ReconReportInput['methodology']; coverage: ReconReportInput['coverage']; factual: FactualReportV3; narrative: ReconNarrativeV3; warnings: V3Issue[]; narrativeStatus: 'VALID' | 'RECOVERED' | 'FACTUAL_ONLY'; narrativeFailure?: ReportV3Failure; generation?: Record<string, unknown>; assessmentContext?:AssessmentReportContext };
+export type ReconReportV3Input = Omit<ReconReportInput, 'version'> & { version: 3; fullEvidenceLedger: SummaryEvidence[]; aliases: Record<string, string>; factual: FactualReportV3; preparationWarnings: V3Issue[]; assessmentContext?:AssessmentReportContext };
 const obj = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const uniq = (values: string[]) => [...new Set(values)].sort();
 const strings = (value: unknown) => Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
@@ -111,7 +114,7 @@ function factualRows(ledger: SummaryEvidence[]): FactualReportV3['sections'] {
 }
 /** The existing model budget is unchanged. The independent factual ledger has
  * its own 1,000-row / 512-KiB bound and always declares omissions. */
-export function createReconReportV3Input(source: ReconReportInput, fullStructuredEvidence: SummaryEvidence[] = source.evidence): ReconReportV3Input {
+export function createReconReportV3Input(source: ReconReportInput, fullStructuredEvidence: SummaryEvidence[] = source.evidence, assessmentContext?:AssessmentReportContext): ReconReportV3Input {
   const original = [...new Map([...source.evidence, ...fullStructuredEvidence].map(row => [row.id, row])).values()];
   const priority = (row: SummaryEvidence) => { const index = ['asset', 'coverage', 'auth-surface', 'api-surface', 'port', 'service', 'hostname', 'technology', 'tls', 'parameter', 'relation', 'observation', 'change', 'endpoint', 'url', 'summary'].indexOf(row.kind); return index < 0 ? 99 : index; };
   let staticAssets = 0;
@@ -124,7 +127,7 @@ export function createReconReportV3Input(source: ReconReportInput, fullStructure
   const omitted = rows.length - ledger.length;
   const factual: FactualReportV3 = { sections: factualRows(ledger), totals: { evidence: original.length, retainedEvidence: ledger.length, staticAssets, omittedEvidence: omitted }, truncated: omitted > 0, sourceFingerprint: jsonHash(original.map(row => ({ id: row.id, kind: row.kind, value: cleanValue(row.value), scopeState: row.scopeState, verification: row.verification })).sort((a, b) => a.id.localeCompare(b.id))) };
   const preparationWarnings: V3Issue[] = omitted ? [{ code: 'FACTUAL_INPUT_TRUNCATED', path: 'factual', evidenceRefs: [], message: `${omitted} evidence records exceed the factual-table limit. Original artifacts and scope.md remain available.` }] : [];
-  return { ...source, version: 3, metadata: JSON.parse(redactObservationText(JSON.stringify(source.metadata))), evidence, fullEvidenceLedger: ledger, aliases, factual, preparationWarnings };
+  return { ...source, version: 3, metadata: JSON.parse(redactObservationText(JSON.stringify(source.metadata))), evidence, fullEvidenceLedger: ledger, aliases, factual, preparationWarnings, ...(assessmentContext?{assessmentContext}:{}) };
 }
 function stripNestedRefs(value: unknown): unknown { if (Array.isArray(value)) return value.map(stripNestedRefs); if (!value || typeof value !== 'object') return value; return Object.fromEntries(Object.entries(obj(value)).filter(([key]) => !/^(?:id|evidenceRefs|artifactId|scanId|scanRunId|runId|sourceRef|requestRef|responseRef)$/i.test(key)).map(([key, v]) => [key, stripNestedRefs(v)])); }
 export function modelInputForReconReportV3(input: ReconReportV3Input) {
@@ -138,7 +141,7 @@ export function reconReportV3NarrativeSchemaFor(input: ReconReportV3Input) {
   return z.strictObject({ title: z.string().min(1).max(180), attackSurfaceSummary: z.string().min(1).max(2000), sections: z.array(z.strictObject({ category: z.enum(reportV3Categories), entries: z.array(entry).max(12) })).max(9), notableObservations: z.array(z.strictObject({ title: z.string().min(1).max(180), observation: z.string().min(1).max(700), relevance: z.string().min(1).max(500), confidence: z.enum(['observed', 'inferred']), evidenceRefs: refs })).max(12), limitations: z.array(z.string().min(1).max(500)).max(20), researchHandoff: z.array(z.strictObject({ priority: z.enum(['high', 'medium', 'low']), area: z.string().min(1).max(180), rationale: z.string().min(1).max(700), evidenceRefs: refs })).max(12) });
 }
 function emptyNarrative(): ReconNarrativeV3 { return { title: 'Reconnaissance & Attack Surface Assessment', attackSurfaceSummary: 'Structured Recon evidence is available in the factual tables. The AI narrative is unavailable.', ...Object.fromEntries(reportV3Categories.map(category => [category, []])) as unknown as Record<ReportV3Category, NarrativeEntryV3[]>, notableObservations: [], limitations: [], researchHandoff: [] }; }
-export function fallbackReconReportV3(input: ReconReportV3Input, issues: V3Issue[] = [], failureKind: ReportV3Failure = 'FAILED_VALIDATION'): ReconReportV3 { return { version: 3, assessmentOverview: input.assessment, methodology: input.methodology, coverage: input.coverage, factual: input.factual, narrative: emptyNarrative(), warnings: [...input.preparationWarnings, ...(issues.length ? issues : [{ code: failureKind, path: 'narrative', evidenceRefs: [], message: 'The AI narrative is unavailable. Application-generated factual tables remain complete within their declared limits.' }])], narrativeStatus: 'FACTUAL_ONLY', narrativeFailure: failureKind }; }
+export function fallbackReconReportV3(input: ReconReportV3Input, issues: V3Issue[] = [], failureKind: ReportV3Failure = 'FAILED_VALIDATION'): ReconReportV3 { return { version: 3, assessmentOverview: input.assessment, methodology: input.methodology, coverage: input.coverage, factual: input.factual, narrative: emptyNarrative(), warnings: [...input.preparationWarnings, ...(issues.length ? issues : [{ code: failureKind, path: 'narrative', evidenceRefs: [], message: 'The AI narrative is unavailable. Application-generated factual tables remain complete within their declared limits.' }])], narrativeStatus: 'FACTUAL_ONLY', narrativeFailure: failureKind, ...(input.assessmentContext?{assessmentContext:input.assessmentContext}:{}) }; }
 export function compactPriorReconReportV3(content: unknown): { narrative: Record<string, unknown>; referencedIds: string[] } {
   const value = obj(content), narrative = obj(value.narrative);
   if (value.version !== 3) return { narrative: { unavailable: 'Unrecognized historical report format.' }, referencedIds: [] };
@@ -267,5 +270,5 @@ export function validateReconReportV3(raw: string, input: ReconReportV3Input, op
   }
   const usefulNarrative = !overviewIssues.length || reportV3Categories.some(category => narrative[category].length) || narrative.notableObservations.length || narrative.researchHandoff.length;
   if (!usefulNarrative) return fallbackReconReportV3(input, warnings, 'FAILED_VALIDATION');
-  return { version: 3, assessmentOverview: input.assessment, methodology: input.methodology, coverage: input.coverage, factual: input.factual, narrative, warnings: [...input.preparationWarnings, ...warnings], narrativeStatus: warnings.length ? 'RECOVERED' : 'VALID' };
+  return { version: 3, assessmentOverview: input.assessment, methodology: input.methodology, coverage: input.coverage, factual: input.factual, narrative, warnings: [...input.preparationWarnings, ...warnings], narrativeStatus: warnings.length ? 'RECOVERED' : 'VALID', ...(input.assessmentContext?{assessmentContext:input.assessmentContext}:{}) };
 }

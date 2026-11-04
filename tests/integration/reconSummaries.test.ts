@@ -78,6 +78,21 @@ const providerCalls:{path:string;authorization:string;body:Record<string,unknown
     expect(await p.reconSummary.findUniqueOrThrow({where:{id:historic.id}})).toEqual(historic);
   });
   it('automatically schedules child then Target summaries, only once per run',async()=>{await s.scheduleFinishedSummaries();const child=await p.reconSummary.findFirstOrThrow({where:{scanRunId:runId}});await s.processReconSummary(child.id);await s.scheduleFinishedSummaries();const parent=await p.reconSummary.findFirstOrThrow({where:{targetReconRunId:parentId,scopeAssetId:null}});expect(JSON.stringify(parent.input)).toContain(child.id);await s.processReconSummary(parent.id);await s.scheduleFinishedSummaries();expect(await p.reconSummary.count({where:{programId}})).toBe(2);});
+  it('keeps the captured assessment declaration outside AI payloads for both asset and Target summaries',async()=>{
+    const{captureAssessmentSnapshot}=await import('@/lib/assessment');
+    const snapshot=captureAssessmentSnapshot({assessmentMode:'WHITE_BOX'},[{id:'private-source-identity',label:'Authorized private metadata',kind:'GIT_REPOSITORY',locator:'https://git.example.test/internal/repository',reference:'protected-reference',includePaths:['internal/src/'],excludePaths:['internal/vendor/'],updatedAt:new Date()}]);
+    const captured={assessmentModeSnapshot:snapshot.assessmentMode,assessmentSourcesSnapshot:JSON.parse(JSON.stringify(snapshot.authorizedSources))};
+    await p.targetReconRun.update({where:{id:parentId},data:captured});await p.scanRun.update({where:{id:runId},data:captured});
+    expect((await p.bountyProgram.findUniqueOrThrow({where:{id:programId}})).assessmentMode).toBe('BLACK_BOX');
+    for(const id of [assetId,undefined]){
+      const job=await s.scheduleReconSummary(userId,programId,id);
+      expect(job.input).toMatchObject({assessmentContext:{assessmentMode:'WHITE_BOX',authorizedSourceCount:1,sourceContentAvailable:false,sourceAnalysisPerformed:false}});
+      expect(JSON.stringify(job.input)).not.toContain('git.example.test');
+      await s.processReconSummary(job.id);const saved=await p.reconSummary.findUniqueOrThrow({where:{id:job.id}});
+      expect(saved).toMatchObject({status:'READY',content:{assessmentContext:{assessmentMode:'WHITE_BOX',authorizedSourceCount:1,sourceAnalysisPerformed:false}}});
+      const sent=JSON.stringify(received);for(const forbidden of ['assessmentContext','WHITE_BOX','private-source-identity','Authorized private metadata','git.example.test','protected-reference','internal/src/'])expect(sent).not.toContain(forbidden);
+    }
+  });
   it('keeps history across regeneration, changed model and a new Recon',async()=>{const first=await s.scheduleReconSummary(userId,programId,assetId);await s.processReconSummary(first.id);expect((await s.scheduleReconSummary(userId,programId,assetId)).id).toBe(first.id);const second=await s.scheduleReconSummary(userId,programId,assetId,true);expect(second.id).not.toBe(first.id);await s.processReconSummary(second.id);await p.aiProviderConfig.update({where:{userId_provider:{userId,provider:'OLLAMA'}},data:{model:'new-selected-model'}});const third=await s.scheduleReconSummary(userId,programId,assetId,true);expect(third.model).toBe('new-selected-model');await s.processReconSummary(third.id);await p.scanRun.create({data:{targetId,scopeAssetId:assetId,type:'RECON',status:'QUEUED'}});expect((await s.summaryView(userId,programId,assetId)).stale).toBe(true);expect(await p.reconSummary.count({where:{scanRunId:runId}})).toBe(3);});
   it('retains Target endpoint facts independently of unavailable child AI and citations',async()=>{
     const now=new Date();const endpointRow=await p.reconArtifact.create({data:{scanRunId:runId,scopeAssetId:assetId,kind:'endpoint',canonicalKey:'uncited-target-endpoint',value:{url:'https://app.example.test/api/uncited',method:'GET',statusCode:200},scopeState:'IN_SCOPE',verification:'OBSERVED',sources:[],firstSeenAt:now,lastSeenAt:now}});

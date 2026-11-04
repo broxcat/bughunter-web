@@ -72,13 +72,31 @@ try {
   for(const [index,prompt] of ['recon-summary/1','recon-report/2','recon-report/3'].entries())await client.$executeRaw`INSERT INTO "ReconSummary" (id,"programId","scanRunId",model,endpoint,"promptVersion","sourceFingerprint",input,status) VALUES (${`old-summary-${index}`},'preasset-program','preasset-scan','historical-model','http://ollama.invalid',${prompt},'historic-fingerprint','{}'::jsonb,'FAILED')`;
   const priorSummaries=await client.$queryRaw`SELECT id,model,endpoint,"promptVersion","sourceFingerprint",input,status,"createdAt" FROM "ReconSummary" ORDER BY id`;
   await client.$executeRaw`INSERT INTO "AiProviderConfig" (id,"userId",provider,model,"apiKeyCipher","isActive","updatedAt") VALUES ('older-ai','upgrade-user','OLLAMA','old-local','fixture-cipher',true,'2026-01-01'),('newer-ai','upgrade-user','OPENROUTER','selected-router','fixture-cipher',true,'2026-01-02')`;
+  // Exact deployed schema before Assessment: all previously available data exists.
+  await cp(join('prisma/migrations', '20261104100000_default_ai_provider'), join(temp, 'migrations', '20261104100000_default_ai_provider'), { recursive: true });
+  migrate(join(temp, 'schema.prisma'));
+  await client.$executeRaw`INSERT INTO "TargetReconRun" (id,"programId",status,outcome,"scopeMarkdown") VALUES ('preassessment-parent','preasset-program','COMPLETED','SUCCESS','Historical factual scope')`;
+  const beforeAssessment = {
+    programs: await client.$queryRaw`SELECT id,"ownerId","scopeRules","outOfScope","createdAt","updatedAt" FROM "BountyProgram" ORDER BY id`,
+    parents: await client.$queryRaw`SELECT id,"programId",status,outcome,"scopeMarkdown","createdAt" FROM "TargetReconRun" ORDER BY id`,
+    research: await client.$queryRaw`SELECT id,"authorizationSnapshot","scopeMarkdown",files,"updatedAt" FROM "ResearchSession" ORDER BY id`,
+    findings: await client.$queryRaw`SELECT id,"targetId","scanRunId",title,"updatedAt" FROM "Finding" ORDER BY id`,
+  };
   migrate(schema);
+  assert.deepEqual(await client.$queryRaw`SELECT id,"ownerId","scopeRules","outOfScope","createdAt","updatedAt" FROM "BountyProgram" ORDER BY id`, beforeAssessment.programs);
+  assert.deepEqual(await client.$queryRaw`SELECT id,"programId",status,outcome,"scopeMarkdown","createdAt" FROM "TargetReconRun" ORDER BY id`, beforeAssessment.parents);
+  assert.deepEqual(await client.$queryRaw`SELECT id,"authorizationSnapshot","scopeMarkdown",files,"updatedAt" FROM "ResearchSession" ORDER BY id`, beforeAssessment.research);
+  assert.deepEqual(await client.$queryRaw`SELECT id,"targetId","scanRunId",title,"updatedAt" FROM "Finding" ORDER BY id`, beforeAssessment.findings);
+  assert((await client.bountyProgram.findMany({select:{assessmentMode:true}})).every(program=>program.assessmentMode==='BLACK_BOX'));
+  assert((await client.scanRun.findMany({select:{assessmentModeSnapshot:true,assessmentSourcesSnapshot:true}})).every(run=>run.assessmentModeSnapshot===null&&run.assessmentSourcesSnapshot===null));
+  assert.deepEqual(await client.$queryRaw`SELECT "assessmentModeSnapshot","assessmentSourcesSnapshot" FROM "TargetReconRun"`,[{assessmentModeSnapshot:null,assessmentSourcesSnapshot:null}]);
+  assert.equal(await client.assessmentSource.count(),0,'Never invent historical source authorization');
   assert.deepEqual(await client.$queryRaw`SELECT id,model,endpoint,"promptVersion","sourceFingerprint",input,status,"createdAt" FROM "ReconSummary" ORDER BY id`,priorSummaries);
   assert.deepEqual((await client.reconSummary.findMany({orderBy:{id:'asc'},select:{provider:true}})).map(row=>row.provider),['OLLAMA','OLLAMA','OLLAMA']);
   assert.deepEqual((await client.aiProviderConfig.findMany({where:{userId:'upgrade-user',isActive:true},select:{provider:true}})).map(row=>row.provider),['OPENROUTER']);
   await assert.rejects(client.aiProviderConfig.update({where:{id:'older-ai'},data:{isActive:true}}));
   assert.deepEqual(await client.$queryRaw`SELECT id,"originalValue","normalizedValue",format,type,"assetValue","typeSource","createdAt","updatedAt" FROM "ScopeAsset" ORDER BY id`,assetBefore);
-  assert.equal(await client.targetReconRun.count(),0,'No invented parent Recon history');
+  assert.equal(await client.targetReconRun.count(),1,'Keep the one pre-assessment parent; do not invent parent Recon history');
   assert.equal(await client.reconArtifact.count(),0,'No invented historical scanner artifacts');
   const oldRun=await client.scanRun.findUniqueOrThrow({where:{id:'preasset-scan'}});
   assert.equal(oldRun.targetReconRunId,null);assert.equal(oldRun.reconPlan,null);assert.equal(oldRun.artifactVersion,0);assert.equal(oldRun.scopeMarkdown,null);

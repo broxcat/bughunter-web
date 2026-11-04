@@ -4,7 +4,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { loadOobHitsByToken } from "@/lib/oobHits";
-import { renderReport, type ReportFinding } from "@/lib/reportTemplates";
+import { renderReport,capturedFindingAssessment, type ReportFinding } from "@/lib/reportTemplates";
 
 const createReportSchema = z.object({
   title: z.string().trim().min(1, "title is required"),
@@ -59,6 +59,7 @@ export async function POST(req: NextRequest) {
   // Fetch only the user's own findings among those requested.
   const findings = await prisma.finding.findMany({
     where: { id: { in: requestedIds }, target: { userId: session.user.id } },
+    include:{scanRun:{select:{assessmentModeSnapshot:true}},researchPromotion:{select:{hypothesis:{select:{session:{select:{authorizationSnapshot:true}}}}}}},
   });
 
   // Every requested id must resolve to an owned finding.
@@ -91,6 +92,7 @@ export async function POST(req: NextRequest) {
   const ordered: ReportFinding[] = requestedIds.map((fid) => {
     const f = byId.get(fid)!;
     return {
+      ...capturedFindingAssessment(f),
       title: f.title,
       vulnClass: f.vulnClass,
       severity: f.severity,

@@ -31,7 +31,7 @@ export async function loadAssetReconDetail(userId:string,programId:string,assetI
   const selected=runId??history[0]?.id;
   if(runId&&!await prisma.scanRun.findFirst({where:{id:runId,scopeAssetId:assetId,target:{userId,programId}}}))throw new ResearchError('Recon not found',404);
   if(selected)await ensureLegacyArtifacts(selected);
-  const run=selected?await prisma.scanRun.findFirst({where:{id:selected,scopeAssetId:assetId},select:{id:true,status:true,outcome:true,createdAt:true,startedAt:true,finishedAt:true,error:true,reconPlan:true,toolVersions:true,changeSet:true,targetReconRunId:true,scopeMarkdownSha256:true,reconSteps:{orderBy:{position:'asc'}},_count:{select:{artifacts:true}}}}):null;
+  const run=selected?await prisma.scanRun.findFirst({where:{id:selected,scopeAssetId:assetId},select:{id:true,status:true,outcome:true,createdAt:true,startedAt:true,finishedAt:true,error:true,reconPlan:true,toolVersions:true,changeSet:true,targetReconRunId:true,scopeMarkdownSha256:true,assessmentModeSnapshot:true,assessmentSourcesSnapshot:true,reconSteps:{orderBy:{position:'asc'}},_count:{select:{artifacts:true}}}}):null;
   const raw=selected?await prisma.reconArtifact.findMany({where:{scanRunId:selected},select:artifactSelect,orderBy:[{kind:'asc'},{canonicalKey:'asc'}],take:1000}):[];
   const artifacts=raw.map(artifactData).map(a=>{const value=typeof a.value.url==='string'?a.value.url:String(a.value.hostname??'');const host=value.startsWith('http')?new URL(value).hostname:value;
     return{...a,scopeState:asset.active&&!isExcluded(host,asset.program.outOfScope)&&(value.startsWith('http')?assetAllowsUrl(asset,value):assetAllowsHost(asset,host))?'IN_SCOPE' as const:'OUT_OF_SCOPE' as const};});

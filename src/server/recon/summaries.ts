@@ -13,7 +13,8 @@ import { resolveReconReportBudget } from './reportProvider';
 import { resolveDefaultAiConfig,resolveProviderApiKey,resolveConfiguredProviderFields,AiConfigurationError } from '../brain/config';
 import { fallbackReconReportV3 } from '@/lib/reconReportV3';
 import { generateReconReportV3 } from './ollamaReportV3';
-import { createReconReportV3Input,compactPriorReconReportV3,type ReconReportV3Input } from '@/lib/reconReportV3';
+import { createReconReportV3Input,compactPriorReconReportV3,reportAssessmentContext,type ReconReportV3Input } from '@/lib/reconReportV3';
+import { assessmentSnapshotFromRun } from '@/lib/assessment';
 const terminal=['COMPLETED','FAILED'];
 const staticPattern=String.raw`/_next/static/|\.(js|mjs|css|map|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot)(/|$)`;
 const asJson=(v:unknown)=>v as Prisma.InputJsonValue;
@@ -99,14 +100,15 @@ export async function buildSummaryInput(userId:string,programId:string,assetId?:
   if(!runs.some(r=>r._count.artifacts>0))throw new ResearchError('No usable Recon evidence yet',409);
   if(await currentAuthorizationFingerprint(prisma,userId,programId)!==captured.fingerprint)throw new ResearchError('Scope changed while preparing the report; regenerate from current authorization',409);
   const input=reportInput({sourceAuthorizationFingerprint:captured.fingerprint,untestedCurrentAssets:captured.assets.length-assets.length,rulesOfEngagement:program.rulesOfEngagement,assetCount:assets.length,reconStatus:parent?.outcome??parent?.status,runCount:runs.length,testedAt:runs.map(r=>r.finishedAt?.toISOString()).filter(Boolean).sort().at(-1)??'Not recorded',targetId:programId,target:program.companyName,exclusions:program.outOfScope,authorization:'Only explicit active Scope Assets; discoveries never grant authorization.',source:assetId?'asset':'target',runIds:runs.map(r=>r.id),targetReconRunId:parent?.id,coverageNote:'Input is bounded; omitted evidence remains in artifacts and scope.md.'},evidence,budget);
-  return{input,fullEvidence:evidence,scanRunId:assetId?runs[0].id:undefined,targetReconRunId:parent?.id,scopeAssetId:assetId};
+  const assessmentContext=reportAssessmentContext(assessmentSnapshotFromRun(assetId?runs[0]:parent??{}));
+  return{input,fullEvidence:evidence,assessmentContext,scanRunId:assetId?runs[0].id:undefined,targetReconRunId:parent?.id,scopeAssetId:assetId};
 }
 export async function scheduleReconSummary(userId:string,programId:string,assetId?:string,regenerate=false){
   let config;try{config=await resolveDefaultAiConfig(userId,{includeApiKey:false});}catch(error){if(error instanceof AiConfigurationError)throw new ResearchError('FAILED_PROVIDER_CONFIGURATION: '+error.message,error.status);throw error;}
   if(!config)throw new ResearchError('NO_DEFAULT_PROVIDER: No default AI provider configured. Select one in Settings.',409);
   const budget=await resolveReconReportBudget(config);
   let source;try{source=await buildSummaryInput(userId,programId,assetId,budget);}catch(error){if(error instanceof Error&&error.message.includes('selected model budget'))throw new ResearchError('Selected AI model context cannot fit the minimum authorization and coverage; scope.md remains available',422);throw error;}
-  const input=createReconReportV3Input(source.input,source.fullEvidence);
+  const input=createReconReportV3Input(source.input,source.fullEvidence,source.assessmentContext);
   const fingerprint=createHash('sha256').update(JSON.stringify(input)).digest('hex');
   const key=createHash('sha256').update(JSON.stringify([source.scanRunId??source.targetReconRunId,config.provider,config.model,config.effectiveBaseUrl,SUMMARY_PROMPT_VERSION,fingerprint])).digest('hex');
   const data={programId,scopeAssetId:assetId,scanRunId:source.scanRunId,targetReconRunId:source.targetReconRunId,provider:config.provider,model:config.model,endpoint:config.effectiveBaseUrl,promptVersion:SUMMARY_PROMPT_VERSION,sourceFingerprint:fingerprint,input:asJson(input)};

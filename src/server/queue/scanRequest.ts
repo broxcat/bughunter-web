@@ -6,6 +6,7 @@ import { dispatchSelect } from "./scanJobPublisher";
 import { RATE_LIMIT_POLICIES } from "@/lib/abusePolicy";
 import { assetSnapshot } from '@/server/scopeAssets';
 import { RECON_STAGE_NAMES } from '@/lib/reconPlanner';
+import { captureProgramAssessment } from '@/server/assessment';
 
 // Empty legacy hashing fields preserve existing Recon idempotency keys; approvals cannot execute.
 export type ScanRequest = { targetId: string; type: "RECON"; scopeAssetId?: string; approvedTechniques?: string[]; approveBoundedTiming?: true };
@@ -52,7 +53,15 @@ export async function createScanRequest(userId: string, input: ScanRequest, key:
       }
       const asset = input.scopeAssetId ? await tx.scopeAsset.findFirst({ where: { id: input.scopeAssetId, active: true, program: { ownerId: userId, deletingAt: null }, executionTarget: { id: input.targetId, userId } } }) : null;
       if (input.scopeAssetId && !asset) throw new ScanRequestNotFound();
-      const run = await tx.scanRun.create({ data: { targetId: input.targetId, type: input.type, status: "QUEUED", ...(asset ? { scopeAssetId: asset.id, scopeAssetSnapshot: assetSnapshot(asset), reconSteps: { create: RECON_STAGE_NAMES.map((name, position) => ({ name, position })) } } : {}) } });
+      const target = await tx.target.findFirst({ where: { id: input.targetId, userId }, select: { programId: true } });
+      if (!target) throw new ScanRequestNotFound();
+      let assessment;
+      if (target.programId) {
+        const owned = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "BountyProgram" WHERE id=${target.programId} AND "ownerId"=${userId} AND "deletingAt" IS NULL FOR SHARE`;
+        if (!owned.length) throw new ScanRequestNotFound();
+        assessment = await captureProgramAssessment(tx, target.programId);
+      }
+      const run = await tx.scanRun.create({ data: { targetId: input.targetId, type: input.type, status: "QUEUED", ...(assessment ? { assessmentModeSnapshot: assessment.assessmentMode, assessmentSourcesSnapshot: assessment.authorizedSources as unknown as Prisma.InputJsonValue } : {}), ...(asset ? { scopeAssetId: asset.id, scopeAssetSnapshot: assetSnapshot(asset), reconSteps: { create: RECON_STAGE_NAMES.map((name, position) => ({ name, position })) } } : {}) } });
       const jobOutbox = await tx.scanJobOutbox.create({ data: { scanRunId: run.id }, select: dispatchSelect });
       if (key) await tx.scanRequestKey.create({ data: { userId, key, scanRunId: run.id, requestHash: requestHash(input) } });
       return { ...run, jobOutbox };
