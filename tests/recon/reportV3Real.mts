@@ -60,6 +60,7 @@ async function main() {
   assert.equal(await prisma.user.count(), 0, 'Acceptance database must be empty');
   const routing=process.env.RECON_REPORT_MULTI_PROVIDER==='1';
   const factsRender=process.env.RECON_FACTS_RENDER_ACCEPTANCE==='1';
+  const requireNarrative=process.env.RECON_REQUIRE_NARRATIVE==='1';
   const configs:CapturedConfig[]=routing?(JSON.parse(await readFile(process.env.RECON_ROUTING_CONFIGS_FILE!,'utf8')) as {configs:CapturedConfig[]}).configs:[{provider:'OLLAMA',model:source.config.model,baseUrl:source.config.baseUrl}];
   const selected=(provider:AiProvider)=>{const c=configs.find(c=>c.provider===provider);assert(c?.model&&c.baseUrl,'Selected provider Settings missing');return c;};
   if(routing)assert(selected('OPENROUTER').apiKeyCipher,'Encrypted OpenRouter credentials missing');
@@ -80,7 +81,7 @@ async function main() {
       assert.equal(asObject(body.provider).require_parameters,true,'OpenRouter must require structured-output support');
       assert(!Object.hasOwn(body,'format')&&!Object.hasOwn(body,'think'),'Ollama parameters leaked into OpenRouter request');
       assert(new Headers(init?.headers).has('authorization'),'Configured provider credential was not attached in the backend');
-      assert(paidReportRequests<(factsRender?1:2),'Paid report would exceed its explicit request limit');paidReportRequests++;openRouterRequests++;
+      assert(paidReportRequests<(factsRender&&!requireNarrative?1:2),'Paid report would exceed its explicit request limit');paidReportRequests++;openRouterRequests++;
     }
     const response=await originalFetch(input, { ...init, redirect: 'error' });
     if(router&&u.origin===new URL(router.baseUrl).origin&&u.pathname.endsWith('/chat/completions')&&!response.ok){
@@ -143,7 +144,7 @@ async function main() {
         const report = asObject(saved.content), input = asObject(saved.input);
         const generation = asObject(report.generation), budget = asObject(input.budget);
         const warningPaths = (Array.isArray(report.warnings) ? report.warnings : []).map(item => ({ code: asObject(item).code, path: asObject(item).path })).filter(item => typeof item.code === 'string' && /^[A-Z_]+$/.test(item.code) && typeof item.path === 'string' && /^[A-Za-z0-9_.[\]]{1,160}$/.test(item.path));
-        metadata(phase + '-result', { status: saved.status,provider:saved.provider, model: saved.model, promptVersion: saved.promptVersion, narrativeStatus: report.narrativeStatus, narrativeFailure: report.narrativeFailure ?? null, warningPaths, attempts: (Array.isArray(generation.attempts) ? generation.attempts : []).map(item => ({ attempt: asObject(item).attempt, status: asObject(item).status,httpStatus:asObject(item).httpStatus,providerErrorCode:asObject(item).providerErrorCode })),openRouterRequests, latencyMs: Date.now() - started, generationMs: generation.durationMs, contextTokens: budget.contextTokens, maxInputBytes: budget.maxInputBytes, outputTokens: budget.outputTokens, modelInputBytes: Buffer.byteLength(JSON.stringify(modelInputForReconReportV3(saved.input as unknown as ReconReportV3Input))) });
+        metadata(phase + '-result', { status: saved.status,provider:saved.provider, model: saved.model, promptVersion: saved.promptVersion, narrativeStatus: report.narrativeStatus, narrativeFailure: report.narrativeFailure ?? null, warningPaths, attempts: (Array.isArray(generation.attempts) ? generation.attempts : []).map(item => ({ attempt: asObject(item).attempt, status: asObject(item).status,httpStatus:asObject(item).httpStatus,providerErrorCode:asObject(item).providerErrorCode,finishReason:asObject(item).finishReason })),openRouterRequests, latencyMs: Date.now() - started, generationMs: generation.durationMs, contextTokens: budget.contextTokens, maxInputBytes: budget.maxInputBytes, outputTokens: budget.outputTokens, modelInputBytes: Buffer.byteLength(JSON.stringify(modelInputForReconReportV3(saved.input as unknown as ReconReportV3Input))) });
         if (report.narrativeStatus === 'FACTUAL_ONLY' && process.env.RECON_REPORT_V3_OUTPUT_FILE) await savePrivate(process.env.RECON_REPORT_V3_OUTPUT_FILE + '.failed.json', { sourceSha256, phase, report: serial(saved) });
         assert.equal(report.version, 3); assert.deepEqual(report.factual, input.factual, 'Model changed server-owned facts');
         const ledger = Array.isArray(input.fullEvidenceLedger) ? input.fullEvidenceLedger : [];
@@ -172,7 +173,8 @@ async function main() {
         const target=source.targetReport;assert(target,'A real captured Target report is required for rendering acceptance');
         assert.equal(target.targetReconRunId,parentId,'Target fixture belongs to a different captured Recon parent');
         targetReport=await prisma.reconSummary.create({data:{...target,automaticKey:null,input:json(target.input),content:nullableJson(target.content),createdAt:new Date(target.createdAt),startedAt:date(target.startedAt),generatedAt:date(target.generatedAt)}});
-        assert.equal(openRouterRequests,1,'This mission authorizes exactly one real OpenRouter request');
+        assert(openRouterRequests<=(requireNarrative?2:1),'Real OpenRouter request budget exceeded');
+        if(requireNarrative)assert(['VALID','RECOVERED'].includes(String(asObject(assetReport.content).narrativeStatus)),'AI narrative is a release blocker');
         metadata('facts-render-provider',{status:'PASS',requests:openRouterRequests,routingChanged:false,modelChanged:false});
       }else{
       const routerOnly=process.env.RECON_ROUTING_ROUTER_ONLY==='1';

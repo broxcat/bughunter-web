@@ -1,8 +1,8 @@
-import { z } from 'zod';
+import { reconReportV3TransportSchemaFor } from './transportSchema';
 import { BrainClient, BrainError } from '../brain/client';
 import { logger } from '@/lib/logger';
 import {
-  modelInputForReconReportV3, reconReportV3NarrativeSchemaFor,
+  modelInputForReconReportV3,
   validateReconReportV3, fallbackReconReportV3, ReconReportV3ValidationError,
   type ReconReportV3, type ReconReportV3Input,
 } from '@/lib/reconReportV3';
@@ -33,7 +33,7 @@ const correctionMessages: Record<string, string> = {
   UNSUPPORTED_VULNERABILITY_CLAIM: 'Recon does not establish the claimed vulnerability. Remove the claim.',
 };
 type Issue = ReconReportV3['warnings'][number];
-type Attempt = { attempt: number; thinkingMode: boolean|string|null; status: string; responseBytes?: number; httpStatus?: number; providerErrorCode?:string; issues?: Array<{code:string;path:string}> };
+type Attempt = { attempt: number; thinkingMode: boolean|string|null; status: string; responseBytes?: number; httpStatus?: number; providerErrorCode?:string; failureCode?:string; providerCode?:string; transportSchemaVariant?:string; finishReason?:string; issues?: Array<{code:string;path:string}> };
 const validatedModes = new Map<string, {think:boolean|string|undefined; expires:number}>();
 function safeIssues(issues: Issue[]) {
   return issues.map(i => ({code: Object.hasOwn(correctionMessages,i.code)?i.code:'FAILED_SCHEMA',path: /^[A-Za-z0-9_.[\]]{1,160}$/.test(i.path)?i.path:'narrative'}));
@@ -47,29 +47,31 @@ export async function generateReconReportV3(client: BrainClient, input: ReconRep
 } = {}): Promise<ReconReportV3> {
   const deadline=AbortSignal.timeout(options.timeoutMs??180000);
   const signal=AbortSignal.any([deadline,...(options.signal?[options.signal]:[])]);
-  const schema=z.toJSONSchema(reconReportV3NarrativeSchemaFor(input),{reused:'ref'});
+  const identity=client.reportTransportIdentity;
+  const {schema,variant:transportSchemaVariant}=reconReportV3TransportSchemaFor(input,identity?.provider??'OLLAMA',identity?.model??'');
   const language=input.metadata.language==='fr'?'Write narrative prose in French. Keep JSON keys and evidence aliases unchanged.':'Write narrative prose in English.';
   const system=SYSTEM+'\n'+language+'\nJSON schema:\n'+JSON.stringify(schema);
   const payload=JSON.stringify(modelInputForReconReportV3(input));
-  const attempts: Attempt[]=[]; const started=Date.now(); let issues:Issue[]=[]; let repair='';
+  const attempts: Attempt[]=[]; const started=Date.now(); let issues:Issue[]=[]; let repair=''; let finishReason: string|undefined;
   const key=input.budget.inspectionKey, prior=key?validatedModes.get(key):undefined;
   let think=input.budget.thinkingTrial&&prior&&prior.expires>Date.now()?prior.think:input.budget.think;
-  const finish=(report:ReconReportV3)=>({...report,generation:{thinkingMode:think??null,attempts,durationMs:Date.now()-started}});
-  const trace=(attempt:Attempt)=>{attempts.push(attempt);options.onAttempt?.(attempt);};
+  const finish=(report:ReconReportV3)=>({...report,generation:{transportSchemaVariant,thinkingMode:think??null,attempts,durationMs:Date.now()-started}});
+  const trace=(attempt:Attempt)=>{attempt.transportSchemaVariant=transportSchemaVariant;attempt.finishReason=finishReason;attempts.push(attempt);options.onAttempt?.(attempt);};
   for(let attempt=0;attempt<2;attempt++){
     options.signal?.throwIfAborted();
     let raw:string;
     try{
       raw=await client.chat(system+(repair?'\nPrevious response rejected.\n'+repair+'\nRemove or rephrase unsupported interpretations. Keep every field qualitative without exact URLs, paths, hosts, IPs, ports, versions, statuses or HTTP verbs; those belong exclusively to the application factual tables. Never guess replacement facts.':''),payload,{
-        format:schema,preserveModel:true,temperature:0,maxTokens:input.budget.outputTokens,contextWindow:input.budget.contextTokens,
+        format:schema,preserveModel:true,temperature:0,maxTokens:input.budget.outputTokens,
+        onResponseMetadata:metadata=>{finishReason=metadata.finishReason;},contextWindow:input.budget.contextTokens,
         ...(think!==undefined?{think}:{}),retries:0,timeoutMs:options.timeoutMs??180000,maxResponseBytes:262144,signal,
       });
     }catch(error){
       options.signal?.throwIfAborted();
-      if(attempt===0&&input.budget.thinkingTrial&&error instanceof BrainError&&[400,422].includes(error.status??0)){
-        trace({attempt:1,thinkingMode:think??null,status:'MODE_REJECTED'});think=undefined;repair='The requested generation control was incompatible. Return the narrative schema.';continue;
+      if(attempt===0&&input.budget.thinkingTrial&&error instanceof BrainError&&([400,422].includes(error.status??0)||error.status===500&&error.code==='THINKING_MODE_UNSUPPORTED')){
+        trace({attempt:1,thinkingMode:think??null,status:'MODE_REJECTED',httpStatus:error.status,failureCode:error.code,providerCode:error.providerCode});think=undefined;repair='The requested generation control was incompatible. Return the narrative schema.';continue;
       }
-      trace({attempt:attempt+1,thinkingMode:think??null,status:'FAILED_PROVIDER',...(error instanceof BrainError?{httpStatus:error.status,providerErrorCode:error.code}: {})});
+      trace({attempt:attempt+1,thinkingMode:think??null,status:'FAILED_PROVIDER',...(error instanceof BrainError?{httpStatus:error.status,providerErrorCode:error.code,failureCode:error.code,providerCode:error.providerCode}: {})});
       if(error instanceof BrainError&&error.code==='STRUCTURED_OUTPUT_UNSUPPORTED'){
         const message=error.provider==='OPENROUTER'?'The selected OpenRouter model/provider route does not support the required structured output.':'The selected model/provider route does not support the required structured output.';
         return finish(fallbackReconReportV3(input,[{code:'STRUCTURED_OUTPUT_UNSUPPORTED',path:'provider',evidenceRefs:[],message}],'FAILED_PROVIDER'));
@@ -88,7 +90,7 @@ export async function generateReconReportV3(client: BrainClient, input: ReconRep
       issues=typed?error.issues:[];
       const factual=typed&&!issues.every(issue=>['INVALID_JSON','INVALID_SCHEMA'].includes(issue.code));
       const diagnostics=safeIssues(issues);
-      trace({attempt:attempt+1,thinkingMode:think??null,status:factual?'FACTUAL_REJECTED':'SCHEMA_REJECTED',responseBytes:Buffer.byteLength(raw),issues:diagnostics});
+      trace({attempt:attempt+1,thinkingMode:think??null,status:factual?'FACTUAL_REJECTED':'SCHEMA_REJECTED',failureCode:factual?'FAILED_VALIDATION':'FAILED_SCHEMA',responseBytes:Buffer.byteLength(raw),issues:diagnostics});
       logger.warn({promptVersion:'recon-report/3',attempt:attempt+1,code:factual?'NARRATIVE_VALIDATION':'FAILED_SCHEMA',issues:diagnostics},'AI interpretation rejected; factual tables remain authoritative');
       if(attempt===0){repair=factual?correction(issues):'FAILED_SCHEMA: Return every required narrative property using only the requested schema. Do not include facts.';continue;}
       if(factual){

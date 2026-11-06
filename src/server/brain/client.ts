@@ -31,6 +31,7 @@ export interface ChatOptions {
    * receive the registry's historical alias compatibility behavior. */
   preserveModel?: boolean;
   maxTokens?: number;
+  onResponseMetadata?: (metadata: {finishReason?: string}) => void;
   temperature?: number;
   timeoutMs?: number;
   /** Transient-failure retries (network / 5xx / 429). Default 2. */
@@ -84,6 +85,8 @@ export class BrainClient {
     this.baseUrl =
       (config.baseUrl && config.baseUrl.trim()) || this.spec.defaultBaseUrl;
   }
+
+  get reportTransportIdentity() { return {provider:this.config.provider, model:this.config.model ?? this.spec.defaultModel}; }
 
   /** Human-readable provider description (no secrets). */
   get description(): string {
@@ -273,7 +276,9 @@ export class BrainClient {
       },
       body,
       opts,
-    )) as { choices?: Array<{ message?: { content?: string } }> };
+    )) as { choices?: Array<{ finish_reason?: string; message?: { content?: string } }> };
+    const finish = json.choices?.[0]?.finish_reason;
+    opts.onResponseMetadata?.({finishReason: ["stop","length","content_filter"].includes(finish??"") ? finish : undefined});
     return (json.choices?.[0]?.message?.content ?? "").trim();
   }
 
@@ -345,10 +350,11 @@ function structuredFailure(provider: AiProviderName, policy: ProviderSpec["struc
   let providerCode: string | undefined;
   try {
     const parsed = JSON.parse(detail), candidate = parsed?.error?.code ?? parsed?.code;
-    const allowed = ["unsupported_parameter", "unsupported_value", "unsupported_response_format", "invalid_parameter", "invalid_request_error", "invalid_json_schema", "model_not_found", "not_found", "no_endpoints_found", "validation_error", "provider_error"];
+    const allowed = ["INVALID_ARGUMENT", "unsupported_parameter", "unsupported_value", "unsupported_response_format", "invalid_parameter", "invalid_request_error", "invalid_json_schema", "model_not_found", "not_found", "no_endpoints_found", "validation_error", "provider_error"];
     if (typeof candidate === "number" && Number.isInteger(candidate) && candidate >= 100 && candidate <= 599) providerCode = String(candidate);
     else if (typeof candidate === "string" && allowed.includes(candidate)) providerCode = candidate;
   } catch { /* The upstream body is inspected only for classification. */ }
+  if (/\bINVALID_ARGUMENT\b/.test(detail)) providerCode = "INVALID_ARGUMENT";
   if (policy === "OLLAMA_FORMAT" && /thinking|think|token repeat|prediction aborted/i.test(detail)) return { code: "THINKING_MODE_UNSUPPORTED", message: "Ollama thinking control or decoder is incompatible with this request", providerCode };
   if (policy === "OPENAI_JSON_SCHEMA" && [400, 404, 422, 500].includes(status)) {
     if (/invalid_json_schema|invalid\s+(?:json\s+)?schema|schema[^\n]{0,80}(?:is invalid|not valid)/i.test(detail)) return { code: "STRUCTURED_OUTPUT_INVALID_SCHEMA", message: `${provider} rejected the structured-output schema`, providerCode };

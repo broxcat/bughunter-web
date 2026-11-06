@@ -49,3 +49,22 @@ Ollama alone uses `/api/show` inspection. API providers use a conservative 8,192
 Migration `20261104100000_default_ai_provider` adds `ReconSummary.provider` with an `OLLAMA` backfill and a partial unique index enforcing at most one `isActive` configuration per user. Only invalid historical duplicate defaults are repaired, retaining the most recently edited row (ID breaks ties). No second default-provider column is introduced.
 
 Rebuild `web` and `worker`, run `prisma migrate deploy`, then recreate those two services. Research-console and Burp require no changes.
+
+### Recon synthesis stabilization — 2026-11-06
+
+The native OpenRouter/Gemini failure was reproduced with synthetic, non-private input. Six diagnostic requests used the same configured `google/gemini-3.6-flash`:
+
+| Probe | HTTP |
+| --- | --- |
+| A: plain chat | 200 |
+| B: minimal strict object | 200 |
+| C: simple array with maxItems | 200 |
+| C: identical array without maxItems | 200 |
+| D: complete Recon schema | 400 / INVALID_ARGUMENT |
+| E: identical complete schema minus maxItems | 200 |
+
+This establishes a compatibility problem with maxItems in the complete Recon schema, not a universal rejection of maxItems. No further constraint removal was needed. `$defs`/`$ref`, enum, minItems and string constraints remain. `reconReportV3TransportSchemaFor` removes only maxItems for OPENROUTER + google/gemini-*; application Zod bounds, evidence validation and recovery remain authoritative. Other providers retain the native schema. No provider/model substitution or prompted-JSON fallback was introduced.
+
+The first real acceptance received unusable JSON and its original one-request factual-render harness blocked the repair attempt. It is not counted as a narrative success. The acceptance harness now offers `RECON_REQUIRE_NARRATIVE=1`, retains the production two-attempt bound, and rejects FACTUAL_ONLY. A second real acceptance produced VALID in one request (7.3 s, four citation references). Together with the six probes this used eight paid requests in total. No further paid request was sent. Browser replay displayed AI synthesis READY with readable facts and zero empty primary rows; the stored historical Target fallback was left unchanged.
+
+Local gpt-oss:20b was available. Its explicit false thinking trial encountered an Ollama HTTP 500 decoder-control rejection; the v3 path now handles this classified incompatibility with the same bounded removal of the trial control already supported by v2. It never retries an arbitrary 500 or changes providers. A real Recon then produced VALID in approximately 44 s using the local model's default control. Model response bodies, evidence, prompts and credentials are not logged. Attempts record failureCode, safe providerCode, httpStatus, transportSchemaVariant and an allowlisted completion finish reason when available.

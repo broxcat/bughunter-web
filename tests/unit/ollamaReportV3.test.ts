@@ -52,6 +52,14 @@ describe('narrative-only Ollama report orchestration (mocked chat, no real infer
     const{input,client}=fixture();vi.spyOn(client,'chat').mockRejectedValue(new DOMException('Timeout','TimeoutError'));
     expect((await generateReconReportV3(client,input)).narrativeFailure).toBe('FAILED_PROVIDER');
   });
+  it('retries an explicit Ollama decoder-mode rejection once without the trial control',async()=>{
+    const {input,narrative,client}=fixture();input.budget.thinkingTrial=true;input.budget.think=false;
+    const chat=vi.spyOn(client,'chat').mockRejectedValueOnce(new BrainError('Control rejected','OLLAMA',500,'THINKING_MODE_UNSUPPORTED')).mockResolvedValueOnce(JSON.stringify(narrative));
+    const report=await generateReconReportV3(client,input);
+    expect(report.narrativeStatus).toBe('VALID');expect(chat).toHaveBeenCalledTimes(2);
+    expect(chat.mock.calls[0][2]?.think).toBe(false);expect(chat.mock.calls[1][2]).not.toHaveProperty('think');
+    expect(report.generation?.attempts).toEqual(expect.arrayContaining([expect.objectContaining({status:'MODE_REJECTED',httpStatus:500,failureCode:'THINKING_MODE_UNSUPPORTED',transportSchemaVariant:'native'})]));
+  });
   it('propagates source cancellation rather than publishing fallback facts',async()=>{
     const{input,client}=fixture();const control=new AbortController();control.abort();const chat=vi.spyOn(client,'chat');
     await expect(generateReconReportV3(client,input,{signal:control.signal})).rejects.toThrow();expect(chat).not.toHaveBeenCalled();
