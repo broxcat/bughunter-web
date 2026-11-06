@@ -2,7 +2,7 @@ import { beforeEach,describe,expect,it,vi } from 'vitest';
 import { NextRequest } from 'next/server';
 const mocks=vi.hoisted(()=>({auth:vi.fn(),findings:vi.fn(),create:vi.fn(),oob:vi.fn()}));
 vi.mock('@/lib/auth',()=>({auth:mocks.auth}));
-vi.mock('@/lib/prisma',()=>({prisma:{finding:{findMany:mocks.findings},report:{create:mocks.create}}}));
+vi.mock('@/lib/prisma',()=>{const db={finding:{findMany:mocks.findings},report:{create:mocks.create},$queryRaw:vi.fn()};return{prisma:{...db,$transaction:(fn:(tx:typeof db)=>unknown)=>fn(db)}};});
 vi.mock('@/lib/oobHits',()=>({loadOobHitsByToken:mocks.oob}));
 import { POST } from '@/app/api/reports/route';
 const finding=(id='finding')=>({id,targetId:'target',title:'Confirmed observation',reviewStatus:'CONFIRMED',oobToken:null});

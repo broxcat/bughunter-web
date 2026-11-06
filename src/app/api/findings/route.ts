@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   const programId = req.nextUrl.searchParams.get('programId');
   if (programId) {
     if (!await prisma.bountyProgram.findFirst({ where: { id: programId, ownerId: session.user.id }, select: { id: true } })) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    return NextResponse.json(await prisma.finding.findMany({ where: { target: { programId, userId: session.user.id } }, select: { id: true, title: true, targetId: true, reviewStatus: true, severity: true }, orderBy: { createdAt: 'desc' }, take: 1000 }));
+    return NextResponse.json(await prisma.finding.findMany({ where: { target: { programId, userId: session.user.id } }, select: { id: true, title: true, targetId: true, reviewStatus: true, severity: true, lifecycle:true,lifecycleEvents:{where:{state:'VALIDATED'},take:1,select:{id:true}} }, orderBy: { createdAt: 'desc' }, take: 1000 }));
   }
   if (!targetId) {
     return NextResponse.json({ error: "targetId is required" }, { status: 400 });
@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
 
   const findings = await prisma.finding.findMany({
     where: { targetId: target.id },
+    include:{lifecycleEvents:{where:{state:'VALIDATED'},take:1,select:{id:true}}},
     orderBy: { createdAt: "desc" },
   });
 

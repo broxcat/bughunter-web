@@ -1,3 +1,6 @@
+import {Prisma} from '@prisma/client';
+import {foreignOrigin} from '@/lib/requestOrigin';
+import {lifecycleReportEligible} from '@/lib/findingLifecycle';
 import { findingReviewStatus } from "@/lib/evidenceReview";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -7,7 +10,7 @@ import { loadOobHitsByToken } from "@/lib/oobHits";
 import { renderReport,capturedFindingAssessment, type ReportFinding } from "@/lib/reportTemplates";
 
 const createReportSchema = z.object({
-  title: z.string().trim().min(1, "title is required"),
+  title: z.string().trim().min(1, "title is required").max(300),
   platform: z.enum([
     "HACKERONE",
     "BUGCROWD",
@@ -16,7 +19,7 @@ const createReportSchema = z.object({
     "IMMUNEFI",
     "GENERIC",
   ]),
-  findingIds: z.array(z.string().trim().min(1)).min(1, "at least one finding is required"),
+  findingIds: z.array(z.string().trim().min(1).max(150)).min(1, "at least one finding is required").max(100),
 });
 
 // GET /api/reports — list the user's reports.
@@ -27,6 +30,12 @@ export async function GET(req: NextRequest) {
   }
 
   const targetId = req.nextUrl.searchParams.get("targetId");
+  const programId=req.nextUrl.searchParams.get('programId');
+  if(programId){
+    if(!await prisma.bountyProgram.findFirst({where:{id:programId,ownerId:session.user.id},select:{id:true}}))return NextResponse.json({error:'Not found'},{status:404});
+    const rows=await prisma.report.findMany({where:{userId:session.user.id,items:{some:{finding:{target:{programId,userId:session.user.id}}}}},include:{items:{select:{finding:{select:{targetId:true}}}}},orderBy:{createdAt:'desc'},take:100});
+    return NextResponse.json(rows.map(r=>({...r,evidenceTargetIds:[...new Set(r.items.map(i=>i.finding.targetId))]})));
+  }
   if (targetId && !await prisma.target.findFirst({ where: { id: targetId, userId: session.user.id }, select: { id: true } })) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const reports = await prisma.report.findMany({
     where: { userId: session.user.id, ...(targetId ? { targetId } : {}) },
@@ -45,6 +54,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  if(foreignOrigin(req))return NextResponse.json({error:'Forbidden'},{status:403});
   const body = await req.json().catch(() => null);
   const parsed = createReportSchema.safeParse(body);
   if (!parsed.success) {
@@ -56,10 +66,13 @@ export async function POST(req: NextRequest) {
 
   const requestedIds = Array.from(new Set(parsed.data.findingIds));
 
+  return prisma.$transaction(async tx=>{
+  // Shared row locks keep review/lifecycle eligibility stable until the Report commits.
+  await tx.$queryRaw(Prisma.sql`SELECT id FROM "Finding" WHERE id IN (${Prisma.join(requestedIds)}) ORDER BY id FOR SHARE`);
   // Fetch only the user's own findings among those requested.
-  const findings = await prisma.finding.findMany({
+  const findings = await tx.finding.findMany({
     where: { id: { in: requestedIds }, target: { userId: session.user.id } },
-    include:{vaultEvidence:{include:{evidence:true}},scanRun:{select:{assessmentModeSnapshot:true}},researchPromotion:{select:{hypothesis:{select:{session:{select:{authorizationSnapshot:true}}}}}}},
+    include:{lifecycleEvents:{where:{state:'VALIDATED'},take:1,select:{id:true}},retests:{orderBy:{createdAt:'desc'},take:100,include:{result:true}},vaultEvidence:{include:{evidence:true}},scanRun:{select:{assessmentModeSnapshot:true}},researchPromotion:{select:{hypothesis:{select:{session:{select:{authorizationSnapshot:true}}}}}}},
   });
 
   // Every requested id must resolve to an owned finding.
@@ -71,7 +84,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Every included finding must have confirmed evidence.
-  const notPassed = findings.filter((f) => findingReviewStatus(f) !== "CONFIRMED");
+  const notPassed = findings.filter((f) => findingReviewStatus(f) !== "CONFIRMED"||!lifecycleReportEligible(f.lifecycle)||(f.lifecycle!=null&&!f.lifecycleEvents?.length));
   if (notPassed.length > 0) {
     return NextResponse.json(
       {
@@ -93,6 +106,8 @@ export async function POST(req: NextRequest) {
     const f = byId.get(fid)!;
     return {
       ...capturedFindingAssessment(f),
+      lifecycle:f.lifecycle??null,
+      retests:f.retests?.map(r=>({requestedAt:r.createdAt.toISOString(),originalEvidenceIds:r.originalEvidenceIds,outcome:r.result?.outcome??'PENDING',performedAt:r.result?.performedAt.toISOString()??null,newEvidenceIds:r.result?.evidenceIds??[],conclusion:r.result?.conclusion??null})),
       vaultEvidence:f.vaultEvidence?.map(link=>({id:link.evidence.id,kind:link.evidence.kind,role:link.role,description:link.evidence.description,contentSha256:link.evidence.contentSha256})),
       title: f.title,
       vulnClass: f.vulnClass,
@@ -121,7 +136,7 @@ export async function POST(req: NextRequest) {
   const targetId = targetIds.size === 1 ? findings[0].targetId : null;
 
   const reportId=crypto.randomUUID();
-  const report = await prisma.report.create({
+  const report = await tx.report.create({
     data: {
       id:reportId,
       userId: session.user.id,
@@ -138,4 +153,5 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json(report, { status: 201 });
+  },{timeout:20000});
 }

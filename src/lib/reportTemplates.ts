@@ -32,6 +32,8 @@ export interface ReportOobHit {
 }
 
 export interface ReportFinding {
+  lifecycle?:string|null;
+  retests?:Array<{requestedAt:string;originalEvidenceIds:string[];outcome:string;performedAt:string|null;newEvidenceIds:string[];conclusion:string|null}>;
   vaultEvidence?:Array<{id:string;kind:string;description:string;contentSha256?:string|null;role?:string}>;
   /** Captured execution provenance, never the current Program setting. */
   assessmentMode?: AssessmentMode | null;
@@ -143,6 +145,10 @@ function renderFinding(
     "",
     cweLine(f),
     cvssLine(f),
+    "",
+    `Finding lifecycle: ${f.lifecycle??'Historical / not captured'}`,
+    ...(f.lifecycle==='RESOLVED'||f.lifecycle==='CLOSED'?['Historical finding: resolution/closure is recorded; this Report does not claim it is currently reproducible.']:[]),
+    ...(f.retests?.length?['#### Retest history',...f.retests.map(r=>`- ${r.outcome} · requested ${r.requestedAt}${r.performedAt?' · tested '+r.performedAt:''}\n  Original proof: ${r.originalEvidenceIds.join(', ')}\n  Retest proof: ${r.newEvidenceIds.join(', ')||'None recorded'}${r.conclusion?'\n  Conclusion: '+r.conclusion.replace(/[\r\n]/g,' '):''}`)]:[]),
     "",
     "#### Description",
     "",

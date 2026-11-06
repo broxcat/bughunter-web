@@ -108,6 +108,9 @@ try {
   const historicalPlan=await client.$queryRaw`SELECT * FROM "ResearchPlan" WHERE id='historical-white-plan'`;
   migrate(schema);
   assert.deepEqual(await client.$queryRaw`SELECT * FROM "ResearchPlan" WHERE id='historical-white-plan'`,historicalPlan);
+  assert.equal((await client.finding.findUniqueOrThrow({where:{id:'upgrade-finding'}})).lifecycle,null,'Never invent a historical lifecycle');
+  assert.equal(await client.findingLifecycleEvent.count(),0,'Never invent historical decisions');
+  assert.equal(await client.findingRetest.count(),0,'Never invent historical retests');
   assert.equal(await client.reconHistoryRun.count(),0,'Historical runs are indexed from recorded observations, never fabricated by migration');
   assert.equal(await client.evidenceRecord.count(),0,'Never backfill Vault content or evidence identities from historical raw fields');
   assert.equal(await client.researchCoverage.count(),0,'Never backfill coverage from historical observations');

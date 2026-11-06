@@ -475,6 +475,13 @@ model ScanLog {
 // ---------------------------------------------------------------------------
 
 model Finding {
+  // Null on historical rows: no invented lifecycle or past validation.
+  lifecycle FindingLifecycle? @default(CANDIDATE)
+  lifecycleRevision Int @default(0)
+  submission Json?
+  lifecycleEvents FindingLifecycleEvent[]
+  retests FindingRetest[]
+
   vaultEvidence EvidenceFinding[]
 
   reviewStatus FindingReviewStatus @default(CANDIDATE)
@@ -1302,4 +1309,69 @@ model ReconSurfaceSeen {
  history ReconHistoryRun @relation(fields:[historyId],references:[id],onDelete:Cascade)
  @@unique([historyId,surfaceId])
  @@index([surfaceId])
+}
+
+enum FindingLifecycle {
+ CANDIDATE
+ VALIDATING
+ VALIDATED
+ REJECTED
+ READY_TO_SUBMIT
+ SUBMITTED
+ TRIAGED
+ ACCEPTED
+ DUPLICATE
+ INFORMATIVE
+ NOT_APPLICABLE
+ RESOLVED
+ RETEST_REQUIRED
+ CLOSED
+}
+enum RetestOutcome {
+ FIX_CONFIRMED
+ STILL_REPRODUCIBLE
+ PARTIALLY_FIXED
+ CANNOT_RETEST
+}
+// Append-only decisions. Evidence review remains an independent required gate.
+model FindingLifecycleEvent {
+ id String @id @default(cuid())
+ findingId String
+ revision Int
+ eventKey String
+ contentSha256 String
+ previous FindingLifecycle?
+ state FindingLifecycle
+ actorId String
+ reason String @db.Text
+ validation Json?
+ submission Json?
+ createdAt DateTime @default(now())
+ finding Finding @relation(fields:[findingId],references:[id],onDelete:Cascade)
+ @@unique([findingId,revision])
+ @@unique([findingId,eventKey])
+}
+model FindingRetest {
+ id String @id @default(cuid())
+ findingId String
+ requestedBy String
+ reason String @db.Text
+ originalEvidenceIds String[]
+ createdAt DateTime @default(now())
+ finding Finding @relation(fields:[findingId],references:[id],onDelete:Cascade)
+ result FindingRetestResult?
+ @@index([findingId,createdAt])
+}
+// A completed retest is never edited or substituted for the original proof.
+model FindingRetestResult {
+ id String @id @default(cuid())
+ retestId String @unique
+ outcome RetestOutcome
+ actorId String
+ sessionReferenceId String?
+ performedAt DateTime
+ conclusion String @db.Text
+ evidenceIds String[]
+ createdAt DateTime @default(now())
+ retest FindingRetest @relation(fields:[retestId],references:[id],onDelete:Cascade)
 }

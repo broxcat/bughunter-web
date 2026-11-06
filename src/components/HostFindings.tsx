@@ -1,5 +1,6 @@
 "use client";
 import EvidencePanel from './EvidencePanel';
+import FindingLifecycle from './FindingLifecycle';
 
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
@@ -287,7 +288,7 @@ export default function FindingsPage({
                     <p className="mt-2 text-xs text-muted">{f.killedReason}</p>
                   )}
 
-                  <EvidencePanel targetId={id} link={{entity:'finding',id:f.id,role:'SUPPORTS'}}/><EvidenceReview key={`${f.id}-${f.reviewStatus}`} finding={f} onDone={load} />
+                  <FindingLifecycle findingId={f.id} onDone={()=>void load()}/><EvidencePanel targetId={id} link={{entity:'finding',id:f.id,role:'SUPPORTS'}}/><EvidenceReview key={`${f.id}-${f.reviewStatus}`} finding={f} onDone={load} />
 
                   <FindingClassification
                     key={`${f.id}-${f.cvssVector}-${f.cwe}`}
