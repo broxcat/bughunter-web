@@ -1,3 +1,4 @@
+import {buildVersion} from '@/lib/buildVersion';
 import Link from "next/link";
 import AuthenticatedSession from "@/components/AuthenticatedSession";
 import { auth } from "@/lib/auth";
@@ -45,6 +46,7 @@ export default async function DashboardLayout({
         </div>
       </header>
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">{children}</main>
+      <footer className="border-t border-border px-4 py-3 text-center text-xs text-subtle">BugHunter Web · v{buildVersion}</footer>
     </div></AuthenticatedSession>
   );
 }

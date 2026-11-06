@@ -82,6 +82,8 @@ try {
   if (process.getuid && process.getgid) env.push('-e', 'RECON_REPORT_V3_OUTPUT_UID=' + process.getuid(), '-e', 'RECON_REPORT_V3_OUTPUT_GID=' + process.getgid());
   if(routerOnly)env.push('-e','RECON_ROUTING_ROUTER_ONLY=1','-e','RECON_ROUTING_BASELINE_FILE=/acceptance/baseline.json');
   if(process.argv.includes('--allow-factual-only'))env.push('-e','RECON_ROUTING_ALLOW_FACTUAL_ONLY=1');
+  if(process.env.RECON_FACTS_ASSET_BASELINE_FILE){const file=resolve(process.env.RECON_FACTS_ASSET_BASELINE_FILE);assert(((await stat(file)).mode&0o077)===0);await copyFile(file,join(directory,'asset-baseline.json'));await chmod(join(directory,'asset-baseline.json'),0o600);env.push('-e','RECON_FACTS_ASSET_BASELINE_FILE=/acceptance/asset-baseline.json');}
+  if(process.env.RECON_REQUIRE_TARGET_NARRATIVE==='1')env.push('-e','RECON_REQUIRE_TARGET_NARRATIVE=1');
   if(process.env.RECON_REQUIRE_NARRATIVE==='1')env.push('-e','RECON_REQUIRE_NARRATIVE=1');
   if(factsRender)env.push('-e','RECON_FACTS_RENDER_ACCEPTANCE=1','-e','RECON_ROUTING_ALLOW_FACTUAL_ONLY=1');
   const mounts = [['src', '/app/src'], ['prisma', '/app/prisma'], ['tsconfig.json', '/app/tsconfig.json'], ['tests/recon/reportV3Real.mts', '/app/tests/recon/reportV3Real.mts'], ['node_modules/.prisma', '/app/node_modules/.prisma']].flatMap(([path, destination]) => ['--mount', `type=bind,source=${resolve(path)},target=${destination},readonly`]);

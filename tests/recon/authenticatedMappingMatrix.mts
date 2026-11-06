@@ -7,7 +7,6 @@ import type {Prisma} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {encryptSecret} from '@/lib/crypto';
 import {createScopeAsset,ensureAssetExecution} from '@/server/scopeAssets';
-import {setAssessmentMode} from '@/server/assessment';
 import {testStoredConnection} from '@/server/credentials/connection';
 import {captureAuthenticatedContexts,readAuthSurface} from '@/server/authenticatedRecon';
 import {loadTargetExecution,withTargetExecution} from '@/server/execution';
@@ -37,16 +36,13 @@ try{
   const before=await(await fetch('http://auth.fixture.test:8081/__observations')).json() as {method:string}[],loginCount=before.filter(row=>row.method==='POST').length;
   const cases=[
     {name:'BLACK_BOX / anonymous only',mode:'BLACK_BOX',data:web,credentials:[]},
-    {name:'WHITE_BOX / anonymous only',mode:'WHITE_BOX',data:web,credentials:[]},
     {name:'BLACK_BOX / explicit cookies',mode:'BLACK_BOX',data:web,credentials:[cookie.id]},
     {name:'BLACK_BOX / existing EMAIL_PASSWORD session',mode:'BLACK_BOX',data:web,credentials:[minted.id]},
     {name:'BLACK_BOX / API bearer',mode:'BLACK_BOX',data:api,credentials:[apiBearer.id]},
-    {name:'WHITE_BOX / API bearer',mode:'WHITE_BOX',data:api,credentials:[apiBearer.id]},
     {name:'BLACK_BOX / two verified contexts',mode:'BLACK_BOX',data:web,credentials:[minted.id,manager.id]},
-    {name:'WHITE_BOX / two verified contexts',mode:'WHITE_BOX',data:web,credentials:[minted.id,manager.id]},
   ] as const;
   for(const test of cases){
-    await setAssessmentMode(owner.id,test.data.program.id,test.mode,true);
+    assert.equal((await prisma.bountyProgram.findUniqueOrThrow({where:{id:test.data.program.id}})).assessmentMode,'BLACK_BOX');
     await prisma.targetCredential.updateMany({where:{targetId:test.data.target.id},data:{reconEnabled:false}});
     if(test.credentials.length)await prisma.targetCredential.updateMany({where:{id:{in:[...test.credentials]}},data:{reconEnabled:true}});
     const snapshot=await prisma.$transaction(tx=>captureAuthenticatedContexts(tx,test.data.target.id));assert.equal(snapshot.contexts.length,test.credentials.length);
@@ -69,6 +65,6 @@ try{
   }
   const requests=await(await fetch('http://auth.fixture.test:8081/__observations')).json() as {host:string;path:string;method:string}[];
   assert.equal(requests.filter(row=>row.method==='POST').length,loginCount);assert(requests.every(row=>row.host==='auth.fixture.test:8081'&&row.path.startsWith('/app/')));assert(!requests.some(row=>/\/(?:logout|delete|transfer)$/.test(row.path)));assert.equal(await prisma.scanLog.count(),0);assert.equal(await prisma.scanExecutionAttempt.count(),0);assert.equal(await prisma.finding.count(),0);assert.equal(await prisma.aiProviderConfig.count(),0);
-  console.log(JSON.stringify({acceptance:'authenticated-recon',phase:'mapping-matrix-isolation',status:'PASS',cases:8,loginDuringMapping:false,scannersInvoked:false,findingsCreated:0,modelCalls:0}));
+  console.log(JSON.stringify({acceptance:'authenticated-recon',phase:'mapping-matrix-isolation',status:'PASS',cases:cases.length,loginDuringMapping:false,scannersInvoked:false,findingsCreated:0,modelCalls:0}));
 }finally{await prisma.$disconnect();}
 process.exit(0);

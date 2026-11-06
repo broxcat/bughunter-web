@@ -173,7 +173,7 @@ d("API route authorization (integration)", () => {
       data: { userId, scopeId: scope.id, host: "ok.com" },
     });
     const finding = await prisma.finding.create({
-      data: { targetId: target.id, title: "real bug", gateStatus: "PASSED", severity: "HIGH" },
+      data: { targetId: target.id, title: "real bug", lifecycle:null, gateStatus: "PASSED", severity: "HIGH" },
     });
 
     const res = await reportsPost(
@@ -323,6 +323,7 @@ d("API route authorization (integration)", () => {
         vulnClass: "SSRF",
         severity: "HIGH",
         gateStatus: "PASSED",
+        lifecycle:null,
         oobToken: token,
         cwe: "CWE-918",
         cvssVector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N",
@@ -516,7 +517,7 @@ d("API route authorization (integration)", () => {
     const p = await prisma.bountyProgram.create({ data: { ownerId: userId, companyName: "Evidence review fixture", requiredUserAgent: "Review/1" } });
     const scope = await prisma.scope.create({ data: { userId, hostPattern: "review.example.test", status: "APPROVED" } });
     const target = await prisma.target.create({ data: { userId, scopeId: scope.id, programId: p.id, host: "review.example.test" } });
-    const finding = await prisma.finding.create({ data: { targetId: target.id, title: "Synthetic evidence", evidence: JSON.stringify({ controls: ["BASELINE_CONTROL", "INDEPENDENT_REPEAT"] }), impact: "Controlled fixture object exposed" } });
+    const finding = await prisma.finding.create({ data: { targetId: target.id, title: "Synthetic evidence", location:"https://review.example.test/api/orders", evidence: JSON.stringify({ controls: ["BASELINE_CONTROL", "INDEPENDENT_REPEAT"] }), impact: "Controlled fixture object exposed" } });
     const params = { params: Promise.resolve({ id: finding.id }) };
     const post = (body: object) => review(req("http://localhost", body), params);
     expect((await post({ answers: { q1_useNow: true } })).status).toBe(400);
@@ -526,6 +527,10 @@ d("API route authorization (integration)", () => {
     const saved = await prisma.finding.findUniqueOrThrow({ where: { id: finding.id } });
     expect(saved.reviewStatus).toBe("CONFIRMED"); expect(saved.gateAnswers).toBeNull();
     expect(saved.reviewEvidence).toMatchObject({ scope: "IN_SCOPE", control: ["BASELINE_CONTROL", "INDEPENDENT_REPEAT"] });
+    expect((await reportsPost(req('http://localhost',{title:'Reviewed but not validated',platform:'GENERIC',findingIds:[finding.id]}))).status).toBe(400);
+    const session=await(await import('@/server/research/sessions')).createResearchSession(userId,target.id);
+    await(await import('@/server/evidenceVault')).createEvidence(userId,target.id,{kind:'HTTP_REQUEST_RESPONSE',sessionId:session.id,description:'Explicit local proof',observedAt:new Date().toISOString(),http:{method:'GET',url:'https://review.example.test/api/orders',statusCode:200},link:{entity:'finding',id:finding.id,role:'SUPPORTS'}});
+    const {changeFindingLifecycle}=await import('@/server/findingLifecycle');for(const [expectedRevision,state]of ['VALIDATING','VALIDATED'].entries())await changeFindingLifecycle(userId,finding.id,{eventKey:crypto.randomUUID(),expectedRevision,state,reason:'Human reviewed the reproduction, impact and negative control',...(state==='VALIDATED'?{validation:{reproduced:true,impactDemonstrated:true,scopeRespected:true,negativeControl:'PERFORMED',conclusion:'Reproduced in authorized scope with impact and negative control'}}:{})});
     expect((await reportsPost(req("http://localhost", { title: "Evidence reviewed report", platform: "GENERIC", findingIds: [finding.id] }))).status).toBe(201);
     expect((await post({ status: "EVIDENCE_REVIEW" })).status).toBe(200);
     expect((await post({ status: "INCONCLUSIVE", notes: "A later local control could not reproduce the observation." })).status).toBe(200);

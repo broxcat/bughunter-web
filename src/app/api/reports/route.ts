@@ -1,3 +1,4 @@
+import {publicFinding,safeFindingText} from '@/server/findingPrivacy';
 import {Prisma} from '@prisma/client';
 import {foreignOrigin} from '@/lib/requestOrigin';
 import {lifecycleReportEligible} from '@/lib/findingLifecycle';
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
   if(programId){
     if(!await prisma.bountyProgram.findFirst({where:{id:programId,ownerId:session.user.id},select:{id:true}}))return NextResponse.json({error:'Not found'},{status:404});
     const rows=await prisma.report.findMany({where:{userId:session.user.id,items:{some:{finding:{target:{programId,userId:session.user.id}}}}},include:{items:{select:{finding:{select:{targetId:true}}}}},orderBy:{createdAt:'desc'},take:100});
-    return NextResponse.json(rows.map(r=>({...r,evidenceTargetIds:[...new Set(r.items.map(i=>i.finding.targetId))]})));
+    return NextResponse.json(rows.map(r=>({...r,markdown:r.markdown?safeFindingText(r.markdown):r.markdown,title:safeFindingText(r.title),evidenceTargetIds:[...new Set(r.items.map(i=>i.finding.targetId))]})));
   }
   if (targetId && !await prisma.target.findFirst({ where: { id: targetId, userId: session.user.id }, select: { id: true } })) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const reports = await prisma.report.findMany({
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest) {
     orderBy: { createdAt: "desc" },
   });
 
-  return NextResponse.json(reports);
+  return NextResponse.json(reports.map(r=>({...r,title:safeFindingText(r.title),markdown:r.markdown?safeFindingText(r.markdown):r.markdown})));
 }
 
 // POST /api/reports — NON-NEGOTIABLE: a report may include ONLY findings whose
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest) {
 
   return prisma.$transaction(async tx=>{
   // Shared row locks keep review/lifecycle eligibility stable until the Report commits.
-  await tx.$queryRaw(Prisma.sql`SELECT id FROM "Finding" WHERE id IN (${Prisma.join(requestedIds)}) ORDER BY id FOR SHARE`);
+  await tx.$queryRaw(Prisma.sql`SELECT f.id FROM "Finding" f JOIN "Target" t ON f."targetId"=t.id WHERE f.id IN (${Prisma.join(requestedIds)}) AND t."userId"=${session.user.id} ORDER BY f.id FOR SHARE OF f`);
   // Fetch only the user's own findings among those requested.
   const findings = await tx.finding.findMany({
     where: { id: { in: requestedIds }, target: { userId: session.user.id } },
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest) {
   // Render in the requested-id order for a stable report.
   const byId = new Map(findings.map((f) => [f.id, f]));
   const ordered: ReportFinding[] = requestedIds.map((fid) => {
-    const f = byId.get(fid)!;
+    const f = publicFinding(byId.get(fid)!);
     return {
       ...capturedFindingAssessment(f),
       lifecycle:f.lifecycle??null,
@@ -125,7 +126,7 @@ export async function POST(req: NextRequest) {
   });
 
   const markdown = renderReport(parsed.data.platform, {
-    title: parsed.data.title,
+    title: safeFindingText(parsed.data.title),
     findings: ordered,
   });
 
@@ -141,7 +142,7 @@ export async function POST(req: NextRequest) {
       id:reportId,
       userId: session.user.id,
       targetId,
-      title: parsed.data.title,
+      title: safeFindingText(parsed.data.title),
       platform: parsed.data.platform,
       markdown,
       vaultEvidence:{create:[...new Set(findings.flatMap(f=>(f.vaultEvidence??[]).map(link=>link.evidenceId)))].map(evidenceId=>({evidenceId,reportReferenceId:reportId}))},

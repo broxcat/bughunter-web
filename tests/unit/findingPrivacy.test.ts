@@ -1,0 +1,6 @@
+import {describe,it,expect} from 'vitest';
+import {publicFinding,safeFindingText} from '@/server/findingPrivacy';
+describe('Finding and Report export privacy',()=>{
+ it('redacts historical secrets on read without rewriting the original record',()=>{const original={id:'finding',title:'Original observation',evidence:'Cookie: PRIVATE_COOKIE\nAuthorization: Bearer PRIVATE_AUTH\n{"accessToken":"PRIVATE_TOKEN"}',impact:'Contact private@example.test',reviewEvidence:{notes:'password=PRIVATE_PASSWORD'},lifecycle:null};const rendered=publicFinding(original);expect(JSON.stringify(rendered)).not.toContain('PRIVATE_');expect(JSON.stringify(rendered)).not.toContain('private@');expect(original.evidence).toContain('PRIVATE_COOKIE');expect(rendered.id).toBe('finding');expect(rendered.lifecycle).toBeNull();});
+ it('retains long Reports and evidence identity while redacting credentials and URLs',()=>{const raw='EV-123\n'+'Observed evidence\n'.repeat(3000)+'DATABASE_URL=postgresql://user:PRIVATE_PASSWORD@host/db\nhttps://platform.example.test/report?token=PRIVATE_TOKEN';const safe=safeFindingText(raw);expect(safe.length).toBeGreaterThan(20000);expect(safe).toContain('EV-123');expect(safe).not.toContain('PRIVATE_');});
+});

@@ -1,3 +1,5 @@
+import {safeFindingField,publicFinding} from '@/server/findingPrivacy';
+import {foreignOrigin} from '@/lib/requestOrigin';
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
@@ -12,14 +14,14 @@ import {
 } from "@/lib/findingClassification";
 
 const createFindingSchema = z.object({
-  targetId: z.string().trim().min(1, "targetId is required"),
-  scanRunId: z.string().trim().min(1).optional(),
-  title: z.string().trim().min(1, "title is required"),
-  vulnClass: z.string().trim().min(1).optional(),
+  targetId: z.string().trim().min(1, "targetId is required").max(150),
+  scanRunId: z.string().trim().min(1).max(150).optional(),
+  title: z.string().trim().min(1, "title is required").max(300),
+  vulnClass: z.string().trim().min(1).max(100).optional(),
   severity: z.enum(["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
-  description: z.string().trim().min(1).optional(),
-  location: z.string().trim().min(1).optional(),
-  evidence: z.string().trim().min(1).optional(),
+  description: z.string().trim().min(1).max(20000).optional(),
+  location: z.string().trim().min(1).max(4096).optional(),
+  evidence: z.string().trim().min(1).max(20000).optional(),
   cwe: cweField.optional(),
   cvssVector: cvssVectorField.optional(),
   impact: reportTextField.min(1).optional(),
@@ -37,7 +39,7 @@ export async function GET(req: NextRequest) {
   const programId = req.nextUrl.searchParams.get('programId');
   if (programId) {
     if (!await prisma.bountyProgram.findFirst({ where: { id: programId, ownerId: session.user.id }, select: { id: true } })) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    return NextResponse.json(await prisma.finding.findMany({ where: { target: { programId, userId: session.user.id } }, select: { id: true, title: true, targetId: true, reviewStatus: true, severity: true, lifecycle:true,lifecycleEvents:{where:{state:'VALIDATED'},take:1,select:{id:true}} }, orderBy: { createdAt: 'desc' }, take: 1000 }));
+    return NextResponse.json((await prisma.finding.findMany({ where: { target: { programId, userId: session.user.id } }, select: { id: true, title: true, targetId: true, reviewStatus: true, severity: true, lifecycle:true,lifecycleEvents:{where:{state:'VALIDATED'},take:1,select:{id:true}} }, orderBy: { createdAt: 'desc' }, take: 1000 })).map(publicFinding));
   }
   if (!targetId) {
     return NextResponse.json({ error: "targetId is required" }, { status: 400 });
@@ -67,7 +69,7 @@ export async function GET(req: NextRequest) {
   const hitsByToken = await loadOobHitsByToken(tokens);
 
   const withHits = findings.map((f) => ({
-    ...f,
+    ...publicFinding(f),
     oobHits: f.oobToken ? (hitsByToken.get(f.oobToken) ?? []) : [],
   }));
 
@@ -82,6 +84,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  if(foreignOrigin(req))return NextResponse.json({error:'Forbidden'},{status:403});
   const body = await req.json().catch(() => null);
   const parsed = createFindingSchema.safeParse(body);
   if (!parsed.success) {
@@ -117,19 +120,19 @@ export async function POST(req: NextRequest) {
     data: {
       targetId: target.id,
       scanRunId: parsed.data.scanRunId,
-      title: parsed.data.title,
-      vulnClass: parsed.data.vulnClass,
+      title: safeFindingField(parsed.data.title),
+      vulnClass: safeFindingField(parsed.data.vulnClass),
       severity: parsed.data.severity ?? "INFO",
-      description: parsed.data.description,
-      location: parsed.data.location,
-      evidence: parsed.data.evidence,
+      description: safeFindingField(parsed.data.description),
+      location: safeFindingField(parsed.data.location),
+      evidence: safeFindingField(parsed.data.evidence),
       cwe: parsed.data.cwe ?? suggestCwe(parsed.data.vulnClass) ?? undefined,
       ...cvssColumns(parsed.data.cvssVector),
-      impact: parsed.data.impact,
-      remediation: parsed.data.remediation,
+      impact: safeFindingField(parsed.data.impact),
+      remediation: safeFindingField(parsed.data.remediation),
       gateStatus: "UNVALIDATED",
     },
   });
 
-  return NextResponse.json(finding, { status: 201 });
+  return NextResponse.json(publicFinding(finding), { status: 201 });
 }

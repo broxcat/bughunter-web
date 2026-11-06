@@ -1,3 +1,5 @@
+import {safeFindingField,publicFinding} from '@/server/findingPrivacy';
+import {foreignOrigin} from '@/lib/requestOrigin';
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
@@ -32,6 +34,7 @@ export async function PATCH(
 
   const { id } = await params;
 
+  if(foreignOrigin(req))return NextResponse.json({error:'Forbidden'},{status:403});
   const body = await req.json().catch(() => null);
   const parsed = updateSchema.safeParse(body);
   if (!parsed.success) {
@@ -59,10 +62,10 @@ export async function PATCH(
     data: {
       cwe,
       ...cvssColumns(cvssVector),
-      impact: blankToNull(impact),
-      remediation: blankToNull(remediation),
+      impact: safeFindingField(blankToNull(impact)),
+      remediation: safeFindingField(blankToNull(remediation)),
     },
   });
 
-  return NextResponse.json(updated);
+  return NextResponse.json(publicFinding(updated));
 }

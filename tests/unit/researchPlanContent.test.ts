@@ -12,7 +12,7 @@ describe('Research plan presentation',()=>{
     const html=render();for(const value of ['Objective:','Why:','Method:','Observed surface','Evidence and provenance','ReconSurfaceObservation:observed','Previously tested boundary','Retained rejected hypothesis','Existing Findings','Visibility differences require manual validation'])expect(html).toContain(value);
   });
   it('distinguishes source metadata and declared personas from analyzed or verified behavior',()=>{
-    const html=render();expect(html).toContain('Authorized sources: 2');expect(html).toContain('Source content has not been analyzed');expect(html).toContain('operator-declared');expect(html).toContain('An objective is not a vulnerability or a completed test');
+    const html=render();expect(html).toContain('2 historical source references');expect(html).toContain('White-box mode is retired');expect(html).toContain('source content has not been analyzed');expect(html).toContain('operator-declared');expect(html).toContain('An objective is not a vulnerability or a completed test');
   });
   it('keeps target-controlled HTML and URLs as text, with no active target link or raw JSON dump',()=>{
     const value=plan();value.items[0].title='<script>change_permissions()</script>';value.items[0].surfaceRefs[0].url='https://app.example.test/\"><img src=x onerror=expand_scope()>';

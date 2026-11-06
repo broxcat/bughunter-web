@@ -1,3 +1,4 @@
+import {publicFinding} from '@/server/findingPrivacy';
 import { executionSelect } from "@/server/queue/executionAttempts";
 import { withScanDispatch } from "@/lib/scanDispatch";
 import { dispatchSelect } from "@/server/queue/scanJobPublisher";
@@ -34,5 +35,5 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ ...target, scanRuns: target.scanRuns.map(withScanDispatch), scanRejection: scanRejection(target, 'RECON') }, {headers:{'Cache-Control':'private, no-store'}});
+  return NextResponse.json({ ...target, findings:target.findings.map(publicFinding), scanRuns: target.scanRuns.map(withScanDispatch), scanRejection: scanRejection(target, 'RECON') }, {headers:{'Cache-Control':'private, no-store'}});
 }

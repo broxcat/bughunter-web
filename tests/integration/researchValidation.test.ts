@@ -26,6 +26,11 @@ const importDocument = async (value = document()) => { await writeFile(join(root
 const hypothesis = () => prisma.researchHypothesis.findFirstOrThrow({ where: { sessionId: session.id } });
 const req = (body: unknown) => new Request("http://app.example.test", { method: "POST", body: JSON.stringify(body) });
 const promoteRow = async (id?: string, revision = 1, body: unknown = { expectedRevision: revision, acknowledgeHumanReview: true }) => promote(req(body), { params: Promise.resolve({ id: session.id, hypothesisId: id ?? (await hypothesis()).id }) });
+async function validateForReport(findingId:string){
+ const {createEvidence}=await import('@/server/evidenceVault');
+ await createEvidence(userId,targetId,{kind:'RESEARCH_EVIDENCE',sessionId:session.id,ref:'evidence/positive.txt',description:'Explicit researcher direct proof',link:{entity:'finding',id:findingId,role:'SUPPORTS'}});
+ const {changeFindingLifecycle}=await import('@/server/findingLifecycle');for(const [expectedRevision,state]of ['VALIDATING','VALIDATED'].entries())await changeFindingLifecycle(userId,findingId,{eventKey:randomUUID(),expectedRevision,state,reason:'Independent human validation with retained scope, impact and controls',...(state==='VALIDATED'?{validation:{reproduced:true,impactDemonstrated:true,scopeRespected:true,negativeControl:'PERFORMED',conclusion:'Reproduced direct behavior and demonstrated impact against a negative control'}}:{})});
+}
 (db ? describe : describe.skip)("Research evidence → human promotion → existing Evidence Review → Report", () => {
   beforeAll(async () => {
     execFileSync("npx", ["prisma", "migrate", "deploy"], { env: process.env, stdio: "pipe" });
@@ -67,6 +72,7 @@ const promoteRow = async (id?: string, revision = 1, body: unknown = { expectedR
     expect((await review(reviewRequest("CONFIRMED"), ctx)).status).toBe(200);
     expect((await prisma.finding.findUniqueOrThrow({ where: { id: findingId } })).gateStatus).toBe("PASSED");
     expect(await prisma.report.count({ where: { userId } })).toBe(0);
+    await validateForReport(findingId);
     expect((await report(reportRequest())).status).toBe(201);
     const replay = await promoteRow(h.id, h.revision); expect(replay.status).toBe(200); expect((await replay.json()).findingId).toBe(findingId);
     expect((await prisma.finding.findUniqueOrThrow({ where: { id: findingId } })).reviewStatus).toBe("CONFIRMED");
@@ -187,6 +193,7 @@ const promoteRow = async (id?: string, revision = 1, body: unknown = { expectedR
       const reviewContext = { params: Promise.resolve({ id: findingId }) };
       for (const status of ["EVIDENCE_REVIEW", "CONFIRMED"]) expect((await review(new NextRequest("http://app.example.test", { method: "POST", body: JSON.stringify({ status, notes: "Operator independently inspected the direct fixture captures and reproduced their security effect against negative controls." }) }), reviewContext)).status).toBe(200);
       expect(await prisma.report.count({ where: { userId } })).toBe(0);
+      await validateForReport(findingId);
       expect((await report(new NextRequest("http://app.example.test", { method: "POST", body: JSON.stringify({ title: "Human-requested Burp-derived fixture report", platform: "GENERIC", findingIds: [findingId] }) }))).status).toBe(201);
     } finally { await dir.close(); await fixture.close(); }
   });

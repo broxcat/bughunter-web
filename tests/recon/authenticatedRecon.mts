@@ -47,7 +47,7 @@ try{
     connection=new Redis(process.env.REDIS_URL!,{maxRetriesPerRequest:null});connection.on('error',()=>{});processor=createScanProcessor('authenticated-native-fixture');
     worker=new Worker<ScanJobData>(SCAN_QUEUE_NAME,(job,token,signal)=>processor!.process(job,signal,token),{connection,concurrency:1});worker.on('error',()=>{});await worker.pause(true);
     const cases=[];
-    for(const assessmentMode of ['BLACK_BOX','WHITE_BOX'] as const){
+    for(const assessmentMode of ['BLACK_BOX'] as const){
       const program=await prisma.bountyProgram.create({data:{ownerId:owner.id,companyName:'Authenticated native '+assessmentMode,requiredUserAgent:'Auth-Recon-Fixture/'+assessmentMode,assessmentMode}});
       const asset=await createScopeAsset(owner.id,program.id,{value:base,type:'WEB_APPLICATION',assetValue:'MEDIUM'}),{target}=await ensureAssetExecution(owner.id,program.id,asset.id);
       const user=await prisma.targetCredential.create({data:{targetId:target.id,label:'User session',mode:'EMAIL_PASSWORD',purpose:'ACCOUNT_A',persona:'User',emailCipher:encryptSecret(fixtureAccounts.user.username),passwordCipher:encryptSecret(fixtureAccounts.user.password)}});
@@ -65,7 +65,7 @@ try{
       // Changing descriptive metadata after queueing must not rewrite this run.
       await prisma.targetCredential.update({where:{id:user.id},data:{persona:'Changed after capture'}});
       await prisma.targetCredential.update({where:{id:duplicate.id},data:{reconEnabled:false}});
-      await setAssessmentMode(owner.id,program.id,assessmentMode==='BLACK_BOX'?'WHITE_BOX':'BLACK_BOX',true);
+      await assert.rejects(setAssessmentMode(owner.id,program.id,'WHITE_BOX',true),{status:410});
       const immutable=await prisma.scanRun.findUniqueOrThrow({where:{id:scan.id}});assert.deepEqual(immutable.authenticatedContextsSnapshot,scan.authenticatedContextsSnapshot);assert.equal(immutable.assessmentModeSnapshot,assessmentMode);
       cases.push({program,asset,target,parent,scan,user,manager,snapshot});
     }

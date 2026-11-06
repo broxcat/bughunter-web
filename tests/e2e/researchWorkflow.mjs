@@ -130,6 +130,8 @@ try {
   await findingCard.getByRole("button", { name: "Confirm", exact: true }).click();
   await findingCard.getByText("CONFIRMED", { exact: true }).waitFor();
   assert.equal(await prisma.report.count({ where: { userId: user.id } }), 0);
+  const proof=await context.request.post(origin+'/api/evidence/'+target.id,{data:{kind:'RESEARCH_EVIDENCE',sessionId:research.id,ref:'evidence/positive.txt',description:'Human reviewed direct fixture proof',link:{entity:'finding',id:draft.findingId,role:'SUPPORTS'}}});assert.equal(proof.status(),201);
+  for(const [expectedRevision,state]of ['VALIDATING','VALIDATED'].entries()){const decision=await context.request.post(origin+'/api/findings/'+draft.findingId+'/lifecycle',{data:{eventKey:randomUUID(),expectedRevision,state,reason:'Human reviewed reproduction, demonstrated impact and negative control',...(state==='VALIDATED'?{validation:{reproduced:true,impactDemonstrated:true,scopeRespected:true,negativeControl:'PERFORMED',conclusion:'Reproduced within authorized scope with direct proof and a negative control'}}:{})}});assert.equal(decision.status(),201);}
   const report = await context.request.post(origin + "/api/reports", { data: { title: "Explicitly requested fixture report", platform: "GENERIC", findingIds: [draft.findingId] } }); assert.equal(report.status(), 201);
   const exportedReport=await report.json();assert(exportedReport.markdown.includes('Assessment mode: Black-box'));assert(exportedReport.markdown.includes('Research session authorization snapshot'));
   await page.goto(origin + `/research/history/${research.id}`);
