@@ -7,6 +7,9 @@ import { loadTargetReconRun } from '@/server/recon/runDetail';
 import { ResearchError } from '@/server/research/workspace';
 import { reconOverview, type ReconTone } from '@/lib/reconOverview';
 import { capabilityRows, elapsed, formatDuration, groupObservationKinds, redactLogLines, stageTools, stepView, type StepTone } from '@/lib/reconTimeline';
+import { buildReconReportModel } from '@/lib/reconReportModel';
+import { loadReconReportFacts } from '@/server/recon/reportFacts';
+import ReconReportView from '@/components/ReconReportView';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +42,8 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
     throw error;
   }
 
+  const facts = await loadReconReportFacts(session.user.id, id);
+  const report = buildReconReportModel(facts);
   const { run, observations, logs, rawLogLimit } = detail;
   const view = reconOverview({ status: run.status, outcome: run.outcome });
   const duration = elapsed(run.startedAt ?? run.createdAt, run.finishedAt);
@@ -56,6 +61,7 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
         <h1 className="text-2xl font-semibold">Recon run</h1>
         <Badge tone={badgeTone[view.tone]}>{view.label}</Badge>
         <Badge tone="neutral" mono>{run.status}</Badge>
+        <a className="ml-auto text-sm text-brand" href={`/api/recon/runs/${run.id}/report`}>Download report (.md)</a>
       </div>
       {view.detail && <p className="text-sm text-muted">{view.detail}</p>}
       <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
@@ -67,6 +73,10 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
         <div><dt className="text-subtle">Authenticated contexts</dt><dd>{contextCount > 0 ? `${contextCount} recorded` : 'None recorded'}</dd></div>
       </dl>
     </header>
+
+    <ReconReportView model={report} />
+
+    <h2 className="pt-2 text-xl font-semibold">Per-host execution detail</h2>
 
     {!run.scans.length && <Card className="p-5"><h2 className="font-semibold">No host executions recorded</h2><p className="mt-2 text-sm text-muted">This run has no per-host execution data. The run status above remains authoritative; nothing is inferred.</p></Card>}
 
