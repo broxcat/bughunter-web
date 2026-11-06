@@ -28,6 +28,9 @@ export default auth(async (req) => {
   if (isPublic(pathname)) return NextResponse.next();
 
   if (!req.auth) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const loginUrl = new URL("/login", req.nextUrl.origin);
     loginUrl.searchParams.set("callbackUrl", `${pathname}${search}`);
     return NextResponse.redirect(loginUrl);

@@ -46,6 +46,8 @@ async function login(page, address = email, secret = password) {
   return response;
 }
 try {
+  // Also support the runner's explicit browser-only mode on a fresh fixture DB.
+  await exec("npx", ["prisma", "migrate", "deploy"], { env });
   // Bootstrap through the actual operator command; secrets only enter stdin.
   const bootstrap = spawn(process.execPath, ["scripts/create-user.mjs", email.toUpperCase(), "Auth browser fixture"], { env, stdio: ["pipe", "ignore", "ignore"] });
   bootstrap.stdin.end(password);
@@ -57,6 +59,17 @@ try {
   browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
   const context = await browser.newContext(), page = await context.newPage();
   await startWeb(false);
+  for (const path of ['/api/programs', '/api/recon/runs/missing/report']) {
+    const result = await context.request.get(`${origin}${path}`, { maxRedirects: 0 });
+    assert.equal(result.status(), 401);
+    assert.equal(result.headers()['location'], undefined);
+    assert.deepEqual(await result.json(), { error: 'Unauthorized' });
+  }
+  const document = await context.request.get(`${origin}/targets?deleted=1`, { maxRedirects: 0 });
+  assert.equal(document.status(), 307);
+  assert.equal(new URL(document.headers()['location'], origin).searchParams.get('callbackUrl'), '/targets?deleted=1');
+  console.log('PASS: anonymous APIs return JSON 401; documents retain login callback redirects');
+
   await page.goto(`${origin}/login`); assert.equal(await page.getByRole("link", { name: "Create one" }).count(), 0);
   await page.goto(`${origin}/register`); await page.getByRole("heading", { name: "Public registration is disabled" }).waitFor();
   assert.equal((await context.request.post(`${origin}/api/register`, { data: { email, name: "Fixture", password } })).status(), 403);
