@@ -1,0 +1,9 @@
+import {describe,it,expect} from 'vitest';
+import {historySurface,compareHistory,historyHash,type HistoryRow} from '@/lib/reconHistory';
+const at='2026-11-06T09:00:00.000Z';
+const row=(value:Record<string,unknown>):HistoryRow=>{const r=historySurface('endpoint',value,at,at)!;return {...r,id:historyHash(r.identity),fingerprint:historyHash(r.details),observedRuns:1};};
+describe('documentary Recon history',()=>{
+ it('keeps stable endpoint identities without query values, raw bodies or credentials',()=>{const r=row({url:'https://app.example.test/api/users?token=PRIVATE_TOKEN',method:'GET',statusCode:200,body:'PRIVATE_BODY',cookie:'PRIVATE_COOKIE'});expect(JSON.stringify(r)).not.toContain('PRIVATE_');expect(r.details).toEqual({method:'GET',statusCode:200,url:'https://app.example.test/api/users?token='});});
+ it('classifies new, changed, unobserved and unchanged without removal inference',()=>{const a=row({url:'https://app.example.test/api/a',statusCode:200}),b=row({url:'https://app.example.test/api/b',statusCode:200}),c=row({url:'https://app.example.test/api/c'}),d=row({url:'https://app.example.test/api/d'});const delta=compareHistory([row({statusCode:403,url:'https://app.example.test/api/a'}),c,d],[a,b,d]);expect(delta.changed.map(r=>r.id)).toEqual([a.id]);expect(delta.notObserved.map(r=>r.id)).toEqual([b.id]);expect(delta.new.map(r=>r.id)).toEqual([c.id]);expect(delta.unchanged.map(r=>r.id)).toEqual([d.id]);expect(delta).not.toHaveProperty('removed');});
+ it('sorts DNS addresses and summarizes static assets while keeping observed methods',()=>{expect(historySurface('hostname',{hostname:'app.example.test',addresses:['2','1','2']},at,at)?.details.addresses).toEqual(['1','2']);expect(row({url:'https://app.example.test/_next/static/chunks/a.js'}).staticAsset).toBe(true);expect(row({url:'https://app.example.test/api/orders',method:'PATCH'}).label).toContain('PATCH');});
+});

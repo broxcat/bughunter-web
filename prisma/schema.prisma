@@ -208,6 +208,8 @@ model AssessmentSource {
 }
 
 model Target {
+  reconHistory ReconHistoryRun[]
+  reconSurfaces ReconSurface[]
   evidenceRecords EvidenceRecord[]
 
   researchCoverage ResearchCoverage[]
@@ -322,6 +324,7 @@ enum CredentialMode {
 // ---------------------------------------------------------------------------
 
 model ScanRun {
+  surfaceHistory ReconHistoryRun?
   researchPlans ResearchPlan[]
   authenticatedContextsSnapshot Json?
   authenticatedReconResult Json?
@@ -1258,4 +1261,45 @@ model EvidenceCoverage {
  coverageEvent ResearchCoverageEvent @relation(fields:[coverageEventId],references:[id],onDelete:Cascade)
  @@unique([evidenceId,coverageEventId])
  @@index([coverageEventId])
+}
+
+// Durable documentary surface identities; never a Scope authorization source.
+model ReconHistoryRun {
+ id String @id @default(cuid())
+ targetId String
+ scopeAssetReferenceId String
+ scanRunId String? @unique
+ scanReferenceId String @unique
+ runCreatedAt DateTime
+ outcome String
+ truncated Boolean @default(false)
+ target Target @relation(fields:[targetId],references:[id],onDelete:Cascade)
+ scanRun ScanRun? @relation(fields:[scanRunId],references:[id],onDelete:SetNull)
+ observations ReconSurfaceSeen[]
+ @@index([targetId,scopeAssetReferenceId,runCreatedAt])
+}
+model ReconSurface {
+ id String @id
+ targetId String
+ scopeAssetReferenceId String
+ kind String
+ identity String @db.Text
+ label String @db.Text
+ firstSeenAt DateTime
+ lastSeenAt DateTime
+ target Target @relation(fields:[targetId],references:[id],onDelete:Cascade)
+ observations ReconSurfaceSeen[]
+ @@index([targetId,scopeAssetReferenceId])
+}
+model ReconSurfaceSeen {
+ id String @id @default(cuid())
+ surfaceId String
+ historyId String
+ fingerprint String
+ details Json
+ sourceRefs String[]
+ surface ReconSurface @relation(fields:[surfaceId],references:[id],onDelete:Cascade)
+ history ReconHistoryRun @relation(fields:[historyId],references:[id],onDelete:Cascade)
+ @@unique([historyId,surfaceId])
+ @@index([surfaceId])
 }

@@ -339,3 +339,5 @@ Tests use disposable/local services. Real Burp GUI and remote Codex inference
 require operator setup and are never asserted from fixture/config checks alone.
 
 Adaptive Target-wide Recon, structured artifacts, compact Scope → Recon → Research → Findings UI and deployment: [Target Recon playbooks](docs/target-recon-playbooks.md).
+
+Recon comparison: [durable history and diffs](docs/recon-history.md). Absence does not prove removal; new discoveries never extend authorization.

@@ -67,7 +67,8 @@ export function deduplicateArtifacts(rows: ReconArtifactData[]) {
 export function reconDiff(current: ReconArtifactData[], previous: ReconArtifactData[], comparable: boolean) {
   const key = (r: ReconArtifactData) => `${r.kind}:${r.canonicalKey}`, a = new Map(current.map(r => [key(r),r])), b = new Map(previous.map(r => [key(r),r]));
   const compact = (r: ReconArtifactData) => ({ artifactId: r.id, kind: r.kind, key: r.canonicalKey, value: r.value });
-  return { version: 1, comparable, coverageWarning: 'Not observed in this run does not prove disappearance; compare coverage and blocked stages.',
-    new: current.filter(r => !b.has(key(r))).map(compact), removed: comparable ? previous.filter(r => !a.has(key(r))).map(compact) : [],
-    changed: current.filter(r => b.has(key(r)) && JSON.stringify(r.value) !== JSON.stringify(b.get(key(r))!.value)).map(compact) };
+  const stable=(v:Record<string,unknown>)=>JSON.stringify(Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,Array.isArray(v)?[...v].sort():v])));
+  return { version: 2, comparable, coverageWarning: 'Not observed in this run does not prove disappearance; compare coverage and blocked stages.',
+    new: current.filter(r => !b.has(key(r))).map(compact), notObserved: comparable ? previous.filter(r => !a.has(key(r))).map(compact) : [],
+    changed: current.filter(r => b.has(key(r)) && stable(r.value) !== stable(b.get(key(r))!.value)).map(compact), unchanged: current.filter(r=>b.has(key(r))&&stable(r.value)===stable(b.get(key(r))!.value)).map(compact) };
 }

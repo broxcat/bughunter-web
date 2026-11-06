@@ -30,7 +30,7 @@ describe('structured Recon data quality and provenance',()=>{
   });
   it('records additions/removals/changes with a coverage warning rather than disappearance claims',()=>{
     const old=norm('/old'),added=norm('/new'),changed={...old,value:{...old.value,statusCode:404}};
-    const d=reconDiff([added,changed],[old],true);expect(d.new).toHaveLength(1);expect(d.changed).toHaveLength(1);expect(d.coverageWarning).toContain('does not prove');expect(reconDiff([added],[old],false).removed).toEqual([]);
+    const d=reconDiff([added,changed],[old],true);expect(d.new).toHaveLength(1);expect(d.changed).toHaveLength(1);expect(d.coverageWarning).toContain('does not prove');expect(reconDiff([added],[old],false).notObserved).toEqual([]);
   });
   it('uses meaningful categories and rejects malformed/oversized data',()=>{
     expect(classifyReconUrl('https://app.example.test/_next/static/chunk.js')).toBe('static');expect(classifyReconUrl('https://app.example.test/api/courses')).toBe('api');expect(classifyReconUrl('https://app.example.test/admin')).toBe('admin');expect(normalizeArtifact('endpoint',{url:'javascript:alert(1)'},source,boundary,[])).toBeNull();expect(normalizeArtifact('endpoint',{url:'https://app.example.test/'+ 'a'.repeat(5000)},source,boundary,[])).toBeNull();
