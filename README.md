@@ -345,3 +345,5 @@ Recon comparison: [durable history and diffs](docs/recon-history.md). Absence do
 [Finding lifecycle and Retest](docs/finding-lifecycle.md) preserve human validation, submission history and original/new proof.
 
 The development footer reads its build version from `package.json`; this remains `0.1.0` until the v1 release audit is approved. Full local workflow checks include `node tests/e2e/runResearchCoverageWorkflow.mjs`, `node tests/e2e/runResearchPlanWorkflow.mjs` and `node tests/e2e/runBlackboxUx.mjs` after building. Their databases, queues, accounts and evidence are disposable fixtures. Real Codex context acceptance is separately opt-in: `BH_REAL_CODEX_COVERAGE=1 npx tsx tests/research/coverageRealCodex.mts`.
+
+Current delivery and release limits: [Black-box v1 release audit](docs/v1-release-audit.md).
