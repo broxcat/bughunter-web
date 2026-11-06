@@ -36,14 +36,12 @@ const ctx=()=>({params:Promise.resolve({id:programId})});
     expect(black.assessmentModeSnapshot).toBe('BLACK_BOX');expect(black.assessmentSourcesSnapshot).toEqual([]);
     expect(blackChildren.every(child=>child.assessmentModeSnapshot==='BLACK_BOX'&&JSON.stringify(child.assessmentSourcesSnapshot)==='[]')).toBe(true);
     for(const child of blackChildren)await finish(child.id);await runs.reconcileTargetRecon(black.id);
-    const assessment=await import('@/server/assessment');await assessment.setAssessmentMode(userId,programId,'WHITE_BOX',true);
-    const white=await runs.startTargetRecon(userId,programId),whiteChildren=await p.scanRun.findMany({where:{targetReconRunId:white.id}});
-    expect(white.assessmentModeSnapshot).toBe('WHITE_BOX');expect(white.assessmentSourcesSnapshot).toEqual([expect.objectContaining({id:source.id,locator:source.locator,contentAvailable:false})]);
-    for(const child of whiteChildren){expect(child.assessmentModeSnapshot).toBe(white.assessmentModeSnapshot);expect(child.assessmentSourcesSnapshot).toEqual(white.assessmentSourcesSnapshot);const plan=child.reconPlan as Record<string,unknown>,previous=blackChildren.find(previous=>previous.scopeAssetId===child.scopeAssetId)!.reconPlan as Record<string,unknown>;for(const key of ['activityMode','depth','limits','stages','capabilities','ffufProfile','nucleiPolicy'])expect(plan[key]).toEqual(previous[key]);}
-    await assessment.setAssessmentMode(userId,programId,'BLACK_BOX',true);await p.assessmentSource.update({where:{id:source.id},data:{label:'Changed current registration',active:false}});
-    for(const child of whiteChildren)await finish(child.id);await runs.reconcileTargetRecon(white.id);
-    const historical=await p.targetReconRun.findUniqueOrThrow({where:{id:white.id}});expect(historical.assessmentModeSnapshot).toBe('WHITE_BOX');expect(historical.assessmentSourcesSnapshot).toEqual(white.assessmentSourcesSnapshot);expect(historical.scopeMarkdown).toContain('White-box');expect(historical.scopeMarkdown).toContain('Repository metadata only');expect(historical.scopeMarkdown).not.toContain('Changed current registration');
-    for(const child of await p.scanRun.findMany({where:{targetReconRunId:white.id}})){expect(child.scopeMarkdown).toContain('White-box');expect(child.scopeMarkdown).toContain('No source-assisted analysis was executed');}
+    const assessment=await import('@/server/assessment');
+    await expect(assessment.setAssessmentMode(userId,programId,'WHITE_BOX',true)).rejects.toMatchObject({status:410});
+    await expect(p.assessmentSource.update({where:{id:source.id},data:{active:true}})).rejects.toThrow();
+    const next=await runs.startTargetRecon(userId,programId);
+    expect(next.assessmentModeSnapshot).toBe('BLACK_BOX');expect(next.assessmentSourcesSnapshot).toEqual([]);
+
   });
   it('fixes Completed · 0 discoveries by counting normalized endpoint artifacts and auto-generates both v2 briefs',async()=>{
     const asset=await add('app.example.test'),parent=await runs.startTargetRecon(userId,programId),scan=await p.scanRun.findFirstOrThrow({where:{targetReconRunId:parent.id}});

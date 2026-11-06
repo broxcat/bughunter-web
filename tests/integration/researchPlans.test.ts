@@ -60,7 +60,7 @@ async function nextRun(){const a=await p.scopeAsset.findUniqueOrThrow({where:{id
     const black=(await s.researchPlanState(userId,targetId)).plan!;
     await p.scanRun.update({where:{id:runId},data:{assessmentModeSnapshot:'WHITE_BOX',assessmentSourcesSnapshot:[{id:'metadata-only',kind:'GIT_REPOSITORY',locator:'https://internal-admin.example.local/repo',contentAvailable:false}]}});
     await artifact('https://outside.example.test/admin','endpoint',runId,{redirect:'https://foreign.example.test/app/admin'});
-    const white=(await s.researchPlanState(userId,targetId)).plan!;expect(white.assessmentMode).toBe('WHITE_BOX');expect(white.authorizedSourceCount).toBe(1);expect(white.sourceAnalysisPerformed).toBe(false);
+    const white=(await s.researchPlanState(userId,targetId)).plan!;expect(white.assessmentMode).toBe('BLACK_BOX');expect(white.authorizedSourceCount).toBe(0);expect(white.sourceAnalysisPerformed).toBe(false);
     expect(white.items.map(i=>i.stableKey)).toEqual(black.items.map(i=>i.stableKey));expect(JSON.stringify(white)).not.toMatch(/internal-admin|outside.example|foreign.example/);
   });
   it('suppresses explicitly excluded program categories with a recorded decision',async()=>{

@@ -87,10 +87,10 @@ const providerCalls:{path:string;authorization:string;body:Record<string,unknown
     expect((await p.bountyProgram.findUniqueOrThrow({where:{id:programId}})).assessmentMode).toBe('BLACK_BOX');
     for(const id of [assetId,undefined]){
       const job=await s.scheduleReconSummary(userId,programId,id);
-      expect(job.input).toMatchObject({assessmentContext:{assessmentMode:'WHITE_BOX',authorizedSourceCount:1,sourceContentAvailable:false,sourceAnalysisPerformed:false}});
+      expect(job.input).toMatchObject({assessmentContext:{assessmentMode:'BLACK_BOX',authorizedSourceCount:0,sourceContentAvailable:false,sourceAnalysisPerformed:false}});
       expect(JSON.stringify(job.input)).not.toContain('git.example.test');
       await s.processReconSummary(job.id);const saved=await p.reconSummary.findUniqueOrThrow({where:{id:job.id}});
-      expect(saved).toMatchObject({status:'READY',content:{assessmentContext:{assessmentMode:'WHITE_BOX',authorizedSourceCount:1,sourceAnalysisPerformed:false}}});
+      expect(saved).toMatchObject({status:'READY',content:{assessmentContext:{assessmentMode:'BLACK_BOX',authorizedSourceCount:0,sourceAnalysisPerformed:false}}});
       const sent=JSON.stringify(received);for(const forbidden of ['assessmentContext','WHITE_BOX','private-source-identity','Authorized private metadata','git.example.test','protected-reference','internal/src/'])expect(sent).not.toContain(forbidden);
     }
   });

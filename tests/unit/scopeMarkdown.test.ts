@@ -29,7 +29,7 @@ describe('concise, deterministic v2 Scope intelligence',()=>{
     const brief=fixture();expect(renderScopeMarkdown(brief,'critical')).toContain('Legacy / mode not captured');
     brief.assessment=captureAssessmentSnapshot({assessmentMode:'WHITE_BOX'},[{id:'source',label:'Captured source label',kind:'GIT_REPOSITORY',locator:'https://git.example.test/approved/repo',reference:'main',includePaths:['src/'],excludePaths:['vendor/'],updatedAt:brief.generatedAt}]);
     Object.assign(brief.program,{assessmentMode:'BLACK_BOX'});
-    for(const asset of [undefined,'critical']){const text=renderScopeMarkdown(brief,asset);expect(text).toContain('White-box');expect(text).toContain('Captured source label');expect(text).toContain('No source-assisted analysis was executed');expect(text).not.toContain('Black-box.');}
+    for(const asset of [undefined,'critical']){const text=renderScopeMarkdown(brief,asset);expect(text).toContain('Black-box');expect(text).not.toContain('Captured source label');}
   });
   it('preserves context coverage and exact references in Asset and Target Markdown without private identities',()=>{
     const brief=fixture(),source:SafeAuthSurface={scanRunId:'context-run',legacy:false,contexts:[{contextKey:'ANONYMOUS',mode:'ANONYMOUS',label:'Anonymous',state:'MAPPED'},{contextKey:'AUTH_A',mode:'AUTHENTICATED',label:'Private Alice',persona:'ADMIN',state:'MAPPED'},{contextKey:'AUTH_B',mode:'AUTHENTICATED',label:'Private Bob',state:'MAPPED'}],observations:[],surfaceVisibility:[],totals:{public:0,authenticatedOnly:0,sharedAuthenticated:0,contextDifferentials:0,observations:0},warnings:[]};

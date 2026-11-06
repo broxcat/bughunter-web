@@ -45,12 +45,12 @@ export default function ReconReportV3Content({ report, provider }: { report: Rec
         ['Asset', assessment.asset], ['Authorized scope', assessment.scopeBoundary], ['Format', formatLabel(assessment.format)],
         ['Type', typeLabel(assessment.assetType)], ['Asset Value', human(assessment.assetValue)], ['Recon status', human(assessment.reconStatus)], ['Tested at', assessment.testedAt],
       ].map(([label, value]) => <div key={label} className="contents"><dt className="text-muted">{label}</dt><dd className="min-w-0 break-words">{value}</dd></div>)}</dl>
-      <section className="space-y-2" aria-label="Assessment mode"><h4 className="font-medium">Assessment mode</h4>
-        <p className="text-sm">{assessmentModeLabel(assessmentContext?.assessmentMode)}</p>
+      {assessmentContext?.assessmentMode !== 'BLACK_BOX' && <section className="space-y-2" aria-label="Assessment mode"><h4 className="font-medium">Assessment mode</h4>
+        <p className="text-sm">{assessmentContext?.assessmentMode==='WHITE_BOX'?'Historical assessment metadata — White-box mode is retired.':assessmentModeLabel(assessmentContext?.assessmentMode)}</p>
         <p className="text-sm text-muted">Authorized sources captured: {assessmentContext?.assessmentMode?assessmentContext.authorizedSourceCount:'Unknown (historical run)'}</p>
         <p className="text-sm text-muted">{assessmentContext?.assessmentMode?'Source content available: No. Source-assisted analysis: Not performed.':'Source-assisted analysis is not recorded in this historical assessment metadata.'}</p>
         <p className="text-xs text-muted">{assessmentContext?.assessmentMode?'Captured by BugHunter for this run.':'No assessment declaration was captured for this historical run.'} Source authorization is separate from network authorization, which remains defined by Scope Assets.</p>
-      </section>
+      </section>}
       <section className="space-y-2" aria-label="Observed authentication contexts"><h4 className="font-medium">Observed authentication contexts</h4>
         <p className="text-xs text-muted">Context visibility differences are observations, not proof of broken authorization. Personas are operator-declared. Missing comparisons remain unknown. Sanitized route identities are evidence only; never reconstruct redacted request targets.</p>
         {report.authenticatedRecon?.some(surface=>!surface.legacy)?report.authenticatedRecon.map(surface=><div key={surface.scanRunId} className="space-y-2 text-sm">

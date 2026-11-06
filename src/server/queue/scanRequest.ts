@@ -56,14 +56,13 @@ export async function createScanRequest(userId: string, input: ScanRequest, key:
       if (input.scopeAssetId && !asset) throw new ScanRequestNotFound();
       const target = await tx.target.findFirst({ where: { id: input.targetId, userId }, select: { programId: true } });
       if (!target) throw new ScanRequestNotFound();
-      let assessment;
       if (target.programId) {
         const owned = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "BountyProgram" WHERE id=${target.programId} AND "ownerId"=${userId} AND "deletingAt" IS NULL FOR SHARE`;
         if (!owned.length) throw new ScanRequestNotFound();
-        assessment = await captureProgramAssessment(tx, target.programId);
+        await captureProgramAssessment(tx, target.programId);
       }
       const authenticated = await captureAuthenticatedContexts(tx,input.targetId);
-      const run = await tx.scanRun.create({ data: { targetId: input.targetId, type: input.type, status: "QUEUED", authenticatedContextsSnapshot: authenticated as unknown as Prisma.InputJsonValue, ...(assessment ? { assessmentModeSnapshot: assessment.assessmentMode, assessmentSourcesSnapshot: assessment.authorizedSources as unknown as Prisma.InputJsonValue } : {}), ...(asset ? { scopeAssetId: asset.id, scopeAssetSnapshot: assetSnapshot(asset), reconSteps: { create: RECON_STAGE_NAMES.map((name, position) => ({ name, position })) } } : {}) } });
+      const run = await tx.scanRun.create({ data: { targetId: input.targetId, type: input.type, status: "QUEUED", authenticatedContextsSnapshot: authenticated as unknown as Prisma.InputJsonValue, assessmentModeSnapshot: 'BLACK_BOX', assessmentSourcesSnapshot: [], ...(asset ? { scopeAssetId: asset.id, scopeAssetSnapshot: assetSnapshot(asset), reconSteps: { create: RECON_STAGE_NAMES.map((name, position) => ({ name, position })) } } : {}) } });
       const jobOutbox = await tx.scanJobOutbox.create({ data: { scanRunId: run.id }, select: dispatchSelect });
       if (key) await tx.scanRequestKey.create({ data: { userId, key, scanRunId: run.id, requestHash: requestHash(input) } });
       return { ...run, jobOutbox };

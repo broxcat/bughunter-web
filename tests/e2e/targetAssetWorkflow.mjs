@@ -26,6 +26,13 @@ try {
   await page.goto(origin + '/login'); await page.getByLabel('Email', { exact: true }).fill(user.email); await page.getByLabel('Password', { exact: true }).fill(password); await page.getByRole('button', { name: 'Sign in', exact: true }).click(); await page.waitForURL(origin + '/targets');
   await page.getByRole('button', { name: 'Create Target', exact: true }).click(); await page.getByLabel('Company / Program name *', { exact: true }).fill('Asset workflow fixture'); await page.getByLabel(/^Required User-Agent/).fill('Asset-Browser/1'); await page.getByRole('button', { name: 'Create Target', exact: true }).click(); await page.waitForURL(/\/targets\/[^/?]+$/);
   const id = new URL(page.url()).pathname.split('/').at(-1);
+  assert(!/White-box|Assessment mode/.test(await page.locator('body').innerText()));
+  assert.equal((await p.bountyProgram.findUniqueOrThrow({where:{id}})).assessmentMode,'BLACK_BOX');
+  await page.goto(origin+'/targets/'+id+'/settings');
+  await page.getByRole('button',{name:'Save Target',exact:true}).waitFor();
+  assert(!/White-box|Assessment mode|Authorized sources/.test(await page.locator('body').innerText()));
+  await page.goto(origin+'/targets/'+id);
+
   const add = async (value, importance, type) => { await page.getByRole('button', { name: '+ Add asset', exact: true }).click(); await page.getByLabel('Asset', { exact: true }).fill(value); if (importance) await page.getByLabel('New asset value').selectOption(importance); if (type) await page.getByLabel('New asset type').selectOption(type); const response = page.waitForResponse(r => r.url().endsWith(`/programs/${id}/assets`) && r.request().method() === 'POST'); await page.getByRole('button', { name: 'Save asset', exact: true }).click(); assert.equal((await response).status(), 201); };
   await add('\\*.example.test', 'CRITICAL'); await add('https://app.example.test/api/', 'HIGH', 'API');
   const rows = page.locator('tbody tr'); await rows.filter({ hasText: 'https://app.example.test/api/' }).waitFor(); assert((await rows.first().innerText()).includes('*.example.test'));
@@ -57,7 +64,7 @@ try {
   await page.getByRole('button',{name:'Summary',exact:true}).click();const reportDialog=page.getByRole('dialog');
   await reportDialog.getByRole('heading',{name:'Recon facts',exact:true}).waitFor();await reportDialog.getByRole('heading',{name:'AI synthesis',exact:true}).waitFor();await reportDialog.getByText(/Report ready with warnings/).waitFor();
   await reportDialog.getByRole('heading',{name:'Web Surface (1)',exact:true}).waitFor();const factPrimary=reportDialog.locator('[data-fact-primary]');assert(await factPrimary.isVisible());assert((await factPrimary.innerText()).includes(fact.value.url));assert((await factPrimary.innerText()).includes('discovered'));
-  await reportDialog.getByText('Black-box',{exact:true}).waitFor();await reportDialog.getByText('Source content available: No. Source-assisted analysis: Not performed.',{exact:true}).waitFor();
+  assert(!(await reportDialog.innerText()).includes('Authorized sources captured:'));
   assert(!(await reportDialog.innerText()).includes('ZodError'));assert.equal(await reportDialog.locator('pre').count(),0);await page.getByRole('button',{name:'Close',exact:true}).click();
   await p.reconSummary.update({where:{id:storedSummary.id},data:{content:{...reportV3,narrativeStatus:'FACTUAL_ONLY',narrativeFailure:'FAILED_SCHEMA',narrative:{...reportV3.narrative,attackSurfaceSummary:'UNVALIDATED_MODEL_OUTPUT'}}}});
   await page.getByRole('button',{name:'Summary',exact:true}).click();await reportDialog.getByText(/AI response could not be read as a report/).waitFor();await reportDialog.getByRole('heading',{name:'Recon facts',exact:true}).waitFor();assert(!(await reportDialog.innerText()).includes('UNVALIDATED_MODEL_OUTPUT'));await page.getByRole('button',{name:'Close',exact:true}).click();

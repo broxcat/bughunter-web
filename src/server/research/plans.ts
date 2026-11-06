@@ -41,7 +41,7 @@ async function inputs(tx:Prisma.TransactionClient,userId:string,targetId:string,
   const artifacts=await tx.reconArtifact.findMany({where:{scanRunId:{in:chosen.map(r=>r.id)}},select:{...artifactSelect,scanRunId:true,scopeAssetId:true},orderBy:[{scanRunId:'asc'},{kind:'asc'},{canonicalKey:'asc'}],take:MAX_ARTIFACTS});
   const authenticated=exportAuthSurfaces(await readAuthSurface(chosen.map(r=>r.id),tx));
   const policy=reconScopePolicy(target,assets),exclusions=parseProgramResearchExclusions(target.program!.nonQualifying.flatMap(line=>line.split(/\r?\n/)),[target.program!.rulesOfEngagement??'',target.scope.rulesOfEngagement??''].flatMap(line=>line.split(/\r?\n/)),target.program!.qualifying.flatMap(line=>line.split(/\r?\n/)));
-  const anchor=chosen[0],mode=anchor.assessmentModeSnapshot;
+  const mode='BLACK_BOX' as const;
   const bundles=chosen.flatMap(run=>{
     const asset=assets.find(a=>a.id===run.scopeAssetId)??(boundary?assets[0]:undefined);if(!asset)return[];
     const data=artifacts.filter(a=>a.scanRunId===run.id).map(artifactData);
@@ -54,7 +54,7 @@ async function inputs(tx:Prisma.TransactionClient,userId:string,targetId:string,
   plan.items=retained;
   const policyFingerprint=reconHash(reconJson({network:researchAuthorizationSnapshot(target),assets:assets.map(a=>({id:a.id,value:a.normalizedValue,format:a.format,type:a.type,assetValue:a.assetValue,active:a.active})),qualifying:target.program!.qualifying,nonQualifying:target.program!.nonQualifying,rules:target.program!.rulesOfEngagement,scopeRules:target.scope.rulesOfEngagement}));
   const coverage=chosen.flatMap(run=>run.reconSteps.filter(s=>!['COMPLETED','COMPLETED_WITH_FALLBACK'].includes(s.state)).map(s=>`${s.name}: ${s.state}. Missing evidence remains unknown.`));
-  const metadata={...plan,items:undefined,policyFingerprint,runIds:chosen.map(r=>r.id),authorizedSourceCount:Array.isArray(anchor.assessmentSourcesSnapshot)?anchor.assessmentSourcesSnapshot.length:0,sourceAnalysisPerformed:false,
+  const metadata={...plan,items:undefined,policyFingerprint,runIds:chosen.map(r=>r.id),authorizedSourceCount:0,sourceAnalysisPerformed:false,
     limitations:[...strings((plan as {limitations?:unknown}).limitations),...strings((plan as {warnings?:unknown}).warnings),...exclusions.limitations,...policy.warnings,...coverage,...(!boundary&&assets.some(a=>!chosen.some(run=>run.scopeAssetId===a.id))?['Some active Scope Assets have no retained usable Recon in this bounded plan input; they remain unassessed.']:[])].slice(0,60)};
   // Snapshots are represented by safe context projections and a metadata digest;
   // neither private verification identity nor source locators leave this module.
@@ -77,7 +77,7 @@ async function ensure(tx:Prisma.TransactionClient,userId:string,targetId:string,
   const current=!scanRunId||latest?.id===scanRunId;
   if(current)await tx.researchPlan.updateMany({where:{targetId,status:{in:['CURRENT','STALE']}},data:{status:'SUPERSEDED',supersededAt:new Date()}});
   const known=new Set(previous?.items.map(i=>i.stableKey));
-  const row=await tx.researchPlan.create({data:{targetId,programId:input.target.program!.id,scopeAssetId:input.target.scopeAsset?.id??input.target.discoveredFromAsset?.id??null,scanRunId:input.runs[0].id,sourceFingerprint:input.fingerprint,methodologyVersion:RESEARCH_PLAN_VERSION,assessmentMode:input.runs[0].assessmentModeSnapshot,status:current?'CURRENT':'SUPERSEDED',metadata:json(input.metadata),items:{create:input.plan.items.map(item=>({...item,methodology:item.methodology.join('\n'),evidenceStrength:({STRONG:3,MODERATE:2,LIMITED:1})[item.evidenceStrength],surfaceRefs:json(item.surfaceRefs),evidenceRefs:json(item.evidenceRefs),contextRefs:json(item.contextRefs),runtimeSignals:json(item.runtimeSignals),sourceSignals:[],sourceEvidenceRefs:[],isNew:!known.has(item.stableKey)}))}},include:planInclude});
+  const row=await tx.researchPlan.create({data:{targetId,programId:input.target.program!.id,scopeAssetId:input.target.scopeAsset?.id??input.target.discoveredFromAsset?.id??null,scanRunId:input.runs[0].id,sourceFingerprint:input.fingerprint,methodologyVersion:RESEARCH_PLAN_VERSION,assessmentMode:'BLACK_BOX',status:current?'CURRENT':'SUPERSEDED',metadata:json(input.metadata),items:{create:input.plan.items.map(item=>({...item,methodology:item.methodology.join('\n'),evidenceStrength:({STRONG:3,MODERATE:2,LIMITED:1})[item.evidenceStrength],surfaceRefs:json(item.surfaceRefs),evidenceRefs:json(item.evidenceRefs),contextRefs:json(item.contextRefs),runtimeSignals:json(item.runtimeSignals),sourceSignals:[],sourceEvidenceRefs:[],isNew:!known.has(item.stableKey)}))}},include:planInclude});
   // Capture one immutable delivery document. Dynamic UI research state remains separate.
   const capturedPlan=await view(tx,row);
   return tx.researchPlan.update({where:{id:row.id},data:{metadata:json({...input.metadata,capturedPlan,capturedMarkdown:researchPlanMarkdown(capturedPlan)})},include:planInclude});

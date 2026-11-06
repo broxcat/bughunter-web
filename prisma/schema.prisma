@@ -158,6 +158,7 @@ enum AssessmentSourceKind {
 
 model BountyProgram {
   researchPlans ResearchPlan[]
+  // Legacy enum retained; current programs are constrained to BLACK_BOX.
   assessmentMode AssessmentMode @default(BLACK_BOX)
   assessmentSources AssessmentSource[]
   scopeRules        String[]        @default([])
@@ -198,7 +199,7 @@ model AssessmentSource {
   reference String?
   includePaths String[] @default([])
   excludePaths String[] @default([])
-  active Boolean @default(true)
+  active Boolean @default(false)
   notes String? @db.Text
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

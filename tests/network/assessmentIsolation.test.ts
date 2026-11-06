@@ -31,7 +31,7 @@ suite('White-box metadata never becomes network authorization (real local transp
   });
   afterAll(async () => { for (const server of [authorized, forbidden]) { server?.closeAllConnections(); if (server) await new Promise<void>(resolve => server.close(() => resolve())); } });
   it('keeps an exact network asset separate from an internal source hostname', () => {
-    expect(assessment.authorizedSources[0].locator).toContain('internal.example.local');
+    expect(assessment.authorizedSources).toEqual([]);
     expect(assetAllowsHost({ format: 'SUBDOMAIN', normalizedValue: 'api.example.com' }, 'api.example.com')).toBe(true);
     expect(assetAllowsHost({ format: 'SUBDOMAIN', normalizedValue: 'api.example.com' }, 'internal.example.local')).toBe(false);
     expect(() => assertExecutionUrl('https://internal.example.local/', { ...execution, host: 'api.example.com', scopeAsset: { ...execution.scopeAsset!, normalizedValue: 'api.example.com', format: 'SUBDOMAIN' } })).toThrow();
@@ -56,7 +56,7 @@ suite('White-box metadata never becomes network authorization (real local transp
     const target = researchTarget();
     const session = { ...researchSession, workspaceId: targetWorkspaceId(target.id), authorizationSnapshot: { ...researchAuthorizationSnapshot(target), ...assessment } };
     const files = consoleBundle(target, null, [], session), policy = JSON.parse(files['.agents/bughunter/policy.json']);
-    expect(JSON.parse(files['assessment-policy.json']).authorizedSources[0].locator).toContain('internal.example.local');
+    expect(JSON.parse(files['assessment-policy.json']).authorizedSources).toEqual([]);expect(JSON.stringify(files)).not.toContain('internal.example.local');
     expect(policy.targetHost).toBe(target.host); expect(policy).not.toHaveProperty('authorizedSources');
     expect(() => enforceHttp1({ targetHostname: target.host, targetPort: 443, usesHttps: true, content: `GET / HTTP/1.1\r\nHost: ${target.host}\r\n\r\n` }, policy)).not.toThrow();
     expect(() => enforceHttp1({ targetHostname: 'internal.example.local', targetPort: 443, usesHttps: true, content: 'GET / HTTP/1.1\r\nHost: internal.example.local\r\n\r\n' }, policy)).toThrow('OUT_OF_SCOPE');

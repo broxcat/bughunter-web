@@ -55,18 +55,12 @@ export type AssessmentSnapshot = {
   networkAuthorizationSource: 'ScopeAsset'; sourceAuthorizationSeparate: true;
 };
 type SourceRecord = Omit<AuthorizedSourceMetadata, 'updatedAt' | 'contentAvailable' | 'evidenceOrigin'> & { updatedAt: Date | string; active?: boolean };
-const sourceOrigin = (kind: AssessmentSourceKind): AuthorizedSourceMetadata['evidenceOrigin'] => kind === 'API_SPECIFICATION' ? 'SPECIFICATION' : kind === 'ARCHITECTURE_DOCUMENTATION' ? 'DOCUMENTATION' : kind === 'CONFIGURATION' ? 'CONFIGURATION' : 'SOURCE';
 const snapshot = (assessmentMode: AssessmentMode | null, authorizedSources: AuthorizedSourceMetadata[]): AssessmentSnapshot => ({ assessmentMode, authorizedSources, sourceContentAvailable: false, sourceAnalysisPerformed: false, networkAuthorizationSource: 'ScopeAsset', sourceAuthorizationSeparate: true });
 
 /** Captures data authorization only. Never feed these locators into a network guard. */
 export function captureAssessmentSnapshot(program: { assessmentMode?: AssessmentMode; assessmentSources?: SourceRecord[] }, sources = program.assessmentSources ?? []): AssessmentSnapshot {
-  const mode = program.assessmentMode ?? 'BLACK_BOX';
-  const authorized = mode === 'WHITE_BOX' ? sources.filter(source => source.active !== false).map(source => ({
-    id: source.id, label: source.label, kind: source.kind, locator: source.locator, reference: source.reference,
-    includePaths: [...source.includePaths], excludePaths: [...source.excludePaths], updatedAt: new Date(source.updatedAt).toISOString(),
-    contentAvailable: false as const, evidenceOrigin: sourceOrigin(source.kind),
-  })).sort((a, b) => a.id.localeCompare(b.id)) : [];
-  return snapshot(mode, authorized);
+  void sources;
+  return snapshot('BLACK_BOX', []);
 }
 
 /** Reads an execution's immutable columns. Missing historical data stays unknown. */
@@ -78,5 +72,5 @@ const markdownText = (value: string) => value.replace(/[\r\n\x00-\x1f\x7f]/g, ' 
 export function assessmentMarkdown(context: AssessmentSnapshot): string {
   if (!context.assessmentMode) return '## Assessment Mode\n\nLegacy / mode not captured. No source-assisted analysis is evidenced by this metadata.\n';
   if (context.assessmentMode === 'BLACK_BOX') return '## Assessment Mode\n\nBlack-box.\n\nThis run uses authorized externally observable evidence.\nNo internal source material is assumed.\nSource authorization does not expand network authorization.\n';
-  return '## Assessment Mode\n\nWhite-box.\n\nAuthorized source metadata is available for later source-assisted analysis.\nSource authorization does not expand network authorization.\n\n### Authorized Sources\n\n' + (context.authorizedSources.map(source => `- ${markdownText(source.label)} — ${assessmentSourceKindLabel(source.kind)}${source.reference ? ` — ref ${markdownText(source.reference)}` : ''}`).join('\n') || 'No effective sources registered.') + '\n\nSource content available: false.\nNo source-assisted analysis was executed by this Recon run.\n';
+  return '## Assessment Mode\n\nHistorical assessment metadata: White-box mode is retired.\n\nThis immutable snapshot is documentary only.\nSource authorization does not expand network authorization.\n\n### Authorized Sources\n\n' + (context.authorizedSources.map(source => `- ${markdownText(source.label)} — ${assessmentSourceKindLabel(source.kind)}${source.reference ? ` — ref ${markdownText(source.reference)}` : ''}`).join('\n') || 'No effective sources registered.') + '\n\nSource content available: false.\nNo source-assisted analysis was executed by this Recon run.\n';
 }

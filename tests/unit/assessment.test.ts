@@ -9,16 +9,13 @@ describe('Assessment data authorization foundation', () => {
     expect(assessmentMarkdown(assessmentSnapshotFromRun())).toContain('Legacy / mode not captured');
     expect(assessmentModeChangeSchema.safeParse({ assessmentMode: 'GREY_BOX' }).success).toBe(false);
   });
-  it('captures only effective metadata, with provenance and no implied source content', () => {
-    const records = [source, { ...source, id: 'source-b', active: false }];
-    const captured = captureAssessmentSnapshot({ assessmentMode: 'WHITE_BOX' }, records);
-    expect(captured).toMatchObject({ assessmentMode: 'WHITE_BOX', networkAuthorizationSource: 'ScopeAsset', sourceAuthorizationSeparate: true, sourceAnalysisPerformed: false, sourceContentAvailable: false });
-    expect(captured.authorizedSources).toEqual([{ id: source.id, label: source.label, kind: source.kind, locator: source.locator, reference: 'main', includePaths: ['src/'], excludePaths: ['tests/'], updatedAt: source.updatedAt.toISOString(), contentAvailable: false, evidenceOrigin: 'SOURCE' }]);
-    records[0].includePaths.push('new/'); expect(captured.authorizedSources[0].includePaths).toEqual(['src/']); records[0].includePaths.pop();
-    expect(captureAssessmentSnapshot({ assessmentMode: 'WHITE_BOX' }, [...records].reverse())).toEqual(captured);
-    expect(assessmentSnapshotFromRun({ assessmentModeSnapshot: 'WHITE_BOX', assessmentSourcesSnapshot: captured.authorizedSources })).toEqual(captured);
-    expect(captureAssessmentSnapshot({ assessmentMode: 'BLACK_BOX' }, records).authorizedSources).toEqual([]);
-    expect(records[0].active).toBe(true);
+  it('ignores retired current configuration but preserves historical snapshots', () => {
+    const before=JSON.stringify(source);
+    const captured=captureAssessmentSnapshot({assessmentMode:'WHITE_BOX'},[source]);
+    expect(captured.assessmentMode).toBe('BLACK_BOX'); expect(captured.authorizedSources).toEqual([]);
+    const historical=assessmentSnapshotFromRun({assessmentModeSnapshot:'WHITE_BOX',assessmentSourcesSnapshot:[source]});
+    expect(historical.assessmentMode).toBe('WHITE_BOX');expect(historical.authorizedSources).toEqual([source]);
+    expect(assessmentMarkdown(historical)).toContain('White-box mode is retired');expect(JSON.stringify(source)).toBe(before);
   });
   it.each(['../', '../../secret', '/etc/passwd', '\\etc\\passwd', 'C:\\secret', './C:/secret', '.\\C:\\secret', 'file:///etc/passwd', 'src/../secret', 'src/\x00x', 'src/%2e%2e/secret', '//server/share'])('rejects source path traversal/absolute %s', path => expect(() => normalizeAssessmentPath(path)).toThrow());
   it('normalizes paths without accessing files, and deduplicates bounded lists', () => {
@@ -39,10 +36,8 @@ describe('Assessment data authorization foundation', () => {
     const input = { label: 'Source', kind: 'GIT_REPOSITORY', locator: source.locator };
     for (const extra of [{ label: 'x'.repeat(121) }, { reference: 'a'.repeat(201) }, { notes: 'a'.repeat(2001) }, { apiKey: 'private' }, { content: 'source code' }, { notes: 'token=private' }]) expect(assessmentSourceSchema.safeParse({ ...input, ...extra }).success).toBe(false);
   });
-  it('documents the source/network boundary and never claims source analysis', () => {
-    const white = assessmentMarkdown(captureAssessmentSnapshot({ assessmentMode: 'WHITE_BOX' }, [source]));
-    expect(white).toContain('Source authorization does not expand network authorization'); expect(white).toContain('No source-assisted analysis was executed'); expect(white).toContain('Backend — Git repository — ref main');
-    expect(assessmentMarkdown(captureAssessmentSnapshot({}))).toContain('No internal source material is assumed');
-    expect(white).not.toContain('https://git.');
+  it('documents the runtime evidence boundary',()=>{
+    const current=assessmentMarkdown(captureAssessmentSnapshot({assessmentMode:'WHITE_BOX'},[source]));
+    expect(current).toContain('No internal source material is assumed');expect(current).not.toContain(source.locator);
   });
 });

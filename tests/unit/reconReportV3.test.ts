@@ -27,7 +27,7 @@ describe('Recon Report v3: deterministic facts, narrative-only model', () => {
   it('keeps assessment mode/source counts deterministic and never includes source pointers in the AI contract',()=>{
     const snapshot=captureAssessmentSnapshot({assessmentMode:'WHITE_BOX'},[{id:'private-source-id',label:'Private source registration',kind:'GIT_REPOSITORY',locator:'https://git.example.test/private/repository',reference:'protected-branch',includePaths:['private/src/'],excludePaths:['private/vendor/'],updatedAt:'2026-11-04T00:00:00Z'}]);
     const context=reportAssessmentContext(snapshot),data=createReconReportV3Input(reportInput({},rows,reportBudget(32768)),rows,context);
-    expect(context).toEqual({assessmentMode:'WHITE_BOX',authorizedSourceCount:1,sourceContentAvailable:false,sourceAnalysisPerformed:false,networkAuthorizationSource:'ScopeAsset',sourceAuthorizationSeparate:true});
+    expect(context).toEqual({assessmentMode:'BLACK_BOX',authorizedSourceCount:0,sourceContentAvailable:false,sourceAnalysisPerformed:false,networkAuthorizationSource:'ScopeAsset',sourceAuthorizationSeparate:true});
     const model=JSON.stringify(modelInputForReconReportV3(data))+JSON.stringify(z.toJSONSchema(reconReportV3NarrativeSchemaFor(data)));
     for(const forbidden of ['WHITE_BOX','assessmentContext','private-source-id','Private source registration','git.example.test','protected-branch','private/src/'])expect(model).not.toContain(forbidden);
     expect(validateReconReportV3(JSON.stringify(narrative(data)),data).assessmentContext).toEqual(context);expect(fallbackReconReportV3(data).assessmentContext).toEqual(context);

@@ -87,6 +87,8 @@ try {
   // historical session. Migration must neither invalidate nor opt it in.
   await cp(join('prisma/migrations', '20261104150000_assessment_modes'), join(temp, 'migrations', '20261104150000_assessment_modes'), { recursive: true });
   migrate(join(temp, 'schema.prisma'));
+  await client.$executeRaw`UPDATE "ResearchSession" SET "authorizationSnapshot"=coalesce("authorizationSnapshot",'{}'::jsonb)||'{"assessmentMode":"WHITE_BOX","authorizedSources":[{"locator":"https://internal-admin.example.local/repo"}]}'::jsonb WHERE id='upgrade-research'`;
+  beforeAssessment.research=await client.$queryRaw`SELECT id,"authorizationSnapshot","scopeMarkdown",files,"updatedAt" FROM "ResearchSession" ORDER BY id`;
   process.env.CREDENTIALS_ENCRYPTION_KEY = 'ac'.repeat(32);
   const legacySession = encryptSecret(JSON.stringify({ session: 'UPGRADE_SESSION_FIXTURE' }));
   await client.$executeRaw`INSERT INTO "TargetCredential" (id,"targetId",label,mode,purpose,"sessionStatus","sessionCheckedAt","sessionExpiresAt","cookiesCipher") VALUES ('preauth-credential','preasset-host','Existing account','COOKIES','ACCOUNT_A','VALID',now(),now()+interval '10 minutes',${legacySession})`;
@@ -96,12 +98,20 @@ try {
   await client.$executeRaw`INSERT INTO "ScanRun" (id,"targetId","scopeAssetId",type,status,outcome,"assessmentModeSnapshot","authenticatedContextsSnapshot") SELECT 'preplan-auth-scan','preasset-host',id,'RECON'::"ScanType",'COMPLETED'::"ScanStatus",'SUCCESS'::"ScanOutcome",'WHITE_BOX'::"AssessmentMode",'{"version":1,"anonymous":{"contextKey":"ANONYMOUS","mode":"ANONYMOUS"},"contextLimit":4,"contexts":[]}'::jsonb FROM "ScopeAsset" WHERE "programId"='preasset-program' AND "normalizedValue"='api.example.test'`;
   await client.$executeRaw`INSERT INTO "ReconArtifact" (id,"scanRunId","scopeAssetId",kind,"canonicalKey",value,"scopeState",verification,sources,"firstSeenAt","lastSeenAt") SELECT 'preplan-artifact','preplan-auth-scan',id,'endpoint','preplan-endpoint','{"url":"https://api.example.test/orders/1001"}'::jsonb,'IN_SCOPE','OBSERVED','[]'::jsonb,now(),now() FROM "ScopeAsset" WHERE "programId"='preasset-program' AND "normalizedValue"='api.example.test'`;
   await client.$executeRaw`INSERT INTO "ReconSurfaceObservation" (id,"scanRunId","scopeAssetId","contextKey","contextType","canonicalKey",url,method,"statusCode","responseClass",source) SELECT 'preplan-observation','preplan-auth-scan',id,'ANONYMOUS','ANONYMOUS','GET:fixture','https://api.example.test/orders/1001','GET',200,'CONTENT','fixture' FROM "ScopeAsset" WHERE "programId"='preasset-program' AND "normalizedValue"='api.example.test'`;
+  await client.$executeRaw`UPDATE "BountyProgram" SET "assessmentMode"='WHITE_BOX' WHERE id='preasset-program'`;
+  await client.$executeRaw`INSERT INTO "AssessmentSource" (id,"programId",label,kind,locator,"updatedAt") VALUES ('retired-source','preasset-program','Historical source','GIT_REPOSITORY','https://internal-admin.example.local/repo',now())`;
+  await client.$executeRaw`UPDATE "ScanRun" SET "assessmentSourcesSnapshot"='[{"id":"retired-source","locator":"https://internal-admin.example.local/repo"}]'::jsonb WHERE id='preplan-auth-scan'`;
   const preplan={run:await client.$queryRaw`SELECT * FROM "ScanRun" WHERE id='preplan-auth-scan'`,artifacts:await client.$queryRaw`SELECT * FROM "ReconArtifact" WHERE id='preplan-artifact'`,observations:await client.$queryRaw`SELECT * FROM "ReconSurfaceObservation" WHERE id='preplan-observation'`};
+  await cp(join('prisma/migrations','20261104190000_research_plans'),join(temp,'migrations','20261104190000_research_plans'),{recursive:true});
+  migrate(join(temp,'schema.prisma'));
+  await client.$executeRaw`INSERT INTO "ResearchPlan" (id,"targetId","programId","scanRunId","sourceFingerprint","methodologyVersion","assessmentMode",metadata) VALUES ('historical-white-plan','preasset-host','preasset-program','preplan-auth-scan','historical-fixture','research-plan/1','WHITE_BOX','{"legacy":true}'::jsonb)`;
+  const historicalPlan=await client.$queryRaw`SELECT * FROM "ResearchPlan" WHERE id='historical-white-plan'`;
   migrate(schema);
+  assert.deepEqual(await client.$queryRaw`SELECT * FROM "ResearchPlan" WHERE id='historical-white-plan'`,historicalPlan);
   const upgradedRun=await client.$queryRaw`SELECT * FROM "ScanRun" WHERE id='preplan-auth-scan'`;assert.deepEqual(upgradedRun,preplan.run);
   assert.deepEqual(await client.$queryRaw`SELECT * FROM "ReconArtifact" WHERE id='preplan-artifact'`,preplan.artifacts);
   assert.deepEqual(await client.$queryRaw`SELECT * FROM "ReconSurfaceObservation" WHERE id='preplan-observation'`,preplan.observations);
-  assert.equal(await client.researchPlan.count(),0,'Never invent plans for historical executions during migration');
+  assert.equal(await client.researchPlan.count(),1,'Keep only the historical plan; never invent plans during migration');
   assert((await client.researchSession.findMany({select:{researchPlanId:true}})).every(session=>session.researchPlanId===null));
   assert((await client.researchHypothesis.findMany({select:{planItemId:true}})).every(h=>h.planItemId===null));
   assert.deepEqual(await client.$queryRaw`SELECT id,"targetId",label,mode,purpose,"sessionStatus","sessionCheckedAt","sessionExpiresAt","cookiesCipher","headerCipher","emailCipher","passwordCipher","sessionCookiesCipher","createdAt" FROM "TargetCredential" ORDER BY id`,beforeAuthentication);
@@ -117,7 +127,10 @@ try {
   assert((await client.bountyProgram.findMany({select:{assessmentMode:true}})).every(program=>program.assessmentMode==='BLACK_BOX'));
   assert((await client.scanRun.findMany({where:{id:{not:"preplan-auth-scan"}},select:{assessmentModeSnapshot:true,assessmentSourcesSnapshot:true}})).every(run=>run.assessmentModeSnapshot===null&&run.assessmentSourcesSnapshot===null));
   assert.deepEqual(await client.$queryRaw`SELECT "assessmentModeSnapshot","assessmentSourcesSnapshot" FROM "TargetReconRun"`,[{assessmentModeSnapshot:null,assessmentSourcesSnapshot:null}]);
-  assert.equal(await client.assessmentSource.count(),0,'Never invent historical source authorization');
+  assert.equal(await client.assessmentSource.count(),1,'Keep historical source records');
+  assert.equal((await client.assessmentSource.findUniqueOrThrow({where:{id:'retired-source'}})).active,false);
+  await assert.rejects(client.bountyProgram.update({where:{id:'preasset-program'},data:{assessmentMode:'WHITE_BOX'}}));
+  await assert.rejects(client.assessmentSource.update({where:{id:'retired-source'},data:{active:true}}));
   assert.deepEqual(await client.$queryRaw`SELECT id,model,endpoint,"promptVersion","sourceFingerprint",input,status,"createdAt" FROM "ReconSummary" ORDER BY id`,priorSummaries);
   assert.deepEqual((await client.reconSummary.findMany({orderBy:{id:'asc'},select:{provider:true}})).map(row=>row.provider),['OLLAMA','OLLAMA','OLLAMA']);
   assert.deepEqual((await client.aiProviderConfig.findMany({where:{userId:'upgrade-user',isActive:true},select:{provider:true}})).map(row=>row.provider),['OPENROUTER']);
@@ -142,7 +155,7 @@ try {
   assert.deepEqual(await client.$queryRaw`SELECT "consoleTargetId" FROM "ResearchSession"`, [{consoleTargetId:null}]);
   const research = await client.researchSession.findUniqueOrThrow({ where: { id: "upgrade-research" } });
   assert.equal(research.hypothesesSyncedAt, null); assert.equal(research.hypothesesSourceSha256, null);
-  assert.equal(research.authorizationSnapshot, null);
+  assert.deepEqual(research.authorizationSnapshot,{assessmentMode:'WHITE_BOX',authorizedSources:[{locator:'https://internal-admin.example.local/repo'}]});
   assert.equal(research.provider, "codex", "Historical Research sessions must default to Codex without a history migration");
   assert.equal(await client.researchHypothesis.count(), 1); assert.equal(await client.researchHypothesisRevision.count(), 1);
   const indexes = await client.$queryRaw`SELECT indexname FROM pg_indexes WHERE tablename IN ('ResearchHypothesis', 'ResearchHypothesisRevision')`;

@@ -8,8 +8,8 @@ import { targetIdentity, targetWorkspaceId, sha256 } from '@/lib/research/termin
 import { consolePolicySchema, consoleCodexConfig } from '@/lib/research/consolePolicy';
 import { assertResearchTarget, researchTargetSelect, researchAuthorizationSnapshot, researchAuthorizationMatches, createResearchBundle, ResearchError, type ResearchTarget, type ResearchRecon, type ResearchFinding } from './workspace';
 import { captureProgramAssessment } from '@/server/assessment';
-import { assessmentMarkdown } from '@/lib/assessment';
-import { researchAssessmentSnapshot, researchAssessmentInstructions } from './workspace';
+import { assessmentMarkdown, captureAssessmentSnapshot } from '@/lib/assessment';
+import { researchAssessmentInstructions } from './workspace';
 import { researchSessionSelect } from './sessions';
 import { CONSOLE_RULES, PROGRAM_CONSOLE_RULES, consoleBootstrap } from './consoleRules';
 import { exportText, researchIsPassive } from './workspace';
@@ -25,7 +25,7 @@ export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, find
   const effectiveHost = target.host.startsWith('*.') ? target.host.slice(2) : target.host;
   const port = asset?.format === 'URL' ? Number(new URL(asset.normalizedValue).port || (target.scheme === 'http' ? 80 : 443)) : target.scheme === 'http' ? 80 : 443;
   const instructions = passive ? PROGRAM_CONSOLE_RULES : CONSOLE_RULES;
-  const assessment = researchAssessmentSnapshot(session.authorizationSnapshot);
+  const assessment = captureAssessmentSnapshot({});
   const assessmentContext = assessmentMarkdown(assessment);
   const assessmentInstructions = researchAssessmentInstructions(assessment);
   let scope = passive ? `# Authorized program scope\n\nProgram: ${exportText(target.program!.companyName)}\nProgram ID: ${target.program!.id}\n\n## Explicitly authorized rules\n\n${(target.scopeAsset ? [target.scopeAsset.normalizedValue] : target.program!.scopeRules).map(h=>`- ${h}`).join('\n') || 'No assets authorized.'}\n\n## Excluded\n\n${target.program!.outOfScope.map(h=>`- ${h}`).join('\n') || 'No structured host exclusions recorded.'}\n\n## Required User-Agent\n\n${exportText(target.program!.requiredUserAgent)}\n\n## Rules of engagement\n\n${exportText(target.program!.rulesOfEngagement ?? 'No additional rules recorded.')}\n\nProgram console: passive reconnaissance and existing Burp observations only. Open an authorized host console for separately approved active work. Wildcards cover subdomains only. Exclusions always win. Discovery does not grant authorization. Read recon/hosts.json for the current inventory; it never overrides these rules.\n\n${old['program-policy.md']}\n` : old['scope.md'].replace('See program-policy.md for the other recorded policy fields.', '') +

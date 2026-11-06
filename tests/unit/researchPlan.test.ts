@@ -55,7 +55,7 @@ describe('deterministic research-plan/1 engine',()=>{
   });
   it('keeps runtime objectives identical for Black-box and White-box and never invents source findings',()=>{
     const black=buildResearchPlan(input(triggers.INPUT_HANDLING,[],{assessmentMode:'BLACK_BOX'})),white=buildResearchPlan(input(triggers.INPUT_HANDLING,[],{assessmentMode:'WHITE_BOX'}));
-    expect(white.items).toEqual(black.items);expect(white.sourceContentAvailable).toBe(false);expect(white.sourceAnalysisPerformed).toBe(false);expect(white.notes.join(' ')).toContain('source content is unavailable');expect(black.notes.join(' ')).toContain('source access or internal architecture is not assumed');
+    expect(white.items).toEqual(black.items);expect(white.sourceContentAvailable).toBe(false);expect(white.sourceAnalysisPerformed).toBe(false);expect(white.notes.join(' ')).toContain('no source-assisted analysis is assumed');expect(black.notes.join(' ')).toContain('source access or internal architecture is not assumed');
   });
   it('keeps historical authentication and assessment context unknown',()=>{
     const legacy={...authenticated(),legacy:true};const plan=buildResearchPlan(input(triggers.AUTHORIZATION,[legacy],{assessmentMode:null}));

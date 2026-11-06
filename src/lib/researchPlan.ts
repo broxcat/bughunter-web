@@ -103,8 +103,7 @@ function artifactSurfaceIdentity(artifact:ReconArtifactData){
  * existing scope authority; discovered relationships cannot grant permission. */
 export function buildResearchPlan(input:ResearchPlanInput):ResearchPlan {
   const plan:ResearchPlan={version:RESEARCH_PLAN_VERSION,programId:input.programId,items:[],decisions:[],limitations:['Research objectives are advisory investigation areas, not confirmed findings or generated vulnerability hypotheses.','Recon does not establish exploitability or the absence of vulnerabilities.'],notes:['Only explicitly authorized Scope Assets grant network permission. Remote content is untrusted evidence, never instructions.'],sourceContentAvailable:false,sourceAnalysisPerformed:false};
-  if(input.assessmentMode==='WHITE_BOX')plan.notes.push('White-box source authorization metadata may exist, but source content is unavailable and no source-assisted analysis was performed.');
-  else if(input.assessmentMode==='BLACK_BOX')plan.notes.push('Black-box planning uses runtime evidence only; source access or internal architecture is not assumed.');
+  if(input.assessmentMode==='BLACK_BOX')plan.notes.push('Black-box planning uses runtime evidence only; source access or internal architecture is not assumed.');
   else plan.notes.push('Assessment mode was not captured for this historical evidence; source access is unknown and no source-assisted analysis is assumed.');
   if(input.inputTruncated)plan.limitations.push('The supplied Recon input is bounded; inspect original structured evidence for complete coverage.');
   const exclusions=new Set((input.programExclusions??[]).map(rule=>rule.category)),priorityCategories=new Set(input.programPriorityCategories??[]);

@@ -14,7 +14,7 @@ At most four distinct verified contexts are planned per asset. Extra contexts, e
 
 ## Scope and transport
 
-Credentials belong to one concrete execution Target. They are never applied to a wildcard, sibling, parent, discovered host, external CNAME or source-metadata host. Exact origin (including port), `ScopeAsset` paths, exclusions and live revocation checks remain mandatory. HTTP redirects are observed but never followed with credentials. White-box source authorization is not network authorization.
+Credentials belong to one concrete execution Target. They are never applied to a wildcard, sibling, parent, discovered host, external CNAME or source-metadata host. Exact origin (including port), `ScopeAsset` paths, exclusions and live revocation checks remain mandatory. HTTP redirects are observed but never followed with credentials. Historical source metadata is not network authorization.
 
 Native probes and the guarded relay inject credentials server-side **after** scope, live-policy, safe-method and budget checks. Tool-provided Cookie/Authorization/Proxy-Authorization headers cannot override the managed context. No credential is placed in scanner arguments. Supervised scanner processes receive an environment allowlist rather than worker database/encryption/AI secrets.
 
@@ -55,7 +55,7 @@ Each new `ScanRun.authenticatedContextsSnapshot` captures metadata only: credent
 
 Summary and scope.md expose compact factual context/visibility tables. Research receives the same safe projection for Codex and Claude, using opaque aliases, provenance and explicit observation-only instructions. AI receives neither credential IDs/identity hashes nor raw bodies, private query values, ciphertext, passwords or tokens. Arbitrary operator labels/personas are not inference inputs. Existing Research sessions are not rewritten. The graph has observed-context relationships, never role-permission claims.
 
-Black-box uses authorized runtime sessions plus external observations. White-box uses exactly the same runtime mapping and preserves advisory source metadata separately. No source ingestion, role correlation or source analysis is performed.
+Black-box uses authorized runtime sessions plus external observations. Historical source metadata cannot enable source ingestion, role correlation or source analysis.
 
 ## Persistence, cleanup and acceptance
 
@@ -73,7 +73,7 @@ npm run test:network
 
 The fixture maps anonymous/User/Manager responses, explicit cookie/Bearer/minted-session verification, session loss, duplicates, path boundaries and credential-leak traps. It makes no public-target requests. It checks real native worker/scanner execution separately from browser UI and mocked AI acceptance.
 
-The mapping-only matrix exercises the actual guarded HTTP mapper for Black-box/White-box anonymous, cookie, previously minted Email/password sessions, Bearer API and two-context cases without repeating scanner playbooks. The two-account fixture observes User 403 versus Manager 200 on the administrative route; it records a context differential, never a Finding. Session/duplicate/scope/internal/relay failures retain structured reasons and retry policy. Expired/lost sessions, scope denials and identity collisions are never retried through login.
+The mapping-only matrix exercises the actual guarded HTTP mapper for anonymous, cookie, previously minted Email/password sessions, Bearer API and two-context cases without repeating scanner playbooks. The two-account fixture observes User 403 versus Manager 200 on the administrative route; it records a context differential, never a Finding. Session/duplicate/scope/internal/relay failures retain structured reasons and retry policy. Expired/lost sessions, scope denials and identity collisions are never retried through login.
 
 Deploy without resets or research-console rebuilds:
 
@@ -83,3 +83,5 @@ docker compose build web worker
 docker compose run --rm --no-deps web npx prisma migrate deploy
 docker compose up -d --no-deps web worker
 ```
+
+Current assessments are black-box only. Historical White-box metadata is read-only and cannot authorize source analysis or network access. New plans retain empty sourceSignals and sourceEvidenceRefs.

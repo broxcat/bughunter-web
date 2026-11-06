@@ -1,7 +1,7 @@
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { describe,expect,it } from 'vitest';
-import AssessmentModeBadge from '@/components/AssessmentModeBadge';
-describe('Target assessment mode badges',()=>{
-  it.each([['BLACK_BOX','Black-box'],['WHITE_BOX','White-box'],[undefined,'Black-box']])('labels %s without relying on color',(mode,label)=>{const html=renderToStaticMarkup(createElement(AssessmentModeBadge,{mode}));expect(html).toContain(label);expect(html).toContain('ui-badge');expect(html).not.toContain('undefined');});
-});
+import {readFileSync} from 'node:fs';
+import {describe,it,expect} from 'vitest';
+describe('minimal Target UI',()=>{it('has no current assessment configuration or badge',()=>{
+ for(const file of ['src/components/TargetSettings.tsx','src/app/(dashboard)/targets/page.tsx','src/app/(dashboard)/targets/[id]/page.tsx']) {
+ const text=readFileSync(file,'utf8');expect(text).not.toContain('AssessmentSettings');expect(text).not.toContain('AssessmentModeBadge');
+ }
+});});

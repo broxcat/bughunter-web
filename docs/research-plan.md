@@ -28,7 +28,7 @@ On `/research`, the list shows stored objective counts, high priorities and Reco
 
 The version selector retains historical plans. When new Recon produces another plan, an existing Research session keeps its captured plan until the existing explicit handoff workflow updates its context. Viewing another version does not update the session, start Codex/Claude or create a hypothesis. Missing or rejected work must not be interpreted as completed testing.
 
-The plan preserves the assessment mode captured by Recon. White-box source authorization metadata can be listed, but source content has not been analyzed. Metadata never grants network authorization or proves application behavior. Scope checks remain authoritative; asset value changes prioritization, never permission.
+New plans use BLACK_BOX and runtime evidence only, including when the selected Recon has historical White-box metadata. Historical plans remain readable. Metadata never grants network authorization or proves application behavior. Scope checks remain authoritative; asset value changes prioritization, never permission.
 
 Authenticated owners can read the current plan with `GET /api/research-plans/current?targetId=...` and an authorized historical version with `GET /api/research-plans/[id]`. Both responses use `Cache-Control: private, no-store`. They expose the public plan DTO rather than credentials, verification proofs, remote bodies or source file contents. GET may materialize a deterministic plan from stored evidence; it performs no network action or model inference.
 
@@ -54,3 +54,5 @@ docker compose up -d --no-deps research-console
 ```
 
 Building an image does not restart an existing console. No production database reset, volume removal or automatic historical workspace rewrite is required.
+
+Current assessments are black-box only. Historical White-box metadata is read-only and cannot authorize source analysis or network access. New plans retain empty sourceSignals and sourceEvidenceRefs.
