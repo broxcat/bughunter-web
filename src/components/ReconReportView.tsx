@@ -20,7 +20,7 @@ export default function ReconReportView({ model }: { model: ReconReportModel }) 
         <div><dt className="text-subtle">Job status</dt><dd>{metadata.status}</dd></div>
         <div><dt className="text-subtle">Recon date</dt><dd>{metadata.reconDate}</dd></div>
         <div><dt className="text-subtle">Duration</dt><dd>{metadata.duration ?? 'Not recorded'}</dd></div>
-        <div><dt className="text-subtle">Hosts assessed</dt><dd>{metadata.hosts}</dd></div>
+        <div><dt className="text-subtle">Asset executions recorded</dt><dd>{metadata.hosts}</dd></div>
         <div><dt className="text-subtle">Assessment mode</dt><dd>{metadata.assessmentMode}</dd></div>
         <div><dt className="text-subtle">Observations</dt><dd>{model.observationsTotal}</dd></div>
         <div><dt className="text-subtle">Stages</dt><dd>{metadata.stageCounts.completed} completed · {metadata.stageCounts.partial} partial · {metadata.stageCounts.failed} failed · {metadata.stageCounts.skipped} skipped</dd></div>
@@ -39,7 +39,7 @@ export default function ReconReportView({ model }: { model: ReconReportModel }) 
       <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
         <div><dt className="text-subtle">Authorized assets</dt><dd className="break-all">{authorization.authorized.join(', ') || 'None recorded'}</dd></div>
         <div><dt className="text-subtle">Observed hosts (not authorization)</dt><dd className="break-all">{authorization.observed.join(', ') || 'None recorded'}</dd></div>
-        <div><dt className="text-subtle">Exclusions applied</dt><dd className="break-all">{authorization.excluded.join(', ') || 'None recorded'}</dd></div>
+        <div><dt className="text-subtle">Captured exclusions</dt><dd className="break-all">{authorization.excluded.join(', ') || 'None recorded'}</dd></div>
         <div><dt className="text-subtle">Required User-Agent</dt><dd className="break-all font-mono text-xs">{authorization.userAgent ?? 'Not recorded'}</dd></div>
         <div className="sm:col-span-2"><dt className="text-subtle">Engagement rules</dt><dd className="whitespace-pre-wrap">{authorization.rules ?? 'Not recorded'}</dd></div>
       </dl>
@@ -53,7 +53,7 @@ export default function ReconReportView({ model }: { model: ReconReportModel }) 
             <tbody>{methodology.stages.map(stage => <tr key={stage.name} className="border-b border-border"><td className="p-2">{stage.name}</td><td className="p-2 font-mono text-xs">{stage.tools.join(', ') || 'None recorded'}</td></tr>)}</tbody>
           </table></div>
         : <p className="text-sm text-muted">No stage detail was recorded for this run.</p>}
-      <p className="text-sm text-muted">Authenticated contexts: {methodology.authenticated ? 'recorded' : 'none recorded'} · {methodology.passiveOnly ? 'passive stages only, as recorded' : 'includes active stages, as recorded'}</p>
+      <p className="text-sm text-muted">Authenticated contexts: {methodology.authenticated ? 'recorded' : 'none recorded'} · {methodology.activity === 'UNKNOWN' ? 'Activity not recorded' : methodology.activity.toLowerCase() + ' (captured plan)'}</p>
     </section>
 
     <section aria-label="Execution overview" className="space-y-2">
@@ -97,7 +97,7 @@ export default function ReconReportView({ model }: { model: ReconReportModel }) 
             <thead><tr className="border-b border-border">{['Host', 'Port', 'Protocol', 'Service', 'Evidence'].map(heading => <th key={heading} scope="col" className="p-2">{heading}</th>)}</tr></thead>
             <tbody>{model.network.map(row => <tr key={`${row.host}:${row.port}`} className="border-b border-border"><td className="break-all p-2 font-mono text-xs">{row.host}</td><td className="p-2">{row.port}</td><td className="p-2">{row.protocol ?? '—'}</td><td className="p-2">{row.service ?? 'Not recorded'}</td><td className="p-2 text-muted">{row.source}</td></tr>)}</tbody>
           </table></div>
-        : <p className="text-sm text-muted">{model.portDiscoveryPerformed ? 'Port discovery ran but recorded no open service observation.' : 'Port discovery was not performed for this run.'}</p>}
+        : <p className="text-sm text-muted">{model.portDiscoveryPerformed ? 'Port discovery ran but recorded no open service observation.' : 'No port discovery execution was recorded; network coverage remains unknown.'}</p>}
     </section>
 
     <section aria-label="Web surface" className="space-y-2">
@@ -105,12 +105,12 @@ export default function ReconReportView({ model }: { model: ReconReportModel }) 
       <dl className="grid gap-x-6 gap-y-1 text-sm">
         <div><dt className="text-subtle">Responsive hosts</dt><dd className="break-all">{web.responsiveHosts.join(', ') || 'None recorded'}</dd></div>
         <div><dt className="text-subtle">HTTP status codes</dt><dd>{web.statusCodes.join(', ') || 'None recorded'}</dd></div>
-        <div><dt className="text-subtle">Authentication entry points</dt><dd className="break-all">{web.authSurfaces.join(', ') || 'None recorded'}</dd></div>
-        <div><dt className="text-subtle">API surfaces</dt><dd className="break-all">{web.apiSurfaces.join(', ') || 'None recorded'}</dd></div>
+        <div><dt className="text-subtle">Authentication signals (unverified)</dt><dd className="break-all">{web.authSurfaces.join(', ') || 'None recorded'}</dd></div>
+        <div><dt className="text-subtle">API signals (unverified)</dt><dd className="break-all">{web.apiSurfaces.join(', ') || 'None recorded'}</dd></div>
         <div><dt className="text-subtle">Technologies</dt><dd>{web.technologies.length ? web.technologies.map(tech => `${tech.name}${tech.version ? ` ${tech.version}` : ' (version unconfirmed)'}`).join(', ') : 'None recorded'}</dd></div>
       </dl>
       {web.endpoints.length > 0 && <>
-        <ul className="space-y-0.5 text-sm">{web.endpoints.slice(0, 50).map(endpoint => <li key={endpoint.url} className="break-all font-mono text-xs">{endpoint.method ?? 'GET'} {endpoint.url}{endpoint.status ? ` · ${endpoint.status}` : ''}</li>)}</ul>
+        <ul className="space-y-0.5 text-sm">{web.endpoints.slice(0, 50).map(endpoint => <li key={endpoint.url} className="break-all font-mono text-xs">{endpoint.method ?? 'Method not recorded'} {endpoint.url}{endpoint.status ? ` · ${endpoint.status}` : ''}</li>)}</ul>
         {web.endpoints.length > 50 && <p className="text-xs text-muted">First 50 of {web.endpoints.length} endpoints shown; the full inventory remains in the artifacts.</p>}
       </>}
       <p className="text-xs text-muted">Observed endpoints are evidence, not confirmed vulnerabilities.</p>
@@ -119,7 +119,7 @@ export default function ReconReportView({ model }: { model: ReconReportModel }) 
     <section aria-label="Authenticated Recon" className="space-y-2">
       <h3 className="font-semibold">Authenticated Recon</h3>
       <p className="text-sm text-muted">{authenticated.note}</p>
-      {authenticated.contexts.length > 0 && <ul className="space-y-1 text-sm">{authenticated.contexts.map((context, index) => <li key={`${context.label}:${index}`}>{context.label} · {context.publicObservations} public · {context.authenticatedOnly} authenticated-only</li>)}</ul>}
+      {authenticated.contexts.length > 0 && <ul className="space-y-1 text-sm">{authenticated.contexts.map((context, index) => <li key={`${context.label}:${index}`}>{context.label} · {context.state} · {context.observations} usable observations</li>)}</ul>}
     </section>
 
     <section aria-label="Errors and limitations" className="space-y-2">

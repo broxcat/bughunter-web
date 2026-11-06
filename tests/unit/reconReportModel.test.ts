@@ -29,6 +29,58 @@ function scan(overrides: Partial<ReportFacts['scans'][number]> = {}): ReportFact
 }
 
 describe('deterministic Recon report', () => {
+
+  it('does not call discovered URLs or DNS names responsive hosts', () => {
+    const model = buildReconReportModel(facts({ scans: [scan({ artifacts: [
+      { kind: 'url', verification: 'DISCOVERED', value: { url: 'https://unprobed.acme.example/login' } },
+      { kind: 'hostname', verification: 'OBSERVED', value: { hostname: 'dns.acme.example' } },
+      { kind: 'endpoint', verification: 'OBSERVED', value: { url: 'https://acme.example/', statusCode: 403 } },
+    ] })] }));
+    expect(model.web.responsiveHosts).toEqual(['acme.example']);
+    expect(model.dns.map(row => row.host)).toEqual(['dns.acme.example']);
+  });
+  it.each(['PENDING', 'SKIPPED', 'SKIPPED_UNSUPPORTED', 'SKIPPED_NOT_APPLICABLE', 'CANCELLED'])('does not claim port scanning ran for %s', state => {
+    expect(buildReconReportModel(facts({ scans: [scan({ steps: [{ name: 'Ports / services', state, reason: null, details: null }] })] })).portDiscoveryPerformed).toBe(false);
+  });
+  it('keeps planned tools separate from provider attempts and reads captured version objects', () => {
+    const model = buildReconReportModel(facts({ scans: [scan({
+      toolVersions: { httpx: { available: true, version: '1.12.0' } },
+      plan: { activityMode: 'ACTIVE', stages: [{ name: 'HTTP surface', tools: ['httpx', 'unused'] }] },
+      steps: [{ name: 'HTTP surface', state: 'PARTIAL', reason: null, details: { capabilities: [{ providersAttempted: [{ provider: 'httpx' }] }] } }],
+    })] }));
+    expect(model.tools).toEqual([{ name: 'httpx', version: '1.12.0', invocation: null }]);
+    expect(model.methodology.stages[0].tools).toEqual(['httpx', 'unused']);
+    expect(model.methodology.activity).toBe('ACTIVE');
+    expect(buildReconReportModel(facts({ scans: [scan()] })).methodology.activity).toBe('UNKNOWN');
+  });
+  it('discloses truncated inventories per host', () => {
+    const model = buildReconReportModel(facts({ scans: [scan({ artifactCount: 500 })] }));
+    expect(model.limitations).toContainEqual(expect.objectContaining({ label: 'Truncated', reason: expect.stringContaining('0 of 500') }));
+  });
+  it('redacts metadata, free-text reasons and credential arguments', () => {
+    const model = buildReconReportModel(facts({ program: { ...facts().program, companyName: 'Authorization: Bearer metadata-secret' }, scans: [scan({
+      steps: [{ name: 'HTTP surface', state: 'FAILED', reason: 'httpx --password "argument-secret"', details: null }],
+    })] }));
+    expect(JSON.stringify(model)).not.toMatch(/metadata-secret|argument-secret/);
+  });
+  it('escapes hostile evidence in Markdown exports, including paragraphs and tables', () => {
+    const model = buildReconReportModel(facts({ program: { ...facts().program, companyName: '<script>alert(1)</script> [click](javascript:alert(1))' }, scans: [scan({
+      steps: [{ name: 'HTTP surface', state: 'FAILED', reason: '<img src=x onerror=alert(1)>', details: null }],
+    })] }));
+    const markdown = renderReconReportMarkdown(model);
+    expect(markdown).not.toMatch(/<script|<img|\[click\]\(javascript:/);
+    expect(markdown).toContain('&lt;script&gt;');
+  });
+
+  it('does not turn anonymous or untested planned contexts into authenticated coverage', () => {
+    const totals = { public: 10, authenticatedOnly: 6, sharedAuthenticated: 2, observations: 20 };
+    const model = buildReconReportModel(facts({ authSurfaces: [{ contexts: [
+      { label: 'Anonymous', mode: 'ANONYMOUS', state: 'MAPPED', observations: 10 },
+      { label: 'Account A', mode: 'AUTHENTICATED', state: 'NOT_TESTED', observations: 0 },
+    ], totals }] }));
+    expect(model.methodology.authenticated).toBe(false);
+    expect(model.authenticated.contexts).toEqual([{ label: 'Account A', state: 'NOT_TESTED', observations: 0 }]);
+  });
   it('keeps COMPLETED with a null outcome as result unknown', () => {
     const model = buildReconReportModel(facts({ run: { ...facts().run, status: 'COMPLETED', outcome: null } }));
     expect(model.metadata.outcomeLabel).toBe('Result unknown');
@@ -59,7 +111,7 @@ describe('deterministic Recon report', () => {
 
   it('lists only tools named in the captured plan and never fabricates commands', () => {
     const model = buildReconReportModel(facts({ scans: [scan({
-      steps: [{ name: 'HTTP surface', state: 'COMPLETED', reason: null, details: null }],
+      steps: [{ name: 'HTTP surface', state: 'COMPLETED', reason: null, details: { capabilities: [{ providersAttempted: [{ provider: 'httpx' }] }] } }],
       toolVersions: { httpx: '1.6.0' },
     })] }));
     expect(model.tools).toEqual([{ name: 'httpx', version: '1.6.0', invocation: null }]);
@@ -127,7 +179,7 @@ describe('deterministic Recon report', () => {
     const model = buildReconReportModel(facts({ scans: [] }));
     const markdown = renderReconReportMarkdown(model);
     expect(markdown).toContain('No stage detail was recorded for this run.');
-    expect(markdown).toContain('Port discovery was not performed for this run.');
+    expect(markdown).toContain('No port discovery execution was recorded; network coverage remains unknown.');
     expect(markdown).toContain('No host or DNS observation was recorded.');
     expect(markdown).not.toContain('| 443 |');
   });

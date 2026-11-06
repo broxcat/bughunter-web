@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { redactObservationText } from '@/lib/observationSafety';
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { Badge } from '@/components/ui/Badge';
@@ -6,7 +7,7 @@ import { Card } from '@/components/ui/Card';
 import { loadTargetReconRun } from '@/server/recon/runDetail';
 import { ResearchError } from '@/server/research/workspace';
 import { reconOverview, type ReconTone } from '@/lib/reconOverview';
-import { capabilityRows, elapsed, formatDuration, groupObservationKinds, redactLogLines, stageTools, stepView, type StepTone } from '@/lib/reconTimeline';
+import { authContextCount, capabilityRows, providerAttempts, elapsed, formatDuration, groupObservationKinds, redactLogLines, stageTools, stepView, type StepTone } from '@/lib/reconTimeline';
 import { buildReconReportModel } from '@/lib/reconReportModel';
 import { loadReconReportFacts } from '@/server/recon/reportFacts';
 import ReconReportView from '@/components/ReconReportView';
@@ -23,10 +24,6 @@ const badgeTone: Record<ReconTone | StepTone, 'neutral' | 'brand' | 'passed' | '
 
 function stamp(value: Date): string {
   return `${value.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
-}
-
-function hostCounts(snapshot: unknown): number {
-  return Array.isArray(snapshot) ? snapshot.length : 0;
 }
 
 export default async function ReconRunPage({ params }: { params: Promise<{ id: string }> }) {
@@ -47,7 +44,7 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
   const { run, observations, logs, rawLogLimit } = detail;
   const view = reconOverview({ status: run.status, outcome: run.outcome });
   const duration = elapsed(run.startedAt ?? run.createdAt, run.finishedAt);
-  const contextCount = run.scans.reduce((sum, scan) => sum + hostCounts(scan.authenticatedContextsSnapshot), 0);
+  const contextCount = run.scans.reduce((sum, scan) => sum + authContextCount(scan.authenticatedContextsSnapshot), 0);
 
   return <div className="space-y-6">
     <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -67,9 +64,9 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
       <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
         <div><dt className="text-subtle">Started</dt><dd>{stamp(run.startedAt ?? run.createdAt)}</dd></div>
         <div><dt className="text-subtle">Duration</dt><dd>{duration ?? 'Not recorded'}</dd></div>
-        <div><dt className="text-subtle">Hosts scanned</dt><dd>{run.scans.length}</dd></div>
-        <div><dt className="text-subtle">Required User-Agent</dt><dd className="break-all font-mono text-xs">{run.program.requiredUserAgent ?? 'Not recorded'}</dd></div>
-        <div><dt className="text-subtle">Assessment mode</dt><dd>{run.program.assessmentMode.toLowerCase().replaceAll('_', ' ')}</dd></div>
+        <div><dt className="text-subtle">Asset executions recorded</dt><dd>{run.scans.length}</dd></div>
+        <div><dt className="text-subtle">Current Target User-Agent</dt><dd className="break-all font-mono text-xs">{redactObservationText(run.program.requiredUserAgent ?? 'Not recorded')}</dd></div>
+        <div><dt className="text-subtle">Assessment mode</dt><dd>{run.assessmentModeSnapshot?.toLowerCase().replaceAll('_', ' ') ?? 'Not captured'}</dd></div>
         <div><dt className="text-subtle">Authenticated contexts</dt><dd>{contextCount > 0 ? `${contextCount} recorded` : 'None recorded'}</dd></div>
       </dl>
     </header>
@@ -88,7 +85,7 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
       const lines = redactLogLines(logs[scan.id] ?? []);
       return <Card key={scan.id} className="space-y-5 p-5">
         <div className="flex flex-wrap items-baseline gap-3">
-          <h2 className="break-all font-mono text-lg font-semibold">{scan.scopeAsset?.normalizedValue ?? 'Unknown host'}</h2>
+          <h2 className="break-all font-mono text-lg font-semibold">{redactObservationText(scan.capturedHost ?? 'Host not captured')}</h2>
           <Badge tone={badgeTone[scanView.tone]}>{scanView.label}</Badge>
           <Badge tone="neutral" mono>{scan.status}</Badge>
           <span className="text-sm text-muted">{scan._count.artifacts} observations</span>
@@ -98,7 +95,7 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
         <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
           <div><dt className="text-subtle">Started</dt><dd>{stamp(scan.startedAt ?? scan.createdAt)}</dd></div>
           <div><dt className="text-subtle">Duration</dt><dd>{elapsed(scan.startedAt, scan.finishedAt) ?? 'Not recorded'}</dd></div>
-          <div><dt className="text-subtle">User-Agent</dt><dd className="break-all font-mono text-xs">{scan.requiredUserAgent ?? 'Not recorded'}</dd></div>
+          <div><dt className="text-subtle">User-Agent</dt><dd className="break-all font-mono text-xs">{redactObservationText(scan.requiredUserAgent ?? 'Not recorded')}</dd></div>
         </dl>
 
         <section aria-label={`Execution timeline for ${scan.scopeAsset?.normalizedValue ?? 'host'}`}>
@@ -111,6 +108,7 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
                 const tools = stageTools(step.name, plan);
                 const details = step.details as { durationMs?: unknown } | null;
                 const caps = capabilityRows(step.details);
+                const attempts = providerAttempts(step.details);
                 return <li key={step.name} className="border-l-2 border-border pl-4">
                   <div className="flex flex-wrap items-center gap-2">
                     <span aria-hidden className={stepState.tone === 'danger' ? 'text-danger' : stepState.tone === 'warning' ? 'text-warning' : stepState.tone === 'success' ? 'text-success' : 'text-subtle'}>{stepState.symbol}</span>
@@ -118,8 +116,16 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
                     <Badge tone={badgeTone[stepState.tone]}>{stepState.label}</Badge>
                     {formatDuration(details?.durationMs) && <span className="text-xs text-muted">{formatDuration(details?.durationMs)}</span>}
                   </div>
-                  {tools.length > 0 && <p className="mt-1 font-mono text-xs text-muted">{tools.join(' · ')}</p>}
-                  {step.reason && <p className="mt-1 text-sm text-muted">{step.reason}</p>}
+                  {tools.length > 0 && <p className="mt-1 font-mono text-xs text-muted">Planned tools: {tools.join(' · ')}</p>}
+                  {attempts.length > 0 && <ul className="mt-2 space-y-1 text-sm">
+                    {attempts.map((attempt, index) => <li key={index}>
+                      <span className="font-mono">{attempt.provider}</span> · {stepView(attempt.state).label}
+                      {attempt.duration && <span> · {attempt.duration}</span>}
+                      {attempt.observations !== null && <span> · {attempt.observations} observations</span>}
+                      {attempt.reason && <p className="text-muted">{attempt.reason}</p>}
+                    </li>)}
+                  </ul>}
+                  {step.reason && <p className="mt-1 text-sm text-muted">{redactObservationText(step.reason)}</p>}
                   {caps.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-muted">
                     {caps.map(cap => <li key={cap.capability}>{cap.capability.replaceAll('_', ' ').toLowerCase()} · {stepView(cap.state).label}</li>)}
                   </ul>}
@@ -144,7 +150,7 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
         {limitations.length > 0 && <section aria-label="Limitations">
           <h3 className="mb-2 font-semibold">Failures and limitations</h3>
           <ul className="space-y-1 text-sm">
-            {limitations.map(step => <li key={step.name}><span className="font-medium">{step.name}</span> · {stepView(step.state).label}{step.reason ? ` — ${step.reason}` : ''}</li>)}
+            {limitations.map(step => <li key={step.name}><span className="font-medium">{step.name}</span> · {stepView(step.state).label}{step.reason ? ` — ${redactObservationText(step.reason)}` : ''}</li>)}
           </ul>
         </section>}
 

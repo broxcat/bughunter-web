@@ -90,3 +90,22 @@ describe('Recon execution timeline', () => {
     expect(plain.text).toBe('httpx: 8 responsive URLs');
   });
 });
+
+
+describe('persisted provider attempt presentation', () => {
+  it('keeps missing attempt metadata unknown and redacts failures', async () => {
+    const { providerAttempts } = await import('@/lib/reconTimeline');
+    expect(providerAttempts(null)).toEqual([]);
+    expect(providerAttempts({ capabilities: [{ providersAttempted: [null, {}, { provider: 'httpx', state: 'FAILED', durationMs: 1200, artifactsProduced: 2, failure: { message: 'Authorization: Bearer private-value' } }] }] })).toEqual([
+      { provider: 'httpx', state: 'FAILED', duration: '1.2 s', observations: 2, reason: '[REDACTED CREDENTIAL]' },
+    ]);
+  });
+});
+
+
+it('counts both versioned context snapshots and legacy arrays without inventing anonymous personas', async () => {
+  const { authContextCount } = await import('@/lib/reconTimeline');
+  expect(authContextCount({ version: 1, anonymous: {}, contexts: [{}, {}] })).toBe(2);
+  expect(authContextCount([{}])).toBe(1);
+  expect(authContextCount(null)).toBe(0);
+});

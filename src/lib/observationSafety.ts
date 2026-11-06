@@ -23,6 +23,7 @@ export function safeObservationUrl(value: string): string {
 }
 export function redactObservationText(value: string): string {
   const plain = (text: string): string => text
+    .replace(/(--(?:password|passwd|token|api-key|secret|cookie|authorization))(?:=|\s+)(?:"[^"]*"|'[^']*'|[^\s]+)/gi, "$1 [REDACTED CREDENTIAL]")
     .replace(/\bBearer\s+[A-Za-z0-9_.~+\/-]+=*/gi, "[REDACTED BEARER]")
     .replace(/\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, "[REDACTED JWT]")
     .replace(/\b(?:authorization|proxy-authorization|cookies?|set-cookie|password|secret|token|(?:x[-_])?(?:csrf|xsrf)(?:[-_]?token)?|x[-_]api[-_]key|api[_ -]?key|access_token|refresh_token|session[_ -]?(?:id|token)|sid)["']?\s*[:=]\s*[^\r\n]+/gi, "[REDACTED CREDENTIAL]")

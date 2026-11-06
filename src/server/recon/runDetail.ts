@@ -14,6 +14,7 @@ export async function loadTargetReconRun(userId: string, runId: string) {
   const run = await prisma.targetReconRun.findFirst({
     where: { id: runId, program: { ownerId: userId } },
     select: {
+      assessmentModeSnapshot: true,
       id: true,
       status: true,
       outcome: true,
@@ -40,6 +41,7 @@ export async function loadTargetReconRun(userId: string, runId: string) {
           finishedAt: true,
           error: true,
           requiredUserAgent: true,
+          scopeAssetSnapshot: true,
           reconPlan: true,
           toolVersions: true,
           authenticatedContextsSnapshot: true,
@@ -63,7 +65,7 @@ export async function loadTargetReconRun(userId: string, runId: string) {
         prisma.reconArtifact.groupBy({ by: ['scanRunId', 'kind'], where: { scanRunId: { in: scanIds } }, _count: true }),
         Promise.all(scanIds.map(scanRunId => prisma.scanLog.findMany({
           where: { scanRunId },
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           take: RAW_LOG_LINES_PER_RUN,
           select: { line: true, stream: true, createdAt: true },
         }))),
@@ -84,5 +86,10 @@ export async function loadTargetReconRun(userId: string, runId: string) {
     logsByRun[scanRunId] = [...rows].reverse();
   });
 
-  return { run, observations, logs: logsByRun, rawLogLimit: RAW_LOG_LINES_PER_RUN };
+  const historicalRun = { ...run, scans: run.scans.map(scan => {
+    const snapshot = scan.scopeAssetSnapshot as { normalizedValue?: string } | null;
+    const plan = scan.reconPlan as { boundary?: { normalizedValue?: string } } | null;
+    return { ...scan, capturedHost: snapshot?.normalizedValue ?? plan?.boundary?.normalizedValue ?? null };
+  }) };
+  return { run: historicalRun, observations, logs: logsByRun, rawLogLimit: RAW_LOG_LINES_PER_RUN };
 }

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { authContextCount } from '@/lib/reconTimeline';
 import { ResearchError } from '../research/workspace';
 import { readAuthSurface } from '../authenticatedRecon';
 import { exportAuthSurfaces } from './authExport';
@@ -6,10 +7,6 @@ import type { ReportFacts, ReportArtifact, ReportScan } from '@/lib/reconReportM
 
 /** Evidence rows bounded per host; counts still reflect the complete stored set. */
 export const REPORT_ARTIFACTS_PER_HOST = 400;
-
-function contextsCount(snapshot: unknown): number {
-  return Array.isArray(snapshot) ? snapshot.length : 0;
-}
 
 /**
  * Read the persisted facts a deterministic Recon report is built from.
@@ -19,20 +16,18 @@ export async function loadReconReportFacts(userId: string, runId: string): Promi
   const run = await prisma.targetReconRun.findFirst({
     where: { id: runId, program: { ownerId: userId } },
     select: {
-      id: true, status: true, outcome: true, createdAt: true, startedAt: true, finishedAt: true,
+      assessmentModeSnapshot: true, id: true, status: true, outcome: true, createdAt: true, startedAt: true, finishedAt: true,
       program: {
         select: {
-          id: true, companyName: true, platform: true, requiredUserAgent: true,
-          outOfScope: true, rulesOfEngagement: true, assessmentMode: true,
+          id: true, companyName: true, platform: true,
         },
       },
       scans: {
         orderBy: [{ reconOrder: 'asc' }, { id: 'asc' }],
         select: {
           id: true, status: true, outcome: true, startedAt: true, finishedAt: true,
-          requiredUserAgent: true, reconPlan: true, toolVersions: true,
+          scopeAssetSnapshot: true, requiredUserAgent: true, reconPlan: true, toolVersions: true,
           authenticatedContextsSnapshot: true, changeSet: true,
-          scopeAsset: { select: { normalizedValue: true } },
           reconSteps: { orderBy: { position: 'asc' }, select: { name: true, state: true, reason: true, details: true } },
           _count: { select: { artifacts: true } },
         },
@@ -41,40 +36,33 @@ export async function loadReconReportFacts(userId: string, runId: string): Promi
   });
   if (!run) throw new ResearchError('Recon run not found', 404);
 
-  const assets = await prisma.scopeAsset.findMany({
-    where: { programId: run.program.id, active: true },
-    select: { normalizedValue: true },
-    orderBy: { normalizedValue: 'asc' },
-    take: 1000,
-  });
-
+  // Bound each host independently. A noisy first host must never consume the
+  // report budget of another host. Retained artifacts themselves are unchanged.
   const scanIds = run.scans.map(scan => scan.id);
-  const artifactRows = scanIds.length
-    ? await prisma.reconArtifact.findMany({
-        where: { scanRunId: { in: scanIds } },
-        orderBy: [{ kind: 'asc' }, { canonicalKey: 'asc' }],
-        select: { scanRunId: true, kind: true, value: true },
-        take: REPORT_ARTIFACTS_PER_HOST * Math.max(1, scanIds.length),
-      })
-    : [];
-
-  const artifactsByRun = new Map<string, ReportArtifact[]>();
-  for (const row of artifactRows) {
-    const bucket = artifactsByRun.get(row.scanRunId) ?? [];
-    if (bucket.length < REPORT_ARTIFACTS_PER_HOST) bucket.push({ kind: row.kind, value: (row.value ?? {}) as Record<string, unknown> });
-    artifactsByRun.set(row.scanRunId, bucket);
-  }
+  const buckets = await Promise.all(scanIds.map(scanRunId => prisma.reconArtifact.findMany({
+    where: { scanRunId },
+    orderBy: [{ kind: 'asc' }, { canonicalKey: 'asc' }, { id: 'asc' }],
+    select: { kind: true, value: true, verification: true },
+    take: REPORT_ARTIFACTS_PER_HOST,
+  })));
+  const artifactsByRun = new Map<string, ReportArtifact[]>(scanIds.map((id, index) => [id,
+    buckets[index].map(row => ({ kind: row.kind, verification: row.verification, value: (row.value ?? {}) as Record<string, unknown> })),
+  ]));
+  // Authorization comes from captured boundaries, never today's mutable assets.
+  const captured = run.scans.map(scan => scan.scopeAssetSnapshot as { normalizedValue?: string } | null);
+  const plans = run.scans.map(scan => scan.reconPlan as ReportScan['plan']);
+  const userAgents = [...new Set(run.scans.map(scan => scan.requiredUserAgent).filter((v): v is string => Boolean(v)))];
 
   const surfaces = scanIds.length ? exportAuthSurfaces(await readAuthSurface(scanIds)) : [];
 
-  const scans: ReportScan[] = run.scans.map(scan => ({
-    host: scan.scopeAsset?.normalizedValue ?? null,
+  const scans: ReportScan[] = run.scans.map((scan, index) => ({
+    host: captured[index]?.normalizedValue ?? plans[index]?.boundary?.normalizedValue ?? null,
     status: scan.status,
     outcome: scan.outcome,
     startedAt: scan.startedAt?.toISOString() ?? null,
     finishedAt: scan.finishedAt?.toISOString() ?? null,
     requiredUserAgent: scan.requiredUserAgent,
-    authenticatedContexts: contextsCount(scan.authenticatedContextsSnapshot),
+    authenticatedContexts: authContextCount(scan.authenticatedContextsSnapshot),
     plan: (scan.reconPlan ?? null) as ReportScan['plan'],
     steps: scan.reconSteps.map(step => ({ name: step.name, state: step.state, reason: step.reason, details: step.details })),
     artifacts: artifactsByRun.get(scan.id) ?? [],
@@ -95,15 +83,17 @@ export async function loadReconReportFacts(userId: string, runId: string): Promi
     program: {
       companyName: run.program.companyName,
       platform: run.program.platform,
-      requiredUserAgent: run.program.requiredUserAgent,
-      outOfScope: run.program.outOfScope,
-      rulesOfEngagement: run.program.rulesOfEngagement,
-      assessmentMode: run.program.assessmentMode,
+      requiredUserAgent: userAgents.length ? userAgents.join('; ') : null,
+      outOfScope: [...new Set(plans.flatMap(plan => plan?.authorization?.exclusions ?? []))],
+      rulesOfEngagement: null, // Not captured by this historical execution contract.
+      assessmentMode: run.assessmentModeSnapshot ?? 'NOT_RECORDED',
     },
-    authorizedAssets: assets.map(asset => asset.normalizedValue),
+    authorizedAssets: [...new Set(run.scans.map((scan, index) => captured[index]?.normalizedValue ?? plans[index]?.boundary?.normalizedValue).filter((value): value is string => Boolean(value)))],
     scans,
     authSurfaces: surfaces.map(surface => ({
-      contexts: surface.contexts.map(context => ({ label: context.label })),
+      contexts: surface.contexts.map(context => ({ label: context.label, mode: context.mode, state: context.state,
+        observations: surface.observations.filter(row => row.contextKey === context.contextKey && !['UNAVAILABLE', 'SESSION_LOST'].includes(row.responseClass)).length,
+      })),
       totals: surface.totals,
     })),
   };

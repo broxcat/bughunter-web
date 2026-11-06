@@ -9,7 +9,7 @@ import type { ReconReportModel } from './reconReportModel';
 /** Escape pipe characters and collapse line breaks so a value cannot break a table. */
 export function cell(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—';
-  return String(value).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  return String(value).replace(/(?<!\\)\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
 function table(headers: string[], rows: Array<Array<string | number | null>>): string {
@@ -21,7 +21,20 @@ function table(headers: string[], rows: Array<Array<string | number | null>>): s
   ].join('\n');
 }
 
-export function renderReconReportMarkdown(model: ReconReportModel): string {
+/** Encode evidence as text even when a consumer enables raw HTML in Markdown. */
+function markdownText(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/([\\`*_[\]{}|])/g, '\\$1').replace(/[\r\n]+/g, ' ');
+}
+function markdownValues<T>(value: T): T {
+  if (typeof value === 'string') return markdownText(value) as T;
+  if (Array.isArray(value)) return value.map(markdownValues) as T;
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, markdownValues(item)])) as T;
+  return value;
+}
+
+export function renderReconReportMarkdown(input: ReconReportModel): string {
+  const model = markdownValues(input);
   const out: string[] = [];
   const { metadata, authorization, methodology, web, authenticated } = model;
 
@@ -35,7 +48,7 @@ export function renderReconReportMarkdown(model: ReconReportModel): string {
   out.push(`- **Execution result:** ${metadata.outcomeLabel}${metadata.outcomeDetail ? ` — ${metadata.outcomeDetail}` : ''}`);
   out.push(`- **Job status:** ${metadata.status}`);
   out.push(`- **Assessment mode:** ${metadata.assessmentMode}`);
-  out.push(`- **Hosts assessed:** ${metadata.hosts}`);
+  out.push(`- **Asset executions recorded:** ${metadata.hosts}`);
   out.push(`- **Stages:** ${metadata.stageCounts.completed} completed, ${metadata.stageCounts.partial} partial, ${metadata.stageCounts.failed} failed, ${metadata.stageCounts.skipped} skipped/not applicable, ${metadata.stageCounts.unknown} unknown`);
   out.push(`- **Recorded observations:** ${model.observationsTotal}`, '');
 
@@ -49,19 +62,19 @@ export function renderReconReportMarkdown(model: ReconReportModel): string {
   out.push(authorization.note, '');
   out.push(`- **Authorized assets:** ${authorization.authorized.length ? authorization.authorized.join(', ') : 'None recorded'}`);
   out.push(`- **Observed hosts (not authorization):** ${authorization.observed.length ? authorization.observed.join(', ') : 'None recorded'}`);
-  out.push(`- **Exclusions applied:** ${authorization.excluded.length ? authorization.excluded.join(', ') : 'None recorded'}`);
+  out.push(`- **Captured exclusions:** ${authorization.excluded.length ? authorization.excluded.join(', ') : 'None recorded'}`);
   out.push(`- **Required User-Agent:** ${authorization.userAgent ?? 'Not recorded'}`);
   out.push(`- **Engagement rules:** ${authorization.rules ? authorization.rules : 'Not recorded'}`, '');
 
   out.push('## Methodology', '');
   if (methodology.stages.length) {
-    out.push(table(['Stage', 'Recorded tools'], methodology.stages.map(stage => [stage.name, stage.tools.join(', ') || 'None recorded'])));
+    out.push(table(['Planned stage', 'Planned tools'], methodology.stages.map(stage => [stage.name, stage.tools.join(', ') || 'None recorded'])));
     out.push('');
   } else {
     out.push('No stage detail was recorded for this run.', '');
   }
   out.push(`- **Authenticated contexts:** ${methodology.authenticated ? 'recorded' : 'none recorded'}`);
-  out.push(`- **Activity:** ${methodology.passiveOnly ? 'passive stages only, as recorded' : 'includes active stages, as recorded'}`, '');
+  out.push(`- **Activity:** ${methodology.activity === 'UNKNOWN' ? 'Not recorded' : methodology.activity.toLowerCase() + ' (captured plan)'}`, '');
 
   out.push('## Execution Overview', '');
   if (model.execution.length) {
@@ -92,14 +105,14 @@ export function renderReconReportMarkdown(model: ReconReportModel): string {
   } else if (model.portDiscoveryPerformed) {
     out.push('Port discovery ran but recorded no open service observation.', '');
   } else {
-    out.push('Port discovery was not performed for this run.', '');
+    out.push('No port discovery execution was recorded; network coverage remains unknown.', '');
   }
 
   out.push('## Web Surface', '');
   out.push(`- **Responsive hosts:** ${web.responsiveHosts.length ? web.responsiveHosts.join(', ') : 'None recorded'}`);
   out.push(`- **HTTP status codes observed:** ${web.statusCodes.length ? web.statusCodes.join(', ') : 'None recorded'}`);
-  out.push(`- **Authentication entry points:** ${web.authSurfaces.length ? web.authSurfaces.join(', ') : 'None recorded'}`);
-  out.push(`- **API surfaces:** ${web.apiSurfaces.length ? web.apiSurfaces.join(', ') : 'None recorded'}`);
+  out.push(`- **Authentication signals (unverified):** ${web.authSurfaces.length ? web.authSurfaces.join(', ') : 'None recorded'}`);
+  out.push(`- **API signals (unverified):** ${web.apiSurfaces.length ? web.apiSurfaces.join(', ') : 'None recorded'}`);
   out.push(`- **Technologies:** ${web.technologies.length ? web.technologies.map(tech => `${tech.name}${tech.version ? ` ${tech.version}` : ' (version unconfirmed)'}`).join(', ') : 'None recorded'}`, '');
   if (web.endpoints.length) {
     out.push(table(['Endpoint', 'Method', 'Status'], web.endpoints.slice(0, 200).map(endpoint => [endpoint.url, endpoint.method, endpoint.status])), '');
@@ -110,7 +123,7 @@ export function renderReconReportMarkdown(model: ReconReportModel): string {
   out.push('## Authenticated Recon', '');
   out.push(authenticated.note ?? 'No authenticated Recon context was recorded for this run.', '');
   if (authenticated.contexts.length) {
-    out.push(table(['Context', 'Public observations', 'Authenticated-only'], authenticated.contexts.map(context => [context.label, context.publicObservations, context.authenticatedOnly])), '');
+    out.push(table(['Context', 'Captured state', 'Usable observations'], authenticated.contexts.map(context => [context.label, context.state, context.observations])), '');
   }
 
   out.push('## Errors and Limitations', '');

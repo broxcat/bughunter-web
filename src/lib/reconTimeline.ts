@@ -129,3 +129,31 @@ export function groupObservationKinds(counts: KindCount[]): Array<{ label: strin
 export function redactLogLines(lines: Array<{ line: string; stream: 'STDOUT' | 'STDERR' }>): Array<{ text: string; stream: 'STDOUT' | 'STDERR' }> {
   return lines.map(({ line, stream }) => ({ text: redactObservationText(line), stream }));
 }
+
+export type ProviderAttemptRow = { provider: string; state: string | null; duration: string | null; observations: number | null; reason: string | null };
+/** Only persisted provider attempts demonstrate execution; plans do not. */
+export function providerAttempts(details: unknown): ProviderAttemptRow[] {
+  const caps = (details as { capabilities?: unknown } | null)?.capabilities;
+  if (!Array.isArray(caps)) return [];
+  return caps.flatMap(cap => {
+    const attempts = cap?.providersAttempted;
+    if (!Array.isArray(attempts)) return [];
+    return attempts.flatMap(attempt => {
+      if (!attempt || typeof attempt.provider !== 'string' || !attempt.provider.trim()) return [];
+      return [{
+        provider: redactObservationText(attempt.provider),
+        state: typeof attempt.state === 'string' ? attempt.state : null,
+        duration: formatDuration(attempt.durationMs),
+        observations: typeof attempt.artifactsProduced === 'number' && Number.isSafeInteger(attempt.artifactsProduced) && attempt.artifactsProduced >= 0 ? attempt.artifactsProduced : null,
+        reason: typeof attempt.failure?.message === 'string' ? redactObservationText(attempt.failure.message) : null,
+      }];
+    });
+  });
+}
+
+/** Current snapshots are versioned objects; legacy arrays remain readable. */
+export function authContextCount(snapshot: unknown): number {
+  if (Array.isArray(snapshot)) return snapshot.length;
+  const contexts = (snapshot as { contexts?: unknown } | null)?.contexts;
+  return Array.isArray(contexts) ? contexts.length : 0;
+}
