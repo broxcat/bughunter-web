@@ -40,7 +40,7 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
       reconRuns: {
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 1,
-        select: { status: true, outcome: true, createdAt: true },
+        select: { id: true, status: true, outcome: true, createdAt: true },
       },
     },
   });
@@ -88,7 +88,10 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
             </td>
             <td className="p-3 text-muted">{row.run ? <time dateTime={row.run.createdAt.toISOString()}>{stamp(row.run.createdAt)}</time> : '—'}</td>
             <td className="p-3">
-              <Link className="text-brand" href={`/targets/${row.id}?tab=Recon`} aria-label={`Open Recon for ${row.companyName}`}>Open</Link>
+              <div className="flex flex-wrap gap-3">
+                {row.run && <Link className="text-brand" href={`/recon/runs/${row.run.id}`} aria-label={`Open latest Recon run for ${row.companyName}`}>Latest run</Link>}
+                <Link className="text-muted" href={`/targets/${row.id}?tab=Recon`} aria-label={`Open Recon for ${row.companyName}`}>Target</Link>
+              </div>
             </td>
           </tr>)}
         </tbody>
