@@ -11,6 +11,17 @@ const exec = promisify(execFile), project = `bh-research-test-${randomUUID().sli
 const temp = await mkdtemp(join(tmpdir(), project)), config = join(temp, "compose.json");
 const cmd = async (file, args, options = {}) => (await exec(file, args, { timeout: 60000, maxBuffer: 2 ** 20, ...options })).stdout.trim();
 const compose = (...args) => cmd("docker", ["compose", "-p", project, "-f", config, ...args], {timeout: args[0] === "up" ? 180000 : 60000});
+// Never use Compose's blanket volume deletion, including for test projects.
+async function cleanDisposableProject() {
+  assert(project.startsWith('bh-research-test-'));
+  await compose('down', '--remove-orphans');
+  const names = (await cmd('docker', ['volume', 'ls', '--filter', `label=com.docker.compose.project=${project}`, '--format', '{{.Name}}'])).split('\n').filter(Boolean);
+  for (const name of names) {
+    const owner = await cmd('docker', ['volume', 'inspect', '--format', '{{index .Labels "com.docker.compose.project"}}', name]);
+    assert.equal(owner, project, 'Refusing to remove a volume owned by another project');
+    await cmd('docker', ['volume', 'rm', name]);
+  }
+}
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { loopHypothesis } from "../fixtures/researchLoop.mjs";
@@ -186,6 +197,6 @@ try {
   await mcp?.close().catch(() => {});
   tunnel?.kill("SIGTERM");
   await burpFixture?.close().catch(() => {});
-  if (started) await compose("down", "-v", "--remove-orphans").catch(() => { process.exitCode = 1; });
+  if (started) await cleanDisposableProject().catch(() => { process.exitCode = 1; });
   await rm(temp, { recursive: true, force: true });
 }

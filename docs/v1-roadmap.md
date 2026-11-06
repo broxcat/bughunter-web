@@ -10,6 +10,6 @@ Product: black-box only. Workflow: Targets → Scope → Recon → Research Plan
 
 Stabilize each gate before starting the next. Coverage delivery alone does not mean v1.0 is ready. White-box, new scanners and large unrelated integrations remain outside these gates.
 
-Do not tag, advertise or display v1.0.0 until the final audit passes. At release, package.json is the single version source used by the UI; no separate hardcoded footer version. Optional commit metadata belongs in About/diagnostics. The current development version remains unchanged.
+The final v1.0.0 release gates passed. `package.json` is the single version source used by the UI; no separate hardcoded footer version. Optional commit metadata belongs in About/diagnostics.
 
-Delivery through these five gates and the remaining conditional provider acceptance are recorded in [the 2026-11-06 release audit](v1-release-audit.md). The development version remains 0.1.0; this audit is not a v1.0.0 release.
+Delivery through these five gates, authenticated Claude acceptance, fresh-install and disposable-upgrade acceptance, and accepted development tooling risk are recorded in [the final release audit](v1-release-audit.md). The previously conditional Claude inference gate is closed.

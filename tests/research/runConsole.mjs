@@ -20,6 +20,13 @@ import { fakeBurp } from './fakeBurp.mjs';
 const execute = promisify(execFile), prefix = `bh-console-${randomUUID().slice(0,8)}`, temp = await mkdtemp(join(tmpdir(),prefix));
 const run = async (file,args,options={}) => (await execute(file,args,{timeout:60000,maxBuffer:2**20,...options})).stdout.trim();
 const config=join(temp,'compose.json'), compose=(...args)=>run('docker',['compose','-p',prefix,'-f',config,...args],{timeout:args[0]==='up'?180000:60000});
+// Remove only volumes labelled with this unique disposable project.
+async function cleanDisposableProject(){
+ assert(prefix.startsWith('bh-console-'));
+ await compose('down','--remove-orphans');
+ const names=(await run('docker',['volume','ls','--filter',`label=com.docker.compose.project=${prefix}`,'--format','{{.Name}}'])).split('\n').filter(Boolean);
+ for(const name of names){const owner=await run('docker',['volume','inspect','--format','{{index .Labels "com.docker.compose.project"}}',name]);assert.equal(owner,prefix,'Refusing another project volume');await run('docker',['volume','rm',name]);}
+}
 const freePort=async()=>{const s=createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));const p=s.address().port;await new Promise(r=>s.close(r));return p;};
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 let started=false, ingress, browser, tunnel, fixture, proxyFixture, targetFixture, mcp, reconWorker;
@@ -257,5 +264,5 @@ try {
  reconWorker?.kill('SIGTERM');
  await mcp?.close().catch(()=>{});tunnel?.kill('SIGTERM');await fixture?.close().catch(()=>{});await browser?.close();
  for(const s of [ingress,proxyFixture,targetFixture])if(s){s.closeAllConnections?.();await new Promise(r=>s.close(r));}
- if(started)await compose('down','-v','--remove-orphans');await rm(temp,{recursive:true,force:true});
+ if(started)await cleanDisposableProject();await rm(temp,{recursive:true,force:true});
 }

@@ -1,10 +1,10 @@
-# BugHunter Web
+# BugHunter Web v1.0.0
 
 License: AGPL-3.0-only ([LICENSE](LICENSE))
 
 Bug bounty workflow: **Targets → Scope → Recon → Research Plan → Research → Findings → Report**.
 
-Research records explicit tested work through [Research Coverage](docs/research-coverage.md), with shared proof identities in the [minimal Evidence Vault](docs/evidence-vault.md). The [v1.0 delivery gates](docs/v1-roadmap.md) are sequential; this development build is not a v1.0 release.
+Research records explicit tested work through [Research Coverage](docs/research-coverage.md), with shared proof identities in the [minimal Evidence Vault](docs/evidence-vault.md). The [v1.0 release audit](docs/v1-release-audit.md) records the validated release gates and accepted tooling risk.
 
 Current assessments are **black-box only**. [Historical assessment metadata](docs/assessment-modes.md) remains readable. Authenticated runtime testing remains supported.
 
@@ -13,11 +13,11 @@ Create it at `/targets` with a company name and an explicit **Required User-Agen
 Platform, program URL, rewards, scope hosts and vulnerability families are optional.
 Enter `BugHunter/1.0` explicitly when the program has no special User-Agent.
 
-Open the Target, then **Open Scope** to add, edit or remove FQDNs. All listed scope
-hosts are active. Supported inputs include `example.com`, `api.example.com` and
-`*.example.com`; case and the final DNS dot are normalized. Spaces, URLs, ports,
-paths and queries are rejected. Wildcards remain rules: add a concrete FQDN before
-scanning it. Discovery never automatically adds a new host to your authorized Scope.
+Open the Target to configure explicitly authorized Scope Assets: domains, subdomains,
+URLs and wildcard rules. URL scope retains its origin and path boundary. Wildcards
+remain discovery rules; active Research requires an authorized concrete host.
+IP/CIDR assets remain documentary where the existing execution engine does not
+support them. Discovery never grants additional authorization.
 
 The **Out of scope** tab supports add/edit/remove. Explicit exclusions always win,
 even against a broader wildcard. Recon and Research let you choose a company, then an
@@ -282,7 +282,7 @@ or host list APIs. Findings undergo an evidence review before they
 can be included in reports.
 
 
-## Codex Research
+## Research: Codex and Claude
 
 **Recon → per-target Codex console → hypotheses/tests/controls → human Finding draft → Evidence Review → Report.**
 
@@ -300,6 +300,10 @@ docker compose run --rm --no-deps web npx prisma migrate deploy
 docker compose up -d
 ```
 
+Codex and Claude use the same scope, plan, Coverage and Evidence boundaries, with
+separate native CLI authentication. Authenticated Claude context inference is
+recorded in the release audit; Findings still require human promotion and review.
+
 The dedicated research-console receives no app env_file, Auth.js/DB/Redis/AI keys,
 Docker socket or host home. Web signs short-lived Ed25519 terminal tickets; the
 console holds only the public key. A minimal ingress proxy strips browser cookies
@@ -316,7 +320,7 @@ Four pinned, unchanged skills are installed; their internal confirmation gates
 remain intact. Details: [CODEX-RESEARCH.md](docs/CODEX-RESEARCH.md).
 
 The clean workspace has scope.md, recon/, requests/, scripts/ and findings/;
-source/ is optional. Scope never expands through discovery. Notes/captures belong
+historical source metadata remains read-only. Scope never expands through discovery. Notes/captures belong
 to the configured local operator UID/GID; critical inputs remain read-only.
 [Hypothesis JSON v2](docs/RESEARCH-HYPOTHESES.md) remains an optional manual sync
 feature under findings/. Research confirmation does not confirm a Finding:
@@ -344,6 +348,6 @@ Recon comparison: [durable history and diffs](docs/recon-history.md). Absence do
 
 [Finding lifecycle and Retest](docs/finding-lifecycle.md) preserve human validation, submission history and original/new proof.
 
-The development footer reads its build version from `package.json`; this remains `0.1.0` until the v1 release audit is approved. Full local workflow checks include `node tests/e2e/runResearchCoverageWorkflow.mjs`, `node tests/e2e/runResearchPlanWorkflow.mjs` and `node tests/e2e/runBlackboxUx.mjs` after building. Their databases, queues, accounts and evidence are disposable fixtures. Real Codex context acceptance is separately opt-in: `BH_REAL_CODEX_COVERAGE=1 npx tsx tests/research/coverageRealCodex.mts`.
+The footer reads its build version from `package.json`, the authoritative version source. Full local workflow checks include `node tests/e2e/runResearchCoverageWorkflow.mjs`, `node tests/e2e/runResearchPlanWorkflow.mjs` and `node tests/e2e/runBlackboxUx.mjs` after building. Their databases, queues, accounts and evidence are disposable fixtures. Real Codex context acceptance is separately opt-in: `BH_REAL_CODEX_COVERAGE=1 npx tsx tests/research/coverageRealCodex.mts`.
 
-Current delivery and release limits: [Black-box v1 release audit](docs/v1-release-audit.md).
+Release evidence and known limitations: [Black-box v1 release audit](docs/v1-release-audit.md). See [v1.0.0 release notes and upgrade instructions](docs/releases/v1.0.0.md).

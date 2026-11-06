@@ -1,4 +1,74 @@
-# Black-box v1 release audit — 2026-11-06
+# BugHunter Web v1.0.0 — final release-candidate validation
+
+## Final release decision: PASS
+
+The release candidate closes all required v1.0.0 gates. Version is `1.0.0`, sourced only from `package.json` through `src/lib/buildVersion.ts`; no React version literal was added. Publication is allowed only for the exact release commit after its post-commit lint, type generation, TypeScript, build and affected browser checks pass. Tag `v1.0.0` must resolve to that commit. This section supersedes the earlier conditional decision preserved below.
+
+### Authenticated Claude acceptance — PASS
+
+- Actual host Claude CLI: `2.1.318`; real authenticated model: `claude-opus-5-5`.
+- Existing current Research workspace: scope approved, owner checks passed, captured authorization matched current policy and a real Research Plan was linked.
+- Native Read successfully accessed the actual workspace AGENTS, scope, plan Markdown/JSON and current Coverage pointer/snapshots (seven reads). No synthetic context, mock response, MCP discovery or unauthenticated initialization was used as inference proof.
+- `alreadyCovered = NONE_RECORDED`; `oneUntestedObjective = cmw4ze1do00lmnt0ui5rfsw1t`, verified against a real READY, untested plan item.
+- `coverageProvesSafety = false`, `networkActions = 0`, `workspaceMutations = 0`; complete workspace hashes/metadata were unchanged. Only Read and the native StructuredOutput response protocol were used.
+- Authenticated inference completed successfully in 11,925 ms. Authentication used the existing local OAuth login. An inherited environment API key was rejected during preflight; it was excluded only from the acceptance subprocess so the existing OAuth login could be used. No credential was printed, copied to BugHunter or persisted by the acceptance scripts. Product AI routing/configuration did not change.
+
+### Fresh installation — PASS
+
+The current local PostgreSQL database is a **fresh installation**: the earlier local volume was recreated after a host disk-full incident. This was not an application migration event. The earlier 437 historical rows are **not claimed to exist in this database**.
+
+`docker compose exec -T web npx prisma migrate status` reports all 37 migrations applied and the schema up to date. Required services are running, PostgreSQL/Redis/Burp/Research services are healthy, and HTTP health reports DB/Redis up. Actual browser credentials login passed. A temporary acceptance account and minimal Target/Scope Asset were used to verify Targets, Scope, Research and Findings, then removed without changing existing users' data. No Recon scan or unnecessary historical fixture was created. The same login/core-UI/footer smoke is required after deploying the tagged release.
+
+### Disposable upgrade — PASS
+
+The documented infrastructure runner provisioned its own PostgreSQL/Redis resources, executed `npm run test:migration` from the old schema through `prisma migrate deploy`, preserved historical fixture identities/evidence/snapshots and detected **no schema drift**. It never used the current application database. The earlier 437-row/17-table historical-preservation audit remains documentary evidence of the prior installation, preserved in the earlier section below; it is separate from this fresh-install acceptance.
+
+### Exact test results
+
+| Check | Passed | Failed | Skipped |
+| --- | ---: | ---: | ---: |
+| Full `npm test` with disposable PostgreSQL/Redis | 1,368 | 0 | 17 opt-in network cases |
+| `npm run test:network` | 17 | 0 | 0 |
+| Distinct executed Vitest cases | **1,385** | **0** | **0 unexecuted** |
+
+The full infrastructure run also passed Target browser, Research browser, auth/browser login and Redis loss/restart, queue resilience, migration and drift checks. Additional current runs passed Coverage/Vault/history/lifecycle/Retest browser, Research Plan browser, Black-box UX (10 checks), native Research infrastructure and real Research console/Burp HTTP/1.1 + HTTP/2, refresh, reconnect, archive and deletion. Real Burp used local fixture targets, not public scans. Native Codex infrastructure/MCP checks did not perform another paid Codex inference; the unchanged, documented real Codex acceptance remains valid. The unchanged real Gemini/Ollama synthesis acceptances remain recorded below.
+
+`npm run lint`, `npx next typegen`, `npx tsc --noEmit`, `npm run build`, `docker compose config --quiet` and `git diff --check` passed in an isolated checkout excluding the five unrelated local Research diagnostics files. The two Research test harnesses now stop their disposable Compose projects without `down -v`; cleanup individually verifies project labels before removing only their own volumes. No application volume was removed.
+
+### Dependencies — ACCEPTED_DEV_TOOLING_RISK
+
+- Production audit (`npm audit --omit=dev`): **0 vulnerabilities**.
+- Complete audit: **8 moderate**, **0 high**, **0 critical**, all in the ESLint/TypeScript-ESLint development chain through minimatch `10.2.6`.
+- Installed ESLint: `9.39.5`; `eslint-config-next`: `16.4.2`; TypeScript-ESLint: `8.72.0`.
+- Registry verification found latest TypeScript-ESLint patch `8.72.1` still depends on minimatch `^10.2.2`; the latest published minimatch 10 version remains `10.2.6`. The fixed minimatch `11.0.1` is outside that supported range. No compatible patch/minor or supported narrow override is available. No forced audit fix, unsupported major override, Next downgrade or blind lockfile refresh was applied.
+- No production source imports minimatch or exposes attacker-controlled runtime patterns to this lint dependency. The moderate development tooling risk is explicitly accepted for this release; production advisories remain zero. See the maintainer advisory linked in the earlier audit.
+
+### Release gate matrix
+
+| Required gate | Decision |
+| --- | --- |
+| Authenticated Claude inference | PASS |
+| Fresh install | PASS |
+| Disposable upgrade / no drift / fixture preservation | PASS |
+| Targets / authoritative Scope | PASS |
+| Recon / Authenticated Recon / AI synthesis | PASS |
+| Research Plan / Research Coverage / Research | PASS |
+| Evidence / Findings / Retest / Report | PASS |
+| Security boundaries | PASS |
+| Required tests | 0 failures |
+| Production dependencies | 0 vulnerabilities |
+| Known BLOCKER defects | 0 |
+| Known HIGH functional defects | 0 |
+
+The repository had no open issues at release inspection. No new product feature, provider architecture, scanner or migration was introduced during release finalization. The only test changes enforce safe disposable-volume cleanup. Release publication and deployment must follow the exact validated commit/tag; runtime version and actual browser login are checked after deployment.
+
+---
+
+## Earlier stabilization audit — before local PostgreSQL recreation
+
+The remainder is the original historical audit. Its `0.1.0` version, conditional Claude status, then-current data counts and deployment statements describe that earlier installation only and are superseded by the final decision above.
+
+### Stabilization evidence recorded 2026-11-06
 
 The five delivery stages have been executed through the audit. The application remains version **0.1.0**. No v1.0.0 tag or release was created. The footer reads the build version from `package.json` through `src/lib/buildVersion.ts`.
 
