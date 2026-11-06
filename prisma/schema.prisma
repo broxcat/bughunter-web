@@ -208,6 +208,8 @@ model AssessmentSource {
 }
 
 model Target {
+  researchCoverage ResearchCoverage[]
+
   researchPlans ResearchPlan[]
   consoleDeletingAt DateTime?
   scopeAssetId String? @unique
@@ -672,6 +674,8 @@ enum ResearchSessionStatus {
 }
 
 model ResearchSession {
+  coverageEvents ResearchCoverageEvent[]
+
   researchPlanId String?
   researchPlan ResearchPlan? @relation(fields: [researchPlanId], references: [id], onDelete: SetNull)
   id             String @id @default(cuid())
@@ -844,6 +848,8 @@ enum AssetValue {
   LOW
 }
 model ScopeAsset {
+  researchCoverage ResearchCoverage[]
+
   researchPlans ResearchPlan[]
   surfaceObservations ReconSurfaceObservation[]
   id String @id @default(cuid())
@@ -1061,6 +1067,8 @@ model ResearchPlan {
   @@index([scanRunId])
 }
 model ResearchPlanItem {
+  researchCoverage ResearchCoverage[]
+
   id String @id @default(cuid())
   planId String
   stableKey String
@@ -1085,4 +1093,72 @@ model ResearchPlanItem {
   hypotheses ResearchHypothesis[]
   @@unique([planId, stableKey])
   @@index([planId, priority])
+}
+
+// Target-owned memory survives session closure and console deletion.
+// States record bounded tests, never safety or automatic Finding promotion.
+enum ResearchCoverageState {
+  NOT_TESTED
+  IN_PROGRESS
+  COVERED_NO_ISSUE_OBSERVED
+  INTERESTING
+  BLOCKED
+  HYPOTHESIS_OPEN
+  FINDING
+  NEEDS_RETEST
+}
+model ResearchCoverage {
+  scopeAssetReferenceId String?
+  planItemReferenceId String
+  id String @id @default(cuid())
+  targetId String
+  scopeAssetId String?
+  planItemId String?
+  objectiveKey String
+  coverageKey String
+  category String
+  surface String
+  method String
+  contextKey String
+  contextLabel String
+  comparisonKey String?
+  comparisonLabel String?
+  contextRunId String
+  testKey String
+  revision Int @default(0)
+  state ResearchCoverageState @default(NOT_TESTED)
+  createdAt DateTime @default(now())
+  target Target @relation(fields:[targetId],references:[id],onDelete:Cascade)
+  scopeAsset ScopeAsset? @relation(fields:[scopeAssetId],references:[id],onDelete:SetNull)
+  planItem ResearchPlanItem? @relation(fields:[planItemId],references:[id],onDelete:SetNull)
+  events ResearchCoverageEvent[]
+  @@unique([targetId,coverageKey])
+  @@index([targetId,objectiveKey])
+}
+// Append-only revisions. Session reference and plan identity survive FK deletion.
+model ResearchCoverageEvent {
+  id String @id @default(cuid())
+  coverageId String
+  targetId String
+  eventKey String
+  contentSha256 String
+  revision Int
+  state ResearchCoverageState
+  action String @db.Text
+  result String @db.Text
+  evidence Json
+  performedAt DateTime
+  createdAt DateTime @default(now())
+  actorId String
+  source String
+  sessionId String?
+  sessionReferenceId String
+  hypothesisReferenceId String?
+  hypothesisTestId String?
+  findingReferenceId String?
+  coverage ResearchCoverage @relation(fields:[coverageId],references:[id],onDelete:Cascade)
+  session ResearchSession? @relation(fields:[sessionId],references:[id],onDelete:SetNull)
+  @@unique([targetId,eventKey])
+  @@unique([coverageId,revision])
+  @@index([coverageId,createdAt])
 }

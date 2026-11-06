@@ -88,3 +88,24 @@ export async function verifyResearchPlanFiles(root: string, workspaceId: string,
     }
   } finally { await directory.close(); }
 }
+
+/** Same hardened directory and immutable version policy as Research Plan inputs. */
+export async function publishCoverageFiles(root:string,workspaceId:string,view:import('@/lib/research/coverage').CoverageView){
+  const {coverageMarkdown,coverageContext}=await import('@/lib/research/coverage');
+  const bounded=coverageContext(view);
+  const jsonText=JSON.stringify(bounded,null,2)+'\n',markdown=coverageMarkdown(bounded),sha256=digest(jsonText);
+  if(Buffer.byteLength(jsonText)>512*1024||Buffer.byteLength(markdown)>256*1024)throw new ResearchError('Coverage context exceeds export limit; review recorded history in BugHunter',409);
+  const directory=await planDirectory(root,workspaceId);
+  const reference={version:1,sha256,jsonPath:`research/coverage-${sha256}.json`,markdownPath:`research/coverage-${sha256}.md`,notice:view.notice};
+  try{
+    const {z}=await import('zod');const {coverageDocumentSchema}=await import('@/lib/research/coverage');
+    await immutablePlanFile(directory,'coverage.schema.json',JSON.stringify(z.toJSONSchema(coverageDocumentSchema),null,2)+'\n',65536);
+    await immutablePlanFile(directory,`coverage-${sha256}.json`,jsonText,512*1024);
+    await immutablePlanFile(directory,`coverage-${sha256}.md`,markdown,256*1024);
+    // Atomic server-owned pointer; old immutable snapshots are retained.
+    const {randomUUID}=await import('node:crypto');const {rename,rm}=await import('node:fs/promises');
+    const temporary=`.coverage-${randomUUID()}`,base=`/proc/self/fd/${directory.fd}`;
+    try{await immutablePlanFile(directory,temporary,JSON.stringify(reference,null,2)+'\n',4096);await rename(`${base}/${temporary}`,`${base}/coverage-current.json`);}finally{await rm(`${base}/${temporary}`,{force:true});}
+  }finally{await directory.close();}
+  return reference;
+}

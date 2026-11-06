@@ -27,7 +27,7 @@ describe('per-target Research console contract', () => {
   });
   it('generates the clean workspace and exact authorized context, not discovered scope/secrets', () => {
     const files = bundle(), all = Object.values(files).join('\n');
-    expect(Object.keys(files).every(f => /^(scope.md|assessment-policy.json|recon\/|requests\/|scripts\/|findings\/|\.codex\/|\.agents\/)/.test(f))).toBe(true);
+    expect(Object.keys(files).every(f => /^(scope.md|assessment-policy.json|research\/coverage|recon\/|requests\/|scripts\/|findings\/|\.codex\/|\.agents\/)/.test(f))).toBe(true);
     expect(all).not.toMatch(/raw-private-body|cookie-fixture-secret|csrf-fixture-secret|apiKeyCipher|DATABASE_URL|AUTH_SECRET/);
     expect(files['scope.md']).toMatch(/Target ID: target/); expect(files['scope.md']).toContain('Research-Test/1'); expect(files['scope.md']).toContain('Discovery does not grant authorization');
     expect(files['scope.md']).toContain('admin.example.test'); expect(files['scope.md']).toContain('Scheme: https');

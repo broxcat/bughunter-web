@@ -1,3 +1,5 @@
+import {coverageInitialFiles,isCoverageInput} from './coverageFiles';
+import {COVERAGE_INSTRUCTIONS,type CoverageView} from '@/lib/research/coverage';
 import { randomUUID, createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { mkdir, lstat, open, rename, rm, chown, chmod } from "node:fs/promises";
@@ -96,7 +98,7 @@ export function researchAssessmentInstructions(assessment: AssessmentSnapshot) {
   return `\n\n## ASSESSMENT POLICY\n\nThis is a black-box assessment.\nUse only authorized externally observable evidence, the supplied Recon evidence, authenticated runtime observations, manual Research evidence and existing Findings.\nDo not assume source-code access, internal architecture, private documentation or internal host authorization.\nRead assessment-policy.json and scope.md. Discovery never enlarges authorization. Historical source metadata is documentary only; do not fetch or analyze internal sources.\n`;
 }
 const json = (value: unknown) => JSON.stringify(value, null, 2) + "\n";
-export function createResearchBundle(target: ResearchTarget, recon: ResearchRecon, findings: ResearchFinding[], session: { id: string; workspaceId: string; createdAt: Date; authorizationSnapshot?: unknown }, consoleLayout = false, plan?: ResearchPlanPublication) {
+export function createResearchBundle(target: ResearchTarget, recon: ResearchRecon, findings: ResearchFinding[], session: { id: string; workspaceId: string; createdAt: Date; authorizationSnapshot?: unknown }, consoleLayout = false, plan?: ResearchPlanPublication,coverage?:CoverageView) {
   assertResearchTarget(target, target.userId);
   const program = target.program!;
   const sshPort = /^\d{1,5}$/.test(process.env.RESEARCH_SSH_PORT ?? "") ? process.env.RESEARCH_SSH_PORT : "2222";
@@ -108,7 +110,8 @@ export function createResearchBundle(target: ResearchTarget, recon: ResearchReco
   const scope = `# Authorized Scope\n\nProgram: ${exportText(program.companyName)}\n\nSource: Target ${target.id}, Scope ${target.scope.id}; snapshot ${provenance.generatedAt}.\nRecheck current authorization in BugHunter before each session.\n\n## Selected target\n\n${target.host}\n\n## Explicitly authorized hosts\n\n- ${target.host}\n\nOnly this selected concrete host is authorized by this workspace.\n\n## Excluded\n\n${program.outOfScope.map(host => `- ${host}`).join("\n") || "No structured host exclusions recorded."}\n${target.scope.outOfScope ? exportText(target.scope.outOfScope) : ""}\n\n## Required User-Agent\n\n${exportText(program.requiredUserAgent)}\n\n## Program rules\n\n${target.scope.rulesOfEngagement ? exportText(target.scope.rulesOfEngagement) : "No additional host rules recorded."}\n${exportText(program.rulesOfEngagement ?? "No additional program rules recorded.")}\nSee program-policy.md for the other recorded policy fields.\n\n## Safety rule\n\nDiscovery does not grant authorization. Hosts discovered during research MUST NOT\nbe treated as authorized unless they appear in the explicitly authorized scope above.\nDo not follow redirects to another host. Authorization revocation requires stopping.\n`;
   const files: Record<string, string> = {
     ...(plan ? researchPlanInitialFiles(plan) : {}),
-    "AGENTS.md": RESEARCH_RULES + assessmentRules,
+    ...coverageInitialFiles(target.id,session.id,coverage),
+    "AGENTS.md": RESEARCH_RULES + assessmentRules + COVERAGE_INSTRUCTIONS,
     "assessment-policy.json": json({ formatVersion: 1, capturedAt: provenance.generatedAt, ...assessment, contentAvailable: false }),
     "README.md": `# BugHunter Research Workspace\n\n${exportText(program.companyName)} / ${target.host}\n\nRead AGENTS.md and scope.md before doing anything.\n\nSSH from the Docker host (use your configured SSH port/key):\n\n\`\`\`sh\nssh -i ~/.ssh/bughunter_research -p ${sshPort} researcher@127.0.0.1\ncd /workspaces/${session.workspaceId}\nbughunter-codex\n# Wrapper: codex --yolo with the fixed workspace MCP configuration\n\`\`\`\n\nBootstrap prompt:\n\nRead AGENTS.md, scope.md and all existing recon evidence. Build an initial map of\nthe application and create only evidence-backed hypotheses in research/hypotheses.json, with a human-readable view in research/hypotheses.md.\n\n${recon ? `Recon source: ScanRun ${recon.id}.` : "No Recon evidence was available at creation; do not invent observations."}\nExport contains metadata only, no target credentials or raw HTTP responses.\nNo remote Git repository or automatic Finding creation is configured.\n\nHypothesis workflow:\n1. Inspect evidence.\n2. Create/update research/hypotheses.json (contract v2; see research/hypothesis.schema.json).\n3. Keep research/hypotheses.md human-readable.\n4. Run bughunter-validate-hypotheses.\n5. Return to BugHunter and click Sync from workspace.\nBugHunter stores imported hypotheses and revisions read-only; workspace edits never create Findings.\nInput files are read-only; research/, evidence/ and scripts/ are writable.\nZIP downloads preserve this initial bundle, excluding subsequent local research edits.\nOptional Burp MCP:\nRead evidence/burp/README.md and the repository docs/BURP-MCP-RESEARCH.md.\nThe installed bughunter-codex wrapper configures a passive metadata MCP gateway.\nStart Burp MCP externally and its loopback SSH tunnel, then run bughunter-burp-status.\nThe web displays only the last diagnostic; it cannot control Burp or execute MCP.\nConfigure authorized scope, exclusions and the required User-Agent in Burp before manual testing.\n127.0.0.1 inside the runner refers to the runner, not the Docker host.\n`,
     "scope.md": scope + '\n' + assessmentContext, "program-policy.md": policy,
@@ -191,7 +194,7 @@ export async function writeResearchWorkspace(root: string, workspaceId: string, 
     try { await lstat(final); throw new ResearchError("Workspace already exists"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     for (const [name, content] of Object.entries(files)) {
       if (!/^[a-zA-Z0-9_./-]+$/.test(name) || name.startsWith("/") || name.split("/").some(p => !p || p === "." || p === "..")) throw new ResearchError("Invalid bundle file");
-      const writable = /^(research|evidence|scripts)\//.test(name) && !isResearchPlanInput(name);
+      const writable = /^(research|evidence|scripts)\//.test(name) && !isResearchPlanInput(name) && !isCoverageInput(name);
       // A sticky, web-owned research directory protects immutable plan inputs
       // from replacement while existing notes and hypotheses remain writable.
       if (dirname(name) !== ".") await safeDirectory(join(temp, dirname(name)), dirname(name) === 'research' ? 0o3770 : writable ? 0o2770 : 0o2750, gid);

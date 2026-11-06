@@ -1,3 +1,4 @@
+import {capturedCoverage} from './coverage';
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
@@ -43,7 +44,8 @@ export async function createResearchSession(userId: string, targetId: string) {
       if(plan&&plan.selectedScanRunId!==recon?.id)recon=await tx.scanRun.findUnique({where:{id:plan.selectedScanRunId},select:{id:true,reconCorpus:true}});
       const session = await tx.researchSession.create({ data: { userId, targetId, workspaceId, authorizationSnapshot: { ...researchAuthorizationSnapshot(current), ...assessment }, targetHost: current.host, programName: current.program!.companyName, scopeMarkdown: "", reconScanRunId: recon?.id,researchPlanId:plan?.id } });
       sessionId = session.id;
-      const bundle = createResearchBundle(current, recon, findings, session,false,plan?{id:plan.id,contentSha256:plan.contentSha256,jsonText:reconJson(plan.plan),markdownText:plan.markdown}:undefined);
+      const coverage=await capturedCoverage(tx,userId,targetId,plan?.plan??null);
+      const bundle = createResearchBundle(current, recon, findings, session,false,plan?{id:plan.id,contentSha256:plan.contentSha256,jsonText:reconJson(plan.plan),markdownText:plan.markdown}:undefined,coverage);
       const result = await writeResearchWorkspace(root, workspaceId, bundle);
       published = true;
       return tx.researchSession.update({ where: { id: session.id }, data: { status: "READY", scopeMarkdown: bundle["scope.md"], ...result }, select: researchSessionSelect });

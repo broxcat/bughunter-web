@@ -1,3 +1,6 @@
+import {capturedCoverage} from './coverage';
+import {COVERAGE_INSTRUCTIONS,COVERAGE_NOTICE,type CoverageView} from '@/lib/research/coverage';
+import {publishCoverageFiles} from './planFiles';
 import { constants } from 'node:fs';
 import { open, mkdir, lstat, chmod, chown, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -14,13 +17,13 @@ import { researchSessionSelect } from './sessions';
 import { CONSOLE_RULES, PROGRAM_CONSOLE_RULES, consoleBootstrap } from './consoleRules';
 import { exportText, researchIsPassive } from './workspace';
 import type { ResearchPlanPublication } from './planFiles';
-import { captureResearchPlanForTarget } from './plans';
+import { captureResearchPlanForTarget,readCapturedResearchPlan } from './plans';
 import { reconJson } from './reconContext';
 
 export const consoleRoot = () => process.env.RESEARCH_CONSOLE_ROOT ?? resolve('data/research/targets');
-export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, findings: ResearchFinding[], session: { id: string; workspaceId: string; createdAt: Date; authorizationSnapshot?: unknown }, plan?:ResearchPlanPublication) {
+export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, findings: ResearchFinding[], session: { id: string; workspaceId: string; createdAt: Date; authorizationSnapshot?: unknown }, plan?:ResearchPlanPublication,coverage?:CoverageView) {
   if (session.workspaceId !== targetWorkspaceId(target.id)) throw new ResearchError('Invalid workspace identity');
-  const old = createResearchBundle(target, recon, findings, session, true, plan);
+  const old = createResearchBundle(target, recon, findings, session, true, plan,coverage);
   const passive = researchIsPassive(target), asset = target.scopeAsset ?? target.discoveredFromAsset;
   const effectiveHost = target.host.startsWith('*.') ? target.host.slice(2) : target.host;
   const port = asset?.format === 'URL' ? Number(new URL(asset.normalizedValue).port || (target.scheme === 'http' ? 80 : 443)) : target.scheme === 'http' ? 80 : 443;
@@ -39,7 +42,7 @@ export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, find
     'scope.md': scope,
     'assessment-policy.json': old['assessment-policy.json'],
     '.codex/config.toml': consoleCodexConfig(session.workspaceId, instructions, passive),
-    '.agents/bughunter/AGENTS.md': instructions + assessmentInstructions,
+    '.agents/bughunter/AGENTS.md': instructions + assessmentInstructions + COVERAGE_INSTRUCTIONS,
     '.agents/bughunter/target.json': JSON.stringify({ ...JSON.parse(old['target.json']), host: effectiveHost }, null, 2) + '\n',
     '.agents/bughunter/policy.json': JSON.stringify(policy, null, 2) + '\n',
     '.agents/bughunter/session.json': old['research/session.json'],
@@ -52,9 +55,10 @@ export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, find
     'findings/hypothesis.schema.json': old['research/hypothesis.schema.json'],
     'findings/HYPOTHESES.md': old['research/HYPOTHESES.md'],
     'findings/notes.md': old['research/notes.md'],
+    'findings/coverage-events.json': old['research/coverage-events.json'],
     'findings/rejected.md': '# Rejected hypotheses\n\nRetain falsified explanations, exact tests and opposing evidence. Do not repeat equivalent failed tests.\n',
   };
-  for (const [path, contents] of Object.entries(old)) if (path.startsWith('recon/') || path.startsWith('research/plan') || path === 'findings/existing-findings.json') files[path] = contents;
+  for (const [path, contents] of Object.entries(old)) if (path.startsWith('recon/') || path.startsWith('research/plan') || path.startsWith('research/coverage')&&path!=='research/coverage-events.json' || path === 'findings/existing-findings.json') files[path] = contents;
   return files;
 }
 async function refreshConsoleInventory(tx: Prisma.TransactionClient, target: ResearchTarget, workspaceId: string) {
@@ -69,7 +73,7 @@ async function refreshConsoleInventory(tx: Prisma.TransactionClient, target: Res
   const temporary = `.inventory-${randomUUID()}`;
   try {
     const file = await open(`/proc/self/fd/${directory.fd}/${temporary}`, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o440);
-    try { await file.chown(process.getuid!(), Number(process.env.RESEARCH_WORKSPACE_GID ?? process.getgid?.())); await file.writeFile(JSON.stringify({ generatedAt:new Date().toISOString(),programId:target.program!.id,untrustedData:true,authorizationGranted:false,hosts,runs,discoveries },null,2)+'\n'); await file.sync(); } finally {await file.close();}
+    try { await file.chown(process.getuid!(), Number(process.env.RESEARCH_WORKSPACE_GID ?? process.getgid?.())); await file.writeFile(JSON.stringify({ generatedAt:new Date().toISOString(),programId:target.program!.id,untrustedData:true,authorizationGranted:false,researchCoverage:{path:'research/coverage-current.json',notice:COVERAGE_NOTICE},hosts,runs,discoveries },null,2)+'\n'); await file.sync(); } finally {await file.close();}
     await rename(`/proc/self/fd/${directory.fd}/${temporary}`, `/proc/self/fd/${directory.fd}/hosts.json`);
   } finally { await rm(`/proc/self/fd/${directory.fd}/${temporary}`,{force:true}); await directory.close(); }
 }
@@ -119,6 +123,8 @@ export async function ensureTargetConsole(userId: string, targetId: string) {
       if (existing.status !== 'READY') throw new ResearchError('Console workspace is unavailable', 409);
       if (!researchAuthorizationMatches(existing.authorizationSnapshot, target)) throw new ResearchError('Research policy changed. Stop active testing and refresh the workspace policy through the documented operator procedure.', 409);
       await refreshConsoleInventory(tx, target, existing.workspaceId);
+      const captured=existing.researchPlanId?await readCapturedResearchPlan(tx,existing.researchPlanId,userId,targetId):null;
+      await publishCoverageFiles(consoleRoot(),existing.workspaceId,await capturedCoverage(tx,userId,targetId,captured?.plan??null));
       return { session: existing, target };
     }
     let recon = await tx.scanRun.findFirst({ where: { targetId, type: 'RECON', status: 'COMPLETED', OR: [{reconCorpus: { not: Prisma.DbNull }},{artifacts:{some:{}}},{surfaceObservations:{some:{}}}] }, orderBy: [{createdAt:'desc'},{id:'desc'}], select: { id: true, reconCorpus: true } });
@@ -127,7 +133,8 @@ export async function ensureTargetConsole(userId: string, targetId: string) {
     const plan=await captureResearchPlanForTarget(tx,userId,targetId,{scanRunId:recon?.id});
     if(plan&&plan.selectedScanRunId!==recon?.id)recon=await tx.scanRun.findUnique({where:{id:plan.selectedScanRunId},select:{id:true,reconCorpus:true}});
     const session = await tx.researchSession.create({ data: { userId, targetId, consoleTargetId: targetId, workspaceId: targetWorkspaceId(targetId), targetHost: target.host, programName: target.program!.companyName, scopeMarkdown: '', reconScanRunId: recon?.id,researchPlanId:plan?.id, authorizationSnapshot: { ...current, ...assessment } } });
-    const files = consoleBundle(target, recon, findings, session,plan?{id:plan.id,contentSha256:plan.contentSha256,jsonText:reconJson(plan.plan),markdownText:plan.markdown}:undefined);
+    const coverage=await capturedCoverage(tx,userId,targetId,plan?.plan??null);
+    const files = consoleBundle(target, recon, findings, session,plan?{id:plan.id,contentSha256:plan.contentSha256,jsonText:reconJson(plan.plan),markdownText:plan.markdown}:undefined,coverage);
     await writeConsoleWorkspace(consoleRoot(), targetId, files);
     await refreshConsoleInventory(tx, target, session.workspaceId);
     const ready = await tx.researchSession.update({ where: { id: session.id }, data: { status: 'READY', scopeMarkdown: files['scope.md'], files: Object.keys(files).sort() }, select: researchSessionSelect });

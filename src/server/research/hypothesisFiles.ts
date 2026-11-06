@@ -74,6 +74,15 @@ export class HypothesisWorkspace {
       return buffer.subarray(0, size);
     } finally { await file.close(); }
   }
+  /** Fixed structured coverage input; terminal logs are never parsed. */
+  async readCoverageDocument() {
+    const file=await this.artifact(this.consoleWorkspace?'findings/coverage-events.json':'research/coverage-events.json');
+    try { const buffer=Buffer.alloc(512*1024+1);let size=0;
+      while(size<buffer.length){const result=await file.read(buffer,size,buffer.length-size,size);if(!result.bytesRead)break;size+=result.bytesRead;}
+      if(size>512*1024)throw new HypothesisSyncError('DOCUMENT_TOO_LARGE','Coverage document exceeds 512 KiB');
+      return buffer.subarray(0,size);
+    } finally {await file.close();}
+  }
   async checkReference(ref: string) {
     const file = await this.artifact(ref);
     await file.close(); // Contents are never read, interpreted or imported.

@@ -56,3 +56,7 @@ docker compose up -d --no-deps research-console
 Building an image does not restart an existing console. No production database reset, volume removal or automatic historical workspace rewrite is required.
 
 Current assessments are black-box only. Historical White-box metadata is read-only and cannot authorize source analysis or network access. New plans retain empty sourceSignals and sourceEvidenceRefs.
+
+## Recorded Research Coverage
+
+A plan objective is not a completed test. [Research Coverage](research-coverage.md) separately retains explicit tests, negative results, method/action and authentication contexts. Coverage never promotes an objective or hypothesis into a Finding.
