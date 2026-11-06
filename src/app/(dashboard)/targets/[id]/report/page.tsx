@@ -1,4 +1,5 @@
 "use client";
+import EvidencePanel from '@/components/EvidencePanel';
 import { findingReviewStatus } from "@/lib/evidenceReview";
 
 import Link from "next/link";
@@ -185,6 +186,7 @@ export default function ReportPage({
       </Card>
 
       {reports.length > 0 && <label className="block text-sm">Saved report<select aria-label="Saved report" className="mt-2 block w-full rounded border border-border bg-surface p-2" value={reportId} onChange={e => { setReportId(e.target.value); setMarkdown(reports.find(r => r.id === e.target.value)?.markdown ?? null); }}>{reports.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select></label>}
+      {reportId&&<EvidencePanel key={reportId} targetId={id} reportId={reportId}/>}
       {markdown !== null && (
         <div className="space-y-2">
           <h2 className="text-sm font-medium text-foreground">

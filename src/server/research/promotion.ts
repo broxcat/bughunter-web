@@ -61,6 +61,8 @@ export async function promoteHypothesis(sessionId: string, hypothesisId: string,
       description: exportText(`${safe.hypothesis}\n\nReasoning:\n${proof.reasoning}\n\nSuspected impact (not verified severity):\n${proof.suspectedImpact}\n\nResearch ${h.externalId}, revision ${h.revision}. Human Evidence Review is still required.`),
       evidence: JSON.stringify(evidence), reviewStatus: "CANDIDATE", gateStatus: "UNVALIDATED",
     } });
+    const vaultLinks=await tx.evidenceHypothesis.findMany({where:{hypothesisId:h.id,revision:h.revision},select:{evidenceId:true,role:true}});
+    if(vaultLinks.length)await tx.evidenceFinding.createMany({data:vaultLinks.map(link=>({evidenceId:link.evidenceId,findingId:finding.id,findingReferenceId:finding.id,role:link.role})),skipDuplicates:true});
     await tx.researchFindingPromotion.create({ data: { hypothesisId: h.id, findingId: finding.id, userId, hypothesisRevision: h.revision, snapshot: safe } });
     return { findingId: finding.id, targetId: target.id, hypothesisRevision: h.revision, created: true };
   }, { timeout: 15000 });

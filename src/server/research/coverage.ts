@@ -1,3 +1,4 @@
+import {registerEvidence,linkEvidence} from '@/server/evidenceVault';
 import {createHash} from 'node:crypto';
 import {Prisma} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
@@ -13,7 +14,7 @@ import {reconScopePolicy} from './reconPolicy';
 import type {ResearchPlanView} from '@/lib/researchPlanView';
 const clean=(value:string)=>exportText(value).replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,'[REDACTED PRIVATE KEY]').replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,'[REDACTED EMAIL]').slice(0,2000);
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
-const eventInclude={events:{orderBy:{revision:'desc' as const},take:1}};
+const eventInclude={events:{orderBy:{revision:'desc' as const},take:1,include:{vaultEvidence:{select:{evidenceId:true}}}}};
 async function owned(tx:Prisma.TransactionClient,userId:string,targetId:string,write=false){
  if(write)await tx.$queryRaw`SELECT id FROM "Target" WHERE id=${targetId} AND "userId"=${userId} FOR UPDATE`;
  let target=await tx.target.findFirst({where:{id:targetId,userId,program:{ownerId:userId,deletingAt:null}},select:researchTargetSelect});
@@ -25,7 +26,7 @@ async function owned(tx:Prisma.TransactionClient,userId:string,targetId:string,w
  if(write)assertResearchTarget(target,userId);
  return target;
 }
-const safeEvent=(e:Prisma.ResearchCoverageEventGetPayload<object>)=>({id:e.id,revision:e.revision,state:e.state,action:clean(e.action),result:clean(e.result),evidence:(e.evidence as Array<{ref:string;summary:string}>).map(v=>({ref:v.ref,summary:clean(v.summary)})),performedAt:e.performedAt.toISOString(),createdAt:e.createdAt.toISOString(),source:e.source,sessionReferenceId:e.sessionReferenceId,hypothesisReferenceId:e.hypothesisReferenceId,hypothesisTestId:e.hypothesisTestId,findingReferenceId:e.findingReferenceId});
+const safeEvent=(e:Prisma.ResearchCoverageEventGetPayload<object>&{vaultEvidence?:Array<{evidenceId:string}>})=>({id:e.id,revision:e.revision,state:e.state,action:clean(e.action),result:clean(e.result),evidenceIds:e.vaultEvidence?.map(v=>v.evidenceId)??[],evidence:(e.evidence as Array<{ref:string;summary:string}>).map(v=>({ref:v.ref,summary:clean(v.summary)})),performedAt:e.performedAt.toISOString(),createdAt:e.createdAt.toISOString(),source:e.source,sessionReferenceId:e.sessionReferenceId,hypothesisReferenceId:e.hypothesisReferenceId,hypothesisTestId:e.hypothesisTestId,findingReferenceId:e.findingReferenceId});
 export async function coverageView(tx:Prisma.TransactionClient,userId:string,targetId:string,plan:ResearchPlanView|null):Promise<CoverageView>{
  const target=await owned(tx,userId,targetId);let readOnly=false;try{assertResearchTarget(target,userId);}catch{readOnly=true;}
  const rows=await tx.researchCoverage.findMany({where:{targetId},orderBy:{id:'asc'},take:501,include:eventInclude});
@@ -62,12 +63,14 @@ async function record(tx:Prisma.TransactionClient,userId:string,targetId:string,
  }
  if(input.findingId&&!await tx.finding.findFirst({where:{id:input.findingId,targetId},select:{id:true}}))throw new ResearchError('Finding must belong to this Target',400);
  const evidence=input.evidence.map(e=>({ref:e.ref,summary:clean(e.summary)}));
- const workspace=await HypothesisWorkspace.open(researchRootFor(session.workspaceId),session.workspaceId);
- try{for(const e of evidence){if(exportText(e.ref)!==e.ref)throw new ResearchError('Remove secrets from artifact names',400);await workspace.checkReference(e.ref);}}finally{await workspace.close();}
+ if(evidence.length){const workspace=await HypothesisWorkspace.open(researchRootFor(session.workspaceId),session.workspaceId);
+ try{for(const e of evidence){if(exportText(e.ref)!==e.ref)throw new ResearchError('Remove secrets from artifact names',400);await workspace.checkReference(e.ref);}}finally{await workspace.close();}}
  if(exportText(input.testKey)!==input.testKey)throw new ResearchError('Use a non-secret test identity',400);
  const surface=safeSurfaceUrl(input.surface),coverageKey=hash([input.testKey,item.stableKey,item.plan.scopeAssetId,surface,input.method,input.contextKey,input.comparisonKey,item.plan.scanRunId]);
  const action=clean(input.action),result=clean(input.result);
- const contentSha256=hash({coverageKey,...input,surface:undefined,action,result,evidence,source});
+ const {evidenceIds,...withoutVault}=input;
+ const canonicalInput=evidenceIds.length?{...withoutVault,evidenceIds}:withoutVault;
+ const contentSha256=hash({coverageKey,...canonicalInput,surface:undefined,action,result,evidence,source});
  const replay=await tx.researchCoverageEvent.findUnique({where:{targetId_eventKey:{targetId,eventKey:input.eventKey}}});
  if(replay){if(replay.contentSha256!==contentSha256)throw new ResearchError('Event identity already used with different content',409);return replay;}
  const existing=await tx.researchCoverage.findUnique({where:{targetId_coverageKey:{targetId,coverageKey}}});
@@ -75,15 +78,18 @@ async function record(tx:Prisma.TransactionClient,userId:string,targetId:string,
  if(await tx.researchCoverageEvent.count({where:{targetId}})>=10000)throw new ResearchError('Coverage event limit reached; retained history remains available',422);
  if(!existing&&await tx.researchCoverage.count({where:{targetId}})>=500)throw new ResearchError('Coverage dimension limit reached; retained history remains available',422);
  const stream=existing??await tx.researchCoverage.create({data:{targetId,scopeAssetReferenceId:item.plan.scopeAssetId,planItemReferenceId:item.id,scopeAssetId:item.plan.scopeAssetId,planItemId:item.id,objectiveKey:item.stableKey,coverageKey,category:item.category,surface,method:input.method,contextKey:input.contextKey,contextLabel:safeAuthLabel(context.label),comparisonKey:input.comparisonKey,comparisonLabel:comparison?safeAuthLabel(comparison.label):null,contextRunId:item.plan.scanRunId,testKey:input.testKey}});
+ const vaultIds=[...input.evidenceIds];
+ for(const proof of evidence){const record=await registerEvidence(tx,userId,targetId,{kind:proof.ref.startsWith('requests/burp/')||proof.ref.startsWith('evidence/burp/')?'BURP_REFERENCE':'RESEARCH_EVIDENCE',sessionId:session.id,ref:proof.ref,description:proof.summary});vaultIds.push(record.id);}
  const revision=stream.revision+1;
  const event=await tx.researchCoverageEvent.create({data:{coverageId:stream.id,targetId,eventKey:input.eventKey,contentSha256,revision,state:input.state,action,result,evidence,performedAt:when,actorId:userId,source,sessionId:session.id,sessionReferenceId:session.id,hypothesisReferenceId:input.hypothesisId,hypothesisTestId:input.hypothesisTestId,findingReferenceId:input.findingId}});
+ for(const id of [...new Set(vaultIds)])await linkEvidence(tx,userId,targetId,id,{entity:'coverage',id:event.id});
  await tx.researchCoverage.update({where:{id:stream.id},data:{revision,state:input.state}});
  return event;
 }
 export async function recordResearchCoverage(userId:string,targetId:string,input:unknown){return prisma.$transaction(tx=>record(tx,userId,targetId,input,'RESEARCHER'),{timeout:20000});}
 export async function coverageHistory(userId:string,targetId:string,coverageId:string,before?:number){
  await prisma.$transaction(tx=>owned(tx,userId,targetId));
- return (await prisma.researchCoverageEvent.findMany({where:{coverageId,targetId,...(before?{revision:{lt:before}}:{})},orderBy:{revision:'desc'},take:50})).map(safeEvent);
+ return (await prisma.researchCoverageEvent.findMany({where:{coverageId,targetId,...(before?{revision:{lt:before}}:{})},orderBy:{revision:'desc'},take:50,include:{vaultEvidence:{select:{evidenceId:true}}}})).map(safeEvent);
 }
 export async function syncResearchCoverage(userId:string,targetId:string,sessionId:string){
  const session=await prisma.researchSession.findFirst({where:{id:sessionId,targetId,...ownedResearch(userId)},select:{id:true,workspaceId:true}});

@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
   // Fetch only the user's own findings among those requested.
   const findings = await prisma.finding.findMany({
     where: { id: { in: requestedIds }, target: { userId: session.user.id } },
-    include:{scanRun:{select:{assessmentModeSnapshot:true}},researchPromotion:{select:{hypothesis:{select:{session:{select:{authorizationSnapshot:true}}}}}}},
+    include:{vaultEvidence:{include:{evidence:true}},scanRun:{select:{assessmentModeSnapshot:true}},researchPromotion:{select:{hypothesis:{select:{session:{select:{authorizationSnapshot:true}}}}}}},
   });
 
   // Every requested id must resolve to an owned finding.
@@ -93,6 +93,7 @@ export async function POST(req: NextRequest) {
     const f = byId.get(fid)!;
     return {
       ...capturedFindingAssessment(f),
+      vaultEvidence:f.vaultEvidence?.map(link=>({id:link.evidence.id,kind:link.evidence.kind,role:link.role,description:link.evidence.description,contentSha256:link.evidence.contentSha256})),
       title: f.title,
       vulnClass: f.vulnClass,
       severity: f.severity,
@@ -119,13 +120,16 @@ export async function POST(req: NextRequest) {
   const targetIds = new Set(findings.map((f) => f.targetId));
   const targetId = targetIds.size === 1 ? findings[0].targetId : null;
 
+  const reportId=crypto.randomUUID();
   const report = await prisma.report.create({
     data: {
+      id:reportId,
       userId: session.user.id,
       targetId,
       title: parsed.data.title,
       platform: parsed.data.platform,
       markdown,
+      vaultEvidence:{create:[...new Set(findings.flatMap(f=>(f.vaultEvidence??[]).map(link=>link.evidenceId)))].map(evidenceId=>({evidenceId,reportReferenceId:reportId}))},
       items: {
         create: requestedIds.map((findingId) => ({ findingId })),
       },

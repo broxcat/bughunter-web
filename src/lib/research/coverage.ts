@@ -10,18 +10,18 @@ export const coverageRecordSchema=z.strictObject({
  contextKey:z.string().min(1).max(150),comparisonKey:z.string().min(1).max(150).nullable().default(null),
  state:z.enum(COVERAGE_STATES),expectedRevision:z.number().int().min(0),
  action:z.string().trim().min(1).max(2000),result:z.string().trim().min(1).max(2000),
- evidence:z.array(evidenceReferenceSchema).max(10),performedAt:z.iso.datetime({offset:true}),
+ evidence:z.array(evidenceReferenceSchema).max(10),evidenceIds:z.array(z.string().regex(/^EV-[a-f0-9-]{36}$/)).max(10).default([]),performedAt:z.iso.datetime({offset:true}),
  hypothesisId:id.nullable().default(null),hypothesisTestId:z.string().regex(/^T-\d{3,6}$/).nullable().default(null),findingId:id.nullable().default(null),
 }).superRefine((v,ctx)=>{
  if(v.comparisonKey===v.contextKey)ctx.addIssue({code:'custom',path:['comparisonKey'],message:'Select distinct contexts'});
- if(['COVERED_NO_ISSUE_OBSERVED','INTERESTING','HYPOTHESIS_OPEN','FINDING'].includes(v.state)&&!v.evidence.length)ctx.addIssue({code:'custom',path:['evidence'],message:'Completed tests require evidence references'});
+ if(['COVERED_NO_ISSUE_OBSERVED','INTERESTING','HYPOTHESIS_OPEN','FINDING'].includes(v.state)&&!v.evidence.length&&!v.evidenceIds.length)ctx.addIssue({code:'custom',path:['evidence'],message:'Completed tests require evidence references'});
  if(v.state==='HYPOTHESIS_OPEN'&&!v.hypothesisId)ctx.addIssue({code:'custom',path:['hypothesisId'],message:'Link an existing hypothesis'});
  if(v.state==='FINDING'&&!v.findingId)ctx.addIssue({code:'custom',path:['findingId'],message:'Link an existing Finding; coverage never creates one'});
  if(v.hypothesisTestId&&!v.hypothesisId)ctx.addIssue({code:'custom',path:['hypothesisTestId'],message:'A test must belong to a hypothesis'});
 });
 export type CoverageRecord=z.infer<typeof coverageRecordSchema>;
 export const coverageDocumentSchema=z.strictObject({version:z.literal(1),sessionId:id,events:z.array(coverageRecordSchema).max(100)});
-export type CoverageEventView={id:string;revision:number;state:CoverageState;action:string;result:string;evidence:Array<{ref:string;summary:string}>;performedAt:string;createdAt:string;source:string;sessionReferenceId:string;hypothesisReferenceId:string|null;hypothesisTestId:string|null;findingReferenceId:string|null};
+export type CoverageEventView={evidenceIds?:string[];id:string;revision:number;state:CoverageState;action:string;result:string;evidence:Array<{ref:string;summary:string}>;performedAt:string;createdAt:string;source:string;sessionReferenceId:string;hypothesisReferenceId:string|null;hypothesisTestId:string|null;findingReferenceId:string|null};
 export type CoverageEntry={id:string;coverageKey:string;testKey:string;objectiveKey:string;category:string;surface:string;method:string;contextKey:string;contextLabel:string;comparisonKey:string|null;comparisonLabel:string|null;contextRunId:string;revision:number;state:CoverageState;events:CoverageEventView[]};
 export type CoverageView={version:1;targetId:string;planId:string|null;contextRunId:string|null;sessionId:string|null;notice:string;truncated:boolean;entries:CoverageEntry[];objectives:Array<{id:string;stableKey:string;title:string;category:string;surfaces:Array<{url:string;method?:string}>;contexts:Array<{contextKey:string;label:string}>;untested:boolean}>;counts:Record<CoverageState,number>};
 export function coverageCounts(entries:CoverageEntry[],untestedObjectives:number){const counts=Object.fromEntries(COVERAGE_STATES.map(s=>[s,0])) as Record<CoverageState,number>;for(const e of entries)counts[e.state]++;counts.NOT_TESTED+=untestedObjectives;return counts;}

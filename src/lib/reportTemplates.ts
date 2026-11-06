@@ -32,6 +32,7 @@ export interface ReportOobHit {
 }
 
 export interface ReportFinding {
+  vaultEvidence?:Array<{id:string;kind:string;description:string;contentSha256?:string|null;role?:string}>;
   /** Captured execution provenance, never the current Program setting. */
   assessmentMode?: AssessmentMode | null;
   assessmentModeSource?: "RESEARCH_SESSION" | "SCAN_RUN" | "UNKNOWN";
@@ -123,6 +124,7 @@ function proofOfConcept(f: ReportFinding): string {
   const parts: string[] = [];
   if (text(f.location)) parts.push(`Affected location: \`${text(f.location)}\``);
   if (text(f.evidence)) parts.push(text(f.evidence));
+  if(f.vaultEvidence?.length){const escape=(v:string)=>v.replace(/[\r\n]/g,' ').replace(/([\\`*_{}\[\]<>|#])/g,'\\$1');parts.push('Evidence Vault references (same durable IDs; provenance retained in BugHunter):\n'+f.vaultEvidence.map(e=>`- ${escape(e.id)} · ${escape(e.kind)}${e.role?' · '+escape(e.role):''} · ${escape(e.description)}${e.contentSha256?' · SHA-256 '+e.contentSha256:''}`).join('\n'));}
   if (f.oobHits && f.oobHits.length > 0) parts.push(oobLines(f.oobHits));
   return parts.length ? parts.join("\n\n") : POC_PLACEHOLDER;
 }

@@ -1,3 +1,4 @@
+import EvidencePanel from '@/components/EvidencePanel';
 import Link from "next/link";
 import ResearchProof from "@/components/ResearchProof";
 import ResearchPromotion from "@/components/ResearchPromotion";
@@ -35,7 +36,7 @@ export default async function HypothesisPage({ params, searchParams }: { params:
     <Card className="p-5"><h2 className="text-xl">WHAT WOULD DISPROVE IT</h2><p className="whitespace-pre-wrap">{h.falsificationCondition}</p></Card>
     <Card className="p-5"><h2 className="text-xl">WHAT TO TEST NEXT</h2><p className="whitespace-pre-wrap">{h.nextTest}</p><p>Expected signal: {h.expectedSignal}</p></Card>
     <Card className="p-5"><ResearchProof value={h.researchData} /></Card>
-    <ResearchPromotion sessionId={id} hypothesisId={h.id} targetId={data.session.targetId} revision={h.revision} eligible={h.status === "CONFIRMED" && Boolean(h.researchData) && policyState === "CURRENT" && data.session.status === "READY"} existing={h.promotion} />
+    <EvidencePanel targetId={data.session.targetId} sessionId={id} link={{entity:'hypothesis',id:h.id,role:'SUPPORTS'}}/><ResearchPromotion sessionId={id} hypothesisId={h.id} targetId={data.session.targetId} revision={h.revision} eligible={h.status === "CONFIRMED" && Boolean(h.researchData) && policyState === "CURRENT" && data.session.status === "READY"} existing={h.promotion} />
     <Evidence title="Evidence for" entries={h.evidenceFor} /><Evidence title="Evidence against" entries={h.evidenceAgainst} />
     <p>Tags: {h.tags.join(", ") || "None"}. Workspace: {data.session.workspaceId}. Raw evidence is not imported.</p>
     <section className="space-y-3"><h2 className="text-xl">Revision history</h2>{h.revisions.map(r => <Card key={r.id} className="p-4"><p>Revision {r.revision}{r.revision === h.revision ? " — current" : ""} · {r.createdAt.toISOString()} · {r.source}</p><p>Status: {String((r.snapshot as { status?: string }).status ?? "Unknown")}</p><details><summary>View snapshot</summary><pre className="whitespace-pre-wrap break-words">{JSON.stringify(r.snapshot, null, 2)}</pre></details></Card>)}<div className="flex gap-4">{revisionPage > 1 && <Link className="text-brand" href={`?revisionPage=${revisionPage - 1}`}>Newer revisions</Link>}{revisionPage * data.revisionPageSize < h.revision && <Link className="text-brand" href={`?revisionPage=${revisionPage + 1}`}>Older revisions</Link>}</div></section>

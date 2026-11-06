@@ -4,7 +4,7 @@ License: AGPL-3.0-only ([LICENSE](LICENSE))
 
 Bug bounty workflow: **Targets → Scope → Recon → Research Plan → Research → Findings → Report**.
 
-Research records explicit tested work through [Research Coverage](docs/research-coverage.md). The [v1.0 delivery gates](docs/v1-roadmap.md) are sequential; this development build is not a v1.0 release.
+Research records explicit tested work through [Research Coverage](docs/research-coverage.md), with shared proof identities in the [minimal Evidence Vault](docs/evidence-vault.md). The [v1.0 delivery gates](docs/v1-roadmap.md) are sequential; this development build is not a v1.0 release.
 
 Current assessments are **black-box only**. [Historical assessment metadata](docs/assessment-modes.md) remains readable. Authenticated runtime testing remains supported.
 

@@ -1,4 +1,5 @@
 'use client';
+import EvidencePanel from './EvidencePanel';
 import {useEffect,useState} from 'react';
 import {COVERAGE_STATES,type CoverageView,type CoverageEntry,type CoverageEventView} from '@/lib/research/coverage';
 import {Button} from './ui/Button';
@@ -6,12 +7,12 @@ import {Dialog} from './ui/Dialog';
 const label=(s:string)=>s.toLowerCase().replaceAll('_',' ');
 const inputClass='block w-full rounded border border-border bg-surface p-2 text-sm';
 async function request(url:string,body?:unknown){const response=await fetch(url,{cache:'no-store',...(body!==undefined?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});const result=await response.json();if(!response.ok)throw new Error(result.error??'Coverage unavailable');return result;}
-function History({entry,url}:{entry:CoverageEntry;url:string}){
+function History({entry,url,targetId}:{entry:CoverageEntry;url:string;targetId:string}){
  const [events,setEvents]=useState<CoverageEventView[]>(entry.events),[more,setMore]=useState(true),[error,setError]=useState('');
  const load=async()=>{try{const batch:CoverageEventView[]=await request(url+'/history?coverageId='+encodeURIComponent(entry.id)+(events.length?'&before='+events.at(-1)!.revision:''));setEvents(old=>[...old,...batch]);setMore(batch.length===50);setError('');}catch(e){setError(e instanceof Error?e.message:'History unavailable');}};
  return <details className="text-sm"><summary>{entry.method==='UNSPECIFIED'?'Method not captured':entry.method} {entry.surface} · {entry.testKey} · {entry.contextLabel}{entry.comparisonLabel?' → '+entry.comparisonLabel:''} · {label(entry.state)}</summary>
  <p className="text-xs text-muted">Recon context: {entry.contextRunId}. Each context and method is distinct.</p>
- {events.map(e=><article key={e.id} className="my-2 border-l-2 border-border pl-3"><p>{label(e.state)} · {new Date(e.performedAt).toLocaleString()} · revision {e.revision}</p><p className="whitespace-pre-wrap break-words">Test: {e.action}</p><p className="whitespace-pre-wrap break-words">Result: {e.result}</p><p className="text-xs text-muted">{e.source} · Session {e.sessionReferenceId}{e.hypothesisReferenceId?' · Hypothesis '+e.hypothesisReferenceId:''}{e.hypothesisTestId?' · Test '+e.hypothesisTestId:''}{e.findingReferenceId?' · Finding '+e.findingReferenceId:''}</p><ul>{e.evidence.map((v,i)=><li key={i} className="break-all">{v.ref} — {v.summary}</li>)}</ul></article>)}
+ {events.map(e=><article key={e.id} className="my-2 border-l-2 border-border pl-3"><p>{label(e.state)} · {new Date(e.performedAt).toLocaleString()} · revision {e.revision}</p><p className="whitespace-pre-wrap break-words">Test: {e.action}</p><p className="whitespace-pre-wrap break-words">Result: {e.result}</p><p className="text-xs text-muted">{e.source} · Session {e.sessionReferenceId}{e.hypothesisReferenceId?' · Hypothesis '+e.hypothesisReferenceId:''}{e.hypothesisTestId?' · Test '+e.hypothesisTestId:''}{e.findingReferenceId?' · Finding '+e.findingReferenceId:''}</p><ul>{e.evidence.map((v,i)=><li key={i} className="break-all">{v.ref} — {v.summary}</li>)}</ul><EvidencePanel targetId={targetId} sessionId={e.sessionReferenceId} link={{entity:'coverage',id:e.id}}/></article>)}
  {more&&entry.revision>events.length&&<Button size="sm" variant="secondary" onClick={()=>void load()}>Earlier test results</Button>}{error&&<p role="alert">{error}</p>}
  </details>;
 }
@@ -51,8 +52,8 @@ export default function ResearchCoverage({targetId,compact=false}:{targetId:stri
  <div className="flex gap-2"><Button size="sm" variant="secondary" disabled={busy||!view.sessionId} onClick={()=>void operation('sync')}>Import structured tests</Button><Button size="sm" variant="secondary" disabled={busy||!view.sessionId} onClick={()=>void operation('context')}>Update agent context</Button></div>
  <p className="text-xs text-muted">Agent input: findings/coverage-events.json (persistent console), research/coverage-events.json (ZIP workspace). Only explicit imports are used; terminal text is never coverage.</p>
  {!view.objectives.length&&<p>No captured objectives yet. Review Recon and the Research Plan.</p>}
- {view.objectives.map(o=><details key={o.id} className="rounded border border-border p-3"><summary>{o.title} · {o.untested?'untested':'recorded tests; other dimensions remain unknown'}</summary><div className="space-y-3 pt-3">{view.entries.filter(e=>e.objectiveKey===o.stableKey).map(e=><History key={e.id+':'+e.revision} entry={e} url={url}/>)}<RecordTest view={view} objective={o} url={url} onSaved={async()=>{await load();setNotice('Test saved. Update agent context before the next investigation.');}}/></div></details>)}
- {view.entries.some(e=>!view.objectives.some(o=>o.stableKey===e.objectiveKey))&&<details><summary>Historical objectives</summary>{view.entries.filter(e=>!view.objectives.some(o=>o.stableKey===e.objectiveKey)).map(e=><History key={e.id+':'+e.revision} entry={e} url={url}/>)}</details>}
+ {view.objectives.map(o=><details key={o.id} className="rounded border border-border p-3"><summary>{o.title} · {o.untested?'untested':'recorded tests; other dimensions remain unknown'}</summary><div className="space-y-3 pt-3">{view.entries.filter(e=>e.objectiveKey===o.stableKey).map(e=><History key={e.id+':'+e.revision} entry={e} url={url} targetId={view.targetId}/>)}<RecordTest view={view} objective={o} url={url} onSaved={async()=>{await load();setNotice('Test saved. Update agent context before the next investigation.');}}/></div></details>)}
+ {view.entries.some(e=>!view.objectives.some(o=>o.stableKey===e.objectiveKey))&&<details><summary>Historical objectives</summary>{view.entries.filter(e=>!view.objectives.some(o=>o.stableKey===e.objectiveKey)).map(e=><History key={e.id+':'+e.revision} entry={e} url={url} targetId={view.targetId}/>)}</details>}
  </>}
  </div></Dialog>}</>;
 }

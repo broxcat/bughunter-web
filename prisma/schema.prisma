@@ -208,6 +208,8 @@ model AssessmentSource {
 }
 
 model Target {
+  evidenceRecords EvidenceRecord[]
+
   researchCoverage ResearchCoverage[]
 
   researchPlans ResearchPlan[]
@@ -470,6 +472,8 @@ model ScanLog {
 // ---------------------------------------------------------------------------
 
 model Finding {
+  vaultEvidence EvidenceFinding[]
+
   reviewStatus FindingReviewStatus @default(CANDIDATE)
   reviewEvidence Json?
   reviewedAt DateTime?
@@ -534,6 +538,8 @@ enum FindingReviewStatus {
 // ---------------------------------------------------------------------------
 
 model Report {
+  vaultEvidence EvidenceReport[]
+
   id        String         @id @default(cuid())
   userId    String
   // Optional direct link to the target the report is about. Reports also reach
@@ -674,6 +680,8 @@ enum ResearchSessionStatus {
 }
 
 model ResearchSession {
+  evidenceRecords EvidenceRecord[]
+
   coverageEvents ResearchCoverageEvent[]
 
   researchPlanId String?
@@ -735,6 +743,8 @@ enum ResearchHypothesisRevisionSource {
 }
 
 model ResearchHypothesis {
+  vaultEvidence EvidenceHypothesis[]
+
   planItemId String?
   planItem ResearchPlanItem? @relation(fields: [planItemId], references: [id], onDelete: SetNull)
   id                     String @id @default(cuid())
@@ -937,6 +947,8 @@ model TargetReconRun {
 }
 
 model ReconArtifact {
+  vaultRecords EvidenceRecord[]
+
   id String @id @default(cuid())
   scanRunId String
   scopeAssetId String
@@ -1137,6 +1149,8 @@ model ResearchCoverage {
 }
 // Append-only revisions. Session reference and plan identity survive FK deletion.
 model ResearchCoverageEvent {
+  vaultEvidence EvidenceCoverage[]
+
   id String @id @default(cuid())
   coverageId String
   targetId String
@@ -1161,4 +1175,87 @@ model ResearchCoverageEvent {
   @@unique([targetId,eventKey])
   @@unique([coverageId,revision])
   @@index([coverageId,createdAt])
+}
+
+enum EvidenceKind {
+ HTTP_REQUEST_RESPONSE
+ RECON_ARTIFACT
+ BURP_REFERENCE
+ RESEARCH_EVIDENCE
+}
+enum EvidenceRelationRole {
+ SUPPORTS
+ REFUTES
+ CONTEXT
+}
+model EvidenceRecord {
+ id String @id
+ targetId String
+ sessionId String?
+ sessionReferenceId String?
+ kind EvidenceKind
+ sourceKey String
+ description String
+ provenance Json
+ redactionStatus String
+ contentSha256 String?
+ metadata Json
+ reconArtifactId String?
+ reconArtifactReferenceId String?
+ createdAt DateTime @default(now())
+ target Target @relation(fields:[targetId],references:[id],onDelete:Cascade)
+ session ResearchSession? @relation(fields:[sessionId],references:[id],onDelete:SetNull)
+ reconArtifact ReconArtifact? @relation(fields:[reconArtifactId],references:[id],onDelete:SetNull)
+ hypotheses EvidenceHypothesis[]
+ findings EvidenceFinding[]
+ reports EvidenceReport[]
+ coverage EvidenceCoverage[]
+ @@unique([targetId,sourceKey])
+ @@index([targetId,createdAt])
+}
+model EvidenceHypothesis {
+ id String @id @default(cuid())
+ evidenceId String
+ hypothesisId String?
+ hypothesisReferenceId String
+ revision Int
+ role EvidenceRelationRole
+ createdAt DateTime @default(now())
+ evidence EvidenceRecord @relation(fields:[evidenceId],references:[id],onDelete:Cascade)
+ hypothesis ResearchHypothesis? @relation(fields:[hypothesisId],references:[id],onDelete:SetNull)
+ @@unique([evidenceId,hypothesisReferenceId,revision,role])
+ @@index([hypothesisId])
+}
+model EvidenceFinding {
+ id String @id @default(cuid())
+ evidenceId String
+ findingId String?
+ findingReferenceId String
+ role EvidenceRelationRole
+ createdAt DateTime @default(now())
+ evidence EvidenceRecord @relation(fields:[evidenceId],references:[id],onDelete:Cascade)
+ finding Finding? @relation(fields:[findingId],references:[id],onDelete:SetNull)
+ @@unique([evidenceId,findingReferenceId,role])
+ @@index([findingId])
+}
+model EvidenceReport {
+ id String @id @default(cuid())
+ evidenceId String
+ reportId String?
+ reportReferenceId String
+ createdAt DateTime @default(now())
+ evidence EvidenceRecord @relation(fields:[evidenceId],references:[id],onDelete:Cascade)
+ report Report? @relation(fields:[reportId],references:[id],onDelete:SetNull)
+ @@unique([evidenceId,reportReferenceId])
+ @@index([reportId])
+}
+model EvidenceCoverage {
+ id String @id @default(cuid())
+ evidenceId String
+ coverageEventId String
+ createdAt DateTime @default(now())
+ evidence EvidenceRecord @relation(fields:[evidenceId],references:[id],onDelete:Cascade)
+ coverageEvent ResearchCoverageEvent @relation(fields:[coverageEventId],references:[id],onDelete:Cascade)
+ @@unique([evidenceId,coverageEventId])
+ @@index([coverageEventId])
 }

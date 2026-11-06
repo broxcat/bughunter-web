@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import { constants } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -82,6 +83,15 @@ export class HypothesisWorkspace {
       if(size>512*1024)throw new HypothesisSyncError('DOCUMENT_TOO_LARGE','Coverage document exceeds 512 KiB');
       return buffer.subarray(0,size);
     } finally {await file.close();}
+  }
+  async fingerprintReference(ref:string){
+    const file=await this.artifact(ref),limit=512*1024;
+    try{const before=await file.stat();if(before.size>limit)throw new HypothesisSyncError('ARTIFACT_TOO_LARGE','Evidence reference exceeds 512 KiB');
+      const digest=createHash('sha256'),buffer=Buffer.alloc(16384);let size=0;
+      while(true){const r=await file.read(buffer,0,Math.min(buffer.length,limit+1-size),size);if(!r.bytesRead)break;size+=r.bytesRead;if(size>limit)throw new HypothesisSyncError('ARTIFACT_TOO_LARGE','Evidence reference exceeds 512 KiB');digest.update(buffer.subarray(0,r.bytesRead));}
+      const after=await file.stat();if(before.size!==after.size||before.mtimeMs!==after.mtimeMs||before.ctimeMs!==after.ctimeMs)throw new HypothesisSyncError('ARTIFACT_CHANGED','Evidence artifact changed during registration',409);
+      return digest.digest('hex');
+    }finally{await file.close();}
   }
   async checkReference(ref: string) {
     const file = await this.artifact(ref);
