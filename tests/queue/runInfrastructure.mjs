@@ -4,9 +4,15 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { createServer } from "node:net";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 const exec = promisify(execFile);
 const prefix = `bughunter-queue-test-${randomUUID().slice(0, 8)}`;
 const containers = [];
+// A bind survives Redis stop/start, unlike a container tmpfs. Respect TMPDIR
+// for all durable fixture writes so RAM-backed acceptance is consistent.
+const redisData = await mkdtemp(join(tmpdir(), `${prefix}-redis-`));
 const docker = async (...args) => (await exec("docker", args, { timeout: args[0] === "run" ? 90_000 : 30_000 })).stdout.trim();
 async function unusedPort() {
   const server = createServer();
@@ -35,7 +41,7 @@ try {
     [pg, [...(process.env.TEST_POSTGRES_TMPFS === '1' ? ['--tmpfs', '/var/lib/postgresql/data'] : []), "-e", "POSTGRES_PASSWORD=disposable-test", "-p", "127.0.0.1::5432", "postgres:16-alpine"]],
     [abuseRedis, ["-p", `127.0.0.1:${abuseRedisPort}:6379`, "redis:7-alpine"]],
     [executionRedis, ["-p", `127.0.0.1:${executionRedisPort}:6379`, "redis:7-alpine"]],
-    [redis, ["-p", `127.0.0.1:${fixedRedisPort}:6379`, "redis:7-alpine", "redis-server", "--appendonly", "yes", "--appendfsync", "always"]],
+    [redis, ["--user", `${process.getuid()}:${process.getgid()}`, "--mount", `type=bind,source=${redisData},target=/data`, "-p", `127.0.0.1:${fixedRedisPort}:6379`, "redis:7-alpine", "redis-server", "--appendonly", "yes", "--appendfsync", "always"]],
   ]) {
     containers.push(name); // Also clean a container created before a slow start times out.
     await docker("run", "-d", "--name", name, "--label", "bughunter.queue-test=disposable", ...args);
@@ -46,9 +52,19 @@ try {
   for (const db of ["queue_test", "api_test", "migration_test", "execution_test", "abuse_test", "shadow_test"]) await docker("exec", pg, "createdb", "-U", "postgres", db);
   const dbUrl = name => `postgresql://postgres:disposable-test@127.0.0.1:${pgPort}/${name}`;
   const env = { ...process.env, LOG_LEVEL: "silent", TEST_ABUSE_DATABASE_URL: dbUrl("abuse_test"), TEST_ABUSE_REDIS_URL: `redis://127.0.0.1:${abuseRedisPort}`, TEST_ABUSE_REDIS_CONTAINER: abuseRedis, TEST_DATABASE_URL: dbUrl("api_test"), TEST_QUEUE_DATABASE_URL: dbUrl("queue_test"), TEST_EXECUTION_DATABASE_URL: dbUrl("execution_test"), TEST_EXECUTION_REDIS_URL: `redis://127.0.0.1:${executionRedisPort}`, TEST_MIGRATION_DATABASE_URL: dbUrl("migration_test"), TEST_QUEUE_REDIS_URL: `redis://127.0.0.1:${redisPort}`, TEST_QUEUE_REDIS_CONTAINER: redis };
-  await run(["test", "--", "--maxWorkers=1", "--testTimeout=30000", "--hookTimeout=120000"], env);
-  await run(["run", "test:migration"], env);
-  await run(['prisma', 'migrate', 'diff', '--from-migrations', 'prisma/migrations', '--to-schema-datamodel', 'prisma/schema.prisma', '--shadow-database-url', dbUrl('shadow_test'), '--exit-code'], env, 'npx');
+  // Explicit browser-only mode avoids re-running the full SQL suite while
+  // iterating on a browser fixture. Provision the base schemas they expect.
+  if (!process.argv.includes('--browser-only')) {
+    await run(["test", "--", "--maxWorkers=1", "--testTimeout=30000", "--hookTimeout=120000"], env);
+    await run(["run", "test:migration"], env);
+    await run(['prisma', 'migrate', 'diff', '--from-migrations', 'prisma/migrations', '--to-schema-datamodel', 'prisma/schema.prisma', '--shadow-database-url', dbUrl('shadow_test'), '--exit-code'], env, 'npx');
+  }
+  if (process.argv.includes('--browser-only')) {
+    for (const databaseUrl of [env.TEST_DATABASE_URL, env.TEST_ABUSE_DATABASE_URL]) {
+      await run(['prisma', 'migrate', 'deploy'], { ...env, DATABASE_URL: databaseUrl }, 'npx');
+    }
+  }
+  if (process.argv.includes('--post-v1-browser')) await run(['tests/e2e/postV1Reliability.mjs'], env, process.execPath);
   if (process.argv.includes('--target-browser')) await run(['tests/e2e/targetAssetWorkflow.mjs'], env, process.execPath);
   if (process.argv.includes("--research-browser")) await run(["tests/e2e/researchWorkflow.mjs"], env, process.execPath);
   if (process.argv.includes("--auth-browser")) await run(["tests/e2e/authHardening.mjs"], env, process.execPath);
@@ -56,7 +72,9 @@ try {
   console.error(error.message);
   process.exitCode = 1;
 } finally {
+  let removed = true;
   for (const name of containers.reverse()) {
-    try { await docker("rm", "-f", "-v", name); } catch { console.error(`Failed to remove disposable service ${name}`); process.exitCode = 1; }
+    try { await docker("rm", "-f", "-v", name); } catch { removed = false; console.error(`Failed to remove disposable service ${name}`); process.exitCode = 1; }
   }
+  if (removed) await rm(redisData, { recursive: true, force: true });
 }
