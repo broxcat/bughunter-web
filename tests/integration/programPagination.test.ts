@@ -1,3 +1,6 @@
+import ResearchLauncher from '@/components/ResearchLauncher';
+import type {ReactElement} from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
 import {beforeAll,beforeEach,afterAll,it,expect,describe,vi} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
@@ -46,7 +49,19 @@ let p:typeof import('@/lib/prisma').prisma,get:typeof import('@/app/api/programs
   await p.target.createMany({data:Array.from({length:501},(_,n)=>({id:ownerId+'_host_'+String(n).padStart(4,'0'),userId:ownerId,programId,scopeId:scope.id,host:`h${String(n).padStart(4,'0')}.fixture.test`,contextOnly:false}))});
   await p.researchSession.createMany({data:Array.from({length:101},(_,n)=>({id:ownerId+'_session_'+String(n).padStart(3,'0'),userId:ownerId,targetId:ownerId+'_host_0000',workspaceId:randomUUID(),status:'ARCHIVED',targetHost:'h0000.fixture.test',programName:'Fixture',scopeMarkdown:'# Historical snapshot',createdAt:new Date('2026-01-01')}))});
   const Page=(await import('@/app/(dashboard)/research/page')).default;
-  const links:string[]=[];const visit=(node:unknown)=>{if(!node||typeof node!=='object')return;if(Array.isArray(node)){node.forEach(visit);return;}const props=(node as {props?:{href?:string;children?:unknown}}).props;if(props?.href)links.push(props.href);visit(props?.children);};
+  // Render only the real client launcher at its boundary; other controls
+  // require a browser App Router. Preserve the original canonical host/history
+  // reachability assertions while the browser suite verifies profile queries.
+  const links:string[]=[];const visit=(node:unknown)=>{
+   if(!node||typeof node!=='object')return;if(Array.isArray(node)){node.forEach(visit);return;}
+   const element=node as ReactElement<{href?:string;children?:unknown}>;
+   if(element.type===ResearchLauncher){
+    const html=renderToStaticMarkup(element);
+    for(const match of html.matchAll(/href="([^"]+)"/g))links.push(new URL(match[1].replaceAll('&amp;','&'),'http://app.example.test').pathname);
+    return;
+   }
+   if(element.props?.href)links.push(element.props.href);visit(element.props?.children);
+  };
   visit(await Page({searchParams:Promise.resolve({page:'21',historyPage:'5',program:programId})}));
   expect(links).toContain('/research/'+ownerId+'_host_0500');expect(links).toContain('/research/history/'+ownerId+'_session_000');
   const {GET}=await import('@/app/api/research-sessions/route');const body=await(await GET(new Request('http://app.example.test/api/research-sessions?page=5'))).json();expect(body).toMatchObject({total:101,page:5});expect(body.items).toHaveLength(1);

@@ -1,17 +1,18 @@
 "use client";
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { providerName, engineStatusesSchema, type ResearchEngineStatus, type ResearchProvider } from '@/lib/research/provider';
+import { providerName, engineStatusesSchema, type ResearchEngineStatus, type ResearchProvider, type LaunchProfile } from '@/lib/research/provider';
 import { terminalHandlesKey } from '@/lib/research/terminalClipboard';
 import ResearchReconContext from './ResearchReconContext';
 import '@xterm/xterm/css/xterm.css';
 
-export default function ResearchTerminal({ targetId, company, host, requiredUserAgent, embedded = false }: { targetId: string; company: string; host: string; requiredUserAgent: string; embedded?: boolean }) {
+export default function ResearchTerminal({ targetId, company, host, requiredUserAgent, embedded = false, initialSelection }: { initialSelection?: {provider:ResearchProvider;profile?:LaunchProfile}; targetId: string; company: string; host: string; requiredUserAgent: string; embedded?: boolean }) {
   const element = useRef<HTMLDivElement>(null);
   const socket = useRef<WebSocket | undefined>(undefined);
-  const [selectedProvider, setSelectedProvider] = useState<ResearchProvider>('codex');
-  const [requestedProvider, setRequestedProvider] = useState<ResearchProvider | undefined>();
+  const [selectedProvider, setSelectedProvider] = useState<ResearchProvider>(initialSelection?.provider??'codex');
+  const [requestedProvider, setRequestedProvider] = useState<ResearchProvider | undefined>(initialSelection?.provider);
   const [switchTo, setSwitchTo] = useState<ResearchProvider | undefined>();
+  const [selectedProfile,setSelectedProfile]=useState<LaunchProfile>(initialSelection?.profile??(initialSelection?.provider==='claude'?'standard':'yolo'));
   const [engines, setEngines] = useState<ResearchEngineStatus[]>([]);
   const [providerState, setProviderState] = useState('checking');
   const [attempt, reconnect] = useState(0), [state, setState] = useState('connecting'), [burp, setBurp] = useState('starting'), [burpDetails, setBurpDetails] = useState('PortSwigger MCP'), [codex, setCodex] = useState('checking'), [error, setError] = useState('');
@@ -25,11 +26,14 @@ export default function ResearchTerminal({ targetId, company, host, requiredUser
       terminal.attachCustomKeyEventHandler(event => terminalHandlesKey(event, terminal!.hasSelection()));
       const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(element.current); fit.fit(); terminal.focus();
       setError(''); setState('connecting');
-      const ticket = async (select = false) => {
-        const r = await fetch(`/api/research-targets/${targetId}/terminal`, { method: 'POST', cache: 'no-store', ...(select && requestedProvider ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: requestedProvider }) } : {}) });
+      let selection=requestedProvider?{provider:requestedProvider,...(requestedProvider===initialSelection?.provider&&initialSelection.profile?{profile:initialSelection.profile}:{})}:undefined;
+      const ticket = async () => {
+        const r = await fetch(`/api/research-targets/${targetId}/terminal`, { method: 'POST', cache: 'no-store', ...(selection ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(selection) } : {}) });
         const data = await r.json(); if (!r.ok) throw new Error(data.error ?? 'Console unavailable'); return data;
       };
-      const signed = await ticket(true); if (disposed) return;
+      const signed = await ticket(); if (disposed) return;
+      selection={provider:signed.provider??'codex',profile:signed.profile??(signed.provider==='claude'?'standard':'yolo')};
+      setSelectedProfile(selection.profile!);
       setSelectedProvider(signed.provider ?? 'codex'); setProviderState('checking');
       const url = new URL(`/research-terminal/${targetId}`, window.location.origin); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       ws = new WebSocket(url, ['bh-terminal.v1', `ticket.${signed.token}`]);
@@ -46,18 +50,18 @@ export default function ResearchTerminal({ targetId, company, host, requiredUser
         if (disposed) return;
         const message = JSON.parse(event.data);
         if (message.type === 'engine_status') { const result = engineStatusesSchema.safeParse(message.engines); if (result.success) setEngines(result.data); }
-        if (message.type === 'ready') { setState('connected'); setSelectedProvider(message.provider ?? 'codex'); }
+        if (message.type === 'ready') { setState('connected'); setSelectedProvider(message.provider ?? 'codex'); if(message.profile)setSelectedProfile(message.profile); }
         if (message.type === 'provider_status') { setCodex(message.authentication === 'authenticated' ? 'signed in' : message.authentication === 'required' ? 'login required' : 'unknown'); setProviderState(`Installation: ${message.installation} · Authentication: ${message.authentication}${message.version ? ` · ${message.version}` : ''}${message.code ? ` · ${message.code}` : ''}`); }
         if (message.type === 'output') terminal?.write(message.data);
         if (message.type === 'status') { setBurp(message.burp); setCodex(message.authentication ?? message.codex ?? 'unknown'); if (message.burpDetails) setBurpDetails(`PortSwigger MCP · ${message.burpDetails.toolCount} tools${message.burpDetails.version ? ` · ${message.burpDetails.version}` : ''} · BugHunter scope controls apply`); }
-        if (message.type === 'error') setError(message.code);
+        if (message.type === 'error') setError(message.code==='PROFILE_CONFLICT'?'This engine is already running with another profile. Return to Research, check readiness and reconnect to its running profile. The existing session was preserved.':message.code==='PROFILE_UNAVAILABLE'?'This profile is not supported by the installed CLI. Check readiness in Research.':message.code);
       };
       ws.onclose = () => { if (renewal) clearInterval(renewal); if (!disposed) setState('disconnected'); };
       ws.onerror = () => { if (!disposed) setError('Terminal connection unavailable. Reconnect when the Research console is ready.'); };
     };
     void connect().catch(e => { if (!disposed) { setError(e.message); setState('unavailable'); } });
     return () => { disposed = true; socket.current = undefined; if (renewal) clearInterval(renewal); observer?.disconnect(); ws?.close(); terminal?.dispose(); };
-  }, [targetId, attempt, requestedProvider]);
+  }, [targetId, attempt, requestedProvider, initialSelection]);
   return <div className={`flex ${embedded ? "h-[650px] rounded border border-border" : "h-dvh"} w-full flex-col overflow-hidden bg-[#090d12] text-slate-200`}>
     <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-800 px-3 py-2 text-xs">
       <Link className="text-slate-400 hover:text-white" href="/research">← Research</Link>
@@ -72,10 +76,11 @@ export default function ResearchTerminal({ targetId, company, host, requiredUser
     </header>
     {switchTo && switchTo !== selectedProvider && <div className="flex shrink-0 flex-wrap items-center gap-3 bg-slate-900 px-3 py-2 text-sm" role="status">
       <p>Open {providerName(switchTo)}? Each engine keeps its own conversation. The current engine stays available when you return.</p>
-      <button className="rounded border px-2 py-1" onClick={() => { setRequestedProvider(switchTo); setSwitchTo(undefined); reconnect(n => n + 1); }}>Open {providerName(switchTo)}</button>
+      <button className="rounded border px-2 py-1" onClick={() => { window.history.replaceState(null,'',`/research/${targetId}?engine=${switchTo}&profile=${switchTo===initialSelection?.provider&&initialSelection.profile?initialSelection.profile:switchTo==='codex'?'yolo':'standard'}`); setRequestedProvider(switchTo); setSwitchTo(undefined); reconnect(n => n + 1); }}>Open {providerName(switchTo)}</button>
       <button className="rounded border px-2 py-1" onClick={() => setSwitchTo(undefined)}>Cancel</button>
     </div>}
-    <p className="shrink-0 px-3 py-1 text-xs" aria-live="polite">{providerName(selectedProvider)} · {providerState}</p>
+    <p className="shrink-0 px-3 py-1 text-xs" aria-live="polite">{providerName(selectedProvider)} · Profile: {selectedProfile} · {providerState}</p>
+    {selectedProvider==='codex'&&selectedProfile==='yolo'&&<p className="shrink-0 px-3 py-1 text-xs">YOLO bypasses native Codex approval/sandbox prompts. BugHunter Scope authorization and methodology confirmation gates still apply.</p>}
     {selectedProvider === 'claude' && <p className="shrink-0 px-3 py-1 text-xs" title={providerState}>Claude: passive Research and existing Burp observations · login is separate for each target · /login · /model · Ctrl+C to interrupt · /exit to stop. Active security skills are unavailable.</p>}
     {error && <p role="alert" className="shrink-0 bg-red-950 px-3 py-2 text-sm">{error}</p>}
     <ResearchReconContext targetId={targetId} provider={selectedProvider} connected={state === 'connected'} />

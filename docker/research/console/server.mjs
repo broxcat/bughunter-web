@@ -8,13 +8,15 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { WebSocketServer } from 'ws';
 import * as pty from 'node-pty';
-import { verifyTerminalTicket, verifyStopTicket, targetWorkspaceId } from '../../../src/lib/research/terminal.ts';
+import { verifyLauncherTicket, verifyTerminalTicket, verifyStopTicket, targetWorkspaceId } from '../../../src/lib/research/terminal.ts';
 import { openConsoleWorkspace } from '../validator/console-files.mjs';
 import { sessionCommand, providerStatus } from './providers.mjs';
 import { providerTmuxIdentity } from '../../../src/lib/research/provider.ts';
 import { reconnectWorkspaceBurp } from './burp-reconnect.mjs';
 import { stageReconContext } from './recon-context.mjs';
 import { collectReconObservations } from './recon-observations.mjs';
+import { assertLaunchProfile, legacyProfile } from '../../../src/lib/research/launchProfiles.mjs';
+import { createLauncherSnapshot, launcherEngine } from './launcher.mjs';
 const exec = promisify(execFile);
 export async function startTerminalService({ port = 7681, host = '0.0.0.0', origin = process.env.RESEARCH_TERMINAL_ORIGIN, publicKey } = {}) {
   publicKey ??= await readFile(process.env.RESEARCH_TERMINAL_PUBLIC_KEY_FILE ?? '/run/research-terminal/public.pem', 'utf8');
@@ -24,10 +26,18 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
   origin = parsedOrigin.origin;
   const spent = new Map(), connections = new Set(), pending = new Map();
   const reconDeliveries = new Map();
+  const launcherSnapshot=createLauncherSnapshot();
   let claudeCreation = Promise.resolve();
   const wss = new WebSocketServer({ noServer: true, maxPayload: 32768, perMessageDeflate: false, handleProtocols: protocols => protocols.has('bh-terminal.v1') ? 'bh-terminal.v1' : false });
   const server = createServer((req, res) => { void (async () => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/control/launcher' && req.method === 'POST') {
+      try {
+        const claims=verifyLauncherTicket(String(req.headers.authorization??'').replace(/^Bearer /,''),publicKey);
+        res.end(JSON.stringify(await launcherSnapshot(claims.targetId)));
+      } catch { res.writeHead(403);res.end('{"error":"Launcher readiness unavailable"}'); }
+      return;
+    }
     if (req.url === '/control/recon-observations' && req.method === 'POST') {
       try { res.end(JSON.stringify(await collectReconObservations(String(req.headers.authorization ?? '').replace(/^Bearer /, ''), publicKey))); } catch { res.writeHead(403); res.end('{"error":"Collection denied"}'); }
       return;
@@ -93,6 +103,7 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
   });
   wss.on('connection', (ws, claims) => {
     const provider = claims.provider ?? 'codex';
+    const profile=claims.profile??legacyProfile(provider);
     ws.targetId = claims.targetId; connections.add(ws); let terminal, closed = false, lease = claims.exp * 1000, inputBytes = 0, messages = 0, checking = false, auth = 'checking';
     const send = value => { if (ws.readyState === ws.OPEN) { if (ws.bufferedAmount > 1024 * 1024) ws.close(1009, 'Slow terminal'); else ws.send(JSON.stringify(value)); } };
     const checkBurp = async (reconnect = false) => {
@@ -123,6 +134,7 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
     ws.on('error', () => ws.close());
     void (async () => {
       try {
+        assertLaunchProfile(provider,profile);
         const { name, launcher } = sessionCommand(claims.targetId, provider), cwd = `/workspaces/${targetWorkspaceId(claims.targetId)}`;
         // Serialize creation within the service. tmux's own unique name is the
         // second boundary across reconnects/processes. Never pass a client command.
@@ -131,15 +143,20 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
           await access(cwd + '/.deleting').then(() => { throw new Error('DENIED'); }, e => { if (e.code !== 'ENOENT') throw e; });
           try { await exec('tmux', ['has-session', '-t', `=${name}`], { timeout: 3000 }); }
           catch {
-            const availability = await providerStatus(provider, undefined, cwd);
+            const availability = await launcherEngine(claims.targetId,provider);
             if (availability.installation !== 'available') { send({ type: 'provider_status', ...availability }); throw new Error(availability.code); }
+            if (!availability.profiles.includes(profile)) throw new Error('PROFILE_UNAVAILABLE');
             if (provider === 'claude') {
               const sessions = await exec('tmux', ['list-sessions', '-F', '#{session_name}'], { timeout: 3000 }).then(result => result.stdout.split('\n'), () => []);
               if (sessions.filter(name => name.startsWith('bughunter_claude_')).length >= 8) throw new Error('CLAUDE_SESSION_LIMIT');
             }
-            try { await exec('tmux', ['-f', '/etc/bughunter/tmux.conf', 'new-session', '-d', '-s', name, '-c', cwd, launcher], { timeout: 5000 }); }
+            try { await exec('tmux', ['-f', '/etc/bughunter/tmux.conf', 'new-session', '-d', '-s', name, '-c', cwd, '-e', `BUGHUNTER_LAUNCH_PROFILE=${profile}`, launcher, '--bughunter-profile', profile], { timeout: 5000 }); }
             catch { await exec('tmux', ['has-session', '-t', `=${name}`], { timeout: 3000 }); }
           }
+          // Session environment is set atomically at tmux creation. Racing
+          // callers may attach only the recorded profile; no silent restart.
+          const running=await launcherEngine(claims.targetId,provider);
+          if(running.runningProfile!==profile)throw new Error('PROFILE_CONFLICT');
         });
         if (provider === 'claude') claudeCreation = creating.catch(() => {});
         pending.set(name, creating); try { await creating; } finally { if (pending.get(name) === creating) pending.delete(name); }
@@ -147,10 +164,10 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
         const env = { PATH: process.env.PATH, HOME: '/home/researcher', USER: 'researcher', LOGNAME: 'researcher', TERM: 'xterm-256color', LANG: 'C.UTF-8', CODEX_HOME: '/home/researcher/.codex', PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright' };
         terminal = pty.spawn('tmux', ['attach-session', '-t', `=${name}`], { name: 'xterm-256color', cwd, env, cols: 120, rows: 32 });
         terminal.onData(data => send({ type: 'output', data })); terminal.onExit(() => ws.close(1000, 'Console detached'));
-        send({ type: 'ready', provider });
+        send({ type: 'ready', provider, profile });
         await checkEngines();
         await checkBurp();
-      } catch (error) { console.info(JSON.stringify({operation:'terminal-attach',code:'CONSOLE_START_FAILED',targetId:claims.targetId})); send({ type: 'error', code: ['CLI_MISSING', 'CLI_CHECK_FAILED', 'CLAUDE_SESSION_LIMIT'].includes(error.message) ? error.message : 'CONSOLE_UNAVAILABLE' }); ws.close(1011, 'Console unavailable'); }
+      } catch (error) { console.info(JSON.stringify({operation:'terminal-attach',code:'CONSOLE_START_FAILED',targetId:claims.targetId})); send({ type: 'error', code: ['PROFILE_CONFLICT','PROFILE_UNAVAILABLE','CLI_MISSING', 'CLI_CHECK_FAILED', 'CLAUDE_SESSION_LIMIT'].includes(error.message) ? error.message : 'CONSOLE_UNAVAILABLE' }); ws.close(1011, 'Console unavailable'); }
     })();
     ws.on('message', (data, binary) => {
       try {
@@ -160,7 +177,7 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
         else if (message.type === 'resize' && Object.keys(message).length === 3 && [message.cols, message.rows].every(n => Number.isInteger(n) && n >= 2 && n <= 500)) terminal?.resize(message.cols, message.rows);
         else if (message.type === 'reconnect_mcp' && Object.keys(message).length === 1) { void checkBurp(true); }
         else if (message.type === 'renew' && Object.keys(message).length === 2 && typeof message.token === 'string') {
-          const next = claim(message.token); if (['targetId','userId','sessionId','policySha256'].some(k => next[k] !== claims[k])) throw new Error(); if ((next.provider ?? 'codex') !== provider) { ws.close(1008, 'Provider selection changed. Reconnect.'); return; } lease = next.exp * 1000;
+          const next = claim(message.token); if (['targetId','userId','sessionId','policySha256'].some(k => next[k] !== claims[k])) throw new Error(); if ((next.profile??legacyProfile(next.provider??'codex'))!==profile) { ws.close(1008,'Profile changed. Reconnect.'); return; } if ((next.provider ?? 'codex') !== provider) { ws.close(1008, 'Provider selection changed. Reconnect.'); return; } lease = next.exp * 1000;
         } else throw new Error();
       } catch { ws.close(1008, 'Invalid terminal message'); }
     });

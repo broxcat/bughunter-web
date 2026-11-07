@@ -1,3 +1,4 @@
+import { claudePermissionMode } from '../../../src/lib/research/launchProfiles.mjs';
 import { claudeBurpServer } from './managed-mcp.mjs';
 export function claudeConfigDirectory(cwd) {
   if (!/^\/workspaces\/research_[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(cwd)) throw new Error('WORKSPACE_REQUIRED');
@@ -9,10 +10,10 @@ export function claudeConfigDirectory(cwd) {
  * @param {boolean} resume
  * @param {string | undefined} mcpFile
  */
-export function claudeArguments(cwd, instructions, resume = false, mcpFile = undefined) {
+export function claudeArguments(cwd, instructions, resume = false, mcpFile = undefined, profile = 'standard') {
   if (!/^\/workspaces\/research_[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(cwd)) throw new Error('WORKSPACE_REQUIRED');
   return [
-    '--permission-mode', 'default', '--setting-sources', '',
+    '--permission-mode', claudePermissionMode(profile), '--setting-sources', '',
     '--tools', 'Read,Glob,Grep,Edit,Write', '--no-chrome',
     '--strict-mcp-config', '--mcp-config', mcpFile ?? JSON.stringify({ mcpServers: {
       bughunter_burp: claudeBurpServer,

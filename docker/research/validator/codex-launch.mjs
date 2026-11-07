@@ -4,6 +4,10 @@ import { readBounded } from './burp-files.mjs';
 import { open, constants } from 'node:fs/promises';
 import { consoleMcpOverrides } from './console-mcp-config.mjs';
 import { codexRead } from './codex-rpc.mjs';
+import { codexProfileArguments } from '../../../src/lib/research/launchProfiles.mjs';
+const input = process.argv.slice(2);
+const profile = input[0] === '--bughunter-profile' ? input.splice(0,2)[1] : 'yolo';
+const profileArgs = codexProfileArguments(profile);
 const cwd = process.cwd(), workspace = await openConsoleWorkspace();
 const metadata = await open(`${cwd}/.agents/bughunter`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
 let bootstrap;
@@ -13,11 +17,11 @@ console.log(`Target: ${workspace.policy.targetHost}\nRequired User-Agent: ${work
 // their authorization snapshot. Project configuration is generated for new ones.
 const trust = ['-c', `projects={${JSON.stringify(cwd)}={trust_level="trusted"}}`,
   ...consoleMcpOverrides(cwd)];
-let args = ['--yolo', ...trust, ...process.argv.slice(2)];
-if (process.argv.length === 2) {
+let args = [...profileArgs, ...trust, ...input];
+if (input.length === 0) {
   let resume;
   try { const result = await codexRead('thread/list', { cwd, limit: 1, sortKey: 'updated_at', sourceKinds: ['cli'] }); resume = result.data?.find(t => t.cwd === cwd && /^[a-f0-9-]{36}$/.test(t.id))?.id; } catch { /* A bounded read failure starts with workspace context, never another CWD's conversation. */ }
-  args = resume ? ['resume', '--yolo', ...trust, resume] : ['--yolo', ...trust, bootstrap];
+  args = resume ? ['resume', ...profileArgs, ...trust, resume] : [...profileArgs, ...trust, bootstrap];
 }
 const child = spawn('codex', args, { cwd, stdio: 'inherit' });
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => child.kill(signal));

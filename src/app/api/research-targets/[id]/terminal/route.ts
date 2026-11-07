@@ -1,4 +1,4 @@
-import { providerSelection, type ResearchProvider } from '@/lib/research/provider';
+import { providerSelection, type ResearchProvider, type LaunchProfile } from '@/lib/research/provider';
 import { auth } from '@/lib/auth';
 import { targetIdentity } from '@/lib/research/terminal';
 import { terminalTicket } from '@/server/research/terminalTicket';
@@ -12,6 +12,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   if (!targetIdentity.safeParse(id).success) return Response.json({ error: 'Not found' }, { status: 404 });
   let provider: ResearchProvider | undefined;
+  let profile: LaunchProfile | undefined;
   if (req.body !== null) {
     const reader = req.body.getReader();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -29,10 +30,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         })(),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Timeout')), 2000); }),
       ]);
-      if (raw) provider = providerSelection.parse(JSON.parse(raw)).provider;
+      if (raw) ({provider,profile} = providerSelection.parse(JSON.parse(raw)));
     } catch { return Response.json({ error: 'Expected only a Codex or Claude provider selection' }, { status: 400 }); }
     finally { clearTimeout(timer); await reader.cancel().catch(() => {}); }
   }
-  try { return Response.json(await terminalTicket(session.user.id, id, provider), { headers: { 'Cache-Control': 'no-store' } }); }
+  try { return Response.json(await terminalTicket(session.user.id, id, provider, profile), { headers: { 'Cache-Control': 'no-store' } }); }
   catch (error) { return Response.json({ error: error instanceof ResearchError ? error.message : 'Research console unavailable' }, { status: error instanceof ResearchError ? error.status : 503, headers: { 'Cache-Control': 'no-store' } }); }
 }

@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, writeFile, rm, readFile, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { verifyTerminalTicket } from '@/lib/research/terminal';
+import { verifyTerminalTicket,verifyLauncherTicket } from '@/lib/research/terminal';
 const mocks = vi.hoisted(()=>({auth:vi.fn()})); vi.mock('@/lib/auth',()=>({auth:mocks.auth}));
 const db=process.env.TEST_DATABASE_URL, schema=`console_${randomUUID().replaceAll('-','')}`;
 if(db){const u=new URL(db);u.searchParams.set('schema',schema);process.env.DATABASE_URL=u.toString();}
@@ -49,6 +49,33 @@ let root:string,userId:string,otherId:string,targetId:string,publicKey:string;
   expect((await (await request()).json()).provider).toBe('claude');
   expect((await (await request(targetId,{body:JSON.stringify({provider:'codex'})})).json()).provider).toBe('codex');
   for(const body of [{provider:'other'},{provider:'claude',command:'bash'}]) expect((await request(targetId,{body:JSON.stringify(body)})).status).toBe(400);
+ });
+ it('signs supported launch profiles without mutating immutable workspace scope',async()=>{
+  await ensure(userId,targetId);const path=join(root,'research_'+targetId,'scope.md'),before=await readFile(path,'utf8');
+  for(const [provider,profile] of [['codex','standard'],['codex','yolo'],['claude','standard'],['claude','plan']]) {
+   const result=await request(targetId,{body:JSON.stringify({provider,profile})});expect(result.status).toBe(200);
+   const body=await result.json();expect(verifyTerminalTicket(body.token,publicKey)).toMatchObject({targetId,profile});expect(await readFile(path,'utf8')).toBe(before);
+  }
+  for(const body of [{provider:'claude',profile:'yolo'},{provider:'codex',profile:'plan'},{provider:'codex',profile:'standard',args:['--yolo']}])expect((await request(targetId,{body:JSON.stringify(body)})).status).toBe(400);
+ });
+ it('checks native readiness read-only after ownership/Scope admission, with a distinct signed audience',async()=>{
+  const {GET}=await import('@/app/api/research-targets/[id]/launcher/route');
+  const get=(id=targetId)=>GET(new Request('http://app.example.test/api/research-targets/'+id+'/launcher'),{params:Promise.resolve({id})});
+  const engines=['codex','claude'].map(provider=>({provider,installation:'available',authentication:'required',version:provider==='codex'?'0.165.0':'2.1.312',code:'AUTH_REQUIRED',profiles:provider==='codex'?['standard','yolo']:['standard','plan'],runningProfile:null}));
+  const fetcher=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify(engines),{status:200}));
+  try {
+   mocks.auth.mockResolvedValue(null);expect((await get()).status).toBe(401);mocks.auth.mockResolvedValue({user:{id:otherId}});expect((await get()).status).toBe(404);expect(fetcher).not.toHaveBeenCalled();
+   mocks.auth.mockResolvedValue({user:{id:userId}});expect((await get('../invalid')).status).toBe(404);
+   const result=await get();expect(result.status).toBe(200);expect(result.headers.get('cache-control')).toBe('private, no-store');expect((await result.json()).engines).toEqual(engines);
+   const options=fetcher.mock.calls[0][1]!;const token=(options.headers as Record<string,string>).Authorization.slice(7);expect(verifyLauncherTicket(token,publicKey).targetId).toBe(targetId);expect(()=>verifyTerminalTicket(token,publicKey)).toThrow();
+   expect(await prisma.researchSession.count({where:{targetId}})).toBe(0);
+   const target=await prisma.target.findUniqueOrThrow({where:{id:targetId}});await prisma.scope.update({where:{id:target.scopeId!},data:{status:'REVOKED'}});fetcher.mockClear();expect((await get()).status).toBe(400);expect(fetcher).not.toHaveBeenCalled();
+  }finally{fetcher.mockRestore();}
+ });
+ it('keeps readiness failures private and never provisions a workspace',async()=>{
+  const {GET}=await import('@/app/api/research-targets/[id]/launcher/route');
+  const fetcher=vi.spyOn(globalThis,'fetch').mockRejectedValue(new Error('PRIVATE_PROVIDER_BODY'));
+  try {const response=await GET(new Request('http://app.example.test'),{params:Promise.resolve({id:targetId})});expect(response.status).toBe(503);expect(await response.text()).not.toContain('PRIVATE_PROVIDER_BODY');expect(await prisma.researchSession.count({where:{targetId}})).toBe(0);}finally{fetcher.mockRestore();}
  });
  it('rejects anonymous/foreign target, foreign origin and any browser body/command',async()=>{
   mocks.auth.mockResolvedValue(null);expect((await request()).status).toBe(401);mocks.auth.mockResolvedValue({user:{id:otherId}});expect((await request()).status).toBe(404);

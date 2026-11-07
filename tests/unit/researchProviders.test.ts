@@ -47,7 +47,7 @@ describe('Research providers', () => {
   it('builds isolated Claude arguments with native continuation and passive MCP only', () => {
     const args = claudeArguments('/workspaces/research_target', 'Trusted instructions', true);
     expect(args).toContain('--continue'); expect(args).toContain('--strict-mcp-config');
-    expect(args[args.indexOf('--permission-mode') + 1]).toBe('default');
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('manual');
     const mcp = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
     expect(mcp.mcpServers).toEqual({ bughunter_burp: { type: 'stdio', command: '/usr/local/bin/bughunter-burp-passive-mcp', args: [] } });
     expect(args).not.toContain('--dangerously-skip-permissions'); expect(args).not.toContain('--yolo');
