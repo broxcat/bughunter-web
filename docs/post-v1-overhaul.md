@@ -682,3 +682,42 @@ Focused disposable acceptance has exercised real broker-selected credentials, na
 Runtime revision `b32c4b2` implements the selected per-workspace UID/GID + trusted broker architecture, private native homes/tmux, protected validator bindings, safe explicit migration and scoped lifecycle cleanup. The final dedicated suite passed 38 kernel denials per provider/session; actual native browser/MCP/persistence/migration/deletion acceptance and the requested full regression/static/build checks passed. Independent web, native toolchain and Research-isolation CI all passed in [run 42412493286](https://github.com/broxcat/bughunter-web/actions/runs/42412493286). See the [exact validation record](research-isolation-42-validation.md) and [unexecuted production migration plan](research-isolation-operations.md).
 
 The original source-matched vulnerable baseline still produces the expected failure as UID/GID 1000/1000 and remains preserved above and in the original audit. Earlier pending/failing entries are historical, not erased. Production is untouched; diagnostics WIP is preserved separately. Stable release remains v1.0.0. **#42's runtime isolation gate is satisfied; #7 remains OPEN and Milestone 8 remains STOPPED/INCOMPLETE. No remaining release acceptance, production migration/deployment, version bump, tag or Release is resumed.**
+
+### Milestone 8 resumed — isolation PASS, production provenance BLOCKED
+
+Final acceptance resumed from origin/main `1a1748d` after #42 closed. The exact
+failed gate was independently rerun against a rebuilt source-matched Research
+image: actual broker identities, 38 kernel denials per native provider/session,
+validator mismatches, MCP, reconnect/restart, copied legacy migration, concurrent
+lifecycle and isolated revocation/deletion all PASS. The original failed gate
+above remains intact. New test-only commits `6112424` and `4b91e59` strengthen the
+full Recon→Plan→hypothesis→Coverage→Evidence→human Finding→distinct Retest→Report
+chain, supported fresh-operator bootstrap and populated 37→39 upgrade preservation.
+
+The requested local full suite passes 1,854 tests with 17 network opt-ins covered
+by a separate 17/17 run; 553 post-v1 browser checks, all 21 inventory routes in
+light/dark at 1280/390 with keyboard checks, native Research/MCP, Plan/Coverage
+workflows, migration/drift, native tools and static/build gates pass. Production
+audit remains 0; development audit remains 8 moderate. Exact results, intermediate
+fixture failures, CI and source identities are recorded in the
+[resumed acceptance audit](releases/v1.1.0-resumed-acceptance.md).
+
+Final exact test candidate `4b91e594038a3fd43af2ba4f607d6f9c2018d367` has all
+three jobs green in [CI 42417240909](https://github.com/broxcat/bughunter-web/actions/runs/42417240909):
+web 1,825 passed / 46 local infrastructure/network opt-ins, native Recon READY /
+46 loopback requests, and actual Research broker/kernel isolation PASS. The
+complete local queue/browser command also passes again on that SHA, including
+the populated migration fixture. Final documentation is a docs-only `[skip ci]`
+checkpoint, with no runtime/test diff against that green candidate; its remote
+HEAD is recorded in #7. Diagnostics stash `62c43206c62b201ceb28998fb444985dfe7de5a2`
+is unchanged and no diagnostics files enter the acceptance commits.
+
+Read-only production preflight found five legacy roots but only two matching
+ResearchSession/Target associations. Three unmatched roots are
+**OPERATOR_REVIEW_REQUIRED**. The operator confirmed there is **no backup** to
+establish their provenance. Two legacy Codex sessions remain live. Migration is
+stopped before admission/session/file/service changes; no ownership is inferred
+from a valid filesystem policy. Production remains v1.0.0 with the legacy runtime
+and 37 applied migrations. No production backup/migration/deployment/restart,
+version bump, v1.1.0 tag or Release was performed. #42 remains CLOSED; #7 remains
+OPEN; **Milestone 8 remains INCOMPLETE/BLOCKED by production workspace provenance**.
