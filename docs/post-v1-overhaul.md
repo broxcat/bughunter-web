@@ -670,3 +670,9 @@ Production was inspected read-only: existing web/worker running, PostgreSQL/Redi
 ### Issue #42 architecture decision (implementation pending)
 
 [Decision 0042](decisions/0042-research-workspace-isolation.md) compares dedicated Unix identities, workspace containers, mount namespaces, filesystem brokering and Landlock. Dedicated workspace identities plus a narrow trusted launcher broker are selected for implementation, with private provider homes/tmux sockets and kernel-UID-bound validator records. Actual non-root disposable namespace probes return EPERM. This is a design decision only: no new runtime boundary, migration or passing acceptance is claimed. **Milestone 8 remains BLOCKED BY #42; #7 remains open.**
+
+### Issue #42 runtime implementation candidate
+
+The dedicated UID/GID broker and protected binding are now integrated into console start/attach, native providers, validators, MCP and terminal admission. Publication receipts let reconnect preserve the kernel boundary while trusted refreshes retain the workspace group. Legacy SSH command sessions and unbound UUID native validation fail closed; restricted reverse forwarding remains. Explicit bounded migration and reviewed provider-state imports preserve original bytes and refuse ambiguous ownership/history. See [operator plan](research-isolation-operations.md).
+
+Focused disposable acceptance has exercised real broker-selected credentials, native Codex command execution without inference, Claude session credentials, filesystem/proc/tmux denials, validator mismatches, MCP initialization/foreign Scope denial, persistence and scoped revocation/deletion. Full regression, browser/native compatibility and CI are separate required gates; these focused results alone do not close #42. **Milestone 8 remains BLOCKED BY #42. #7 remains open.**

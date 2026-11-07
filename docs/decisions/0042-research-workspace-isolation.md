@@ -1,6 +1,6 @@
 # 0042 — Research workspace isolation
 
-Status: design selected; implementation and acceptance pending. Issue #42 remains OPEN. This record does not supersede or erase the failed acceptance.
+Status: UID/GID broker implementation integrated; complete regression/CI acceptance pending. Issue #42 remains OPEN. This record does not supersede or erase the failed acceptance.
 
 ## Threat model and invariant
 
@@ -42,8 +42,12 @@ Unsupported until verified: insufficient subordinate-ID mapping, exhausted UID r
 
 2026-11-07: disposable image `bughunter-m7-research:local`, actual researcher 1000:1000 with supplementary legacy group 2000, CapEff 0, NoNewPrivs 1: mount and user namespace probes both EPERM. Retained baseline test still demonstrates foreign reads/writes/validator acceptance. No isolation implementation or passing provider/migration/lifecycle/full-suite/CI acceptance is claimed by this decision.
 
-## Prerequisite implementation evidence
+## Historical prerequisite implementation evidence (818c6f4)
 
 `runtime-binding.mjs` implements a separate protected-registry reader and binding check. It uses the kernel UID/GID, requires matching real/effective IDs with no foreign supplementary groups, uses descriptor-anchored O_PATH traversal of root-owned non-writable registry ancestry, and requires a root-owned 0440 single-link record belonging to the runtime group. It rejects foreign paths before opening policy and rechecks activation after policy validation. It is deliberately not wired into the legacy console until a trusted broker provisions these records. The existing runtime remains vulnerable.
 
 `node tests/research/workspaceIdentityPrimitive.mjs` passes with UID/GID 200001/200001, groups [200001], CapEff 0, 24 actual OS denials, own reads/writes passing, child-process denial and foreign validator rejection before open. The fixture uses disposable container-local files and a read-only bind of the binding module only; no persistent/production volume is used. The chosen identity is a proposed runtime identity, not the current Research launcher identity. This fixture is explicitly PRIMITIVE_PASS_ONLY. Nine binding contract tests pass; targeted ESLint and diff checks pass. No provider/tmux/proc-fd, migration, concurrency, Scope revocation, full-suite or CI acceptance is inferred. Those remain required before closure.
+
+## Runtime integration
+
+The broker, private homes, protected per-UID records, native launch paths and validator call sites now implement this decision. See `../research-isolation-operations.md` for final ownership/modes and the explicit migration/deployment plan. Historical prototype results above are retained; current focused runtime tests use actual broker-selected identities and native processes. Full regression and CI remain independent closure gates.
