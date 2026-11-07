@@ -413,3 +413,19 @@ The first combined runner passed1,755 Vitest tests (17 separately passed network
 - Both failed and final runners removed their exact disposable containers; no remaining `bughunter.queue-test=disposable` resource. Original diagnostics hashes still match all5 files; they are absent from this worktree/commit. `v1.0.0` still resolves to29d35d1. No deployment, external scan, paid inference or persistent Research restart.
 
 The Recon implementation is ready for its focused main commit/push. #36 is CLOSED with the successful CI proof above. The next checkpoint must record the Recon runtime SHA and its own remote CI result before marking #7 Milestone3 complete; later milestones and release acceptance remain separate.
+
+The initial history render also triggered16 ESLint `react-hooks/error-boundaries` diagnostics because JSX was inside `try/catch`; only the awaited history lookup is now caught and JSX renders outside. Final lint is clean. These were intermediate development failures, not passing gates or reasons to weaken existing assertions/timeouts.
+
+### Pushed Recon runtime / web CI proof
+
+`9cc544b667052fe8b2ffb15c005ade3a79db42bc` is pushed to origin/main, following the separate CI correction `7faf12e7d1d83f8a2650903b4cf52db3550346ac`. [Web job128375217680](https://github.com/broxcat/bughunter-web/actions/runs/42363044721/job/128375217680) is SUCCESS on the Recon SHA:128 passed files/6 opt-in files skipped,1,726 tests passed/0failed/46 opt-in cases skipped; additive upgrade preservation passed. The29 infrastructure opt-ins and17 network opt-ins run in the successful local suites above. Its sibling native job128375217817 is still pending at this intermediate checkpoint; completion is not inferred from the prior7faf12e run.
+
+### Milestone 3 COMPLETE — integration checkpoint
+
+[Run42363044721](https://github.com/broxcat/bughunter-web/actions/runs/42363044721) is now **SUCCESS** on the exact pushed Recon runtime/test SHA **`9cc544b667052fe8b2ffb15c005ade3a79db42bc`**. Both [web128375217680](https://github.com/broxcat/bughunter-web/actions/runs/42363044721/job/128375217680) and [native128375217817](https://github.com/broxcat/bughunter-web/actions/runs/42363044721/job/128375217817) passed. Native smoke again reports READY,12 fixture entries,46 loopback requests and all4 allowed Nuclei templates. Hosted disk starts at16GiB available, ends the loaded image at7.4GiB and returns to15GiB after exact job-owned cleanup. This second native success confirms #36's correction on the Recon commit; its longer compilation time was not a product/test failure.
+
+All Milestone3 criteria in the evidence table are validated. No remaining Milestone3 blocker. #36 is CLOSED; #7 stays OPEN for Milestones4–8. Global release/fresh-install/production deployment acceptance is not claimed, and no later milestone was started. The historical `v1.0.0` tag and package version remain unchanged.
+
+Commits: CI correction `7faf12e7d1d83f8a2650903b4cf52db3550346ac`; Recon implementation/tests `9cc544b667052fe8b2ffb15c005ade3a79db42bc`; this final checkpoint is documentation-only. `origin/main` was verified at9cc544b before this checkpoint commit. Its `[skip ci]` marker avoids an unnecessary third native build: runtime, tests, workflow and Dockerfile are identical to the green9cc544b SHA. The final documentation SHA and confirmed remote head are recorded in #7 and the delivery report after push.
+
+Clean isolated worktree validation excludes the5 original Research diagnostic WIP files; all5 original SHA256 checks still pass and none of their paths changed in this mission's commits. After fast-forwarding the original `main`, only those pre-existing2 modified/3 untracked files should remain. No force push, branch, PR, production restart/deployment, public scan, inference call, schema/version/tag/release change. Disposable runner resources are removed. Stop after Milestone3.
