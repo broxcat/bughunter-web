@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import {useRouter} from 'next/navigation';
 import ResearchProof from "./ResearchProof";
 import { useState } from "react";
 import { Button } from "./ui/Button";
@@ -8,18 +9,17 @@ import { HYPOTHESIS_STATUSES, REGISTRY_NOTICE, type HypothesisStatus } from "@/l
 
 type Hypothesis = { id: string; externalId: string; title: string; status: HypothesisStatus; hypothesis: string; evidenceFor: unknown[]; evidenceAgainst: unknown[]; nextTest: string; expectedSignal: string; falsificationCondition: string; blockedReason: string | null; notes: string | null; researchData: unknown; promotion: { findingId: string } | null };
 export type HypothesisListData = { session: { status: string; hypothesesSyncedAt: string | null }; counts: Record<string, number>; total: number; page: number; pageSize: number; hypotheses: Hypothesis[] };
-export default function ResearchHypotheses({ sessionId, initial }: { sessionId: string; initial: HypothesisListData }) {
-  const [data, setData] = useState(initial), [status, setStatus] = useState<HypothesisStatus | "">("");
+export default function ResearchHypotheses({ sessionId, initial,initialStatus }: { sessionId: string; initial: HypothesisListData;initialStatus?:HypothesisStatus }) {
+  const [data,setData]=useState(initial),status=initialStatus??'',router=useRouter();
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [result, setResult] = useState("");
   async function load(filter: HypothesisStatus | "", page = 1) {
     const r = await fetch(`/api/research-sessions/${sessionId}/hypotheses?${new URLSearchParams({ ...(filter ? { status: filter } : {}), page: String(page) })}`, { cache: "no-store" });
     if (!r.ok) throw new Error("Unable to load hypotheses");
-    setData(await r.json()); setStatus(filter);
+    const body=await r.json();setData(body);
+    if(body.page!==data.page)navigate(filter,body.page,true);
   }
-  async function filter(next: HypothesisStatus | "", page = 1) {
-    setBusy(true); setError("");
-    try { await load(next, page); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-  }
+  function navigate(next:HypothesisStatus|"",page=1,replace=false){const q=new URLSearchParams();if(next)q.set('status',next);q.set('hypothesisPage',String(page));const href=`/research/history/${sessionId}?${q}`;if(replace)router.replace(href);else router.push(href);}
+  async function filter(next:HypothesisStatus|"",page=1){navigate(next,page);}
   async function sync() {
     if (busy) return;
     setBusy(true); setError(""); setResult("");
@@ -27,7 +27,7 @@ export default function ResearchHypotheses({ sessionId, initial }: { sessionId: 
       const response = await fetch(`/api/research-sessions/${sessionId}/hypotheses/sync`, { method: "POST" });
       const body = await response.json();
       if (!response.ok) throw new Error(`${body.code ?? "SYNC_FAILED"}: ${body.error}. ${(body.issues ?? []).map((issue: { path: string; message: string }) => `${issue.path}: ${issue.message}`).join("; ")}`);
-      await load(status);
+      await load(status,data.page);
       setResult(`Synced: ${body.created} created, ${body.updated} updated, ${body.unchanged} unchanged.`);
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }

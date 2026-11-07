@@ -69,7 +69,7 @@ export async function registerEvidence(tx:Prisma.TransactionClient,userId:string
 }
 export async function createEvidence(userId:string,targetId:string,raw:unknown){const parsed=evidenceCreateSchema.safeParse(raw);if(!parsed.success)throw new ResearchError('Invalid evidence metadata. Raw headers, credentials and arbitrary source URLs are not accepted.',400);return prisma.$transaction(async tx=>evidenceView(await registerEvidence(tx,userId,targetId,parsed.data)),{timeout:20000});}
 export async function attachEvidence(userId:string,targetId:string,evidenceId:string,link:unknown){return prisma.$transaction(async tx=>{await ownedEvidenceTarget(tx,userId,targetId,true,false);await linkEvidence(tx,userId,targetId,evidenceId,link);return{id:evidenceId};});}
-export async function listEvidence(userId:string,targetId:string,filter:{hypothesisId?:string;findingId?:string;coverageEventId?:string;reportId?:string}={}){
+export async function listEvidence(userId:string,targetId:string,filter:{hypothesisId?:string;findingId?:string;coverageEventId?:string;reportId?:string}={},before?:string){
  return prisma.$transaction(async tx=>{
   await ownedEvidenceTarget(tx,userId,targetId);
   const where:Prisma.EvidenceRecordWhereInput={targetId};
@@ -77,7 +77,23 @@ export async function listEvidence(userId:string,targetId:string,filter:{hypothe
   if(filter.findingId){await reference(tx,userId,targetId,{entity:'finding',id:filter.findingId,role:'CONTEXT'});where.findings={some:{findingReferenceId:filter.findingId}};}
   if(filter.coverageEventId){await reference(tx,userId,targetId,{entity:'coverage',id:filter.coverageEventId});where.coverage={some:{coverageEventId:filter.coverageEventId}};}
   if(filter.reportId){if(!await tx.report.findFirst({where:{id:filter.reportId,userId},select:{id:true}}))throw new ResearchError('Report not found',404);where.reports={some:{reportReferenceId:filter.reportId}};}
-  const rows=await tx.evidenceRecord.findMany({where,orderBy:{createdAt:'desc'},take:101,include:{hypotheses:{select:{hypothesisReferenceId:true,revision:true,role:true}},findings:{select:{findingReferenceId:true,role:true}},reports:{select:{reportReferenceId:true}},coverage:{select:{coverageEventId:true}}}});return{items:rows.slice(0,100).map(row=>({...evidenceView(row),relations:[...row.hypotheses.map(r=>({entity:'hypothesis',id:r.hypothesisReferenceId,role:r.role,revision:r.revision})),...row.findings.map(r=>({entity:'finding',id:r.findingReferenceId,role:r.role})),...row.reports.map(r=>({entity:'report',id:r.reportReferenceId})),...row.coverage.map(r=>({entity:'coverage',id:r.coverageEventId}))]})),truncated:rows.length>100};
- });
+  let cursor:{createdAt:Date;id:string}|undefined;
+  if(before){
+   try{if(before.length>512)throw new Error();const raw=JSON.parse(Buffer.from(before,'base64url').toString('utf8'));
+    if(!raw||typeof raw.id!=='string'||!/^[A-Za-z0-9_-]{1,150}$/.test(raw.id)||typeof raw.createdAt!=='string'||new Date(raw.createdAt).toISOString()!==raw.createdAt)throw new Error();
+    cursor={id:raw.id,createdAt:new Date(raw.createdAt)};
+   }catch{throw new ResearchError('Invalid evidence cursor',400);}
+  }
+  const include={hypotheses:{select:{hypothesisReferenceId:true,revision:true,role:true}},findings:{select:{findingReferenceId:true,role:true}},reports:{select:{reportReferenceId:true}},coverage:{select:{coverageEventId:true}}} as const;
+  const read=(after?:typeof cursor)=>tx.evidenceRecord.findMany({where:{...where,...(after?{OR:[{createdAt:{lt:after.createdAt}},{createdAt:after.createdAt,id:{lt:after.id}}]}:{})},orderBy:[{createdAt:'desc'},{id:'desc'}],take:101,include});
+  let rows=await read(cursor),reset=false;
+  // A removed cursor row does not invalidate its immutable key. If the entire
+  // older window disappeared, return newest retained records rather than trap
+  // a caller on an empty page while previous results still exist.
+  if(cursor&&!rows.length){rows=await read();reset=true;}
+  const selected=rows.slice(0,100),last=selected.at(-1),truncated=rows.length>100;
+  return{items:selected.map(row=>({...evidenceView(row),relations:[...row.hypotheses.map(r=>({entity:'hypothesis',id:r.hypothesisReferenceId,role:r.role,revision:r.revision})),...row.findings.map(r=>({entity:'finding',id:r.findingReferenceId,role:r.role})),...row.reports.map(r=>({entity:'report',id:r.reportReferenceId})),...row.coverage.map(r=>({entity:'coverage',id:r.coverageEventId}))]})),truncated,reset,
+   nextCursor:truncated&&last?Buffer.from(JSON.stringify({createdAt:last.createdAt.toISOString(),id:last.id})).toString('base64url'):null};
+ },{isolationLevel:'RepeatableRead'});
 }
 export async function getEvidence(userId:string,targetId:string,evidenceId:string){return prisma.$transaction(async tx=>{await ownedEvidenceTarget(tx,userId,targetId);const row=await tx.evidenceRecord.findFirst({where:{id:evidenceId,targetId}});if(!row)throw new ResearchError('Evidence not found',404);return evidenceView(row);});}

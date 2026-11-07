@@ -1,3 +1,5 @@
+import {paginationInput} from '@/lib/pagination';
+import {reportCollection} from '@/server/findingCollections';
 import {publicFinding,safeFindingText} from '@/server/findingPrivacy';
 import {Prisma} from '@prisma/client';
 import {foreignOrigin} from '@/lib/requestOrigin';
@@ -30,17 +32,24 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  if(req.nextUrl.searchParams.has('page')||req.nextUrl.searchParams.has('pageSize')){
+    let input;try{input=paginationInput(req.nextUrl.searchParams);}catch{return NextResponse.json({error:'Invalid page or pageSize'},{status:400});}
+    const programId=req.nextUrl.searchParams.get('programId')||undefined,targetId=req.nextUrl.searchParams.get('targetId')||undefined;
+
+    if(programId?!await prisma.bountyProgram.findFirst({where:{id:programId,ownerId:session.user.id},select:{id:true}}):targetId&&!await prisma.target.findFirst({where:{id:targetId,userId:session.user.id},select:{id:true}}))return NextResponse.json({error:'Not found'},{status:404});
+    return NextResponse.json(await reportCollection(session.user.id,programId?{programId}:{targetId},input),{headers:{'Cache-Control':'private, no-store'}});
+  }
   const targetId = req.nextUrl.searchParams.get("targetId");
   const programId=req.nextUrl.searchParams.get('programId');
   if(programId){
     if(!await prisma.bountyProgram.findFirst({where:{id:programId,ownerId:session.user.id},select:{id:true}}))return NextResponse.json({error:'Not found'},{status:404});
-    const rows=await prisma.report.findMany({where:{userId:session.user.id,items:{some:{finding:{target:{programId,userId:session.user.id}}}}},include:{items:{select:{finding:{select:{targetId:true}}}}},orderBy:{createdAt:'desc'},take:100});
+    const rows=await prisma.report.findMany({where:{userId:session.user.id,items:{some:{finding:{target:{programId,userId:session.user.id}}}}},include:{items:{select:{finding:{select:{targetId:true}}}}},orderBy:[{createdAt:'desc'},{id:'desc'}]});
     return NextResponse.json(rows.map(r=>({...r,markdown:r.markdown?safeFindingText(r.markdown):r.markdown,title:safeFindingText(r.title),evidenceTargetIds:[...new Set(r.items.map(i=>i.finding.targetId))]})));
   }
   if (targetId && !await prisma.target.findFirst({ where: { id: targetId, userId: session.user.id }, select: { id: true } })) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const reports = await prisma.report.findMany({
     where: { userId: session.user.id, ...(targetId ? { targetId } : {}) },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{createdAt:"desc"},{id:"desc"}],
   });
 
   return NextResponse.json(reports.map(r=>({...r,title:safeFindingText(r.title),markdown:r.markdown?safeFindingText(r.markdown):r.markdown})));
@@ -73,7 +82,7 @@ export async function POST(req: NextRequest) {
   // Fetch only the user's own findings among those requested.
   const findings = await tx.finding.findMany({
     where: { id: { in: requestedIds }, target: { userId: session.user.id } },
-    include:{lifecycleEvents:{where:{state:'VALIDATED'},take:1,select:{id:true}},retests:{orderBy:{createdAt:'desc'},take:100,include:{result:true}},vaultEvidence:{include:{evidence:true}},scanRun:{select:{assessmentModeSnapshot:true}},researchPromotion:{select:{hypothesis:{select:{session:{select:{authorizationSnapshot:true}}}}}}},
+    include:{lifecycleEvents:{where:{state:'VALIDATED'},take:1,select:{id:true}},retests:{orderBy:[{createdAt:'desc'},{id:'desc'}],take:100,include:{result:true}},vaultEvidence:{include:{evidence:true}},scanRun:{select:{assessmentModeSnapshot:true}},researchPromotion:{select:{hypothesis:{select:{session:{select:{authorizationSnapshot:true}}}}}}},
   });
 
   // Every requested id must resolve to an owned finding.

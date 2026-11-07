@@ -3,7 +3,10 @@ import EvidencePanel from './EvidencePanel';
 import FindingLifecycle from './FindingLifecycle';
 
 import Link from "next/link";
-import { use, useEffect, useState } from "react";
+import {useRouter,useSearchParams} from 'next/navigation';
+import CollectionPager from './CollectionPager';
+import {paginationInput} from '@/lib/pagination';
+import { Suspense,use,useCallback,useEffect,useState } from "react";
 import EvidenceReview from "@/components/EvidenceReview";
 import { findingReviewStatus, type ReviewState } from "@/lib/evidenceReview";
 import {
@@ -53,12 +56,11 @@ const SEVERITY_TONE: Record<Severity, BadgeTone> = {
 
 const REVIEW_TONE: Record<ReviewState, BadgeTone> = { CANDIDATE: "candidate", EVIDENCE_REVIEW: "info", CONFIRMED: "passed", REJECTED: "killed", INCONCLUSIVE: "neutral" };
 
-export default function FindingsPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default function FindingsPage(props:{params:Promise<{id:string}>}){return <Suspense fallback={<p role="status">Loading Findings…</p>}><HostFindingCollection {...props}/></Suspense>;}
+function HostFindingCollection({params}:{params:Promise<{id:string}>}){
   const { id } = use(params);
+  const router=useRouter(),paramsQuery=useSearchParams(),query=paramsQuery.toString(),input=paginationInput(new URLSearchParams(query),false);
+  const [pages,setPages]=useState<{page:number;pages:number;total:number}|null>(null);
 
   const [findings, setFindings] = useState<Finding[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,25 +74,16 @@ export default function FindingsPage({
   const [location, setLocation] = useState("");
   const [evidence, setEvidence] = useState("");
 
-  async function load() {
-    try {
-      const res = await fetch(`/api/findings?targetId=${encodeURIComponent(id)}`);
-      if (!res.ok) throw new Error(`Failed to load findings (${res.status})`);
-      setFindings(await res.json());
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load findings");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    fetch(`/api/findings?targetId=${encodeURIComponent(id)}`).then(async res => {
-      if (!res.ok) throw new Error("Unable to load findings");
-      setFindings(await res.json());
-    }).catch(e => setError(e.message)).finally(() => setLoading(false));
-  }, [id]);
+  const load=useCallback(async(signal?:AbortSignal)=>{
+    try{
+      const res=await fetch(`/api/findings?targetId=${encodeURIComponent(id)}&page=${input.page}&pageSize=${input.pageSize}&q=${encodeURIComponent(input.q)}`,{signal});
+      if(!res.ok)throw new Error('Unable to load Findings');const body=await res.json();if(signal?.aborted)return;
+      setFindings(body.items);setPages(body);setError(null);
+      const q=new URLSearchParams(query);if(q.has('page')&&q.get('page')!==String(body.page)){q.set('page',String(body.page));router.replace('/targets/'+id+'/findings?'+q);}
+    }catch(e){if(!signal?.aborted)setError(e instanceof Error?e.message:'Unable to load Findings');}
+    finally{if(!signal?.aborted)setLoading(false);}
+  },[id,input.page,input.pageSize,input.q,query,router]);
+  useEffect(()=>{const controller=new AbortController();void Promise.resolve().then(()=>{if(!controller.signal.aborted)return load(controller.signal);});return()=>controller.abort();},[load]);
 
   async function createFinding(e: React.FormEvent) {
     e.preventDefault();
@@ -220,6 +213,8 @@ export default function FindingsPage({
 
       <div className="space-y-3">
         <h2 className="text-sm font-medium text-foreground">Findings</h2>
+        {pages&&<CollectionPager path={'/targets/'+id+'/findings'} query={query} {...pages}/>}
+        <form action={'/targets/'+id+'/findings'} className="flex flex-wrap gap-3"><label>Search Findings<input name="q" defaultValue={input.q} key={input.q} maxLength={200} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={input.pageSize}/><Button type="submit">Search</Button></form>
         {loading ? (
           <p className="text-sm text-muted">Loading…</p>
         ) : findings.length === 0 ? (

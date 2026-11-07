@@ -1,3 +1,5 @@
+import {paginationInput} from '@/lib/pagination';
+import {findingCollection} from '@/server/findingCollections';
 import {safeFindingField,publicFinding} from '@/server/findingPrivacy';
 import {foreignOrigin} from '@/lib/requestOrigin';
 import { NextRequest, NextResponse } from "next/server";
@@ -35,11 +37,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  if(req.nextUrl.searchParams.has('page')||req.nextUrl.searchParams.has('pageSize')){
+    let input;try{input=paginationInput(req.nextUrl.searchParams);}catch{return NextResponse.json({error:'Invalid page or pageSize'},{status:400});}
+    const programId=req.nextUrl.searchParams.get('programId')||undefined,targetId=req.nextUrl.searchParams.get('targetId')||undefined;
+    if(!programId&&!targetId)return NextResponse.json({error:"targetId is required"},{status:400});
+    if(programId?!await prisma.bountyProgram.findFirst({where:{id:programId,ownerId:session.user.id},select:{id:true}}):targetId&&!await prisma.target.findFirst({where:{id:targetId,userId:session.user.id},select:{id:true}}))return NextResponse.json({error:'Not found'},{status:404});
+    return NextResponse.json(await findingCollection(session.user.id,programId?{programId}:{targetId},input),{headers:{'Cache-Control':'private, no-store'}});
+  }
   const targetId = req.nextUrl.searchParams.get("targetId");
   const programId = req.nextUrl.searchParams.get('programId');
   if (programId) {
     if (!await prisma.bountyProgram.findFirst({ where: { id: programId, ownerId: session.user.id }, select: { id: true } })) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    return NextResponse.json((await prisma.finding.findMany({ where: { target: { programId, userId: session.user.id } }, select: { id: true, title: true, targetId: true, reviewStatus: true, severity: true, lifecycle:true,lifecycleEvents:{where:{state:'VALIDATED'},take:1,select:{id:true}} }, orderBy: { createdAt: 'desc' }, take: 1000 })).map(publicFinding));
+    return NextResponse.json((await prisma.finding.findMany({ where: { target: { programId, userId: session.user.id } }, select: { id: true, title: true, targetId: true, reviewStatus: true, severity: true, lifecycle:true,lifecycleEvents:{where:{state:'VALIDATED'},take:1,select:{id:true}} }, orderBy: [{createdAt:'desc'},{id:'desc'}] })).map(publicFinding));
   }
   if (!targetId) {
     return NextResponse.json({ error: "targetId is required" }, { status: 400 });
@@ -56,7 +65,7 @@ export async function GET(req: NextRequest) {
   const findings = await prisma.finding.findMany({
     where: { targetId: target.id },
     include:{lifecycleEvents:{where:{state:'VALIDATED'},take:1,select:{id:true}}},
-    orderBy: { createdAt: "desc" },
+    orderBy: [{createdAt:"desc"},{id:"desc"}],
   });
 
   // Attach correlated out-of-band callbacks (Phase 5). A finding's oobToken

@@ -4,7 +4,10 @@ import EvidencePanel from '@/components/EvidencePanel';
 import { findingReviewStatus } from "@/lib/evidenceReview";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import {useRouter,useSearchParams} from 'next/navigation';
+import CollectionPager from './CollectionPager';
+import {paginationInput} from '@/lib/pagination';
+import { Suspense,useEffect, useState } from "react";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -37,7 +40,14 @@ const PLATFORMS: Platform[] = [
   "GENERIC",
 ];
 
-export default function ReportEditor({id,programMode=false}:{id:string;programMode?:boolean}) {
+export default function ReportEditor(props:{id:string;programMode?:boolean}){return <Suspense fallback={<p role="status">Loading Report…</p>}><ReportCollection {...props}/></Suspense>;}
+function ReportCollection({id,programMode=false}:{id:string;programMode?:boolean}) {
+  const router=useRouter(),params=useSearchParams(),query=params.toString();
+  const findingInput=paginationInput(new URLSearchParams({page:params.get('findingPage')??'1',pageSize:params.get('pageSize')??'25'}),false);
+  const reportInput=paginationInput(new URLSearchParams({page:params.get('reportPage')??'1',pageSize:params.get('pageSize')??'25'}),false);
+  type Bounds={page:number;pages:number;total:number};
+  const [pages,setPages]=useState<{findings:Bounds;reports:Bounds}|null>(null);
+  const [revision,setRevision]=useState(0);
   const [reports, setReports] = useState<{ id: string; title: string; markdown: string; evidenceTargetIds?:string[];targetId?:string|null }[]>([]);
   const [reportId, setReportId] = useState("");
   const [passed, setPassed] = useState<Finding[]>([]);
@@ -46,27 +56,33 @@ export default function ReportEditor({id,programMode=false}:{id:string;programMo
 
   const [title, setTitle] = useState("");
   const [platform, setPlatform] = useState<Platform>("HACKERONE");
-  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [selected, setSelected] = useState<Record<string, Finding>>({});
   const [generating, setGenerating] = useState(false);
   const [markdown, setMarkdown] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    Promise.all([fetch(`/api/findings?${programMode?'programId':'targetId'}=${encodeURIComponent(id)}`, { signal: controller.signal }), fetch(`/api/reports?${programMode?'programId':'targetId'}=${encodeURIComponent(id)}`, { signal: controller.signal })]).then(async ([findingsResponse, reportsResponse]) => {
-      if (!findingsResponse.ok || !reportsResponse.ok) throw new Error("Unable to load findings and report history");
-      const all: Finding[] = await findingsResponse.json(); setPassed(all.filter(f => findingReviewStatus(f) === "CONFIRMED"&&lifecycleReportEligible(f.lifecycle)&&(f.lifecycle==null||Boolean(f.lifecycleEvents?.length))));
-      const saved = await reportsResponse.json(); setReports(saved); setReportId(saved[0]?.id ?? ""); setMarkdown(saved[0]?.markdown ?? null);
-    }).catch(e => { if (e.name !== "AbortError") setError("Unable to load findings and report history"); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    const identity=`${programMode?'programId':'targetId'}=${encodeURIComponent(id)}`;
+    Promise.all([fetch(`/api/findings?${identity}&page=${findingInput.page}&pageSize=${findingInput.pageSize}`,{signal:controller.signal}),fetch(`/api/reports?${identity}&page=${reportInput.page}&pageSize=${reportInput.pageSize}`,{signal:controller.signal})]).then(async([fr,rr])=>{
+      if(!fr.ok||!rr.ok)throw new Error('Unable to load findings and report history');
+      const [findings,saved]=await Promise.all([fr.json(),rr.json()]);if(controller.signal.aborted)return;
+      setPassed(findings.items.filter((f:Finding)=>findingReviewStatus(f)==='CONFIRMED'&&lifecycleReportEligible(f.lifecycle)&&(f.lifecycle==null||Boolean(f.lifecycleEvents?.length))));
+      setReports(saved.items);setReportId(saved.items[0]?.id??'');setMarkdown(saved.items[0]?.markdown??null);setPages({findings,reports:saved});setError(null);
+      const next=new URLSearchParams(query);let changed=false;
+      for(const [key,page] of [['findingPage',findings.page],['reportPage',saved.page]] as const){if(next.has(key)&&next.get(key)!==String(page)){next.set(key,String(page));changed=true;}}
+      if(changed)router.replace('/targets/'+id+'/report?'+next);
+    }).catch(e=>{if(!controller.signal.aborted)setError(e.message);}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
     return () => controller.abort();
-  }, [id,programMode]);
+  }, [id,programMode,query,findingInput.page,findingInput.pageSize,reportInput.page,reportInput.pageSize,router,revision]);
 
   async function generate(e: React.FormEvent) {
     e.preventDefault();
-    const findingIds = passed.filter((f) => selected[f.id]).map((f) => f.id);
+    const chosen=Object.values(selected),findingIds=chosen.map(f=>f.id);
     if (findingIds.length === 0) {
       setError("Select at least one confirmed finding.");
       return;
     }
+    if(findingIds.length>100){setError('Select at most 100 Findings per report.');return;}
     setGenerating(true);
     setError(null);
     setMarkdown(null);
@@ -81,9 +97,9 @@ export default function ReportEditor({id,programMode=false}:{id:string;programMo
         throw new Error(j.error ?? `Failed to generate report (${res.status})`);
       }
       const report = await res.json();
-      report.evidenceTargetIds=[...new Set(passed.filter(f=>findingIds.includes(f.id)).map(f=>f.targetId??id))];
+      report.evidenceTargetIds=[...new Set(chosen.map(f=>f.targetId??id))];
       setMarkdown(report.markdown ?? "");
-      setReportId(report.id); setReports(previous => [report, ...previous]);
+      setReportId(report.id);setReports(previous=>[report,...previous]);setRevision(n=>n+1);const next=new URLSearchParams(query);next.set('reportPage','1');router.replace('/targets/'+id+'/report?'+next);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to generate report");
     } finally {
@@ -142,7 +158,9 @@ export default function ReportEditor({id,programMode=false}:{id:string;programMo
           </select>
 
           <div className="space-y-1">
-            <p className="text-sm font-medium text-foreground">Confirmed findings</p>
+            <p className="text-sm font-medium text-foreground">Confirmed findings · {Object.keys(selected).length} selected</p>
+            {pages&&<CollectionPager path={'/targets/'+id+'/report'} query={query} {...pages.findings} pageKey="findingPage" label="Report finding pages" noun="Findings reviewed for eligibility"/>}
+            <p className="text-sm text-muted">Only eligible confirmed Findings on this page are shown. Selection is retained while paging; report creation validates eligibility again.</p>
             {loading ? (
               <p className="text-sm text-muted">Loading…</p>
             ) : passed.length === 0 ? (
@@ -157,9 +175,9 @@ export default function ReportEditor({id,programMode=false}:{id:string;programMo
                 >
                   <input
                     type="checkbox"
-                    checked={selected[f.id] === true}
+                    checked={Boolean(selected[f.id])}
                     onChange={(e) =>
-                      setSelected((s) => ({ ...s, [f.id]: e.target.checked }))
+                      setSelected(s=>{const next={...s};if(e.target.checked)next[f.id]=f;else delete next[f.id];return next;})
                     }
                     className="accent-brand"
                   />
@@ -176,7 +194,7 @@ export default function ReportEditor({id,programMode=false}:{id:string;programMo
             <Button
               type="submit"
               variant="primary"
-              disabled={generating || passed.length === 0}
+              disabled={generating || Object.keys(selected).length === 0}
             >
               {generating ? "Generating…" : "Generate report"}
             </Button>
@@ -184,6 +202,7 @@ export default function ReportEditor({id,programMode=false}:{id:string;programMo
         </form>
       </Card>
 
+      {pages&&<CollectionPager path={'/targets/'+id+'/report'} query={query} {...pages.reports} pageKey="reportPage" label="Saved report pages"/>}
       {reports.length > 0 && <label className="block text-sm">Saved report<select aria-label="Saved report" className="mt-2 block w-full rounded border border-border bg-surface p-2" value={reportId} onChange={e => { setReportId(e.target.value); setMarkdown(reports.find(r => r.id === e.target.value)?.markdown ?? null); }}>{reports.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select></label>}
       {reportId&&(reports.find(r=>r.id===reportId)?.evidenceTargetIds??[reports.find(r=>r.id===reportId)?.targetId??id]).map(targetId=><EvidencePanel key={reportId+targetId} targetId={targetId} reportId={reportId}/>)}
       {markdown !== null && (
