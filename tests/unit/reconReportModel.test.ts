@@ -105,7 +105,7 @@ describe('deterministic Recon report', () => {
       steps: [{ name: 'Ports / services', state: 'COMPLETED', reason: null, details: null }],
       artifacts: [{ kind: 'port', value: { hostname: 'acme.example', port: 8443, protocol: 'tcp', service: 'https-alt' } }],
     })] }));
-    expect(model.network).toEqual([{ host: 'acme.example', port: 8443, protocol: 'tcp', service: 'https-alt', source: 'port artifact' }]);
+    expect(model.network).toEqual([{ host: 'acme.example', port: 8443, protocol: 'tcp', service: 'https-alt', state: null, source: 'port artifact' }]);
     expect(model.portDiscoveryPerformed).toBe(true);
   });
 
@@ -180,7 +180,7 @@ describe('deterministic Recon report', () => {
     const markdown = renderReconReportMarkdown(model);
     expect(markdown).toContain('No stage detail was recorded for this run.');
     expect(markdown).toContain('No port discovery execution was recorded; network coverage remains unknown.');
-    expect(markdown).toContain('No host or DNS observation was recorded.');
+    expect(markdown).toContain('DNS evidence not recorded for this run.');
     expect(markdown).not.toContain('| 443 |');
   });
 

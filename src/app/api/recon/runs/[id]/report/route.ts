@@ -1,3 +1,4 @@
+import {readRunNarrative} from '@/server/recon/runNarrative';
 import { auth } from '@/lib/auth';
 import { loadReconReportFacts } from '@/server/recon/reportFacts';
 import { buildReconReportModel } from '@/lib/reconReportModel';
@@ -13,7 +14,8 @@ export async function GET(_req: Request, { params }: Params) {
   const { id } = await params;
   try {
     const facts = await loadReconReportFacts(session.user.id, id);
-    const markdown = renderReconReportMarkdown(buildReconReportModel(facts));
+    const model = buildReconReportModel(facts);
+    const markdown = renderReconReportMarkdown(model,await readRunNarrative(session.user.id,facts,model));
     const slug = facts.program.companyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'target';
     return new Response(markdown, {
       headers: {

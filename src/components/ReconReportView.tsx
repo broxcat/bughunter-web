@@ -1,10 +1,13 @@
+import ReconRunNarrative from './ReconRunNarrative';
+import type {RunNarrative} from '@/lib/reconRunNarrative';
+import ReconReportEvidence,{ReportProvenance} from './ReconReportEvidence';
 import type { ReconReportModel } from '@/lib/reconReportModel';
 
 /**
  * Deterministic Recon report. Server component with no client state: the
  * Markdown export and this view are rendered from the same model.
  */
-export default function ReconReportView({ model }: { model: ReconReportModel }) {
+export default function ReconReportView({ model,narrative }: { model: ReconReportModel;narrative?:RunNarrative }) {
   const { metadata, authorization, methodology, web, authenticated, changes } = model;
 
   return <section aria-labelledby="recon-report-heading" className="space-y-6">
@@ -33,13 +36,15 @@ export default function ReconReportView({ model }: { model: ReconReportModel }) 
       </div>}
     </section>
 
+    <ReconRunNarrative narrative={narrative??{state:"DETERMINISTIC",highlights:[]}}/>
+
     <section aria-label="Scope and authorization" className="space-y-2">
       <h3 className="font-semibold">Scope and authorization</h3>
       <p className="text-sm text-muted">{authorization.note}</p>
       <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
         <div><dt className="text-subtle">Authorized assets</dt><dd className="break-all">{authorization.authorized.join(', ') || 'None recorded'}</dd></div>
         <div><dt className="text-subtle">Observed hosts (not authorization)</dt><dd className="break-all">{authorization.observed.join(', ') || 'None recorded'}</dd></div>
-        <div><dt className="text-subtle">Captured exclusions</dt><dd className="break-all">{authorization.excluded.join(', ') || 'None recorded'}</dd></div>
+        <div><dt className="text-subtle">Captured exclusions</dt><dd className="break-all">{authorization.excluded.join(', ') || (authorization.exclusionsRecorded?'None (captured policy)':'Not recorded')}</dd></div>
         <div><dt className="text-subtle">Required User-Agent</dt><dd className="break-all font-mono text-xs">{authorization.userAgent ?? 'Not recorded'}</dd></div>
         <div className="sm:col-span-2"><dt className="text-subtle">Engagement rules</dt><dd className="whitespace-pre-wrap">{authorization.rules ?? 'Not recorded'}</dd></div>
       </dl>
@@ -49,7 +54,7 @@ export default function ReconReportView({ model }: { model: ReconReportModel }) 
       <h3 className="font-semibold">Methodology</h3>
       {methodology.stages.length
         ? <div className="overflow-x-auto"><table className="w-full min-w-[420px] text-left text-sm">
-            <thead><tr className="border-b border-border"><th scope="col" className="p-2">Stage</th><th scope="col" className="p-2">Recorded tools</th></tr></thead>
+            <thead><tr className="border-b border-border"><th scope="col" className="p-2">Stage</th><th scope="col" className="p-2">Planned tools</th></tr></thead>
             <tbody>{methodology.stages.map(stage => <tr key={stage.name} className="border-b border-border"><td className="p-2">{stage.name}</td><td className="p-2 font-mono text-xs">{stage.tools.join(', ') || 'None recorded'}</td></tr>)}</tbody>
           </table></div>
         : <p className="text-sm text-muted">No stage detail was recorded for this run.</p>}
@@ -83,21 +88,16 @@ export default function ReconReportView({ model }: { model: ReconReportModel }) 
         : <p className="text-sm text-muted">No tool was recorded for this run.</p>}
     </section>
 
-    <section aria-label="DNS and hosts" className="space-y-2">
-      <h3 className="font-semibold">DNS and hosts</h3>
-      {model.dns.length
-        ? <ul className="space-y-1 text-sm">{model.dns.map(row => <li key={row.host} className="break-all font-mono text-xs">{row.host} <span className="font-sans text-muted">· {row.source}</span></li>)}</ul>
-        : <p className="text-sm text-muted">No host or DNS observation was recorded.</p>}
-    </section>
+    <ReconReportEvidence model={model}/>
 
     <section aria-label="Ports and services" className="space-y-2">
       <h3 className="font-semibold">Ports and services</h3>
       {model.network.length
         ? <div className="overflow-x-auto"><table className="w-full min-w-[520px] text-left text-sm">
             <thead><tr className="border-b border-border">{['Host', 'Port', 'Protocol', 'Service', 'Evidence'].map(heading => <th key={heading} scope="col" className="p-2">{heading}</th>)}</tr></thead>
-            <tbody>{model.network.map(row => <tr key={`${row.host}:${row.port}`} className="border-b border-border"><td className="break-all p-2 font-mono text-xs">{row.host}</td><td className="p-2">{row.port}</td><td className="p-2">{row.protocol ?? '—'}</td><td className="p-2">{row.service ?? 'Not recorded'}</td><td className="p-2 text-muted">{row.source}</td></tr>)}</tbody>
+            <tbody>{model.network.map(row => <tr key={`${row.host}:${row.port}:${row.protocol??"unrecorded"}`} className="border-b border-border"><td className="break-all p-2 font-mono text-xs">{row.host}</td><td className="p-2">{row.port}</td><td className="p-2">{row.protocol ?? '—'}</td><td className="p-2">{(row.service ?? 'Not recorded') + ' · ' + (row.state??'state not recorded')}</td><td className="p-2 text-muted">{row.source}</td></tr>)}</tbody>
           </table></div>
-        : <p className="text-sm text-muted">{model.portDiscoveryPerformed ? 'Port discovery ran but recorded no open service observation.' : 'No port discovery execution was recorded; network coverage remains unknown.'}</p>}
+        : <p className="text-sm text-muted">{model.evidenceTruncated ? 'No port/service observation included in the bounded report inventory; consult retained artifacts.' : model.portDiscoveryPerformed ? 'Port discovery ran but recorded no open service observation.' : 'No port discovery execution was recorded; network coverage remains unknown.'}</p>}
     </section>
 
     <section aria-label="Web surface" className="space-y-2">
@@ -136,6 +136,8 @@ export default function ReconReportView({ model }: { model: ReconReportModel }) 
         ? <><p className="text-sm">{changes.new} new · {changes.changed} changed · {changes.notObserved} not observed · {changes.unchanged} unchanged</p><p className="text-sm text-muted">{changes.note}</p></>
         : <p className="text-sm text-muted">No comparison data was recorded for this run.</p>}
     </section>
+
+    <ReportProvenance model={model}/>
 
     <section aria-label="Research handoff" className="space-y-2">
       <h3 className="font-semibold">Research handoff</h3>

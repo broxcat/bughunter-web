@@ -3,18 +3,21 @@
  *
  * Every value here is derived from persisted execution evidence. Nothing is
  * inferred: a port appears only when a port artifact was recorded, a tool only
- * when the captured plan named it, and an invocation only when it was stored.
+ * when an actual provider attempt was recorded, and an invocation only when it was stored.
  * This model is authoritative; any AI narrative is a separate, optional layer.
  */
+import { buildReportEvidence } from './reconReportEvidence';
 import { reconOverview } from './reconOverview';
 import { providerAttempts } from './reconTimeline';
 import { redactObservationText } from './observationSafety';
 
-export type ReportStep = { name: string; state: string; reason: string | null; details: unknown };
+export type ReportStep = { id?: string; name: string; state: string; reason: string | null; details: unknown };
 
-export type ReportArtifact = { kind: string; verification?: string; value: Record<string, unknown> };
+export type ReportArtifact = { id?: string; sources?: unknown; scopeState?: string; firstSeenAt?: string; lastSeenAt?: string; kind: string; verification?: string; value: Record<string, unknown> };
 
 export type ReportScan = {
+  id?: string;
+  scopeAssetId?: string | null;
   host: string | null;
   status: string;
   outcome: string | null;
@@ -42,12 +45,12 @@ export type ReportFacts = {
   program: { companyName: string; platform: string | null; requiredUserAgent: string | null; outOfScope: string[]; rulesOfEngagement: string | null; assessmentMode: string };
   authorizedAssets: string[];
   scans: ReportScan[];
-  authSurfaces: Array<{ contexts: Array<{ label: string; mode: string; state: string; observations: number }>; totals: { public: number; authenticatedOnly: number; sharedAuthenticated: number; observations: number } }>;
+  authSurfaces: Array<{ observations?:Array<{id:string;scanRunId:string;url:string;method:string;source:string;observedAt:string;responseClass:string;contextLabel:string}>; contexts: Array<{ label: string; mode: string; state: string; observations: number }>; totals: { public: number; authenticatedOnly: number; sharedAuthenticated: number; observations: number } }>;
 };
 
 export type StageLine = { host: string; name: string; tools: string[]; state: string; label: string; reason: string | null };
 
-export type ReconReportModel = {
+export type ReconReportModel = ReturnType<typeof buildReportEvidence> & {
   title: string;
   metadata: {
     program: string;
@@ -61,12 +64,12 @@ export type ReconReportModel = {
     hosts: number;
     stageCounts: { completed: number; partial: number; failed: number; skipped: number; unknown: number };
   };
-  authorization: { authorized: string[]; observed: string[]; excluded: string[]; userAgent: string | null; rules: string | null; note: string };
+  authorization: { authorized: string[]; observed: string[]; excluded: string[]; userAgent: string | null; exclusionsRecorded: boolean; rules: string | null; note: string };
   methodology: { stages: Array<{ name: string; tools: string[] }>; passiveOnly: boolean; activity: 'PASSIVE' | 'ACTIVE' | 'UNKNOWN'; authenticated: boolean };
   execution: StageLine[];
   tools: Array<{ name: string; version: string | null; invocation: string | null }>;
   dns: Array<{ host: string; source: string }>;
-  network: Array<{ host: string; port: number; protocol: string | null; service: string | null; source: string }>;
+  network: Array<{ host: string; port: number; protocol: string | null; service: string | null; state: string | null; source: string }>;
   portDiscoveryPerformed: boolean;
   web: {
     responsiveHosts: string[];
@@ -118,7 +121,7 @@ export function buildReconReportModel(facts: ReportFacts): ReconReportModel {
   const execution: StageLine[] = [];
   const tools = new Map<string, { name: string; version: string | null; invocation: string | null }>();
   const dns = new Map<string, { host: string; source: string }>();
-  const network = new Map<string, { host: string; port: number; protocol: string | null; service: string | null; source: string }>();
+  const network = new Map<string, { host: string; port: number; protocol: string | null; service: string | null; state: string | null; source: string }>();
   const endpoints = new Map<string, { url: string; status: number | null; method: string | null }>();
   const technologies = new Map<string, { name: string; version: string | null }>();
   const authSurfaces = new Set<string>();
@@ -161,11 +164,12 @@ export function buildReconReportModel(facts: ReportFacts): ReconReportModel {
       if (artifact.kind === 'port') {
         const port = num(value.port);
         if (port && Number.isInteger(port) && port > 0 && port <= 65535 && hostname) {
-          network.set(`${hostname}:${port}`, {
+          network.set(`${hostname}:${port}:${str(value.protocol)??"unrecorded"}`, {
             host: hostname,
             port,
             protocol: str(value.protocol),
             service: str(value.service),
+            state: str(value.state),
             source: 'port artifact',
           });
         }
@@ -174,9 +178,9 @@ export function buildReconReportModel(facts: ReportFacts): ReconReportModel {
         const port = num(value.port);
         const service = str(value.service) ?? str(value.name);
         if (port && Number.isInteger(port) && port > 0 && port <= 65535 && hostname) {
-          const key = `${hostname}:${port}`;
+          const key = `${hostname}:${port}:${str(value.protocol)??"unrecorded"}`;
           const existing = network.get(key);
-          network.set(key, { host: hostname, port, protocol: str(value.protocol) ?? existing?.protocol ?? null, service: service ?? existing?.service ?? null, source: 'service artifact' });
+          network.set(key, { host: hostname, port, protocol: str(value.protocol) ?? existing?.protocol ?? null, service: service ?? existing?.service ?? null, state: str(value.state) ?? existing?.state ?? null, source: 'service artifact' });
         }
       }
       if (artifact.kind === 'endpoint' || url) {
@@ -240,6 +244,7 @@ export function buildReconReportModel(facts: ReportFacts): ReconReportModel {
 
   const activity = facts.scans.length && facts.scans.every(scan => scan.plan?.activityMode === 'PASSIVE') ? 'PASSIVE' : facts.scans.some(scan => scan.plan?.activityMode === 'ACTIVE') ? 'ACTIVE' : 'UNKNOWN';
   const result: ReconReportModel = {
+    ...buildReportEvidence(facts),
     title: `Recon Report — ${facts.program.companyName}`,
     metadata: {
       program: facts.program.companyName,
@@ -258,6 +263,7 @@ export function buildReconReportModel(facts: ReportFacts): ReconReportModel {
       observed: observedList,
       excluded,
       userAgent: facts.program.requiredUserAgent,
+      exclusionsRecorded: facts.scans.length>0&&facts.scans.every(scan=>Array.isArray(scan.plan?.authorization?.exclusions)),
       rules: facts.program.rulesOfEngagement ? redactObservationText(facts.program.rulesOfEngagement) : null,
       note: 'Captured execution boundaries only; unrecorded historical policy stays unknown. Engagement rules were not captured here. Review current Target Scope before new work. Observations never grant authorization.',
     },
@@ -270,7 +276,7 @@ export function buildReconReportModel(facts: ReportFacts): ReconReportModel {
     execution,
     tools: [...tools.values()].sort((a, b) => a.name.localeCompare(b.name)),
     dns: [...dns.values()].sort((a, b) => a.host.localeCompare(b.host)),
-    network: [...network.values()].sort((a, b) => a.host.localeCompare(b.host) || a.port - b.port),
+    network: [...network.values()].sort((a, b) => a.host.localeCompare(b.host) || a.port - b.port || (a.protocol??'').localeCompare(b.protocol??'')),
     portDiscoveryPerformed: anyPortStage,
     web: {
       responsiveHosts: [...responsiveHosts].sort(),
@@ -284,7 +290,7 @@ export function buildReconReportModel(facts: ReportFacts): ReconReportModel {
       contexts: authenticatedContexts,
       note: authenticatedContexts.length
         ? 'Captured authentication contexts include their recorded state and usable observation count. Planned or unavailable contexts do not imply tested coverage. Session material is never included.'
-        : 'No authenticated Recon context was recorded for this run; the report does not imply authenticated coverage.',
+        : 'No authenticated Recon context was included in the available captured report evidence; the report does not imply authenticated coverage.',
     },
     limitations,
     changes: changesSection,

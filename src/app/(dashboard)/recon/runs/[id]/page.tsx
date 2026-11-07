@@ -1,3 +1,4 @@
+import {readRunNarrative} from '@/server/recon/runNarrative';
 import Link from 'next/link';
 import ReconRunRefresh from '@/components/ReconRunRefresh';
 import { paginationInput } from '@/lib/pagination';
@@ -45,6 +46,7 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
 
   const facts = await loadReconReportFacts(session.user.id, id);
   const report = buildReconReportModel(facts);
+  const narrative = await readRunNarrative(session.user.id,facts,report);
   const { run, observations, logs, rawLogLimit } = detail;
   const view = reconOverview({ status: run.status, outcome: run.outcome });
   const duration = elapsed(run.startedAt ?? run.createdAt, run.finishedAt);
@@ -77,7 +79,7 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
       </dl>
     </header>
 
-    <ReconReportView model={report} />
+    <ReconReportView model={report} narrative={narrative} />
 
     <h2 className="pt-2 text-xl font-semibold">Per-host execution detail</h2>
 

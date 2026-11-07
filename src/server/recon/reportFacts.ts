@@ -25,10 +25,10 @@ export async function loadReconReportFacts(userId: string, runId: string): Promi
       scans: {
         orderBy: [{ reconOrder: 'asc' }, { id: 'asc' }],
         select: {
-          id: true, status: true, outcome: true, startedAt: true, finishedAt: true,
+          id: true, scopeAssetId:true, status: true, outcome: true, startedAt: true, finishedAt: true,
           scopeAssetSnapshot: true, requiredUserAgent: true, reconPlan: true, toolVersions: true,
           authenticatedContextsSnapshot: true, changeSet: true,
-          reconSteps: { orderBy: { position: 'asc' }, select: { name: true, state: true, reason: true, details: true } },
+          reconSteps: { orderBy: { position: 'asc' }, select: { id: true, name: true, state: true, reason: true, details: true } },
           _count: { select: { artifacts: true } },
         },
       },
@@ -42,11 +42,11 @@ export async function loadReconReportFacts(userId: string, runId: string): Promi
   const buckets = await Promise.all(scanIds.map(scanRunId => prisma.reconArtifact.findMany({
     where: { scanRunId },
     orderBy: [{ kind: 'asc' }, { canonicalKey: 'asc' }, { id: 'asc' }],
-    select: { kind: true, value: true, verification: true },
+    select: { id:true,kind:true,value:true,verification:true,scopeState:true,sources:true,firstSeenAt:true,lastSeenAt:true },
     take: REPORT_ARTIFACTS_PER_HOST,
   })));
   const artifactsByRun = new Map<string, ReportArtifact[]>(scanIds.map((id, index) => [id,
-    buckets[index].map(row => ({ kind: row.kind, verification: row.verification, value: (row.value ?? {}) as Record<string, unknown> })),
+    buckets[index].map(row => ({ id:row.id,sources:row.sources,scopeState:row.scopeState,firstSeenAt:row.firstSeenAt.toISOString(),lastSeenAt:row.lastSeenAt.toISOString(),kind: row.kind, verification: row.verification, value: (row.value ?? {}) as Record<string, unknown> })),
   ]));
   // Authorization comes from captured boundaries, never today's mutable assets.
   const captured = run.scans.map(scan => scan.scopeAssetSnapshot as { normalizedValue?: string } | null);
@@ -56,6 +56,8 @@ export async function loadReconReportFacts(userId: string, runId: string): Promi
   const surfaces = scanIds.length ? exportAuthSurfaces(await readAuthSurface(scanIds)) : [];
 
   const scans: ReportScan[] = run.scans.map((scan, index) => ({
+    id: scan.id,
+    scopeAssetId: scan.scopeAssetId ?? (scan.scopeAssetSnapshot as {assetId?:string}|null)?.assetId ?? null,
     host: captured[index]?.normalizedValue ?? plans[index]?.boundary?.normalizedValue ?? null,
     status: scan.status,
     outcome: scan.outcome,
@@ -64,7 +66,7 @@ export async function loadReconReportFacts(userId: string, runId: string): Promi
     requiredUserAgent: scan.requiredUserAgent,
     authenticatedContexts: authContextCount(scan.authenticatedContextsSnapshot),
     plan: (scan.reconPlan ?? null) as ReportScan['plan'],
-    steps: scan.reconSteps.map(step => ({ name: step.name, state: step.state, reason: step.reason, details: step.details })),
+    steps: scan.reconSteps.map(step => ({ id: step.id, name: step.name, state: step.state, reason: step.reason, details: step.details })),
     artifacts: artifactsByRun.get(scan.id) ?? [],
     artifactCount: scan._count.artifacts,
     changeSet: scan.changeSet,
@@ -91,6 +93,7 @@ export async function loadReconReportFacts(userId: string, runId: string): Promi
     authorizedAssets: [...new Set(run.scans.map((scan, index) => captured[index]?.normalizedValue ?? plans[index]?.boundary?.normalizedValue).filter((value): value is string => Boolean(value)))],
     scans,
     authSurfaces: surfaces.map(surface => ({
+      observations: surface.observations.filter(row=>Boolean(row.id)).map(row=>({id:row.id!,scanRunId:surface.scanRunId,url:row.url,method:row.method,source:row.source,observedAt:row.observedAt,responseClass:row.responseClass,contextLabel:surface.contexts.find(c=>c.contextKey===row.contextKey)?.label??'Not recorded'})),
       contexts: surface.contexts.map(context => ({ label: context.label, mode: context.mode, state: context.state,
         observations: surface.observations.filter(row => row.contextKey === context.contextKey && !['UNAVAILABLE', 'SESSION_LOST'].includes(row.responseClass)).length,
       })),
