@@ -30,6 +30,27 @@ let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/progr
   });
   afterAll(async()=>{vi.restoreAllMocks();if(p){await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);await p.$disconnect();}if(root)await rm(root,{recursive:true,force:true});});
   async function run(){const c=await context(userId,programId);return p.scanRun.create({data:{targetId:c.id,type:'RECON',status:'RUNNING'}});}
+  it.each([true,false])('uses locked current policy when another writer adds a scope rule (active Recon: %s)',async(active)=>{
+    const {PATCH}=await import('@/app/api/programs/[id]/route');
+    let entered!:()=>void,release!:()=>void;
+    const observed=new Promise<void>(r=>{entered=r;}),gate=new Promise<void>(r=>{release=r;});
+    const read=p.bountyProgram.findFirst.bind(p.bountyProgram);
+    vi.spyOn(p.bountyProgram,'findFirst').mockImplementationOnce(args=>{
+      const result=read(args);
+      return result.then(async value=>{entered();await gate;return value;}) as typeof result;
+    });
+    const pending=PATCH(new Request('http://localhost',{method:'PATCH',body:JSON.stringify({scopeRules:['*.example.test']})}),{params:Promise.resolve({id:programId})});
+    await observed;
+    let assetId='';
+    try{
+      await p.bountyProgram.update({where:{id:programId},data:{scopeRules:['*.example.test','api.extra.test']}});
+      const asset=await p.scopeAsset.create({data:{programId,originalValue:'api.extra.test',normalizedValue:'api.extra.test',format:'SUBDOMAIN',type:'WEB_APPLICATION'}});assetId=asset.id;
+      if(active){const target=await context(userId,programId);await p.scanRun.create({data:{targetId:target.id,scopeAssetId:asset.id,type:'RECON',status:'RUNNING'}});}
+    }finally{release();}
+    expect((await pending).status).toBe(active?409:200);
+    expect((await p.scopeAsset.findUniqueOrThrow({where:{id:assetId}})).active).toBe(active);
+    expect((await p.bountyProgram.findUniqueOrThrow({where:{id:programId}})).scopeRules).toEqual(active?['*.example.test','api.extra.test']:['*.example.test']);
+  });
   it('starts from official rules without hosts; persists incrementally, normalizes and deduplicates across concurrent runs and programs',async()=>{
     expect(await p.target.count({where:{programId}})).toBe(0);
     const a=await run();const b=await run();
