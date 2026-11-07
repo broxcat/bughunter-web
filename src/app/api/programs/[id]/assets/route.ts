@@ -1,3 +1,8 @@
+import {prisma} from '@/lib/prisma';
+import {paginationInput} from '@/lib/pagination';
+import {assetReconStatus} from '@/lib/scopeAssets';
+import {listTargetAssets} from '@/server/recon/intelligence';
+import {lockOwnedProgram,backfillProgramAssets} from '@/server/scopeAssets';
 import { auth } from '@/lib/auth';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { assetInputSchema } from '@/lib/scopeAssets';
@@ -6,6 +11,19 @@ import { listScopeAssets, createScopeAsset, assetError } from '@/server/scopeAss
 type Context = { params: Promise<{ id: string }> };
 export async function GET(_req: Request, { params }: Context) {
   const session = await auth(); if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  const query=new URL(_req.url).searchParams;
+  if(query.has('page')||query.has('pageSize')){
+    let input;try{input=paginationInput(query);}catch{return Response.json({error:'Invalid page or pageSize'},{status:400});}
+    try{
+      const userId=session.user.id,programId=(await params).id;
+      await prisma.$transaction(async tx=>{await lockOwnedProgram(tx,userId,programId);await backfillProgramAssets(tx,programId,userId);});
+      const result=await listTargetAssets(userId,programId,input,query.get('active')==='1');
+      // Preserve the legacy metadata upgrade, only for records on this page.
+      const {ensureLegacyArtifacts}=await import('@/server/recon/artifacts');
+      for(const asset of result.items){const run=asset.scanRuns[0];if(run&&run.artifactVersion<2&&!['QUEUED','RUNNING'].includes(run.status)){await ensureLegacyArtifacts(run.id);run._count.artifacts=await prisma.reconArtifact.count({where:{scanRunId:run.id}});}}
+      return Response.json({...result,items:result.items.map(asset=>({...asset,reconStatus:assetReconStatus(asset.scanRuns[0]??null)}))},{headers:{'Cache-Control':'no-store'}});
+    }catch(e){return assetError(e);}
+  }
   try { return Response.json(await listScopeAssets(session.user.id, (await params).id), { headers: { 'Cache-Control': 'no-store' } }); } catch (e) { return assetError(e); }
 }
 export async function POST(req: Request, { params }: Context) {

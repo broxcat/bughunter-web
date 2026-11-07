@@ -1,7 +1,8 @@
+import { paginationBounds, type PageRequest } from '@/lib/pagination';
 import { prisma } from '@/lib/prisma';
 import { artifactData, artifactSelect, ensureLegacyArtifacts } from './artifacts';
 import { ResearchError } from '../research/workspace';
-import { assetValueRank,assetAllowsUrl,assetAllowsHost } from '@/lib/scopeAssets';
+import { assetAllowsUrl,assetAllowsHost } from '@/lib/scopeAssets';
 import { isExcluded } from '@/lib/bountyProgram';
 import { classifyReconUrl, type ReconArtifactData } from '@/lib/reconArtifacts';
 import { isSafeReadUrl } from '@/lib/observationSafety';
@@ -39,6 +40,16 @@ export async function loadAssetReconDetail(userId:string,programId:string,assetI
   if(run){const item=history.find(h=>h.id===run.id);if(item)item._count.artifacts=run._count.artifacts;}
   return{asset,run,history,artifacts,counts,discoveryCount:run?._count.artifacts??0,truncated:Boolean(run&&run._count.artifacts>artifacts.length),priorities:researchPriorities(artifacts,asset,run?.changeSet),untrustedData:true};
 }
-export async function listTargetAssets(userId:string,programId?:string) {
-  return prisma.scopeAsset.findMany({where:{...(programId?{programId}:{}),program:{ownerId:userId}},orderBy:[{programId:'asc'},{normalizedValue:'asc'}],take:1000,include:{program:{select:{id:true,companyName:true}},scanRuns:{take:1,orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true,status:true,outcome:true,finishedAt:true,_count:{select:{artifacts:true}}}}}}).then(rows=>rows.sort((a,b)=>a.program.companyName.localeCompare(b.program.companyName)||assetValueRank(a.assetValue)-assetValueRank(b.assetValue)||a.normalizedValue.localeCompare(b.normalizedValue)));
+export async function listTargetAssets(userId: string, programId?: string, input?: PageRequest,activeOnly=false) {
+  const where = { ...(activeOnly?{active:true}:{}), ...(programId ? { programId } : {}), program: { ownerId: userId },
+    ...(input?.q ? { normalizedValue: { contains: input.q, mode: 'insensitive' as const } } : {}) };
+  return prisma.$transaction(async tx => {
+    const bounds = input ? paginationBounds(input, await tx.scopeAsset.count({ where })) : undefined;
+    const items = await tx.scopeAsset.findMany({ where,
+      orderBy: [{ program: { companyName: 'asc' } }, { programId: 'asc' }, { assetValue: 'asc' }, { normalizedValue: 'asc' }, { id: 'asc' }],
+      ...(bounds ? { skip: bounds.skip, take: bounds.pageSize } : {}),
+      include: { program: { select: { id: true, companyName: true } },
+        scanRuns: { take: 1, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { id: true,artifactVersion:true, status: true, outcome: true, finishedAt: true, _count: { select: { artifacts: true } } } } } });
+    return { ...bounds, items };
+  }, { isolationLevel: 'RepeatableRead' });
 }
