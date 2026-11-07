@@ -23,7 +23,14 @@ const config=join(temp,'compose.json'), compose=(...args)=>run('docker',['compos
 // Remove only volumes labelled with this unique disposable project.
 async function cleanDisposableProject(){
  assert(prefix.startsWith('bh-console-'));
- await compose('down','--remove-orphans');
+ // All assertions have finished; only this disposable project is being stopped.
+ // Keep teardown bounded even when the local Docker daemon stalls a stop RPC.
+ const down=()=>compose('down','--remove-orphans','--timeout','5');
+ try { await down(); } catch(error) {
+   if(!error.killed)throw error;
+   console.error('Disposable Research teardown timed out; retrying this project once.');
+   await down();
+ }
  const names=(await run('docker',['volume','ls','--filter',`label=com.docker.compose.project=${prefix}`,'--format','{{.Name}}'])).split('\n').filter(Boolean);
  for(const name of names){const owner=await run('docker',['volume','inspect','--format','{{index .Labels "com.docker.compose.project"}}',name]);assert.equal(owner,prefix,'Refusing another project volume');await run('docker',['volume','rm',name]);}
 }
@@ -143,7 +150,18 @@ try {
  const connectMcp=async(id,command)=>{const client=new Client({name:'local-console-verification',version:'1.0.0'});await client.connect(new StdioClientTransport({command:'ssh',args:[...sshArgs,'researcher@127.0.0.1',`cd /workspaces/research_${id} && ${command}`],stderr:'pipe'}));return client;};
  // Separate official inventory: reconnect must replace Java and rediscover tools.
  let official=await connectMcp(data.ids[1],'bughunter-portswigger-mcp');
- const expectedInventory=[...fixture.inventory]; assert.equal((await official.listTools()).tools.length,5);
+ const expectedInventory=[...fixture.inventory];
+ // SSH forwarding and the real Java proxy initialize asynchronously. Observe
+ // the actual fixture inventory rather than assuming the 600ms SSH head start
+ // proves readiness. Keep the inventory assertion and a bounded failure.
+ const inventoryDeadline=Date.now()+45000;let initialInventory=[];
+ do {
+   initialInventory=(await official.listTools()).tools;
+   if(initialInventory.length===5)break;
+   assert.equal(tunnel.exitCode,null,'Disposable reverse SSH tunnel exited before MCP readiness');
+   await wait(200);
+ }while(Date.now()<inventoryDeadline);
+ assert.equal(initialInventory.length,5,'Local fixture MCP inventory did not become ready');
  for(const inventory of [[],['burp_status','burp_history','burp_save_observation']]) {
    fixture.inventory.splice(0,fixture.inventory.length,...inventory);
    await page.getByRole('button',{name:'Reconnect',exact:true}).click();

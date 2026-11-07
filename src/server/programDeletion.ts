@@ -1,3 +1,5 @@
+import { readPublicationManifest, discardPublicationTemporary, discardPublicationArchive } from './research/publicationFiles';
+import { withPublicationLock } from './research/publicationLock';
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { prisma } from '@/lib/prisma';
@@ -30,7 +32,7 @@ export async function deleteProgram(userId: string, programId: string) {
     if (targets.some(t => t.userId !== userId)) throw new ResearchError('Program ownership is inconsistent', 409);
     const ids = targets.map(t => t.id);
     const runs = await tx.scanRun.findMany({ where: { targetId: { in: ids } }, select: { id: true } });
-    const sessions = await tx.researchSession.findMany({ where: { targetId: { in: ids } }, select: { workspaceId: true, targetId: true } });
+    const sessions = await tx.researchSession.findMany({ where: { targetId: { in: ids } }, select: { id: true, publicationManifest: true, workspaceId: true, targetId: true } });
     // Also recover a publication whose SQL transaction failed after filesystem
     // publication. Deterministic console paths belong only to this identity.
     for (const target of targets) {
@@ -38,9 +40,12 @@ export async function deleteProgram(userId: string, programId: string) {
       if (sessions.some(s => s.workspaceId === workspaceId)) continue;
       for (const name of [workspaceId, `.tmp-${workspaceId}`]) {
         const stat = await lstat(join(consoleRoot(), name)).catch(e => { if(e.code !== 'ENOENT') throw e; return null; });
-        if (stat) { sessions.push({ workspaceId, targetId: target.id }); break; }
+        if (stat) { sessions.push({ id: '', publicationManifest: null, workspaceId, targetId: target.id }); break; }
       }
     }
+    // The committed program tombstone rejects new reservations. Drain prior
+    // filesystem publishers before cleanup; they cannot write after this barrier.
+    for (const session of sessions) await withPublicationLock(researchRootFor(session.workspaceId), session.workspaceId, async () => {});
     await prisma.targetReconRun.updateMany({where:{programId,status:{in:['QUEUED','RUNNING']}},data:{cancelRequestedAt:new Date()}});
     await prisma.reconSummary.updateMany({where:{programId,status:{in:['PENDING','RUNNING']}},data:{status:'CANCELLED'}});
     for (const run of runs) await requestScanCancellation(run.id, userId);
@@ -65,7 +70,15 @@ export async function deleteProgram(userId: string, programId: string) {
     }
     // Redis job payloads/history also belong exclusively to these scans.
     await purgeScanJobs(runs.map(r => r.id));
-    for (const session of sessions) await removeWorkspace(researchRootFor(session.workspaceId), session.workspaceId);
+    for (const session of sessions) {
+      if (session.publicationManifest) {
+        const manifest = readPublicationManifest(session.publicationManifest);
+        if (manifest.sessionId !== session.id || manifest.workspaceId !== session.workspaceId || manifest.targetId !== session.targetId) throw new ResearchError('Workspace reservation mismatch', 409);
+        await discardPublicationTemporary(researchRootFor(session.workspaceId), manifest);
+        await discardPublicationArchive(researchRootFor(session.workspaceId), manifest);
+      }
+      await removeWorkspace(researchRootFor(session.workspaceId), session.workspaceId);
+    }
     // Reports spanning other targets and OOB tokens shared with other findings
     // remain intact. Exclusive report content must not survive SET NULL FKs.
     await prisma.$transaction(async tx=>{

@@ -1,24 +1,17 @@
-import {capturedCoverage} from './coverage';
 import {COVERAGE_INSTRUCTIONS,COVERAGE_NOTICE,type CoverageView} from '@/lib/research/coverage';
-import {publishCoverageFiles} from './planFiles';
 import { constants } from 'node:fs';
-import { open, mkdir, lstat, chmod, chown, rename, rm } from 'node:fs/promises';
+import { open, lstat, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { Prisma } from '@prisma/client';
-import { prisma } from '@/lib/prisma';
-import { targetIdentity, targetWorkspaceId, sha256 } from '@/lib/research/terminal';
+import { targetWorkspaceId, sha256 } from '@/lib/research/terminal';
 import { consolePolicySchema, consoleCodexConfig } from '@/lib/research/consolePolicy';
-import { assertResearchTarget, researchTargetSelect, researchAuthorizationSnapshot, researchAuthorizationMatches, createResearchBundle, ResearchError, type ResearchTarget, type ResearchRecon, type ResearchFinding } from './workspace';
-import { captureProgramAssessment } from '@/server/assessment';
+import { createResearchBundle, ResearchError, type ResearchTarget, type ResearchRecon, type ResearchFinding } from './workspace';
 import { assessmentMarkdown, captureAssessmentSnapshot } from '@/lib/assessment';
 import { researchAssessmentInstructions } from './workspace';
-import { researchSessionSelect } from './sessions';
 import { CONSOLE_RULES, PROGRAM_CONSOLE_RULES, consoleBootstrap } from './consoleRules';
 import { exportText, researchIsPassive } from './workspace';
 import type { ResearchPlanPublication } from './planFiles';
-import { captureResearchPlanForTarget,readCapturedResearchPlan } from './plans';
-import { reconJson } from './reconContext';
 
 export const consoleRoot = () => process.env.RESEARCH_CONSOLE_ROOT ?? resolve('data/research/targets');
 export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, findings: ResearchFinding[], session: { id: string; workspaceId: string; createdAt: Date; authorizationSnapshot?: unknown }, plan?:ResearchPlanPublication,coverage?:CoverageView) {
@@ -61,10 +54,13 @@ export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, find
   for (const [path, contents] of Object.entries(old)) if (path.startsWith('recon/') || path.startsWith('research/plan') || path.startsWith('research/coverage')&&path!=='research/coverage-events.json' || path === 'findings/existing-findings.json') files[path] = contents;
   return files;
 }
-async function refreshConsoleInventory(tx: Prisma.TransactionClient, target: ResearchTarget, workspaceId: string) {
+export async function consoleInventory(tx: Prisma.TransactionClient, target: ResearchTarget) {
   const hosts = await tx.target.findMany({ where: { programId: target.program!.id, userId: target.userId, active: true, contextOnly: false }, orderBy: { host: 'asc' }, take: 10000, select: {id:true,host:true,createdAt:true,discoverySource:true,discoveredAt:true,discoveredByScanRunId:true} });
   const runs = await tx.scanRun.findMany({ where: {target:{programId:target.program!.id,userId:target.userId}}, orderBy:{createdAt:'desc'},take:30, select:{id:true,targetId:true,status:true,outcome:true,createdAt:true,finishedAt:true,_count:{select:{discoveries:true}}} });
   const discoveries = await tx.hostDiscovery.findMany({where:{scanRun:{target:{programId:target.program!.id,userId:target.userId}}},orderBy:{createdAt:'desc'},take:1000,select:{host:true,state:true,source:true,createdAt:true,scanRunId:true,added:true}});
+  return JSON.stringify({ generatedAt:new Date().toISOString(),programId:target.program!.id,untrustedData:true,authorizationGranted:false,researchCoverage:{path:'research/coverage-current.json',notice:COVERAGE_NOTICE},hosts,runs,discoveries },null,2)+'\n';
+}
+export async function refreshConsoleInventory(workspaceId: string, text: string) {
   await ancestors(consoleRoot());
   // Runtime data volume; inventories are not deployable build inputs.
   const workspace = await open(/* turbopackIgnore: true */ join(/* turbopackIgnore: true */ consoleRoot(), workspaceId), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
@@ -73,7 +69,7 @@ async function refreshConsoleInventory(tx: Prisma.TransactionClient, target: Res
   const temporary = `.inventory-${randomUUID()}`;
   try {
     const file = await open(`/proc/self/fd/${directory.fd}/${temporary}`, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o440);
-    try { await file.chown(process.getuid!(), Number(process.env.RESEARCH_WORKSPACE_GID ?? process.getgid?.())); await file.writeFile(JSON.stringify({ generatedAt:new Date().toISOString(),programId:target.program!.id,untrustedData:true,authorizationGranted:false,researchCoverage:{path:'research/coverage-current.json',notice:COVERAGE_NOTICE},hosts,runs,discoveries },null,2)+'\n'); await file.sync(); } finally {await file.close();}
+    try { await file.chown(process.getuid!(), Number(process.env.RESEARCH_WORKSPACE_GID ?? process.getgid?.())); await file.writeFile(text); await file.sync(); } finally {await file.close();}
     await rename(`/proc/self/fd/${directory.fd}/${temporary}`, `/proc/self/fd/${directory.fd}/hosts.json`);
   } finally { await rm(`/proc/self/fd/${directory.fd}/${temporary}`,{force:true}); await directory.close(); }
 }
@@ -81,63 +77,17 @@ async function ancestors(path: string) {
   for (let p = resolve(path); p !== dirname(p); p = dirname(p)) { const s = await lstat(p); if (!s.isDirectory() || s.isSymbolicLink()) throw new ResearchError('Unsafe Research root'); }
 }
 export async function writeConsoleWorkspace(root: string, id: string, files: Record<string, string>) {
+  const { withPublicationLock } = await import('./publicationLock');
+  const { makePublicationManifest, writePublication, publicationExists, activatePublication } = await import('./publicationFiles');
   const workspaceId = targetWorkspaceId(id);
-  if (!isAbsolute(root)) throw new ResearchError('Research root must be absolute');
-  const uid = Number(process.env.RESEARCH_WORKSPACE_UID ?? process.getuid?.()), gid = Number(process.env.RESEARCH_WORKSPACE_GID ?? process.getgid?.());
-  if (![uid, gid].every(n => Number.isSafeInteger(n) && n >= 0)) throw new ResearchError('Invalid Research owner');
-  await mkdir(root, { recursive: true, mode: 0o3770 }); await ancestors(root);
-  await chown(root, process.getuid!(), gid); await chmod(root, 0o3770);
-  const temporary = join(root, `.tmp-${workspaceId}`), final = join(root, workspaceId);
-  try { await lstat(final); throw new ResearchError('Workspace already exists; refusing to overwrite', 409); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
-  await mkdir(temporary, { mode: 0o700 });
-  try {
-    // Root and inputs are web-owned; operator-owned research subdirectories are writable.
-    for (const dir of ['recon', 'research', 'requests', 'requests/burp', 'scripts', 'findings', '.codex', '.agents', '.agents/bughunter']) {
-      const writable = /^(requests|scripts|findings)/.test(dir);
-      await mkdir(join(temporary, dir), { recursive: true }); await chown(join(temporary, dir), writable ? uid : process.getuid!(), gid); await chmod(join(temporary, dir), writable ? 0o2770 : 0o2750);
-    }
-    for (const [name, content] of Object.entries(files)) {
-      if (!/^[A-Za-z0-9_./-]+$/.test(name) || name.split('/').some(p => !p || p === '.' || p === '..')) throw new ResearchError('Invalid export entry');
-      const writable = /^(requests|scripts|findings)\//.test(name);
-      const file = await open(join(temporary, name), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      try { await file.chown(writable ? uid : process.getuid!(), gid); await file.chmod(writable ? 0o660 : 0o440); await file.writeFile(content); await file.sync(); } finally { await file.close(); }
-    }
-    await chown(temporary, process.getuid!(), gid); await chmod(temporary, 0o2750);
-    await rename(temporary, final);
-  } catch (e) { await rm(temporary, { recursive: true, force: true }); throw e; }
+  return withPublicationLock(root, workspaceId, async () => {
+    if (await publicationExists(root, workspaceId)) throw new ResearchError('Workspace already exists; refusing to overwrite', 409);
+    const manifest = makePublicationManifest(files, { sessionId: 'standalone', targetId: id, workspaceId, policyIdentity: sha256(files['scope.md'] ?? '') }, 'console');
+    await writePublication(root, files, manifest);
+    await activatePublication(root, manifest);
+  });
 }
 export async function ensureTargetConsole(userId: string, targetId: string) {
-  targetIdentity.parse(targetId);
-  return prisma.$transaction(async tx => {
-    await tx.$queryRaw`SELECT "id" FROM "Target" WHERE "id" = ${targetId} AND "userId" = ${userId} FOR UPDATE`;
-    let target = await tx.target.findFirst({ where: { id: targetId, userId }, select: researchTargetSelect });
-    if (!target) throw new ResearchError('Target not found', 404);
-    await tx.$queryRaw`SELECT "id" FROM "Scope" WHERE "id" = ${target.scope.id} FOR SHARE`;
-    if (target.program) await tx.$queryRaw`SELECT "id" FROM "BountyProgram" WHERE "id" = ${target.program.id} FOR SHARE`;
-    target = await tx.target.findUniqueOrThrow({ where: { id: targetId }, select: researchTargetSelect });
-    if(target.consoleDeletingAt)throw new ResearchError('Console deletion in progress; retry deletion',409);
-    assertResearchTarget(target, userId);
-    const current = researchAuthorizationSnapshot(target);
-    const existing = await tx.researchSession.findUnique({ where: { consoleTargetId: targetId }, select: researchSessionSelect });
-    if (existing) {
-      if (existing.status !== 'READY') throw new ResearchError('Console workspace is unavailable', 409);
-      if (!researchAuthorizationMatches(existing.authorizationSnapshot, target)) throw new ResearchError('Research policy changed. Stop active testing and refresh the workspace policy through the documented operator procedure.', 409);
-      await refreshConsoleInventory(tx, target, existing.workspaceId);
-      const captured=existing.researchPlanId?await readCapturedResearchPlan(tx,existing.researchPlanId,userId,targetId):null;
-      await publishCoverageFiles(consoleRoot(),existing.workspaceId,await capturedCoverage(tx,userId,targetId,captured?.plan??null));
-      return { session: existing, target };
-    }
-    let recon = await tx.scanRun.findFirst({ where: { targetId, type: 'RECON', status: 'COMPLETED', OR: [{reconCorpus: { not: Prisma.DbNull }},{artifacts:{some:{}}},{surfaceObservations:{some:{}}}] }, orderBy: [{createdAt:'desc'},{id:'desc'}], select: { id: true, reconCorpus: true } });
-    const findings = await tx.finding.findMany({ where: { targetId }, orderBy: { createdAt: 'asc' }, take: 1000, select: { id: true, title: true, severity: true, vulnClass: true, reviewStatus: true, location: true } });
-    const assessment = await captureProgramAssessment(tx, target.program!.id);
-    const plan=await captureResearchPlanForTarget(tx,userId,targetId,{scanRunId:recon?.id});
-    if(plan&&plan.selectedScanRunId!==recon?.id)recon=await tx.scanRun.findUnique({where:{id:plan.selectedScanRunId},select:{id:true,reconCorpus:true}});
-    const session = await tx.researchSession.create({ data: { userId, targetId, consoleTargetId: targetId, workspaceId: targetWorkspaceId(targetId), targetHost: target.host, programName: target.program!.companyName, scopeMarkdown: '', reconScanRunId: recon?.id,researchPlanId:plan?.id, authorizationSnapshot: { ...current, ...assessment } } });
-    const coverage=await capturedCoverage(tx,userId,targetId,plan?.plan??null);
-    const files = consoleBundle(target, recon, findings, session,plan?{id:plan.id,contentSha256:plan.contentSha256,jsonText:reconJson(plan.plan),markdownText:plan.markdown}:undefined,coverage);
-    await writeConsoleWorkspace(consoleRoot(), targetId, files);
-    await refreshConsoleInventory(tx, target, session.workspaceId);
-    const ready = await tx.researchSession.update({ where: { id: session.id }, data: { status: 'READY', scopeMarkdown: files['scope.md'], files: Object.keys(files).sort() }, select: researchSessionSelect });
-    return { session: ready, target };
-  }, { timeout: 15000 });
+  const { provisionResearch } = await import('./provisioning');
+  return provisionResearch(userId, targetId, 'console');
 }

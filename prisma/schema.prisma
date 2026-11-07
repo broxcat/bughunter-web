@@ -690,6 +690,8 @@ enum ResearchSessionStatus {
 }
 
 model ResearchSession {
+  // Trusted hashes for CREATING recovery; never authorization from filesystem.
+  publicationManifest Json?
   evidenceRecords EvidenceRecord[]
 
   coverageEvents ResearchCoverageEvent[]

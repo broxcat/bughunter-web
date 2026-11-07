@@ -1,8 +1,8 @@
-import {coverageInitialFiles,isCoverageInput} from './coverageFiles';
+import {coverageInitialFiles} from './coverageFiles';
 import {COVERAGE_INSTRUCTIONS,type CoverageView} from '@/lib/research/coverage';
 import { randomUUID, createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdir, lstat, open, rename, rm, chown, chmod } from "node:fs/promises";
+import { lstat, open } from "node:fs/promises";
 import { dirname, join, resolve, isAbsolute } from "node:path";
 import { persistedCorpusSchema } from "@/server/recon/corpus";
 import { safeObservationUrl, redactObservationText } from "@/lib/observationSafety";
@@ -11,11 +11,9 @@ import { scanRejection } from "@/server/execution";
 import { hypothesesJsonSchema } from "@/lib/research/hypotheses";
 import { burpCodexConfig, burpPolicySchema } from "@/lib/research/burp";
 import { RESEARCH_RULES, HYPOTHESES } from "./rules";
-import { bundleZip } from "./zip";
 import type { Prisma } from "@prisma/client";
 import { assetAllowsHost } from '@/lib/scopeAssets';
 import { assessmentMarkdown, assessmentSnapshotFromRun, captureAssessmentSnapshot, type AssessmentSnapshot } from '@/lib/assessment';
-import { isResearchPlanInput } from '@/lib/research/planReference';
 import { researchPlanInitialFiles, type ResearchPlanPublication } from './planFiles';
 
 // Explicit projection: no Prisma credential or AI secret can enter the exporter.
@@ -163,12 +161,6 @@ export function workspacePath(root: string, workspaceId: string) {
 }
 export const newWorkspaceId = () => randomUUID();
 const digest = (value: Buffer) => createHash("sha256").update(value).digest("hex");
-async function safeDirectory(path: string, mode: number, gid: number) {
-  await mkdir(path, { recursive: true, mode });
-  const info = await lstat(path);
-  if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.()) throw new ResearchError("Unsafe workspace directory");
-  await chown(path, info.uid, gid); await chmod(path, mode);
-}
 async function checkAncestors(path: string) {
   let current = resolve(path);
   while (current !== dirname(current)) {
@@ -178,42 +170,16 @@ async function checkAncestors(path: string) {
   }
 }
 export async function writeResearchWorkspace(root: string, workspaceId: string, files: Record<string, string>) {
-  const final = workspacePath(root, workspaceId), temp = join(root, `.tmp-${workspaceId}`);
-  const gid = Number(process.env.RESEARCH_WORKSPACE_GID ?? process.getgid?.());
-  if (!Number.isSafeInteger(gid) || gid < 0) throw new ResearchError("Invalid workspace group");
-  await mkdir(root, { recursive: true, mode: 0o3770 });
-  await checkAncestors(root);
-  await safeDirectory(root, 0o3770, gid); // sticky bit: researcher cannot rename another owner's sessions
-  const exports = join(root, ".exports");
-  await safeDirectory(exports, 0o700, gid);
-  await mkdir(temp, { mode: 0o700 }); // exclusive; no partial workspace is visible to SSH
-  const archiveTemp = join(exports, `.tmp-${workspaceId}`), archivePath = join(exports, `${workspaceId}.zip`);
-  let archivePublished = false;
-  try {
-    // Never overwrite a prior session, even with the same server identity.
-    try { await lstat(final); throw new ResearchError("Workspace already exists"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    for (const [name, content] of Object.entries(files)) {
-      if (!/^[a-zA-Z0-9_./-]+$/.test(name) || name.startsWith("/") || name.split("/").some(p => !p || p === "." || p === "..")) throw new ResearchError("Invalid bundle file");
-      const writable = /^(research|evidence|scripts)\//.test(name) && !isResearchPlanInput(name) && !isCoverageInput(name);
-      // A sticky, web-owned research directory protects immutable plan inputs
-      // from replacement while existing notes and hypotheses remain writable.
-      if (dirname(name) !== ".") await safeDirectory(join(temp, dirname(name)), dirname(name) === 'research' ? 0o3770 : writable ? 0o2770 : 0o2750, gid);
-      const file = await open(join(temp, name), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, writable ? 0o660 : 0o440);
-      try { await file.chown(process.getuid!(), gid); await file.chmod(writable ? 0o660 : 0o440); await file.writeFile(content); await file.sync(); } finally { await file.close(); }
-    }
-    const zip = bundleZip(files), archive = await open(archiveTemp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    try { await archive.writeFile(zip); await archive.sync(); } finally { await archive.close(); }
-    await chown(temp, process.getuid!(), gid); await chmod(temp, 0o2750);
-    await rename(archiveTemp, archivePath);
-    archivePublished = true;
-    await rename(temp, final); // single publication point
-    return { exportSha256: digest(zip), files: Object.keys(files).sort() };
-  } catch (error) {
-    await rm(temp, { recursive: true, force: true });
-    await rm(archiveTemp, { force: true });
-    if (archivePublished) await rm(archivePath, { force: true });
-    throw error;
-  }
+  const { withPublicationLock } = await import('./publicationLock');
+  const { makePublicationManifest, writePublication, publicationExists, publicationArchiveExists, activatePublication } = await import('./publicationFiles');
+  workspacePath(root, workspaceId);
+  return withPublicationLock(root, workspaceId, async () => {
+    if (await publicationExists(root, workspaceId) || await publicationArchiveExists(root, workspaceId)) throw new ResearchError('Workspace already exists', 409);
+    const manifest = makePublicationManifest(files, { sessionId: 'standalone', targetId: 'standalone', workspaceId, policyIdentity: digest(Buffer.from(files['scope.md'] ?? '')) }, 'legacy');
+    await writePublication(root, files, manifest);
+    await activatePublication(root, manifest);
+    return { exportSha256: manifest.archive!.sha256, files: Object.keys(files).sort() };
+  });
 }
 export async function readResearchZip(root: string, workspaceId: string, expectedHash: string) {
   workspacePath(root, workspaceId);

@@ -127,15 +127,13 @@ const create = (extra = {}) => POST(new Request("http://app.example.test/api/res
     expect((await zip(new Request("http://app.example.test"), context(s.id))).status).toBe(409);
     await prisma.researchSession.update({ where: { id: s.id }, data: { exportSha256: dbSession.exportSha256 } });
   });
-  it("records a safe FAILED session when filesystem publication is refused", async () => {
+  it("rejects an unsafe root before reservation, without falsely active session state", async () => {
     const unsafe = join(root, "unsafe-root");
     await symlink(tmpdir(), unsafe);
     process.env.RESEARCH_WORKSPACE_ROOT = unsafe;
     try {
-      const response = await create(); expect(response.status).toBe(400);
-      const failed = await prisma.researchSession.findFirstOrThrow({ where: { targetId } });
-      expect(failed.status).toBe("FAILED"); expect(failed.exportSha256).toBeNull();
-      expect((await zip(new Request("http://app.example.test"), context(failed.id))).status).toBe(409);
+      const response = await create(); expect(response.status).toBe(409);
+      expect(await prisma.researchSession.count({ where: { targetId } })).toBe(0);
       expect(JSON.stringify(mocks.log.mock.calls)).not.toContain(root);
     } finally { process.env.RESEARCH_WORKSPACE_ROOT = root; }
   });
