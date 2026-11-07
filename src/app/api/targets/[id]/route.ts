@@ -1,3 +1,4 @@
+import {paginationInput,paginationBounds} from '@/lib/pagination';
 import {publicFinding} from '@/server/findingPrivacy';
 import { executionSelect } from "@/server/queue/executionAttempts";
 import { withScanDispatch } from "@/lib/scanDispatch";
@@ -9,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 
 // GET /api/targets/[id] — one owned target with its scope, scan runs, and findings.
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await auth();
@@ -19,6 +20,18 @@ export async function GET(
 
   const { id } = await params;
 
+  const query=new URL(req.url).searchParams;
+  if(query.has('scanPage')||query.has('pageSize')){
+    let input;try{input=paginationInput(new URLSearchParams({page:query.get('scanPage')??'1',pageSize:query.get('pageSize')??'25'}));}catch{return NextResponse.json({error:'Invalid scanPage or pageSize'},{status:400});}
+    const result=await prisma.$transaction(async tx=>{
+      const target=await tx.target.findFirst({where:{id,userId:session.user.id},include:{scope:true,program:true,scopeAsset:{select:{id:true,programId:true,normalizedValue:true,format:true,active:true}},discoveredFromAsset:{select:{id:true,programId:true,normalizedValue:true,format:true,active:true}},_count:{select:{findings:true}}}});
+      if(!target)return null;
+      const scanPage=paginationBounds(input,await tx.scanRun.count({where:{targetId:id}}));
+      const scanRuns=await tx.scanRun.findMany({where:{targetId:id},orderBy:[{createdAt:'desc'},{id:'desc'}],skip:scanPage.skip,take:scanPage.pageSize,include:{executionAttempts:executionSelect,jobOutbox:{select:dispatchSelect}}});
+      return{...target,findingCount:target._count.findings,scanPage,scanRuns:scanRuns.map(withScanDispatch),scanRejection:scanRejection(target,'RECON')};
+    },{isolationLevel:'RepeatableRead'});
+    return NextResponse.json(result??{error:'Not found'},{status:result?200:404,headers:{'Cache-Control':'private, no-store'}});
+  }
   const target = await prisma.target.findFirst({
     where: { id, userId: session.user.id },
     include: {
@@ -26,8 +39,8 @@ export async function GET(
       program: true,
       scopeAsset: { select: { id: true, programId: true, normalizedValue: true, format: true, active: true } },
       discoveredFromAsset: { select: { id: true, programId: true, normalizedValue: true, format: true, active: true } },
-      scanRuns: { orderBy: { createdAt: "desc" }, include: { executionAttempts: executionSelect, jobOutbox: { select: dispatchSelect } } },
-      findings: { orderBy: { createdAt: "desc" } },
+      scanRuns: { orderBy: [{createdAt:'desc'},{id:'desc'}], include: { executionAttempts: executionSelect, jobOutbox: { select: dispatchSelect } } },
+      findings: { orderBy: [{createdAt:'desc'},{id:'desc'}] },
     },
   });
 

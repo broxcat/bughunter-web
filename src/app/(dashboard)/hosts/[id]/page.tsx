@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import {useRouter,useSearchParams} from "next/navigation";
+import {paginationInput} from "@/lib/pagination";
+import CollectionPager from "@/components/CollectionPager";
 import TargetAuthentication from "@/components/TargetAuthentication";
 import CreateResearchButton from "@/components/CreateResearchButton";
-import { use, useEffect, useState } from "react";
+import { Suspense, use, useEffect, useState } from "react";
 import ScanCancelButton from "@/components/ScanCancelButton";
 import ScanLogViewer from "@/components/ScanLogViewer";
 import {
@@ -43,16 +46,22 @@ interface TargetDetail {
   label: string | null;
   scope: Scope;
   scanRuns: ScanRun[];
-  findings: { id: string }[];
+  findingCount:number;
+  scanPage:{page:number;pages:number;total:number;pageSize:number};
 }
 
-export default function TargetDetailPage({
+export default function TargetDetailPage(props:{params:Promise<{id:string}>}){const {id}=use(props.params);return <Suspense fallback={<p role="status">Loading host…</p>}><TargetDetailContent key={id} {...props}/></Suspense>;}
+function TargetDetailContent({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router=useRouter(),paramsQuery=useSearchParams(),query=paramsQuery.toString();
+  const input=paginationInput(new URLSearchParams({page:paramsQuery.get("scanPage")??"1",pageSize:paramsQuery.get("pageSize")??"25"}),false);
+  const endpoint=`/api/targets/${id}?scanPage=${input.page}&pageSize=${input.pageSize}`;
 
+  const [loadedEndpoint,setLoadedEndpoint]=useState('');
   const [target, setTarget] = useState<TargetDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +69,7 @@ export default function TargetDetailPage({
 
   async function load() {
     try {
-      const res = await fetch(`/api/targets/${id}`);
+      const res = await fetch(endpoint);
       if (!res.ok) throw new Error(`Failed to load target (${res.status})`);
       setTarget(await res.json());
       setError(null);
@@ -71,14 +80,15 @@ export default function TargetDetailPage({
     }
   }
 
-  useEffect(() => {
-    fetch(`/api/targets/${id}`).then(async t => {
-      if (!t.ok) throw new Error("Host not found"); setTarget(await t.json());
-    }).catch(e => setError(e.message)).finally(() => setLoading(false));
-  }, [id]);
+  useEffect(()=>{const c=new AbortController();
+    fetch(endpoint,{signal:c.signal}).then(async r=>{
+      if(!r.ok)throw new Error('Host not found');const body=await r.json();if(c.signal.aborted)return;setTarget(body);setError(null);setLoadedEndpoint(endpoint);
+      const current=new URLSearchParams(window.location.search);if(current.has('scanPage')&&current.get('scanPage')!==String(body.scanPage.page)){current.set('scanPage',String(body.scanPage.page));router.replace(`/hosts/${id}?`+current);}
+    }).catch(e=>{if(!c.signal.aborted){setTarget(null);setError(e.message);setLoadedEndpoint(endpoint);}}).finally(()=>{if(!c.signal.aborted)setLoading(false);});return()=>c.abort();
+  },[id,endpoint,router]);
 
 
-  if (loading) return <p className="text-sm text-muted">Loading…</p>;
+  if (loading||loadedEndpoint!==endpoint) return <p className="text-sm text-muted">Loading…</p>;
   if (error && !target)
     return (
       <div
@@ -96,7 +106,7 @@ export default function TargetDetailPage({
   return (
     <div className="space-y-8">
       <div>
-        <Link href={target.program ? `/scopes/${target.program.id}` : "/scopes"} className="text-sm text-muted hover:text-foreground">
+        <Link href={target.program ? `/scopes?target=${target.program.id}` : "/scopes"} className="text-sm text-muted hover:text-foreground">
           ← Scope
         </Link>
         <h1 className="mt-2 font-mono text-2xl font-semibold tracking-tight text-foreground">
@@ -124,7 +134,7 @@ export default function TargetDetailPage({
             href={`/targets/${id}/findings`}
             className="text-brand hover:text-brand-hover"
           >
-            Findings ({target.findings.length})
+            Findings ({target.findingCount})
           </Link>
           <Link
             href={`/targets/${id}/report`}
@@ -166,6 +176,7 @@ export default function TargetDetailPage({
 
       <div className="space-y-3">
         <h2 className="text-sm font-medium text-foreground">Scan runs</h2>
+        <CollectionPager path={`/hosts/${id}`} query={query} {...target.scanPage} pageKey="scanPage" label="Host history pages" noun="scan runs"/>
         {target.scanRuns.length === 0 ? (
           <p className="text-sm text-muted">No scan runs yet.</p>
         ) : (
@@ -173,28 +184,32 @@ export default function TargetDetailPage({
             {target.scanRuns.map((run) => (
               <li key={run.id}>
                 <Card className="overflow-hidden">
-                  <button
+                  <div className="flex flex-wrap items-center gap-3 p-4"><button
+                    aria-expanded={openRun === run.id}
+                    aria-controls={openRun === run.id ? `logs-${run.id}` : undefined}
                     onClick={() =>
                       setOpenRun((cur) => (cur === run.id ? null : run.id))
                     }
-                    className="flex w-full items-center justify-between gap-4 p-4 text-left hover:bg-surface-2"
+                    className="flex min-w-0 flex-1 items-center justify-between gap-4 rounded p-2 text-left hover:bg-surface-2"
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-medium text-foreground">
-                        {run.type === "HUNT" ? <Link href={`/hunt/${run.id}`} className="text-brand">Legacy Hunt — history</Link> : run.type}
+                        {run.type === "HUNT" ? "Legacy Hunt" : run.type}
                       </span>
                       <Badge tone={scanPresentation(run.status, run.outcome, run.dispatch, run.execution?.state, Boolean(run.cancelRequestedAt)).tone}>
                         {scanPresentation(run.status, run.outcome, run.dispatch, run.execution?.state, Boolean(run.cancelRequestedAt)).label}
                       </Badge>
-                      {run.type === "RECON" && <ScanCancelButton scanRunId={run.id} status={run.status} requested={Boolean(run.cancelRequestedAt)} onRequested={() => void load()} />}
                       {run.execution?.state === "INTERRUPTED" && <span className="text-sm text-muted">Relance automatique désactivée.</span>}
                     </div>
                     <span className="text-xs text-subtle">
                       {openRun === run.id ? "Hide logs" : "View live logs"}
                     </span>
                   </button>
+                  {run.type === 'HUNT' && <Link href={`/hunt/${run.id}`} className="text-brand">View Hunt history</Link>}
+                  {run.type === "RECON" && <ScanCancelButton scanRunId={run.id} status={run.status} requested={Boolean(run.cancelRequestedAt)} onRequested={() => void load()} />}
+                  </div>
                   {openRun === run.id && (
-                    <div className="border-t border-border p-4">
+                    <div id={`logs-${run.id}`} className="border-t border-border p-4">
                       {run.requiredUserAgent && <p>User-Agent used: <code>{run.requiredUserAgent}</code></p>}
                       <ScanLogViewer scanRunId={run.id} />
                     </div>

@@ -1,3 +1,4 @@
+import {paginationInput,paginationBounds} from '@/lib/pagination';
 import {Prisma} from '@prisma/client';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { NextRequest, NextResponse } from "next/server";
@@ -39,15 +40,26 @@ function normalizeTargetInput(input: string): { host: string; scheme: string | n
 }
 
 // GET /api/targets — list the signed-in user's targets (with their scope).
-export async function GET() {
+export async function GET(request?:Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const query=new URLSearchParams(request?new URL(request.url).search:'');
+  if(query.has('page')||query.has('pageSize')){
+    let input;try{input=paginationInput(query);}catch{return NextResponse.json({error:'Invalid page or pageSize'},{status:400});}
+    const where={userId:session.user.id,contextOnly:false,...(query.get('legacy')==='1'?{programId:null}:{}),...(input.q?{host:{contains:input.q,mode:'insensitive' as const}}:{})};
+    const result=await prisma.$transaction(async tx=>{
+      const bounds=paginationBounds(input,await tx.target.count({where}));
+      const items=await tx.target.findMany({where,orderBy:[{host:'asc'},{id:'asc'}],skip:bounds.skip,take:bounds.pageSize,select:{id:true,host:true,programId:true}});
+      return{...bounds,items};
+    },{isolationLevel:'RepeatableRead'});
+    return NextResponse.json(result,{headers:{'Cache-Control':'private, no-store'}});
+  }
   const targets = await prisma.target.findMany({
     where: { userId: session.user.id, contextOnly: false },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{createdAt:"desc"},{id:"desc"}],
     include: { scope: true },
   });
 
