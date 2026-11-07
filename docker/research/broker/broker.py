@@ -17,6 +17,7 @@ import struct
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 
 ROOT = '/var/lib/bughunter-identities'
@@ -32,6 +33,8 @@ LIFECYCLE = {}
 RECON_SPENT = {}
 ATTACHMENTS = {}
 RUNNING = {}
+INSTALLATIONS = {}
+INSTALLATION_LOCKS = {provider:threading.Lock() for provider in PROFILES}
 
 def identity_lock(uid):
     with LOCK:
@@ -358,15 +361,37 @@ def revoke(token, delete=False):
 
 def installation_status(provider):
     if provider not in PROFILES:fail('INVALID_PROVIDER')
+    # Version/profile support is a property of the pinned, root-owned image.
+    # Cache only successfully verified installation facts, never Target auth,
+    # policy, paths, transcripts or a failed/empty capability result.
+    with INSTALLATION_LOCKS[provider]:
+        status=INSTALLATIONS.get(provider)
+        if status is None:
+            status=probe_installation(provider)
+            if status['profiles']:INSTALLATIONS[provider]=status
+        return {**status,'profiles':list(status['profiles'])}
+
+
+def probe_installation(provider):
     home='/var/empty/bughunter-probe'
     env={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':home,'CODEX_HOME':home+'/.codex','CLAUDE_CONFIG_DIR':home+'/.claude','DISABLE_AUTOUPDATER':'1'}
     prefix=['setpriv','--reuid=199999','--regid=199999','--clear-groups','--bounding-set=-all','--inh-caps=-all','--ambient-caps=-all','--no-new-privs','--',provider]
-    version=subprocess.run(prefix+['--version'],cwd=home,env=env,capture_output=True,text=True,timeout=5,close_fds=True)
-    help_result=subprocess.run(prefix+['--help'],cwd=home,env=env,capture_output=True,text=True,timeout=5,close_fds=True)
-    if version.returncode or help_result.returncode:fail('CLI_UNAVAILABLE')
-    found=re.search(r'\b\d+\.\d+\.\d+\b',version.stdout)
-    help_text=help_result.stdout
+    def output(argument):
+        # Claude can exit 0 after only 8190 bytes of its ~22KB help have reached
+        # a pipe. A regular descriptor makes native writes complete before exit.
+        # This anonymous file contains installation metadata only, never context.
+        with tempfile.TemporaryFile(dir='/run/bughunter-broker') as destination:
+            result=subprocess.run(prefix+[argument],cwd=home,env=env,stdout=destination,stderr=subprocess.DEVNULL,timeout=5,close_fds=True)
+            if result.returncode:fail('CLI_UNAVAILABLE')
+            destination.seek(0)
+            raw=destination.read(65537)
+            if len(raw)>65536:fail('CLI_CHECK_LIMIT')
+            return raw.decode('utf-8',errors='strict')
+    version=output('--version')
+    help_text=output('--help')
+    found=re.search(r'\b\d+\.\d+\.\d+\b',version)
     profiles=([*(['standard'] if '--ask-for-approval' in help_text and '--sandbox' in help_text else []),*(['yolo'] if '--dangerously-bypass-approvals-and-sandbox' in help_text else [])] if provider=='codex' else (['standard','plan'] if '--permission-mode' in help_text and '"manual"' in help_text and '"plan"' in help_text else []))
+    if not profiles:print(json.dumps({'operation':'installation-profile-check','provider':provider,'version':found[0] if found else None,'helpBytes':len(help_text),'permissionFlag':'--permission-mode' in help_text,'manual':'"manual"' in help_text,'plan':'"plan"' in help_text}),file=sys.stderr,flush=True)
     return {'provider':provider,'installation':'available','authentication':'required','version':found[0] if found else None,'code':None,'profiles':profiles,'runningProfile':None}
 
 

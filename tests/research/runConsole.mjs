@@ -325,7 +325,7 @@ try {
 } catch(error) {
  const failedPage=browser?.contexts()[0]?.pages()[0];
  if(failedPage)console.error('Native-console failure UI:',(await failedPage.locator('body').innerText().catch(()=>'' )).slice(0,1800));
- if(started)console.error(await compose('logs','--tail','35','research-console').catch(()=>''));
+ if(started){console.error(await compose('logs','--tail','35','research-console').catch(()=>''));console.error('Fixture cgroup memory:',await dexec('cat','/sys/fs/cgroup/memory.events','/sys/fs/cgroup/memory.peak').catch(()=>''));console.error('Read-only native Claude help:',await dexec('setpriv','--reuid=199999','--regid=199999','--clear-groups','--no-new-privs','--bounding-set=-all','env','HOME=/var/empty/bughunter-probe','CLAUDE_CONFIG_DIR=/var/empty/bughunter-probe/.claude','DISABLE_AUTOUPDATER=1','claude','--help').catch(e=>e.stderr??e.message));}
  throw error;
 } finally {
  reconWorker?.kill('SIGTERM');

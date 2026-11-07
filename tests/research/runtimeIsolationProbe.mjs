@@ -9,6 +9,13 @@ const results={id:spawnSync('id',[],{encoding:'utf8'}).stdout.trim(),noNewPrivs:
 function deny(fn){try{fn();throw new Error('UNEXPECTED_ACCESS');}catch(error){if(!['EACCES','EPERM'].includes(error.code))throw error;results.denied++;}}
 try {
  const initial=await openConsoleWorkspace(own);await initial.root.close();
+ const home='/var/lib/bughunter-homes/'+expectedUid;
+ for(const [path,uid,gid,mode] of [[own,0,expectedUid,0o750],[own+'/scope.md',0,expectedUid,0o440],[own+'/.agents/bughunter/policy.json',0,expectedUid,0o440],[own+'/findings',expectedUid,expectedUid,0o700],[home,0,expectedUid,0o750],[home+'/home',expectedUid,expectedUid,0o700],[home+'/home/run',expectedUid,expectedUid,0o700],['/var/lib/bughunter-identities/active/'+expectedUid+'/binding.json',0,expectedUid,0o440]]) {
+  const value=fs.statSync(path);if(value.uid!==uid||value.gid!==gid||(value.mode&0o7777)!==mode)throw new Error('UNEXPECTED_OWNERSHIP_OR_MODE');
+ }
+ deny(()=>fs.appendFileSync(own+'/scope.md','DENIED_FIXTURE'));
+ deny(()=>fs.chmodSync(own,0o777));deny(()=>fs.chmodSync(own+'/.agents/bughunter/policy.json',0o666));
+
  if(results.noNewPrivs!=='1'||results.capBnd!=='0000000000000000')throw new Error('PRIVILEGE_BOUNDARY');
  const regain=spawnSync('setpriv',['--reuid=1000','id'],{encoding:'utf8'});if(regain.status===0)throw new Error('LEGACY_UID_REGAINED');
  const ipc=spawnSync('python3',['-c',"import socket;s=socket.socket(socket.AF_UNIX);s.connect('/run/bughunter-broker/control.sock')"],{encoding:'utf8'});if(ipc.status===0||!ipc.stderr.includes('Permission denied'))throw new Error('BROKER_IPC_ACCESS');

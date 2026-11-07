@@ -44,6 +44,7 @@ try {
  await assert.rejects(()=>exec(['test','-e','/var/lib/bughunter-identities/ledger.json']));
  const nativeReadiness=JSON.parse(await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','node','--input-type=module','-e','import {isolatedLauncherEngine} from "/opt/bughunter/docker/research/console/broker.mjs";console.log(JSON.stringify(await isolatedLauncherEngine("m8-alice","codex")))']));
  assert.equal(nativeReadiness.authentication,'required');assert(nativeReadiness.profiles.includes('yolo'));
+ const claudeReadiness=JSON.parse(await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','node','--input-type=module','-e','import {isolatedLauncherEngine} from "/opt/bughunter/docker/research/console/broker.mjs";console.log(JSON.stringify(await isolatedLauncherEngine("m8-alice","claude")))']));assert.deepEqual(claudeReadiness.profiles,['standard','plan']);
  console.log('READ_ONLY_INSTALLATION_PROBE_WITHOUT_WORKSPACE_ALLOCATION_PASS');
  await writeFile(join(temporary,'legacy.mjs'),await readFile('tests/research/legacyProviderFixture.mjs'));
  await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','--no-new-privs','env','HOME=/home/researcher','CODEX_HOME=/home/researcher/.codex','node','/fixtures/legacy.mjs']);
@@ -64,7 +65,7 @@ try {
    for(const attack of ['symlink','hardlink','owner']) {
     const path='/workspaces/research_m8-alice/findings/migration-attack';
     await exec(['node','-e',`const fs=require('fs'),p=process.argv[1];if(process.argv[2]==='symlink')fs.symlinkSync('/workspaces/research_m8-bob',p);else if(process.argv[2]==='hardlink')fs.linkSync('/workspaces/research_m8-alice/scope.md',p);else{fs.writeFileSync(p,'fixture');fs.chownSync(p,65534,65534)}`,path,attack]);
-    await assert.rejects(dryRun,error=>JSON.parse((error as {stdout:string}).stdout).status===(attack==='hardlink'?'INVALID_TICKET':'OPERATOR_REVIEW_REQUIRED'));await exec(['rm',path]);
+    await assert.rejects(dryRun,error=>JSON.parse((error as {stdout:string}).stdout).status==='OPERATOR_REVIEW_REQUIRED');await exec(['rm',path]);
    }
    await run(['exec','-d',name,'setpriv','--reuid=1000','--regid=1000','--clear-groups','sleep','30']);
    await assert.rejects(dryRun,error=>JSON.parse((error as {stdout:string}).stdout).status==='LEGACY_SESSION_ACTIVE');await exec(['pkill','-KILL','-u','1000']);
@@ -149,7 +150,7 @@ try {
  const after=JSON.parse(await exec(['cat','/var/lib/bughunter-identities/ledger.json']));assert.equal(after.targets['m8-alice'].uid,ids.alice);assert.equal(after.targets['m8-bob'].uid,ids.bob);
  assert((await exec(['cat','/workspaces/research_m8-alice/findings/notes.md'])).includes('ISOLATED_NOTE'));
  console.log('RESTART_IDENTITY_AND_NOTES_PASS');
- for(const [suffix,provider,profile] of [['alice','codex','yolo'],['bob','claude','standard']] as const)await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'start',targetId:'m8-'+suffix,provider,profile})]);
+ await Promise.all(([['alice','codex','yolo'],['bob','claude','standard']] as const).map(([suffix,provider,profile])=>exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'start',targetId:'m8-'+suffix,provider,profile})])));
  const stop=issueStopTicket('m8-alice','research_m8-alice',privateKey);
  await writeFile(join(temporary,'revoke.json'),JSON.stringify({operation:'revoke',token:stop}),{mode:0o600});
  const racingProbe=exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'mcp',targetId:'m8-alice',provider:'claude',profile:'standard'})]).catch(()=>null);

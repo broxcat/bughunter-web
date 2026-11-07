@@ -171,5 +171,6 @@ if __name__ == '__main__':
     except Exception as error:
         import re
         code=str(error) if type(error) is ValueError and re.fullmatch(r'[A-Z_]{3,80}',str(error)) else 'OPERATOR_REVIEW_REQUIRED'
+        if code=='INVALID_TICKET':code='OPERATOR_REVIEW_REQUIRED'
         print(json.dumps({'status':code}))
         sys.exit(1)
