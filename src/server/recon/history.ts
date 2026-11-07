@@ -59,17 +59,18 @@ async function flagCoverageRetest(tx:Prisma.TransactionClient,targetId:string,sc
 export async function maintainReconHistory(){const runs=await prisma.scanRun.findMany({where:{type:'RECON',scopeAssetId:{not:null},status:{in:['COMPLETED','FAILED','CANCELLED']},surfaceHistory:null},orderBy:[{createdAt:'asc'},{id:'asc'}],take:10,select:{id:true}});for(const r of runs)await publishReconHistory(r.id);}
 export async function reconHistory(userId:string,assetId:string,currentId?:string,previousId?:string){
  const asset=await prisma.scopeAsset.findFirst({where:{id:assetId,program:{ownerId:userId}},select:{id:true}});if(!asset)throw new ResearchError('Scope Asset not found',404);
- const scans=await prisma.scanRun.findMany({where:{scopeAssetId:assetId,type:'RECON',target:{userId},status:{in:['COMPLETED','FAILED','CANCELLED']}},orderBy:[{createdAt:'desc'},{id:'desc'}],take:50,select:{id:true,status:true,outcome:true,createdAt:true}});
- const archived=await prisma.reconHistoryRun.findMany({where:{scopeAssetReferenceId:assetId,target:{userId}},orderBy:[{runCreatedAt:'desc'},{id:'desc'}],take:50});
- const runs=[...new Map([...scans,...archived.map(r=>({id:r.scanReferenceId,createdAt:r.runCreatedAt,outcome:r.outcome,status:r.scanRunId?'COMPLETED':'ARCHIVED'}))].map(r=>[r.id,r])).values()].sort((a,b)=>b.createdAt.getTime()-a.createdAt.getTime()||b.id.localeCompare(a.id)).slice(0,50);
+ const scans=await prisma.scanRun.findMany({where:{scopeAssetId:assetId,type:'RECON',target:{userId},status:{in:['COMPLETED','FAILED','CANCELLED']}},orderBy:[{createdAt:'desc'},{id:'desc'}],take:51,select:{id:true,status:true,outcome:true,createdAt:true}});
+ const archived=await prisma.reconHistoryRun.findMany({where:{scopeAssetReferenceId:assetId,target:{userId}},orderBy:[{runCreatedAt:'desc'},{id:'desc'}],take:51});
+ const candidates=[...new Map([...scans,...archived.map(r=>({id:r.scanReferenceId,createdAt:r.runCreatedAt,outcome:r.outcome,status:r.scanRunId?'COMPLETED':'ARCHIVED'}))].map(r=>[r.id,r])).values()].sort((a,b)=>b.createdAt.getTime()-a.createdAt.getTime()||b.id.localeCompare(a.id));
+ const runs=candidates.slice(0,50);
  const chosen=currentId?runs.find(r=>r.id===currentId):runs[0],index=runs.findIndex(r=>r.id===chosen?.id),prior=previousId?runs.find(r=>r.id===previousId):runs[index+1];
  if(currentId&&!chosen||previousId&&!prior)throw new ResearchError('Select retained Recon runs for this Scope Asset',404);
  if(chosen&&prior&&(prior.createdAt>chosen.createdAt||prior.id===chosen.id))throw new ResearchError('Comparison must use an earlier Recon',400);
- // Publish all retained runs oldest first so first/last seen and membership are reliable.
+ // Publish this bounded comparison window oldest first; the API and UI disclose its limit.
  for(const run of [...runs].reverse())await publishReconHistory(run.id);
  const load=async(id?:string)=>id?prisma.reconHistoryRun.findUnique({where:{scanReferenceId:id},include:{observations:{include:{surface:true}}}}):null;
  const [a,b]=await Promise.all([load(chosen?.id),load(prior?.id)]);
  const rows=a?.observations.map(seenRow)??[],old=b?.observations.map(seenRow)??[];
  const ids=[...new Set([...rows,...old].map(r=>r.id))],counts=await prisma.reconSurfaceSeen.groupBy({by:['surfaceId'],where:{surfaceId:{in:ids}},_count:true});const countMap=new Map(counts.map(c=>[c.surfaceId,c._count]));for(const r of [...rows,...old])r.observedRuns=countMap.get(r.id)??0;
- return{runs,currentId:chosen?.id??null,previousId:prior?.id??null,comparable:Boolean(a&&b),truncated:Boolean(a?.truncated||b?.truncated),notice:'Observations do not grant Scope authorization. Not observed this run does not prove removal. Compare methodology and run coverage. First/last seen describe recorded observations, not continuous availability.',...compareHistory(rows,old)};
+ return{runs,runWindowLimit:50,runWindowTruncated:candidates.length>runs.length,currentId:chosen?.id??null,previousId:prior?.id??null,comparable:Boolean(a&&b),truncated:Boolean(a?.truncated||b?.truncated),notice:'Comparison selection is limited to the latest 50 retained runs to bound evidence processing; it is not complete run-history navigation. Observations do not grant Scope authorization. Not observed this run does not prove removal. Compare methodology and run coverage. First/last seen describe recorded observations, not continuous availability.',...compareHistory(rows,old)};
 }

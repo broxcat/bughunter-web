@@ -69,7 +69,7 @@ export async function reconPanelState(userId: string, targetId: string): Promise
     if (!session) return { sessionId: '', snapshot: null, updateAvailable: false, aged: false, deliveries: [] };
     const [snapshot, deliveries, runs, assets] = await Promise.all([
       tx.researchReconSnapshot.findFirst({ where: { sessionId: session.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: snapshotSelect }),
-      tx.researchReconDelivery.findMany({ where: { sessionId: session.id }, orderBy: { createdAt: 'desc' }, take: 20, select: deliverySelect }),
+      tx.researchReconDelivery.findMany({ where: { sessionId: session.id }, orderBy: [{createdAt:'desc'},{id:'desc'}], take: 20, select: deliverySelect }),
       loadInputs(tx, target),
       loadAssets(tx, target),
     ]);
@@ -105,7 +105,9 @@ export async function reconSnapshotDetails(userId: string, targetId: string, sna
   const snapshot = await prisma.researchReconSnapshot.findFirst({ where: { id: snapshotId, session: { userId, consoleTargetId: targetId, target: { userId, program: { ownerId: userId } } } }, select: { context: true } });
   if (!snapshot) throw new ResearchError('Snapshot not found', 404);
   const context = snapshot.context as unknown as ResearchReconContext;
-  return { snapshotId, kind, page, total: context[kind].length, items: context[kind].slice(page * 25, (page + 1) * 25) };
+  const unavailable=!Array.isArray(context?.[kind]),entries=unavailable?[]:context[kind];
+  const actual=Math.min(page,Math.max(0,Math.ceil(entries.length/25)-1));
+  return {snapshotId,kind,page:actual,total:entries.length,items:entries.slice(actual*25,(actual+1)*25),unavailable};
 }
 export async function transmitReconSnapshot(userId: string, targetId: string, snapshotId: string, provider: ResearchProvider) {
   return prisma.$transaction(async tx => {
@@ -157,6 +159,6 @@ async function publishCapturedPlan(tx:Prisma.TransactionClient,userId:string,tar
 
 async function normalizeOwnedHistory(userId:string,targetId:string){
   const target=await prisma.target.findFirst({where:{id:targetId,userId,program:{ownerId:userId}},select:{programId:true}});if(!target?.programId)return;
-  const runs=await prisma.scanRun.findMany({where:{target:{programId:target.programId,userId},scopeAssetId:{not:null},artifactVersion:{lt:2},type:'RECON',status:{notIn:['QUEUED','RUNNING']}},orderBy:{createdAt:'desc'},take:60,select:{id:true}});
+  const runs=await prisma.scanRun.findMany({where:{target:{programId:target.programId,userId},scopeAssetId:{not:null},artifactVersion:{lt:2},type:'RECON',status:{notIn:['QUEUED','RUNNING']}},orderBy: [{createdAt:'desc'},{id:'desc'}],take:60,select:{id:true}});
   for(const run of runs)await ensureLegacyArtifacts(run.id);
 }

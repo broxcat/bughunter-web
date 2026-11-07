@@ -9,7 +9,7 @@ import type { SafeAuthSurface } from '@/lib/authenticatedRecon';
 function fixture():ScopeIntelligenceBrief{
   const at=new Date('2026-11-03T00:00:00Z'),program={id:'target',companyName:'Équipe | **scope**',platform:null,programUrl:null,requiredUserAgent:'Fixture/1',rulesOfEngagement:'Only authorized scope.',outOfScope:['excluded.example.test'],updatedAt:at};
   const assets:ScopeIntelligenceBrief['assets']=[{id:'critical',programId:'target',originalValue:'*.example.test',normalizedValue:'*.example.test',format:'WILDCARD_DOMAIN',type:'WILDCARD',formatSource:'AUTO',typeSource:'USER',assetValue:'CRITICAL',active:true,createdAt:at,updatedAt:at,program,executionTarget:null},{id:'low',programId:'target',originalValue:'low.example.test',normalizedValue:'low.example.test',format:'SUBDOMAIN',type:'WEB_APPLICATION',formatSource:'AUTO',typeSource:'HEURISTIC',assetValue:'LOW',active:true,createdAt:at,updatedAt:at,program,executionTarget:null}];
-  const details:ScopeIntelligenceBrief['details']=new Map(assets.map(asset=>[asset.id,{asset,run:null,history:[],artifacts:[],counts:[],discoveryCount:0,truncated:false,priorities:[],untrustedData:true}]));
+  const details:ScopeIntelligenceBrief['details']=new Map(assets.map(asset=>[asset.id,{asset,run:null,history:[],historyLimit:30,historyTruncated:false,artifacts:[],counts:[],discoveryCount:0,truncated:false,priorities:[],untrustedData:true}]));
   return{program,assets,details,generatedAt:at.toISOString(),parentId:'parent',bounded:false};
 }
 describe('concise, deterministic v2 Scope intelligence',()=>{

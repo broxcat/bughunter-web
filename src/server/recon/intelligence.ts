@@ -28,7 +28,8 @@ export function researchPriorities(artifacts:ReconArtifactData[],asset:{id:strin
 export async function loadAssetReconDetail(userId:string,programId:string,assetId:string,runId?:string) {
   const asset=await prisma.scopeAsset.findFirst({where:{id:assetId,programId,program:{ownerId:userId}},include:{program:{select:{id:true,companyName:true,platform:true,programUrl:true,requiredUserAgent:true,outOfScope:true,rulesOfEngagement:true,updatedAt:true}},executionTarget:{select:{id:true,_count:{select:{researchSessions:true,findings:true}}}}}});
   if(!asset)throw new ResearchError('Scope Asset not found',404);
-  const history=await prisma.scanRun.findMany({where:{scopeAssetId:assetId,type:'RECON',target:{userId,programId}},orderBy:[{createdAt:'desc'},{id:'desc'}],take:30,select:{id:true,status:true,outcome:true,createdAt:true,startedAt:true,finishedAt:true,error:true,targetReconRunId:true,_count:{select:{artifacts:true}}}});
+  const recent=await prisma.scanRun.findMany({where:{scopeAssetId:assetId,type:'RECON',target:{userId,programId}},orderBy:[{createdAt:'desc'},{id:'desc'}],take:31,select:{id:true,status:true,outcome:true,createdAt:true,startedAt:true,finishedAt:true,error:true,targetReconRunId:true,_count:{select:{artifacts:true}}}});
+  const history=recent.slice(0,30);
   const selected=runId??history[0]?.id;
   if(runId&&!await prisma.scanRun.findFirst({where:{id:runId,scopeAssetId:assetId,target:{userId,programId}}}))throw new ResearchError('Recon not found',404);
   if(selected)await ensureLegacyArtifacts(selected);
@@ -38,7 +39,7 @@ export async function loadAssetReconDetail(userId:string,programId:string,assetI
     return{...a,scopeState:asset.active&&!isExcluded(host,asset.program.outOfScope)&&(value.startsWith('http')?assetAllowsUrl(asset,value):assetAllowsHost(asset,host))?'IN_SCOPE' as const:'OUT_OF_SCOPE' as const};});
   const counts=selected?await prisma.reconArtifact.groupBy({by:['kind','scopeState'],where:{scanRunId:selected},_count:true}):[];
   if(run){const item=history.find(h=>h.id===run.id);if(item)item._count.artifacts=run._count.artifacts;}
-  return{asset,run,history,artifacts,counts,discoveryCount:run?._count.artifacts??0,truncated:Boolean(run&&run._count.artifacts>artifacts.length),priorities:researchPriorities(artifacts,asset,run?.changeSet),untrustedData:true};
+  return{asset,run,history,historyLimit:30,historyTruncated:recent.length>history.length,artifacts,counts,discoveryCount:run?._count.artifacts??0,truncated:Boolean(run&&run._count.artifacts>artifacts.length),priorities:researchPriorities(artifacts,asset,run?.changeSet),untrustedData:true};
 }
 export async function listTargetAssets(userId: string, programId?: string, input?: PageRequest,activeOnly=false) {
   const where = { ...(activeOnly?{active:true}:{}), ...(programId ? { programId } : {}), program: { ownerId: userId },

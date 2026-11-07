@@ -15,7 +15,7 @@ export async function lockOwnedProgram(tx: Prisma.TransactionClient, userId: str
 /** Idempotent compatibility for rules added by older API clients after migration. */
 export async function backfillProgramAssets(tx: Prisma.TransactionClient, programId: string, userId: string) {
   const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId } });
-  const hosts = await tx.target.findMany({ where: { programId, userId, active: true, contextOnly: false, discoverySource: null }, orderBy: { createdAt: 'asc' } });
+  const hosts = await tx.target.findMany({ where: { programId, userId, active: true, contextOnly: false, discoverySource: null }, orderBy: [{createdAt:'asc'},{id:'asc'}] });
   for (const value of [...new Set([...program.scopeRules, ...hosts.map(h => h.host)])]) {
     let detected; try { detected = detectScopeAsset(value); } catch { continue; }
     if(await tx.scopeAsset.findFirst({where:{programId,originalValue:value,formatSource:'MANUAL'}}))continue;
@@ -37,6 +37,7 @@ export async function listScopeAssets(userId: string, programId: string) {
     } });
     return assets.sort((a, b) => assetValueRank(a.assetValue) - assetValueRank(b.assetValue) || a.normalizedValue.localeCompare(b.normalizedValue)).map(asset => ({ ...asset,
       reconStatus: assetReconStatus(asset.scanRuns[0] ?? null), executable: scopeAssetExecutable(asset),
+      scanRunWindowLimit:20,scanRunsTruncated:asset._count.scanRuns>asset.scanRuns.length,
       researchStatus: asset.executionTarget?._count.researchSessions ? 'STARTED' : 'NOT_STARTED',
     }));
   }, { timeout: 30000 });
@@ -111,6 +112,6 @@ export const assetHostAllowed = (asset: { normalizedValue: string; format: strin
 export async function scopeAssetSourceIds(db: Pick<Prisma.TransactionClient, 'scopeAsset'>, asset: { id: string; programId: string; format: string; normalizedValue: string }) {
   if (asset.format === 'WILDCARD_DOMAIN') return [asset.id];
   const host = asset.format === 'URL' ? new URL(asset.normalizedValue).hostname : asset.normalizedValue;
-  const candidates = await db.scopeAsset.findMany({ where: { programId: asset.programId }, select: { id: true, normalizedValue: true, format: true }, take: 1000 });
+  const candidates = await db.scopeAsset.findMany({ where: { programId: asset.programId }, select: { id: true, normalizedValue: true, format: true }, orderBy:{id:'asc'}, take: 1000 });
   return [...new Set([asset.id, ...candidates.filter(a => asset.format === 'URL' ? assetAllowsUrl(a, asset.normalizedValue) : assetAllowsHost(a, host)).map(a => a.id)])];
 }

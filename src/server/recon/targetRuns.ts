@@ -77,10 +77,11 @@ export async function cancelTargetRecon(userId:string,programId:string,id:string
   await settleQueuedCancellations();return reconcileTargetRecon(id);
 }
 export async function targetReconState(userId:string,programId:string) {
-  if(!await prisma.bountyProgram.findFirst({where:{id:programId,ownerId:userId}}))throw new ResearchError('Target not found',404);
-  const runs=await prisma.targetReconRun.findMany({where:{programId},take:10,orderBy:[{createdAt:'desc'},{id:'desc'}],include:{scans:{select:{id:true,scopeAssetId:true,status:true,outcome:true,scopeAssetSnapshot:true,_count:{select:{artifacts:true}}}}}});
+  const program=await prisma.bountyProgram.findFirst({where:{id:programId,ownerId:userId},select:{deletingAt:true}});if(!program)throw new ResearchError('Target not found',404);
+  const recent=await prisma.targetReconRun.findMany({where:{programId},take:11,orderBy:[{createdAt:'desc'},{id:'desc'}],include:{scans:{select:{id:true,scopeAssetId:true,status:true,outcome:true,scopeAssetSnapshot:true,_count:{select:{artifacts:true}}}}}});
+  const runs=recent.slice(0,10);
   const assets=await prisma.scopeAsset.findMany({where:{programId,active:true},select:{id:true,normalizedValue:true,format:true,type:true,assetValue:true}});
-  const latest=runs[0],needsRecon=!latest||assets.some(a=>!latest.scans.some(s=>{const p=s.scopeAssetSnapshot as {normalizedValue?:string;format?:string;type?:string;assetValue?:string}|null;return s.scopeAssetId===a.id&&p?.normalizedValue===a.normalizedValue&&p.format===a.format&&p.type===a.type&&p.assetValue===a.assetValue;}));
+  const latest=runs[0],needsRecon=!assets.length||!latest||assets.some(a=>!latest.scans.some(s=>{const p=s.scopeAssetSnapshot as {normalizedValue?:string;format?:string;type?:string;assetValue?:string}|null;return s.scopeAssetId===a.id&&p?.normalizedValue===a.normalizedValue&&p.format===a.format&&p.type===a.type&&p.assetValue===a.assetValue;}));
   const findingsConfirmed=await prisma.finding.count({where:{target:{programId,userId},reviewStatus:'CONFIRMED'}}),researchStarted=await prisma.target.count({where:{programId,userId,OR:[{scopeAsset:{active:true}},{discoveredFromAsset:{active:true}},{contextOnly:true}],researchSessions:{some:{consoleTargetId:{not:null}}}}});
-  return{latest:latest??null,runs,needsRecon,findingsConfirmed,researchStarted,researchReady:Boolean(latest?.scopeMarkdown&&!needsRecon&&['COMPLETED','FAILED'].includes(latest.status))};
+  return{latest:latest??null,runs,runsLimit:10,runsTruncated:recent.length>runs.length,needsRecon,findingsConfirmed,researchStarted,researchReady:Boolean(!program.deletingAt&&assets.length&&latest?.scopeMarkdown&&!needsRecon&&['COMPLETED','FAILED'].includes(latest.status))};
 }

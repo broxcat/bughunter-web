@@ -59,6 +59,7 @@ export default function ReconReportV3Content({ report, provider }: { report: Rec
             <ul>{surface.contexts.map(context=><li key={context.contextKey}>{context.label} · {human(context.state)}{context.persona?` · declared persona: ${context.persona}`:''}</li>)}</ul>
             <p>{surface.totals.public} public · {surface.totals.authenticatedOnly} authenticated only · {surface.totals.sharedAuthenticated} shared across authenticated contexts · {surface.totals.contextDifferentials} observed context differentials</p>
             <ul className="space-y-2">{surface.surfaceVisibility.slice(0,12).map(item=><li key={item.canonicalKey} className="break-words"><p>{item.method} {item.url} · {human(item.classification)}</p><p className="text-xs text-muted">{item.visibility.map(observation=>`${observation.label}: ${observation.observed?observation.statusCode??observation.outcome:'Not observed / unknown'}`).join('; ')}</p><Evidence refs={item.evidenceRefs} /></li>)}</ul>
+            {surface.surfaceVisibility.length>12&&<p className="text-xs text-muted">Showing 12 of {surface.surfaceVisibility.length} recorded surface comparisons.</p>}
             {surface.truncated&&<p className="text-xs text-muted">Context details are bounded; the original Recon retains the structured observations.</p>}
           </>}
         </div>):<p className="text-sm text-muted">Historical context not captured; anonymous access is unknown.</p>}
