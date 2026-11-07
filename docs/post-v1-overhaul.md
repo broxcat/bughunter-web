@@ -284,3 +284,61 @@ The first frozen run's Docker remove call timed out for its disposable execution
 Runtime/tests were validated through implementation commit **3fc7e8d**, with the final documentation commit adding these records only. The five original diagnostics files retain their starting SHA-256 hashes and remain outside the commits. The v1.0.0 tag still resolves to 29d35d1c4fe117f1b954b2474c1ba57933dfaddb; package version and published release are unchanged. No DeepSeek or auxiliary inference requests were issued (additional DeepSeek spend $0 from this work; account billing is not independently observable).
 
 **Milestone 1 acceptance is complete.** #8 remains closed; the Program PATCH race remains fixed; collection/cap/order, supported-method CRUD/concurrency, negative states, practical keyboard/form/dialog/contrast/responsive acceptance and required gates pass. The focused defects #11–#30 are verified for closure after the validated commits are pushed. #7 remains open for Milestones 2–8. This is not complete overhaul/release acceptance and no v1.1.0 decision or production deployment occurred. Work stops here.
+
+## Milestone 2 — Target settings and immutable Scope management (base 309ffc0)
+
+The isolated worktree started at the latest origin/main, verified to contain 309ffc018780aca46b98f1826d0307ebbe8b2977. The primary checkout's five Research diagnostics files remained untouched and outside the worktree, tests and commits. Dependencies were installed in the isolated tree; no production .env, Research workspace or credentials were copied. Milestone 1 is not rerun as development work; its regression gates are retained.
+
+### Acceptance evidence
+
+| Criterion | Delivered behavior | Proof |
+| --- | --- | --- |
+| Visible Target settings | Keyboard-accessible settings link on the Target; existing form edits Program metadata, User-Agent, rules and exclusions; direct URL, return/success state, absent-resource error, mobile layout | `milestone2ScopeManagement.mjs`: settings/required-field/exclusion/direct-error flow in both themes at 1280/390px; existing auth/navigation matrix |
+| Authorized metadata edits | Classification and priority remain editable, normalization unchanged; forms and inline saves use current updatedAt tokens; saving, server validation/conflict and success are visible | `scopeManagement.test.ts`: metadata/current token/stale token/invalid enum/direct-value refusal; browser real409 held-write probe, retry after reload, saved metadata |
+| Explicit identity replacement | Technical Format and normalized value are immutable on PATCH. The existing Format selector opens an explicit replacement dialog with normalized preview and authorization confirmation. Existing create/admission and retirement primitives share one owned Program lock/transaction | Pre-fix #31 probe returned200 instead of409; fixed probe and manual Format replacement pass. Duplicate/invalid/stale failures retain current execution; an actual PostgreSQL failure trigger after replacement creation proves full rollback |
+| Capacity, duplicate and concurrent semantics | 1,000-active quota and unique normalized value preserved; one-for-one replacement works at quota. Exactly one concurrent replacement wins. Current-version retirement racing replacement cannot revive the old identity | Real SQL quota fixture, dual replacement and retirement/replacement cases; existing Program lock and unique-key tests |
+| Retirement from Target/Scope | Shared actions on Target and Scope detail, explicit asset/consequences/Cancel confirmation; Scope inventory links to management and labels archives. Queued/running scans receive cancellation and summaries are cancelled; trusted current authorization denies new execution | SQL retirement/captured-context denial; browser Cancel/keyboard confirmation, retired detail, last active row on final filtered Target page, archived Scope filter/clamp |
+| Historical identity/evidence | BountyProgram remains business identity; ScopeAsset authorizes; Target remains a separate execution identity. Old Target host/scheme/Scope IDs, ScanRun snapshots, Report and Research snapshots are not rewritten | Exact SQL row/JSON equality before/after URL replacement; browser checks identical historical rows and a distinct replacement Target/Scope; current Scope/readiness/Research regressions |
+| Historical route compatibility | Existing owned legacy host REMOVE/EDIT return the existing Target shape while retiring any bound ScopeAsset in the same transaction; legacy absent/private/status conventions retained | Two pre-fix #33 cases left asset.active=true; fixed REMOVE/EDIT and failed duplicate replacement cases prove authorization denial and rollback, plus existing legacy suites |
+| Exclusions | Existing Target Settings add/edit/remove UI is reachable from Target and Scope; current server policy is checked again, with stale Settings409 | SQL current execution denied after exclusion, allowed after explicit removal; browser adds/removes exclusion through the actual form and checks owned API scanRejection |
+| Cleanup/recovery | Replacement creation failure leaves original usable. A committed replacement returns201 with an explicit warning if native cleanup is unconfirmed. DELETE503 explicitly says authorization is already retired; historical detail supports retry. No native process is automatically restarted | SQL transport-failure/retry cases; browser uses an explicitly absent disposable signing key/control destination, observes the committed-warning path and preserved Research rows; no production/native session contacted |
+
+### Invariants and bounds
+
+All mutations retain the owned non-deleting Program lock. Slow native/filesystem cleanup happens after database commit; no database transaction spans it. Replacement is a short existing metadata transaction, without a distributed state machine or schema addition. Historical ScanRun.scopeAssetSnapshot, Reports, Research authorization/recon snapshots and immutable workspace evidence retain their existing contracts. Discovery/Recon history never supplies authorization. Source generations or provider/model execution were not changed.
+
+The database's existing `(programId, normalizedValue)` uniqueness also reserves retired identities. Reauthorization may reuse that same retained Format/value identity; it cannot reinterpret its Format or rewrite the old technical Target. A different Format with the same normalized value is rejected rather than rewriting history or changing the schema. No automatic migration/repair of pre-Milestone-2 historical Format overrides is attempted. Existing unsupported executor formats remain documentary. Current policy and stale-policy checks remain authoritative, never Markdown or old discovery.
+
+### Reproduction, failed attempts and limits
+
+- #31: URL-to-wildcard confirmed PATCH deterministically returned200 before the fix; the new identity-refusal assertion failed. After the fix it returns409 and leaves the old Target/Scope identity unchanged.
+- #33: both legacy host REMOVE and EDIT left the bound ScopeAsset active before the fix; two real-SQL assertions failed. The existing retirement primitive is now shared under the same transaction.
+- A development attempt passed237/failed3: two existing method-matrix cases had no configured AUTH_URL in the clean worktree, and the new manual-format replacement accidentally passed a preview-only `requiresConfirmation` property to Prisma. Explicit identity-field selection fixed the latter, with a dedicated regression; the fixture now stubs/restores its own origin. A corrected five-file run passed242, then246 after adding legacy/cleanup cases. No assertion/deadline was weakened.
+- The first browser pass passed the existing84-view accessibility matrix and navigation checks, then timed out on the new classification selector's implicit label. Explicit names were added to the three new selectors; the complete24-case Milestone2 matrix passes. The initial clean-worktree tsc invocation lacked Next's generated LayoutProps; typegen was then run before tsc as required. Compose validation initially refused missing isolated configuration; only synthetic configuration is used for its final check.
+- Baseline GitHub CI at309ffc0 was already red: run42335817949 had two undeclared-origin fixture failures, a five-second export test timeout and a Burp proxy classification failure under parallel load. CI now uses the documented runner's single-worker scheduling, retaining original deadlines/assertions. The unchanged native-toolchain job exhausted the hosted runner disk (`No space left on device`, check128292380916); this is not local disk/production exhaustion and no local pruning or native image rebuild is used as a workaround. Pushed CI verification is recorded in #7; native toolchain/provider/Burp acceptance is not claimed by the Scope UI pass.
+
+### Final clean-source gates
+
+All checks below ran from the clean isolated worktree, without any of the five diagnostics files/changes. The final combined command exited zero, including disposable teardown:
+
+```sh
+TMPDIR=/dev/shm TEST_POSTGRES_TMPFS=1 npm run test:queue -- --target-browser --research-browser --auth-browser --post-v1-browser
+npm run test:network -- --maxWorkers=1
+```
+
+| Check | Passed | Failed | Skipped |
+| --- | ---: | ---: | ---: |
+| Full Vitest (130 passing files, 3 network files skipped) | 1,737 | 0 | 17 opt-in network cases |
+| Separate local-fixture network suite | 17 | 0 | 0 |
+| Focused five-file Scope/Program/admission/normalization regression | 246 | 0 | 0 |
+| Standalone method matrix with AUTH_URL unset externally | 155 | 0 | 0 |
+| Existing post-v1 browser checks/matrix cases | 286 | 0 | 0 |
+| New Milestone 2 browser matrix | 24 | 0 | 0 |
+
+There are **1,754 distinct Vitest cases** across full/network acceptance. The focused runs overlap the full total. The 21 new Scope cases plus three new method-admission cases add24 tests to the Milestone1 baseline; the existing technical-Format test is updated to assert explicit replacement, archived execution denial and retained identity reauthorization rather than permit in-place rewriting. No test deadline was changed. Browser totals are310 named checks/matrix cases, not individual assertions. The existing Target, Research and authentication browser workflows also passed (their individual assertion counts are not exposed).
+
+Lint, Next typegen, TypeScript, build, Compose validation and working/staged diff checks pass. Compose used a temporary synthetic .env in the isolated tree, removed immediately after config --quiet; the operator's .env was neither read nor copied. The supported migration-preservation script and schema-drift check passed through the final runner even though schema/migrations are unchanged. Package/lockfile are unchanged. npm audit production0, development8 moderate: the previously accepted tooling risk is unchanged.
+
+The actual new-code CI outcome and pushed SHA are linked from issue #7 after integration; baseline CI limitations above are retained instead of inventing successful remote/native results. Local acceptance does not claim production deployment, fresh native PTY/model/genuine Burp acceptance or a release decision. No model/provider execution, native image contract or persistent console service was modified or restarted. No public target scan, DeepSeek or other paid auxiliary inference was used.
+
+The implementation satisfies the Milestone2 local acceptance criteria. Integration uses focused commits pushed directly to origin/main without a branch/PR/force/tag/release. The primary checkout's five original WIP files are checked by their starting SHA-256 hashes and excluded from every commit. Milestone3 and the remaining overhaul are not started. Issue #7 remains open; final integration/CI verification is recorded there.

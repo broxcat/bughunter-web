@@ -19,7 +19,25 @@ remain discovery rules; active Research requires an authorized concrete host.
 IP/CIDR assets remain documentary where the existing execution engine does not
 support them. Discovery never grants additional authorization.
 
-The **Out of scope** tab supports add/edit/remove. Explicit exclusions always win,
+Open **Target settings** from the Target page to edit program metadata, the required
+User-Agent, engagement rules and **Out of Scope** exclusions. The same settings are
+linked from Scope details. Changes apply to future work; stale forms return a conflict.
+
+Scope classification and priority can be edited without changing its technical
+identity. Changing Format or normalized value requires **Replace**: creation and
+retirement commit atomically, so a failed or duplicate replacement leaves the
+original authorized. Existing technical host IDs, ScanRun snapshots, Reports and
+Research snapshots stay attached to their original identity. A retained normalized
+value cannot be reused with a different Format; identical retained identities can
+be explicitly reauthorized through the existing admission flow.
+
+**Retire** confirms the exact asset and revokes future execution while preserving
+its history. Running work receives cancellation and Research cleanup is requested.
+If cleanup cannot be confirmed, the UI distinguishes committed revocation from
+creation failure and offers retry from the retired asset. No historical workspace
+is automatically restarted.
+
+Exclusions support add/edit/remove in Target settings. Explicit exclusions always win,
 even against a broader wildcard. Recon and Research let you choose a company, then an
 active concrete host that has not been excluded. Removed hosts cannot start scans.
 
