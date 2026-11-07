@@ -1,5 +1,6 @@
 // Built app against the test runner's disposable Postgres/Redis only.
 import assert from "node:assert/strict";
+import {prepareReleasePlan,recordReleaseCoverage,acceptReleaseRetest} from "./milestone8ResearchChain.mjs";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createServer } from "node:net";
@@ -51,6 +52,7 @@ try {
   const target = await prisma.target.findFirstOrThrow({ where: { programId: program.id } });
   // Labelled synthetic Recon evidence; this test never contacts example.test.
   const recon = await prisma.scanRun.create({ data: { targetId: target.id, type: "RECON", status: "COMPLETED", reconCorpus: { version: 1, capturedAt: new Date().toISOString(), urls: ["https://app.example.test/search"], authenticated: false, surface: Object.fromEntries(["queryInputs", "objectReferences", "forms", "javascript", "cookies", "jwt", "oauth", "xml", "urlInputs", "fileInputs", "businessFlows", "apiEndpoints"].map(k => [k, false])) } } });
+  const objective=await prepareReleasePlan({prisma,context,origin,target,recon});
   await page.getByRole("banner").getByRole("link", { name: "Research", exact: true }).click(); await page.waitForURL(origin + "/research");
   await page.getByRole("link", { name: "Open console — app.example.test", exact: true }).waitFor();
   // Legacy API remains supported; the primary Research UI now opens a target console.
@@ -104,11 +106,12 @@ try {
   assert.deepEqual(await zipAfterSync.body(), zipBeforeSync);
   // V2 proof stays research until a deliberate, acknowledged human promotion.
   for (const name of ["positive", "control"]) await writeFile(join(root, research.workspaceId, `evidence/${name}.txt`), "Synthetic redacted fixture observation only.");
-  const detailed = ["CONFIRMED", "REJECTED", "TESTING", "BLOCKED", "OPEN"].map((status, i) => ({ ...loopHypothesis({ targetId: target.id, status }), externalId: `H-00${i + 3}` }));
+  const detailed = ["CONFIRMED", "REJECTED", "TESTING", "BLOCKED", "OPEN"].map((status, i) => ({ ...loopHypothesis({ targetId: target.id, status }), planItemId:objective.item.id, externalId: `H-00${i + 3}` }));
   await writeFile(join(root, research.workspaceId, "research/hypotheses.json"), JSON.stringify({ version: 2, sessionId: research.id, hypotheses: detailed }));
   await page.getByRole("button", { name: "Sync from workspace", exact: true }).click();
   await page.getByText("Synced: 5 created, 0 updated, 0 unchanged.", { exact: true }).waitFor();
   assert.equal(await page.getByLabel("TESTING hypotheses", { exact: true }).innerText(), "1");
+  const coverageEvidenceId=await recordReleaseCoverage({prisma,context,origin,target,research,objective});
   await page.getByRole("link", { name: "View details — H-003", exact: true }).click();
   await page.getByRole("heading", { name: "Performed tests and negative controls", exact: true }).waitFor();
   const draftButton = page.getByRole("button", { name: "Create Finding Draft", exact: true });
@@ -131,9 +134,13 @@ try {
   await findingCard.getByText("CONFIRMED", { exact: true }).waitFor();
   assert.equal(await prisma.report.count({ where: { userId: user.id } }), 0);
   const proof=await context.request.post(origin+'/api/evidence/'+target.id,{data:{kind:'RESEARCH_EVIDENCE',sessionId:research.id,ref:'evidence/positive.txt',description:'Human reviewed direct fixture proof',link:{entity:'finding',id:draft.findingId,role:'SUPPORTS'}}});assert.equal(proof.status(),201);
+  const originalProof=await proof.json();assert.equal(originalProof.id,coverageEvidenceId,"Coverage and Finding must retain stable Vault identity");
   for(const [expectedRevision,state]of ['VALIDATING','VALIDATED'].entries()){const decision=await context.request.post(origin+'/api/findings/'+draft.findingId+'/lifecycle',{data:{eventKey:randomUUID(),expectedRevision,state,reason:'Human reviewed reproduction, demonstrated impact and negative control',...(state==='VALIDATED'?{validation:{reproduced:true,impactDemonstrated:true,scopeRespected:true,negativeControl:'PERFORMED',conclusion:'Reproduced within authorized scope with direct proof and a negative control'}}:{})}});assert.equal(decision.status(),201);}
+  const retestEvidenceId=await acceptReleaseRetest({prisma,context,origin,target,research,findingId:draft.findingId,originalEvidenceId:originalProof.id});
   const report = await context.request.post(origin + "/api/reports", { data: { title: "Explicitly requested fixture report", platform: "GENERIC", findingIds: [draft.findingId] } }); assert.equal(report.status(), 201);
   const exportedReport=await report.json();assert(exportedReport.markdown.includes('Assessment mode: Black-box'));assert(exportedReport.markdown.includes('Research session authorization snapshot'));
+  assert(exportedReport.markdown.includes(originalProof.id)&&exportedReport.markdown.includes(retestEvidenceId)&&exportedReport.markdown.includes("FIX_CONFIRMED"));
+  console.log("M8_RESEARCH_CHAIN_PASS: Recon → Plan → hypothesis → Coverage → stable Vault evidence → human promotion/review → lifecycle → distinct Retest evidence → reviewed Report; rejected history retained, no AI/target calls.");
   await page.goto(origin + `/research/history/${research.id}`);
   // Invalid sync keeps the imported registry and READY workspace intact.
   await writeFile(join(root, research.workspaceId, "research/hypotheses.json"), "invalid");
