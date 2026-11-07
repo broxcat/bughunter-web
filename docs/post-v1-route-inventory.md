@@ -103,3 +103,7 @@ Methods and status literals below are extracted from source. Delegated helpers m
 | `/api/targets/[id]/hunt-readiness` | GET | 401, 410 | `src/app/api/targets/[id]/hunt-readiness/route.ts` |
 | `/api/targets/[id]` | GET | 401, 404 | `src/app/api/targets/[id]/route.ts` |
 | `/api/targets` | GET, POST | 201, 400, 401 | `src/app/api/targets/route.ts` |
+
+## Milestone 3 route compatibility
+
+No new page or API handler: `/recon?program=<id>` now opens complete server-paginated history instead of forwarding into the Target. `/recon/runs/[id]` remains the exact retained run address; optional `historyPage`/`historyPageSize` carry its return context. `/api/programs/[id]/recon?runId=<id>` adds a read-only, owner-and-Program-scoped `{id,status}` heartbeat; the existing query-free status, POST start and DELETE cancel contracts are unchanged. Anonymous API callers receive401 and private/absent history or exact-run heartbeat receives404; documents retain login redirects and Next not-found UI (a streamed shell may already have status200).

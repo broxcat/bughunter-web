@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import ReconRunRefresh from '@/components/ReconRunRefresh';
+import { paginationInput } from '@/lib/pagination';
 import { redactObservationText } from '@/lib/observationSafety';
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
@@ -26,8 +28,10 @@ function stamp(value: Date): string {
   return `${value.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 }
 
-export default async function ReconRunPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ReconRunPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ historyPage?: string; historyPageSize?: string }> }) {
   const { id } = await params;
+  const search = await searchParams;
+  const history = paginationInput(new URLSearchParams({page: search.historyPage ?? '1', pageSize: search.historyPageSize ?? '25'}), false);
   const session = await auth();
   if (!session?.user?.id) redirect('/login');
 
@@ -47,9 +51,11 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
   const contextCount = run.scans.reduce((sum, scan) => sum + authContextCount(scan.authenticatedContextsSnapshot), 0);
 
   return <div className="space-y-6">
+    <ReconRunRefresh programId={run.program.id} runId={run.id} status={run.status}/>
     <div className="flex flex-wrap items-center gap-3 text-sm">
       <Link href="/recon" className="text-brand">← Recon</Link>
       <span aria-hidden className="text-subtle">/</span>
+      <Link href={`/recon?program=${run.program.id}&page=${history.page}&pageSize=${history.pageSize}`} className="text-brand">Run history</Link>
       <Link href={`/targets/${run.program.id}?tab=Recon`} className="text-brand">{run.program.companyName}</Link>
     </div>
 

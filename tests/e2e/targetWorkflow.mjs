@@ -19,7 +19,7 @@ try {
   const changed=page.waitForResponse(r=>r.url().includes('/assets/')&&r.request().method()==='PATCH');await row.getByLabel('Type www.example.test').selectOption('API');assert.equal((await changed).status(),200);
   await page.getByRole('button',{name:'Recon',exact:true}).click();await row.getByRole('cell',{name:'Queued',exact:true}).waitFor();
   const response = await context.request.get(app + `/api/programs/${id}/scope.md`); assert.equal(response.status(), 200); assert((await response.text()).includes('LLM Safety Boundary'));
-  await page.goto(app + `/recon?program=${id}`); await page.waitForURL(app + `/targets/${id}?tab=Recon`);
+  await page.goto(app + `/recon?program=${id}`); await page.getByRole('heading',{name:'Recon history — Console Target workflow',exact:true}).waitFor();
   await page.setViewportSize({ width: 390, height: 844 }); assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)); assert.deepEqual(errors, []);
-  console.log('Target workflow passed: structured asset, escaping, value/type, Target-wide enqueue, scope.md, old Recon redirect and mobile width.');
+  console.log('Target workflow passed: structured asset, escaping, value/type, Target-wide enqueue, scope.md, compatible Recon history link and mobile width.');
 } finally { await browser.close(); }

@@ -1,5 +1,7 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
+import { reconRunHistory } from '@/server/recon/runHistory';
+import { ResearchError } from '@/server/research/workspace';
+import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import {programCollection} from '@/server/programCollection';
 import {paginationInput} from '@/lib/pagination';
@@ -22,14 +24,61 @@ function stamp(value: Date): string {
   return `${value.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 }
 
-export default async function ReconPage({ searchParams }: { searchParams: Promise<{ program?: string;page?:string;pageSize?:string;q?:string }> }) {
-  const search=await searchParams, {program}=search;
+export default async function ReconPage({ searchParams }: { searchParams: Promise<{ program?: string | string[];page?:string;pageSize?:string;q?:string }> }) {
+  const search=await searchParams;
   const query=new URLSearchParams(Object.entries(search).filter((entry):entry is [string,string]=>typeof entry[1]==='string'));
-  // Historical deep links used to forward into the Target workflow tab.
-  if (program) redirect(`/targets/${encodeURIComponent(program)}?tab=Recon`);
 
   const session = await auth();
   if (!session?.user?.id) redirect('/login');
+
+  if (Array.isArray(search.program)) notFound();
+  const program = query.get('program');
+  if (program) {
+    let history: Awaited<ReturnType<typeof reconRunHistory>>;
+    try {
+      history = await reconRunHistory(session.user.id, program, paginationInput(query, false));
+    } catch (error) {
+      if (error instanceof ResearchError && error.status === 404) notFound();
+      throw error;
+    }
+    return <div className="space-y-6">
+      <nav aria-label="Recon navigation" className="flex flex-wrap gap-4 text-sm">
+        <Link href="/recon" className="text-brand">Recon Targets</Link>
+        <Link href={`/targets/${history.program.id}`} className="text-brand">Back to {history.program.companyName}</Link>
+      </nav>
+      <div>
+        <h1 className="text-2xl font-semibold">Recon history — {history.program.companyName}</h1>
+        <p className="text-muted">All retained runs, newest first. Historical evidence does not authorize future operations.</p>
+        {history.program.deletingAt && <p role="status">Target pending deletion.</p>}
+      </div>
+      <CollectionPager path="/recon" query={query.toString()} {...history} label="Recon history pages" noun="runs"/>
+      {!history.items.length ? <p>No Recon runs recorded. Manage authorized assets and start Recon from the Target.</p> :
+        <div className="overflow-x-auto rounded border border-border" tabIndex={0} aria-label="Recon history table">
+          <table className="w-full min-w-[540px] text-left text-sm">
+            <caption className="sr-only">Retained Recon runs ordered by date and unique run ID</caption>
+            <thead><tr className="border-b border-border">
+              {['Run date (UTC)', 'Result', 'Recorded executions'].map(h => <th key={h} scope="col" className="p-3">{h}</th>)}
+            </tr></thead>
+            <tbody>{history.items.map(run => {
+              const view = reconOverview(run);
+              return <tr key={run.id} className="border-b border-border last:border-0">
+                <td className="p-3">
+                  <Link href={`/recon/runs/${run.id}?historyPage=${history.page}&historyPageSize=${history.pageSize}`} className="text-brand">
+                    <time dateTime={run.createdAt.toISOString()}>{stamp(run.createdAt)}</time>
+                    <span className="block font-mono text-xs">{run.id}</span>
+                  </Link>
+                </td>
+                <td className="p-3">
+                  <Badge tone={badgeTone[view.tone]}>{view.label}</Badge>
+                  {view.detail && <p className="mt-1 max-w-72 text-xs text-muted">{view.detail}</p>}
+                </td>
+                <td className="p-3">{run._count.scans}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>}
+    </div>;
+  }
 
   const collection=await programCollection(session.user.id,paginationInput(query,false));
   const programs=collection.items;
@@ -81,6 +130,7 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
             <td className="p-3">
               <div className="flex flex-wrap gap-3">
                 {row.run && <Link className="text-brand" href={`/recon/runs/${row.run.id}`} aria-label={`Open latest Recon run for ${row.companyName}`}>Latest run</Link>}
+                <Link className="text-brand" href={`/recon?program=${row.id}`} aria-label={`Open Recon history for ${row.companyName}`}>History</Link>
                 <Link className="text-muted" href={`/targets/${row.id}?tab=Recon`} aria-label={`Open Recon for ${row.companyName}`}>Target</Link>
               </div>
             </td>
