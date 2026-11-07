@@ -35,7 +35,7 @@ function TargetsCollection() {
     {data&&!creating&&<CollectionPager path="/targets" query={query} {...data}/>}
     {deleted && <p role="status">Target permanently deleted and resources cleaned up.</p>}
     {error && <p role="alert">{error}</p>}
-    {creating ? <Card className="p-6"><ProgramForm onSaved={id => router.push(`/targets/${id}`)} /></Card> : programs.map(p => <Card className="p-5" key={p.id}><Link className="text-xl font-semibold text-brand" href={`/targets/${p.id}`}>{p.companyName}</Link><Link className="float-right text-sm text-muted" href={`/targets/${p.id}/settings`}>Settings</Link><p>{p.platform ?? "Private program"} · Scope — {p._count.scopeAssets} assets</p></Card>)}
+    {creating ? <Card className="p-6"><ProgramForm onSaved={id => router.push(`/targets/${id}`)} /></Card> : programs.map(p => <Card className="p-5" key={p.id}><Link className="text-xl font-semibold text-brand" href={`/targets/${p.id}`}>{p.companyName}</Link><Link className="float-right text-sm text-muted" href={`/targets/${p.id}/settings`}>Settings</Link><p>{p.platform ?? "Private program"} · Scope — {p._count.scopeAssets} assets</p>{p.deletingAt&&<p role="status" className="text-sm text-muted">Deletion in progress — open this Target to review or retry cleanup.</p>}</Card>)}
     {!creating && data && !programs.length && !error && <p>{input.q?'No Targets match this view. Clear the search.':'Create your first Target to add hosts and start Recon.'}</p>}
   </div>;
 }

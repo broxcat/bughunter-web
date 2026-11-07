@@ -1,3 +1,4 @@
+import ResearchKeyboardBoundary from '@/components/ResearchKeyboardBoundary';
 import ResearchCoverage from '@/components/ResearchCoverage';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
@@ -17,5 +18,5 @@ export default async function ConsolePage({ params }: { params: Promise<{ id: st
   }
   try { assertResearchTarget(target, session.user.id); }
   catch (error) { if (error instanceof ResearchError && error.status === 404) notFound(); return <p role="alert" className="p-6">Research unavailable: current scope authorization is required. Stop active testing.</p>; }
-  return <div className="flex h-dvh flex-col"><ResearchPlan key={target.id} targetId={target.id}/><ResearchCoverage key={target.id+':coverage'} targetId={target.id}/><div className="min-h-0 flex-1 [&>div]:h-full"><ResearchTerminal targetId={target.id} company={target.program!.companyName} host={target.host} requiredUserAgent={target.program!.requiredUserAgent} /></div></div>;
+  return <div className="flex h-dvh flex-col"><ResearchPlan key={target.id} targetId={target.id}/><ResearchCoverage key={target.id+':coverage'} targetId={target.id}/><ResearchKeyboardBoundary><ResearchTerminal targetId={target.id} company={target.program!.companyName} host={target.host} requiredUserAgent={target.program!.requiredUserAgent} /></ResearchKeyboardBoundary></div>;
 }

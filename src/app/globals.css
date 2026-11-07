@@ -58,6 +58,14 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Control boundaries identify editable fields; decorative separators stay soft.
+ * Native toggles and the terminal's hidden input retain their own presentation. */
+input:not([type="checkbox"]):not([type="radio"]),
+textarea:not(.xterm-helper-textarea),
+select {
+  border-color: var(--control-border);
+}
+
 /* Consistent, brand-tinted focus outline for keyboard users across the app. */
 :focus-visible {
   outline: 2px solid var(--ring);

@@ -33,6 +33,7 @@
   --surface-3: #e9e9ec;     /* deeper inset / code wells */
   --border: #e4e4e7;        /* default hairline */
   --border-strong: #d4d4d8; /* emphasized divider / input border */
+  --control-border: #85858f; /* 3:1 or better against all light form surfaces */
   --foreground: #18181b;    /* primary text (near-black) */
   --muted: #52525b;         /* secondary text / labels */
   --subtle: #71717a;        /* tertiary text / placeholders */
@@ -97,9 +98,10 @@
   --surface-3: #2d2f35;     /* deeper inset / code wells */
   --border: #33363c;        /* default hairline */
   --border-strong: #41444b; /* emphasized divider / input border */
+  --control-border: #858995; /* distinguish controls against dark form surfaces */
   --foreground: #ededed;    /* primary text (off-white) */
   --muted: #a1a1aa;         /* secondary text */
-  --subtle: #80848c;        /* tertiary text */
+  --subtle: #9a9eaa;        /* tertiary text */
 
   /* ---- Brand (lighter + slightly desaturated so it reads on anthracite).
    * A lighter red means a brand button pairs with NEAR-BLACK text for
