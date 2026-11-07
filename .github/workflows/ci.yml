@@ -75,7 +75,7 @@ jobs:
         run: npm run build
 
       - name: Test (unit + integration)
-        run: npm test
+        run: npm test -- --maxWorkers=1
 
       - name: Validate upgrade preserves historical data
         env:

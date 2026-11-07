@@ -25,8 +25,8 @@ const call=async(row:typeof rows[number],data:string,origin?:string)=>{
  return mod[row.method](new NextRequest('http://app.example.test'+path,{method:row.method,headers:{'Content-Type':'application/json',...(origin?{Origin:origin}:{})},body:data}),context);
 };
 (db?describe:describe.skip)('Inventory mutating-method admission',()=>{
- beforeAll(async()=>{execFileSync('npx',['prisma','migrate','deploy'],{env:process.env,stdio:'pipe'});({prisma:p}=await import('@/lib/prisma'));userId=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;},30000);
- afterAll(async()=>{if(p){await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);await p.$disconnect();}});
+ beforeAll(async()=>{vi.stubEnv('AUTH_URL','http://app.example.test');execFileSync('npx',['prisma','migrate','deploy'],{env:process.env,stdio:'pipe'});({prisma:p}=await import('@/lib/prisma'));userId=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;},30000);
+ afterAll(async()=>{vi.unstubAllEnvs();if(p){await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);await p.$disconnect();}});
  for(const row of rows){
   it(`${row.method} ${row.path}: anonymous`,async()=>{mocks.auth.mockResolvedValue(null);const r=await call(row,'{}');expect(r.status).toBe(401);expect(r.headers.get('location')).toBeNull();});
   if(row.path.startsWith('/api/internal/'))continue;
