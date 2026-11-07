@@ -23,9 +23,10 @@ export default async function DashboardLayout({
 
   return (
     <AuthenticatedSession><div className="flex min-h-full flex-col bg-background text-foreground">
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="sticky top-0 z-10 border-b border-border bg-surface/90 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 py-3">
+          <div className="flex min-w-0 items-center gap-3">
             <Link
               href="/targets"
               className="flex items-center gap-2 font-semibold tracking-tight"
@@ -33,11 +34,11 @@ export default async function DashboardLayout({
               <span className="inline-block h-2.5 w-2.5 rounded-sm bg-brand" />
               bughunter
             </Link>
-            <NavLinks items={NAV} />
           </div>
+          <div className="order-3 w-full sm:order-none sm:mr-auto sm:w-auto"><NavLinks items={NAV} /></div>
           <div className="flex items-center gap-3 text-sm">
             {session?.user?.email && (
-              <span className="hidden font-mono text-subtle sm:inline">
+              <span className="hidden max-w-40 truncate text-xs text-subtle lg:inline">
                 {session.user.email}
               </span>
             )}
@@ -46,7 +47,7 @@ export default async function DashboardLayout({
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">{children}</main>
+      <main id="main-content" tabIndex={-1} className="workspace-ui mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:py-8">{children}</main>
       <footer className="border-t border-border px-4 py-3 text-center text-xs text-subtle">BugHunter Web · v{buildVersion}</footer>
     </div></AuthenticatedSession>
   );

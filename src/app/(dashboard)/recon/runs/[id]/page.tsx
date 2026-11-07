@@ -165,7 +165,7 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
         <details className="rounded border border-border p-3">
           <summary className="cursor-pointer text-sm font-medium">Raw execution output ({lines.length}{lines.length >= rawLogLimit ? ` of the latest ${rawLogLimit}` : ''} lines)</summary>
           {lines.length
-            ? <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-surface-2 p-3 font-mono text-xs leading-relaxed">{lines.map((line, index) => <span key={index} className={line.stream === 'STDERR' ? 'block text-danger' : 'block'}>{line.text}</span>)}</pre>
+            ? <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-surface-2 p-3 font-mono text-xs leading-relaxed">{lines.map((line, index) => <span key={index} className="block"><span className="text-muted">[{line.stream}] </span>{line.text}</span>)}</pre>
             : <p className="mt-2 text-sm text-muted">No raw output was recorded. Open host evidence for the complete artifact set.</p>}
           {lines.length >= rawLogLimit && <p className="mt-2 text-xs text-muted">Only the most recent {rawLogLimit} lines are shown here. Stored logs are unchanged and remain available from the host page.</p>}
         </details>

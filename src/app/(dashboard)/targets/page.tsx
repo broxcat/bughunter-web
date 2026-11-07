@@ -30,12 +30,12 @@ function TargetsCollection() {
     return()=>controller.abort();
   },[key,query,input.page,input.pageSize,input.q,router]);
   return <div className="space-y-6"><div className="flex items-center justify-between"><h1 className="text-2xl font-semibold">Targets</h1><Button onClick={() => setCreating(!creating)}>{creating ? "Cancel" : "Create Target"}</Button></div><p className="text-muted">Your bug bounty targets. Manage scope assets, Recon, Research and Findings from each Target.</p>
-    <form action="/targets" className="flex flex-wrap gap-3"><label>Search Targets<input name="q" maxLength={200} defaultValue={input.q} key={input.q} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={input.pageSize}/><Button type="submit">Search</Button></form>
+    <form action="/targets" className="flex flex-wrap gap-3"><label>Search Targets<input name="q" maxLength={200} defaultValue={input.q} key={input.q} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={input.pageSize}/><Button variant="secondary" type="submit">Search</Button></form>
     {!data&&!error&&<p role="status">Loading Targets…</p>}
     {data&&!creating&&<CollectionPager path="/targets" query={query} {...data}/>}
     {deleted && <p role="status">Target permanently deleted and resources cleaned up.</p>}
     {error && <p role="alert">{error}</p>}
-    {creating ? <Card className="p-6"><ProgramForm onSaved={id => router.push(`/targets/${id}`)} /></Card> : programs.map(p => <Card className="p-5" key={p.id}><Link className="text-xl font-semibold text-brand" href={`/targets/${p.id}`}>{p.companyName}</Link><Link className="float-right text-sm text-muted" href={`/targets/${p.id}/settings`}>Settings</Link><p>{p.platform ?? "Private program"} · Scope — {p._count.scopeAssets} assets</p>{p.deletingAt&&<p role="status" className="text-sm text-muted">Deletion in progress — open this Target to review or retry cleanup.</p>}</Card>)}
+    {creating ? <Card className="p-6"><ProgramForm onSaved={id => router.push(`/targets/${id}`)} /></Card> : programs.map(p => <Card className="p-5" key={p.id}><Link className="text-xl font-semibold text-brand" href={`/targets/${p.id}`}>{p.companyName}</Link><Link className="ml-4 inline-block text-sm text-muted" href={`/targets/${p.id}/settings`}>Settings</Link><p className="mt-2 text-sm text-muted">{p.platform ?? "Private program"} · Scope — {p._count.scopeAssets} assets</p>{p.deletingAt&&<p role="status" className="text-sm text-muted">Deletion in progress — open this Target to review or retry cleanup.</p>}</Card>)}
     {!creating && data && !programs.length && !error && <p>{input.q?'No Targets match this view. Clear the search.':'Create your first Target to add hosts and start Recon.'}</p>}
   </div>;
 }

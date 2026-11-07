@@ -4,7 +4,7 @@ import {useId,useState,type ReactNode} from 'react';
  * xterm without changing CLI approval, provider or persistent session state. */
 export default function ResearchKeyboardBoundary({children}:{children:ReactNode}){
  const [navigate,setNavigate]=useState(false),helpId=useId();
- return <div className="flex min-h-0 flex-1 flex-col" role="region" aria-label="Research console keyboard controls" aria-keyshortcuts="Control+Shift+M" onFocusCapture={event=>{
+ return <div className="research-console flex min-h-0 flex-1 flex-col" role="region" aria-label="Research console keyboard controls" aria-keyshortcuts="Control+Shift+M" onFocusCapture={event=>{
   if(event.target instanceof HTMLElement&&event.target.closest('.xterm')){
    const described=new Set((event.target.getAttribute('aria-describedby')??'').split(/\s+/).filter(Boolean));described.add(helpId);event.target.setAttribute('aria-describedby',[...described].join(' '));
   }

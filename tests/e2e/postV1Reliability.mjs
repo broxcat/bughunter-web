@@ -1,3 +1,4 @@
+import {auditMilestone6Interactions,auditScopeUrlState} from './milestone6VisualAcceptance.mjs';
 import {auditMilestone5Scope} from './milestone5ScopeContext.mjs';
 import {auditMilestone4Report} from './milestone4Report.mjs';
 import {auditMilestone3Recon} from './milestone3ReconNavigation.mjs';
@@ -62,7 +63,7 @@ try {
   check('anonymous API JSON contract', () => { assert.equal(anonymous.status(), 401); assert.equal(anonymous.headers()['location'], undefined); });
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
   await login(page, owner.email, password);
-  if(process.env.POST_V1_M5_ONLY==='1'){const otherContext=await browser.newContext(),other=await otherContext.newPage();await login(other,outsider.email,password);await auditMilestone5Scope({prisma,owner,origin,context,page,otherContext});await otherContext.close();}else if(process.env.POST_V1_M4_ONLY==='1'){await auditMilestone4Report({prisma,owner,origin,context,page,fixtureEnv:env});}else if(process.env.POST_V1_M3_ONLY==='1'){const otherContext=await browser.newContext(),other=await otherContext.newPage();await login(other,outsider.email,password);await auditMilestone3Recon({prisma,owner,origin,context,page,otherContext});await otherContext.close();}else if(process.env.POST_V1_M2_ONLY==='1'){await auditMilestone2Scope({prisma,owner,origin,context,page});}else if(process.env.POST_V1_A11Y_ONLY==='1'){await auditAccessibility({prisma,owner,origin,context,page,program,scope,asset,target,parent});}else{
+  if(process.env.POST_V1_M6_URL_ONLY==='1'){await auditScopeUrlState({prisma,owner,origin,context,page});}else if(process.env.POST_V1_M6_ONLY==='1'){await auditAccessibility({prisma,owner,origin,context,page,program,scope,asset,target,parent});await auditMilestone6Interactions({prisma,owner,origin,context,page});await auditScopeUrlState({prisma,owner,origin,context,page});}else if(process.env.POST_V1_M5_ONLY==='1'){const otherContext=await browser.newContext(),other=await otherContext.newPage();await login(other,outsider.email,password);await auditMilestone5Scope({prisma,owner,origin,context,page,otherContext});await otherContext.close();}else if(process.env.POST_V1_M4_ONLY==='1'){await auditMilestone4Report({prisma,owner,origin,context,page,fixtureEnv:env});}else if(process.env.POST_V1_M3_ONLY==='1'){const otherContext=await browser.newContext(),other=await otherContext.newPage();await login(other,outsider.email,password);await auditMilestone3Recon({prisma,owner,origin,context,page,otherContext});await otherContext.close();}else if(process.env.POST_V1_M2_ONLY==='1'){await auditMilestone2Scope({prisma,owner,origin,context,page});}else if(process.env.POST_V1_A11Y_ONLY==='1'){await auditAccessibility({prisma,owner,origin,context,page,program,scope,asset,target,parent});}else{
   for (const mode of ['light', 'dark']) for (const width of [1280, 390]) {
     await page.evaluate(theme => localStorage.setItem('theme', theme), mode); await page.emulateMedia({ colorScheme: mode }); await page.setViewportSize({ width, height: 900 });
     await page.goto(`${origin}/recon/runs/${parent.id}`); await page.getByRole('heading', { name: 'Recon run', exact: true }).waitFor();
@@ -105,6 +106,7 @@ try {
   await auditMilestone3Recon({prisma,owner,origin,context,page,otherContext});
   await auditMilestone4Report({prisma,owner,origin,context,page,fixtureEnv:env});
   await auditMilestone5Scope({prisma,owner,origin,context,page,otherContext});
+  await auditMilestone6Interactions({prisma,owner,origin,context,page});await auditScopeUrlState({prisma,owner,origin,context,page});
   check('no page exceptions or foreign browser requests', () => { assert.deepEqual(errors, []); assert.equal(foreign, 0); });
   console.log(`POST_V1_BROWSER: ${checks} passed, 0 failed, 0 skipped`);
   }

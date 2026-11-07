@@ -123,7 +123,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 px-4 py-8">
+    <div className="space-y-6">
       <h1 className="text-2xl font-semibold">AI Provider Settings</h1>
       <p className="mt-1 text-sm text-muted">
         Configure the default AI provider for Recon reports and AI assistance. API keys are encrypted at
@@ -148,7 +148,7 @@ export default function SettingsPage() {
                 key={c.id}
                 role="group"
                 aria-label={`Configured ${c.provider} provider`}
-                className="flex items-center justify-between gap-4 px-4 py-3"
+                className="flex flex-wrap items-start justify-between gap-4 px-4 py-3"
               >
                 <div>
                   <span className="flex items-center gap-2">
@@ -159,7 +159,7 @@ export default function SettingsPage() {
                       </Badge>
                     )}
                   </span>
-                  <div className="mt-1 font-mono text-xs text-subtle">
+                  <div className="mt-1 break-all font-mono text-xs text-subtle">
                     {c.model ? `model: ${c.model}` : "no model set"}
                     {c.baseUrl ? ` · ${c.baseUrl}` : ""}
                   </div>

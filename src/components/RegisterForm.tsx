@@ -41,7 +41,7 @@ export default function RegisterForm() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4">
+    <div className="auth-ui mx-auto flex w-full min-h-screen max-w-md flex-col justify-center px-4">
       <div className="mb-6 flex items-center gap-2">
         <span className="inline-block h-2.5 w-2.5 rounded-sm bg-brand" />
         <span className="font-semibold tracking-tight">bughunter</span>

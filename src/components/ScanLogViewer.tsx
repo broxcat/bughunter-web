@@ -69,41 +69,40 @@ function ScanLogSession({ scanRunId,stages,cancelled }: { scanRunId: string;stag
 
   // Auto-scroll to the newest line.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current?.scrollIntoView({ behavior: "instant" });
   }, [logs]);
 
-  // Deliberate terminal aesthetic: this panel stays dark in BOTH themes, so the
-  // log well reads like a real console regardless of the app's light/dark mode.
-  // These fixed neutral/green/red tones are intentional for the terminal look
-  // and are kept separate from the themeable chrome tokens.
+  // Normal Recon controls follow the app theme. Raw output stays secondary;
+  // stream labels, not colour, distinguish STDERR from STDOUT.
   return (
-    <div className="flex flex-col overflow-hidden rounded-md border border-neutral-800 bg-neutral-950">
-      <div className="flex items-center justify-between border-b border-neutral-800 bg-neutral-900 px-4 py-2">
-        <span className="font-mono text-xs font-medium uppercase tracking-wide text-neutral-400">
+    <div className="flex flex-col overflow-hidden rounded-md border border-border bg-surface-2">
+      <div className="flex items-center justify-between border-b border-border bg-surface px-4 py-2">
+        <span className="font-mono text-xs font-medium uppercase tracking-wide text-muted">
           {stages ? 'Recon Console' : 'Scan output'}
         </span>
         <div className="flex items-center gap-2"><Badge tone={presentation.tone} mono>{presentation.label}</Badge><ScanCancelButton scanRunId={scanRunId} status={status} requested={Boolean(cancelRequestedAt)} onRequested={setCancelRequestedAt} /></div>
       </div>
-      {stages&&<ol className="space-y-1 border-b border-neutral-800 px-4 py-3 font-mono text-xs text-neutral-200">{stages.map(s=><li key={s.name} className="flex flex-wrap gap-x-3"><span className="min-w-48">{s.name}</span><span>{cancelled&&['PENDING','RUNNING','SKIPPED'].includes(s.state)?'Cancelled':s.state.toLowerCase().replaceAll('_',' ').replace(/^./,c=>c.toUpperCase())}</span>{s.reason&&['PARTIAL','BLOCKED','FAILED','SKIPPED','SKIPPED_UNSUPPORTED','SKIPPED_NOT_APPLICABLE','COMPLETED_WITH_FALLBACK','CANCELLED'].includes(s.state)&&<span className="basis-full text-neutral-400">{s.reason}</span>}</li>)}</ol>}
-      {execution?.state === "INTERRUPTED" && <p role="status" className="px-4 py-2 text-sm text-neutral-300">Exécution interrompue · relance automatique désactivée.</p>}
-      <p className="px-4 py-1 text-xs text-neutral-300">Displays the most recent 2,000 received log entries.</p>
-      <div className="h-96 overflow-y-auto bg-neutral-950 px-4 py-3 font-mono text-xs leading-relaxed">
+      {stages&&<ol className="space-y-1 border-b border-border px-4 py-3 font-mono text-xs text-foreground">{stages.map(s=><li key={s.name} className="flex flex-wrap gap-x-3"><span className="min-w-48">{s.name}</span><span>{cancelled&&['PENDING','RUNNING','SKIPPED'].includes(s.state)?'Cancelled':s.state.toLowerCase().replaceAll('_',' ').replace(/^./,c=>c.toUpperCase())}</span>{s.reason&&['PARTIAL','BLOCKED','FAILED','SKIPPED','SKIPPED_UNSUPPORTED','SKIPPED_NOT_APPLICABLE','COMPLETED_WITH_FALLBACK','CANCELLED'].includes(s.state)&&<span className="basis-full text-muted">{s.reason}</span>}</li>)}</ol>}
+      {execution?.state === "INTERRUPTED" && <p role="status" className="px-4 py-2 text-sm text-muted">Exécution interrompue · relance automatique désactivée.</p>}
+      <p className="px-4 py-1 text-xs text-muted">Displays the most recent 2,000 received log entries.</p>
+      <details className="border-t border-border">
+      <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-foreground">Raw scan output ({logs.length} received lines)</summary>
+      <div className="max-h-96 overflow-y-auto bg-surface-2 px-4 py-3 font-mono text-xs leading-relaxed">
         {logs.length === 0 ? (
-          <p className="text-neutral-600">Waiting for scan output…</p>
+          <p className="text-muted">Waiting for scan output…</p>
         ) : (
           logs.map((entry, i) => (
             <pre
               key={i}
-              className={`whitespace-pre-wrap break-words ${
-                entry.stream === "STDERR" ? "text-red-400" : "text-emerald-200"
-              }`}
+              className="whitespace-pre-wrap break-words text-foreground"
             >
-              {entry.line}
+              <span className="text-muted">[{entry.stream}] </span>{entry.line}
             </pre>
           ))
         )}
         <div ref={bottomRef} />
       </div>
+      </details>
     </div>
   );
 }

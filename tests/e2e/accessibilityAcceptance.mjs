@@ -1,3 +1,5 @@
+import {inspectVisualSurface} from './milestone6VisualAcceptance.mjs';
+import {mkdir} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 // Practical DOM/keyboard checks supplement the dedicated native-console suite.
@@ -7,12 +9,24 @@ export async function auditAccessibility({prisma,owner,origin,context,page,progr
  const session=await prisma.researchSession.create({data:{userId:owner.id,targetId:target.id,workspaceId:randomUUID(),status:'ARCHIVED',targetHost:target.host,programName:program.companyName,scopeMarkdown:'# Historical fixture'}});
  const hypothesis=await prisma.researchHypothesis.create({data:{sessionId:session.id,externalId:'H-1',title:'Accessibility fixture',status:'OPEN',hypothesis:'Synthetic hypothesis',evidenceFor:[],evidenceAgainst:[],nextTest:'Manual review',expectedSignal:'Unknown',falsificationCondition:'Unknown',contentSha256:'a'.repeat(64)}});
  const hunt=await prisma.scanRun.create({data:{targetId:target.id,type:'HUNT',status:'COMPLETED'}});
+ // Populated Findings/Reports complement the empty-state and lifecycle workflow suites.
+ const candidate=await prisma.finding.create({data:{targetId:target.id,title:'Visual candidate fixture',severity:'HIGH',description:'Synthetic local visual evidence'}});
+ const confirmed=await prisma.finding.create({data:{targetId:target.id,title:'Visual confirmed fixture',severity:'MEDIUM',reviewStatus:'CONFIRMED',lifecycle:null}});
+ const report=await prisma.report.create({data:{userId:owner.id,targetId:target.id,title:'Visual saved report',markdown:'# Historical visual report\n\nSynthetic local fixture; no production evidence.'}});
+ await prisma.reportItem.create({data:{reportId:report.id,findingId:confirmed.id}});
  const pages=[['/hosts/[id]','/hosts/'+target.id],['/hunt/[id]','/hunt/'+hunt.id],['/hunt','/hunt'],['/recon','/recon'],['/recon/runs/[id]','/recon/runs/'+parent.id],['/research/history/[id]/hypotheses/[hypothesisId]',`/research/history/${session.id}/hypotheses/${hypothesis.id}`],['/research/history/[id]','/research/history/'+session.id],['/research','/research?program='+program.id],['/scopes/[id]','/scopes/'+asset.id],['/scopes','/scopes?target='+program.id],['/settings','/settings'],['/targets/[id]/findings','/targets/'+program.id+'/findings'],['/targets/[id]','/targets/'+program.id],['/targets/[id]/report','/targets/'+program.id+'/report'],['/targets/[id]/settings','/targets/'+program.id+'/settings'],['/targets','/targets'],['/research/[id]/hypotheses/[hypothesisId]',`/research/${session.id}/hypotheses/${hypothesis.id}`],['/research/[id]','/research/'+target.id],['/login','/login'],['/','/'],['/register','/register']];
  const terminal='**/api/research-targets/*/terminal',intercept=route=>route.fulfill({status:503,contentType:'application/json',body:'{"error":"Disposable accessibility fixture; console not launched"}'});
- await context.route(terminal,intercept);let checks=0;const failures=[];
+ await mkdir('/tmp/bh-m6/screenshots',{recursive:true});await context.route(terminal,intercept);let checks=0,visualChecks=0;const failures=[];
  try{for(const theme of ['light','dark'])for(const width of [1280,390])for(const [pattern,path] of pages.filter(([pattern])=>!process.env.POST_V1_A11Y_PATH||pattern===process.env.POST_V1_A11Y_PATH)){
   await page.setViewportSize({width,height:900});await page.evaluate(t=>localStorage.setItem('theme',t),theme);
   const response=await page.goto(origin+path);assert(response.status()<400,`${pattern}: document ${response.status()}`);
+  // Include asynchronously loaded populated Target controls, not just its SSR shell.
+  if(pattern==='/targets/[id]'){
+    const currentAsset=await prisma.scopeAsset.findFirst({where:{programId:program.id,active:true},orderBy:{id:'asc'}});
+    if(currentAsset)await page.getByRole('link',{name:currentAsset.normalizedValue,exact:true}).first().waitFor();
+  }
+  if(pattern==='/targets/[id]/findings')await page.getByText(candidate.title,{exact:true}).first().waitFor();
+  if(pattern==='/targets/[id]/report'){const saved=page.getByRole('combobox',{name:'Saved report',exact:true});await saved.waitFor();assert(await saved.evaluate((e,id)=>Array.from(e.options).some(o=>o.value===id),report.id));}
   // Wait for hydrated client forms, without waiting on external services.
   await page.locator('h1, [role="alert"], .xterm').first().waitFor();
   await page.waitForFunction(()=>!Array.from(document.querySelectorAll('p')).some(e=>e.getClientRects().length&&/^Loading.*[.…]$/.test(e.textContent.trim())));
@@ -46,6 +60,9 @@ export async function auditAccessibility({prisma,owner,origin,context,page,progr
    }
    return issues;
   });
+  const visual=await page.evaluate(inspectVisualSurface);visualChecks++;
+  if(visual.length)failures.push({pattern,theme,width,issues:visual});
+  if(['/targets/[id]','/recon/runs/[id]'].includes(pattern))await page.screenshot({path:`/tmp/bh-m6/screenshots/${pattern.includes('recon')?'recon':'target'}-${theme}-${width}.png`});
   if(audit.length)failures.push({pattern,theme,width,issues:audit});
   if(pattern==='/research/[id]'){
     await page.getByRole('alert').filter({hasText:'Disposable accessibility fixture'}).waitFor();
@@ -78,5 +95,6 @@ export async function auditAccessibility({prisma,owner,origin,context,page,progr
  }}finally{await context.unroute(terminal,intercept);}
  if(failures.length)console.log('A11Y_FAILURES '+JSON.stringify(failures));
  assert.deepEqual(failures,[]);
+ console.log(`M6_VISUAL_BROWSER: ${visualChecks} page/theme/viewport checks passed, 0 failed, 0 skipped`);
  console.log(`ACCESSIBILITY_BROWSER: ${checks} page/theme/viewport checks passed, 0 failed, 0 skipped (terminal transport synthetic)`);
 }

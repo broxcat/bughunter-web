@@ -10,7 +10,7 @@ import type { ReconReportModel } from '@/lib/reconReportModel';
 export default function ReconReportView({ model,narrative }: { model: ReconReportModel;narrative?:RunNarrative }) {
   const { metadata, authorization, methodology, web, authenticated, changes } = model;
 
-  return <section aria-labelledby="recon-report-heading" className="space-y-6">
+  return <section aria-labelledby="recon-report-heading" className="recon-report space-y-6">
     <div className="space-y-1">
       <h2 id="recon-report-heading" className="text-xl font-semibold">Report</h2>
       <p className="text-sm text-muted">Deterministic, generated from stored Recon evidence. It does not prove security, and missing observations are not evidence of absence.</p>
@@ -53,7 +53,7 @@ export default function ReconReportView({ model,narrative }: { model: ReconRepor
     <section aria-label="Methodology" className="space-y-2">
       <h3 className="font-semibold">Methodology</h3>
       {methodology.stages.length
-        ? <div className="overflow-x-auto"><table className="w-full min-w-[420px] text-left text-sm">
+        ? <div className="ui-table-scroll overflow-x-auto" tabIndex={0} role="region" aria-label="Recon methodology: Stage and planned tools"><table className="w-full min-w-[420px] text-left text-sm">
             <thead><tr className="border-b border-border"><th scope="col" className="p-2">Stage</th><th scope="col" className="p-2">Planned tools</th></tr></thead>
             <tbody>{methodology.stages.map(stage => <tr key={stage.name} className="border-b border-border"><td className="p-2">{stage.name}</td><td className="p-2 font-mono text-xs">{stage.tools.join(', ') || 'None recorded'}</td></tr>)}</tbody>
           </table></div>
@@ -64,7 +64,7 @@ export default function ReconReportView({ model,narrative }: { model: ReconRepor
     <section aria-label="Execution overview" className="space-y-2">
       <h3 className="font-semibold">Execution overview</h3>
       {model.execution.length
-        ? <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-left text-sm">
+        ? <div className="ui-table-scroll overflow-x-auto" tabIndex={0} role="region" aria-label="Recon execution: Host, phase and recorded tool"><table className="w-full min-w-[640px] text-left text-sm">
             <thead><tr className="border-b border-border">{['Host', 'Phase', 'Tool', 'Result', 'Notes'].map(heading => <th key={heading} scope="col" className="p-2">{heading}</th>)}</tr></thead>
             <tbody>{model.execution.map((line, index) => <tr key={`${line.host}:${line.name}:${index}`} className="border-b border-border align-top">
               <td className="break-all p-2 font-mono text-xs">{line.host}</td>
@@ -80,7 +80,7 @@ export default function ReconReportView({ model,narrative }: { model: ReconRepor
     <section aria-label="Tools and commands" className="space-y-2">
       <h3 className="font-semibold">Tools and commands</h3>
       {model.tools.length
-        ? <><div className="overflow-x-auto"><table className="w-full min-w-[480px] text-left text-sm">
+        ? <><div className="ui-table-scroll overflow-x-auto" tabIndex={0} role="region" aria-label="Recorded tools: Version and invocation"><table className="w-full min-w-[480px] text-left text-sm">
             <thead><tr className="border-b border-border">{['Tool', 'Version', 'Invocation'].map(heading => <th key={heading} scope="col" className="p-2">{heading}</th>)}</tr></thead>
             <tbody>{model.tools.map(tool => <tr key={tool.name} className="border-b border-border"><td className="p-2 font-mono text-xs">{tool.name}</td><td className="p-2">{tool.version ?? 'Not recorded'}</td><td className="p-2 text-muted">{tool.invocation ?? 'Invocation not recorded'}</td></tr>)}</tbody>
           </table></div>
@@ -93,7 +93,7 @@ export default function ReconReportView({ model,narrative }: { model: ReconRepor
     <section aria-label="Ports and services" className="space-y-2">
       <h3 className="font-semibold">Ports and services</h3>
       {model.network.length
-        ? <div className="overflow-x-auto"><table className="w-full min-w-[520px] text-left text-sm">
+        ? <div className="ui-table-scroll overflow-x-auto" tabIndex={0} role="region" aria-label="Observed network: Host, port and protocol"><table className="w-full min-w-[520px] text-left text-sm">
             <thead><tr className="border-b border-border">{['Host', 'Port', 'Protocol', 'Service', 'Evidence'].map(heading => <th key={heading} scope="col" className="p-2">{heading}</th>)}</tr></thead>
             <tbody>{model.network.map(row => <tr key={`${row.host}:${row.port}:${row.protocol??"unrecorded"}`} className="border-b border-border"><td className="break-all p-2 font-mono text-xs">{row.host}</td><td className="p-2">{row.port}</td><td className="p-2">{row.protocol ?? '—'}</td><td className="p-2">{(row.service ?? 'Not recorded') + ' · ' + (row.state??'state not recorded')}</td><td className="p-2 text-muted">{row.source}</td></tr>)}</tbody>
           </table></div>

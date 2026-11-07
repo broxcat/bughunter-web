@@ -1,5 +1,5 @@
 /* =============================================================================
- * bughunter-web — Design Tokens (Phase 7 visual identity)
+ * bughunter-web — Shared post-v1 design tokens
  * -----------------------------------------------------------------------------
  * Single source of truth for every color in the app. Two themes:
  *   - Light  -> :root                     (near-white bg / near-black text)
@@ -26,6 +26,7 @@
  * ========================================================================== */
 
 :root {
+  color-scheme: light;
   /* ---- Surfaces & text (neutral chrome) ---------------------------------- */
   --bg: #fafafa;            /* page background (near-white) */
   --surface: #ffffff;       /* cards, panels, header */
@@ -39,15 +40,15 @@
   --subtle: #71717a;        /* tertiary text / placeholders */
 
   /* ---- Brand (the ONE red) ----------------------------------------------- */
-  --brand: #dc2626;             /* accent fill: buttons, active nav, links */
-  --brand-hover: #b91c1c;       /* hover/pressed fill */
-  --brand-active: #991b1b;      /* active/pressed deeper */
+  --brand: #b91c1c;             /* accent fill: buttons, active nav, links */
+  --brand-hover: #991b1b;       /* hover/pressed fill */
+  --brand-active: #7f1d1d;      /* active/pressed deeper */
   --brand-contrast: #ffffff;    /* text/icon on a brand fill */
   --brand-ring: rgba(220, 38, 38, 0.45); /* focus ring */
 
   /* ---- Destructive action (deeper than brand, for "delete"/"kill") ------- */
-  --danger: #b91c1c;
-  --danger-hover: #991b1b;
+  --danger: #991b1b;
+  --danger-hover: #7f1d1d;
   --danger-contrast: #ffffff;
 
   /* ---- Focus ring (generic) ---------------------------------------------- */
@@ -91,12 +92,13 @@
  * they sit naturally on the dark surface; labels get lighter for contrast.
  * ========================================================================== */
 :root[data-theme="dark"] {
+  color-scheme: dark;
   /* ---- Surfaces & text --------------------------------------------------- */
-  --bg: #18191c;            /* anthracite page background */
-  --surface: #202226;       /* cards, panels, header */
-  --surface-2: #26282d;     /* muted fills, hovered rows */
-  --surface-3: #2d2f35;     /* deeper inset / code wells */
-  --border: #33363c;        /* default hairline */
+  --bg: #111214;            /* anthracite page background */
+  --surface: #1b1d21;       /* cards, panels, header */
+  --surface-2: #24262b;     /* muted fills, hovered rows */
+  --surface-3: #2d3036;     /* deeper inset / code wells */
+  --border: #393c43;        /* default hairline */
   --border-strong: #41444b; /* emphasized divider / input border */
   --control-border: #858995; /* distinguish controls against dark form surfaces */
   --foreground: #ededed;    /* primary text (off-white) */
@@ -106,15 +108,15 @@
   /* ---- Brand (lighter + slightly desaturated so it reads on anthracite).
    * A lighter red means a brand button pairs with NEAR-BLACK text for
    * contrast (brand-contrast), while the same red works as accent/link text. */
-  --brand: #ef5350;
-  --brand-hover: #f26a67;
+  --brand: #ff706b;
+  --brand-hover: #ff8985;
   --brand-active: #d94a40;
   --brand-contrast: #1a0b0a;
   --brand-ring: rgba(239, 83, 80, 0.50);
 
   /* ---- Destructive action ------------------------------------------------ */
-  --danger: #f0564c;
-  --danger-hover: #f26a67;
+  --danger: #fca5a5;
+  --danger-hover: #fecaca;
   --danger-contrast: #1a0b0a;
 
   --ring: var(--brand);

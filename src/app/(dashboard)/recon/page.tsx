@@ -53,7 +53,7 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
       </div>
       <CollectionPager path="/recon" query={query.toString()} {...history} label="Recon history pages" noun="runs"/>
       {!history.items.length ? <p>No Recon runs recorded. Manage authorized assets and start Recon from the Target.</p> :
-        <div className="overflow-x-auto rounded border border-border" tabIndex={0} aria-label="Recon history table">
+        <div className="ui-table-scroll overflow-x-auto rounded border border-border" tabIndex={0} aria-label="Recon history table" role="region">
           <table className="w-full min-w-[540px] text-left text-sm">
             <caption className="sr-only">Retained Recon runs ordered by date and unique run ID</caption>
             <thead><tr className="border-b border-border">
@@ -107,7 +107,7 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
     <CollectionPager path="/recon" query={query.toString()} {...collection}/>
     {!rows.length && <p>No matching Targets. <Link href="/targets" className="text-brand">Create a Target</Link> to authorize assets and start Recon.</p>}
 
-    {rows.length > 0 && <div className="overflow-x-auto rounded border border-border">
+    {rows.length > 0 && <div className="ui-table-scroll overflow-x-auto rounded border border-border" tabIndex={0} role="region" aria-label="Targets with their authorized asset count and latest Recon result">
       <table className="w-full min-w-[680px] text-left text-sm">
         <caption className="sr-only">Targets with their authorized asset count and latest Recon result</caption>
         <thead>
