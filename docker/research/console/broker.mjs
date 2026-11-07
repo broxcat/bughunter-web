@@ -1,3 +1,4 @@
+import {launcherStatusSchema} from '../../../src/lib/research/provider.ts';
 import { spawn } from 'node:child_process';
 export const brokerClient='/opt/bughunter/docker/research/broker/client.py';
 // Signed tickets travel over stdin, never process argv visible through /proc.
@@ -19,9 +20,5 @@ export function workspaceRequest(targetId,operation,provider='codex',profile=pro
   return brokerRequest({operation,targetId,provider,profile});
 }
 export async function isolatedLauncherEngine(targetId,provider) {
-  const status=JSON.parse((await workspaceRequest(targetId,'probe',provider)).stdout);
-  const help=(await workspaceRequest(targetId,'help',provider)).stdout;
-  const profiles=provider==='codex' ? [ ...(help.includes('--ask-for-approval')?['standard']:[]), ...(help.includes('--dangerously-bypass-approvals-and-sandbox')?['yolo']:[]) ] : (help.includes('--permission-mode')?['standard','plan']:[]);
-  const runningProfile=await workspaceRequest(targetId,'profile',provider).then(result=>result.stdout.trim().replace(/^BUGHUNTER_LAUNCH_PROFILE=/,''),()=>null);
-  return {...status,profiles,runningProfile};
+  return launcherStatusSchema.parse([JSON.parse((await workspaceRequest(targetId,'inspect',provider)).stdout)])[0];
 }

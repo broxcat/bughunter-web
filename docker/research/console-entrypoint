@@ -13,7 +13,6 @@ fi
 chmod 0700 /etc/ssh/host-keys
 chmod 0600 /etc/ssh/host-keys/ssh_host_ed25519_key
 # Aggregate legacy provider volumes stay untouched pending explicit migration.
-install -d -o root -g root -m 0711 /var/lib/bughunter-identities /var/lib/bughunter-identities/active /var/lib/bughunter-homes
 install -d -o root -g root -m 0711 /run/bughunter-broker
 python3 /opt/bughunter/docker/research/broker/broker.py &
 broker_pid=$!

@@ -22,7 +22,7 @@ export function sessionCommand(targetId, provider = 'codex') {
 export async function providerStatus(provider = 'codex', run = execute, cwd = undefined) {
   const adapter = providerAdapter(provider);
   const status = { provider, installation: 'available', authentication: 'unknown', version: null, code: null };
-  const options = { timeout: 5000, killSignal: 'SIGKILL', maxBuffer: 16384, shell: false, cwd: '/tmp', ...(provider === 'claude' && cwd ? { env: { ...process.env, CLAUDE_CONFIG_DIR: claudeConfigDirectory(cwd), DISABLE_AUTOUPDATER: '1' } } : {}) };
+  const options = { timeout: 5000, killSignal: 'SIGKILL', maxBuffer: 16384, shell: false, cwd: process.env.HOME ?? '/var/empty/bughunter-probe', ...(provider === 'claude' && cwd ? { env: { ...process.env, CLAUDE_CONFIG_DIR: claudeConfigDirectory(cwd), DISABLE_AUTOUPDATER: '1' } } : {}) };
   try {
     const { stdout } = await run(adapter.command, ['--version'], options);
     status.version = /\b\d+\.\d+\.\d+\b/.exec(stdout)?.[0] ?? null;

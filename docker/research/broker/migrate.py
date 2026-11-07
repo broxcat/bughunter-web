@@ -69,20 +69,27 @@ def migrate(token, apply=False, fresh=False):
     binding = admitted(token)
     if not fresh and legacy_active():
         fail('LEGACY_SESSION_ACTIVE')
-    import fcntl
-    lock = open(ROOT + '/migration.lock', 'a')
-    fcntl.flock(lock, fcntl.LOCK_EX)
+    from broker import metadata_lock,reject_revoked,lookup
+    lock=metadata_lock('migration')
+    lock.__enter__()
     handles = []
     export = None
     try:
         from broker import ledger
         previous = ledger()['targets'].get(binding['targetId'])
+        already_active=False
+        if previous and previous.get('state')!='deleted':
+            reject_revoked(previous['uid'])
+            try:lookup(binding['targetId']);already_active=True
+            except FileNotFoundError:pass
         if previous and legacy_active(previous['uid']):
             fail('WORKSPACE_SESSION_ACTIVE')
         from provider_export import load_export, import_export
         export=load_export(binding,inventory)
+        if not fresh and previous is None and export is None:
+            fail('OPERATOR_REVIEW_REQUIRED')
         for path in ['/home/researcher/.codex/sessions','/home/researcher/.codex/state_5.sqlite','/home/researcher/.claude/workspaces/'+binding['targetId']]:
-            if os.path.lexists(path) and export is None:
+            if not fresh and os.path.lexists(path) and export is None:
                 fail('OPERATOR_REVIEW_REQUIRED')
 
         handles, entries = inventory('/workspaces/' + binding['workspaceId'], previous['uid'] if previous else None)
@@ -93,14 +100,22 @@ def migrate(token, apply=False, fresh=False):
         if not apply:
             return {'status': 'DRY_RUN', 'targetId': binding['targetId'], 'entries': len(entries), 'files': len(before)}
         entry = allocate(binding)
-        from broker import ensure_account
+        from broker import ensure_account,binding_path
         ensure_account(entry)
         parent_stat=os.lstat('/workspaces')
-        if not stat.S_ISDIR(parent_stat.st_mode) or parent_stat.st_uid!=0:
+        if not stat.S_ISDIR(parent_stat.st_mode) or parent_stat.st_uid not in {0,SERVICE_UID}:
             fail('OPERATOR_REVIEW_REQUIRED')
         os.chmod('/workspaces',0o711)
         uid = entry['uid']
-        home = HOMES + '/' + str(uid)
+        outer=HOMES+'/'+str(uid)
+        try:
+            os.mkdir(outer,0o750)
+            os.chown(outer,0,uid)
+        except FileExistsError:
+            st=os.lstat(outer)
+            if not stat.S_ISDIR(st.st_mode) or st.st_uid!=0 or st.st_gid!=uid or (st.st_mode&0o7777)!=0o750:
+                fail('OPERATOR_REVIEW_REQUIRED')
+        home = outer+'/home'
         try:
             os.mkdir(home, 0o700)
             os.chown(home, uid, uid)
@@ -132,9 +147,11 @@ def migrate(token, apply=False, fresh=False):
                     after.update(part)
                 if after.hexdigest() != digest:
                     fail('CONTENT_CHANGED')
-        transcripts=import_export(export,home,uid)
-        atomic('/workspaces/'+binding['workspaceId']+'/.agents/bughunter/isolation.json',{**entry,'state':'active'},uid,0o440)
-        atomic(ROOT + '/active/' + str(uid) + '.json', {**entry, 'state': 'active'}, uid, 0o440)
+        transcripts=0 if already_active else import_export(export,home,uid)
+        with metadata_lock('lifecycle-'+str(uid)):
+            reject_revoked(uid)
+            atomic('/workspaces/'+binding['workspaceId']+'/.agents/bughunter/isolation.json',{**entry,'state':'active'},uid,0o440)
+            atomic(binding_path(uid), {**entry, 'state': 'active'}, uid, 0o440)
         return {'status': 'MIGRATED', 'targetId': binding['targetId'], 'filesPreserved': len(before), 'providerFilesPreserved':transcripts}
     finally:
         for fd in handles:
@@ -142,7 +159,7 @@ def migrate(token, apply=False, fresh=False):
         if export is not None:
             for fd in export[0]:
                 os.close(fd)
-        lock.close()
+        lock.__exit__(None,None,None)
 
 if __name__ == '__main__':
     try:
@@ -150,5 +167,7 @@ if __name__ == '__main__':
             fail('INVALID_ARGUMENT')
         print(json.dumps(migrate(sys.stdin.read(4096), sys.argv[1:] == ['--apply'])))
     except Exception as error:
-        print(json.dumps({'status': str(error) if isinstance(error, ValueError) else 'OPERATOR_REVIEW_REQUIRED'}))
+        import re
+        code=str(error) if type(error) is ValueError and re.fullmatch(r'[A-Z_]{3,80}',str(error)) else 'OPERATOR_REVIEW_REQUIRED'
+        print(json.dumps({'status':code}))
         sys.exit(1)

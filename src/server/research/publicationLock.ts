@@ -45,7 +45,7 @@ export async function withPublicationLock<T>(root: string, workspaceId: string, 
     if (!Number.isSafeInteger(gid) || gid < 0) throw new ResearchError('Invalid workspace group');
     const rootInfo = await directory.stat();
     if (rootInfo.uid !== process.getuid?.() || rootInfo.mode & 0o002) throw new ResearchError('Unsafe publication root ownership or permissions', 409);
-    await directory.chown(process.getuid!(), gid); await directory.chmod(0o3770);
+    await directory.chown(process.getuid!(), gid); await directory.chmod(workspaceId.startsWith('research_') ? 0o711 : 0o3770);
     const path = `/proc/self/fd/${directory.fd}/.provisioning-locks`;
     await mkdir(path, { mode: 0o700 }).catch(e => { if (e.code !== 'EEXIST') throw e; });
     locks = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);

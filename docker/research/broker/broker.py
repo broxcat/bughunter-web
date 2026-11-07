@@ -4,6 +4,7 @@ Only the dedicated admission-service UID can connect. Console UIDs cannot.
 Registry and runtime state must be dedicated durable volumes, owned by root.
 """
 import fcntl
+import contextlib
 import json
 import os
 import pwd
@@ -46,15 +47,44 @@ def secure_dir(path, mode=0o711):
     except FileExistsError:
         pass
     st = os.lstat(path)
-    if not __import__('stat').S_ISDIR(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o022:
+    if not __import__('stat').S_ISDIR(st.st_mode) or st.st_uid != 0 or st.st_gid != 0 or st.st_mode & 0o022:
         fail('UNSAFE_REGISTRY')
+    os.chmod(path,mode)
+
+
+@contextlib.contextmanager
+def metadata_lock(name):
+    if not re.fullmatch(r'[a-z0-9-]{1,40}',name):fail('INVALID_LOCK')
+    fd=os.open(ROOT+'/'+name+'.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    try:
+        st=os.fstat(fd)
+        if not __import__('stat').S_ISREG(st.st_mode) or st.st_uid!=0 or st.st_gid!=0 or st.st_nlink!=1 or st.st_mode&0o022 or st.st_size!=0:fail('UNSAFE_LOCK')
+        os.fchmod(fd,0o600)
+        fcntl.flock(fd,fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+def reject_revoked(uid):
+    path=binding_path(uid)
+    try:fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    except FileNotFoundError:return
+    with os.fdopen(fd) as file:
+        st=os.fstat(file.fileno())
+        if st.st_uid!=0 or st.st_gid!=uid or st.st_nlink!=1 or st.st_size>4096:fail('UNSAFE_REGISTRY')
+        if json.load(file).get('state')!='active':fail('IDENTITY_REVOKED')
 
 
 def atomic(path, value, gid=0, mode=0o600):
     temporary = path + '.tmp'
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
-        os.write(fd, json.dumps(value, sort_keys=True).encode())
+        remaining=memoryview(json.dumps(value,sort_keys=True).encode())
+        while remaining:
+            written=os.write(fd,remaining)
+            if written<=0:raise OSError('METADATA_WRITE_FAILED')
+            remaining=remaining[written:]
         os.fchown(fd, 0, gid)
         os.fchmod(fd, mode)
         os.fsync(fd)
@@ -73,12 +103,17 @@ def ledger():
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
+        if os.path.lexists(HOMES+'/.allocated') or os.listdir(HOMES) or os.listdir(ROOT+'/active') or any(FIRST<=item.stat(follow_symlinks=False).st_gid<=LAST for item in os.scandir('/workspaces')):
+            fail('REGISTRY_LOST_OPERATOR_REVIEW_REQUIRED')
         return {'version': 1, 'next': FIRST, 'targets': {}, 'retired': []}
     with os.fdopen(fd) as file:
         st = os.fstat(file.fileno())
         if st.st_uid != 0 or st.st_mode & 0o077 or st.st_nlink != 1 or st.st_size > 32 * 1024 * 1024:
             fail('UNSAFE_REGISTRY')
         data = json.load(file)
+    for target,entry in data['targets'].items():
+        if entry.get('targetId')!=target or entry.get('workspaceId')!='research_'+target or not IDENTITY.fullmatch(target) or entry.get('uid')!=entry.get('gid'):
+            fail('INVALID_REGISTRY')
     ids = [entry['uid'] for entry in [*data['targets'].values(),*data.get('retired',[])]]
     if data['version'] != 1 or len(ids) != len(set(ids)) or any(uid < FIRST or uid > LAST for uid in ids) or data['next'] <= max(ids, default=FIRST-1):
         fail('INVALID_REGISTRY')
@@ -87,8 +122,7 @@ def ledger():
 
 def allocate(binding):
     # Cross-process flock plus in-process mutex; retain all records/tombstones.
-    with LOCK, open(ROOT + '/allocation.lock', 'a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with LOCK, metadata_lock('allocation'):
         data = ledger()
         old = data['targets'].get(binding['targetId'])
         if old:
@@ -117,13 +151,15 @@ def allocate(binding):
         data['targets'][binding['targetId']] = entry
         data['next'] = uid + 1
         atomic(ROOT + '/ledger.json', data)
+        if not os.path.lexists(HOMES+'/.allocated'):
+            atomic(HOMES+'/.allocated',{'version':1})
         return entry
 
 
 def ensure_account(entry):
     uid = entry['uid']
     name = 'research-' + str(uid)
-    home = HOMES + '/' + str(uid)
+    home = HOMES + '/' + str(uid) + '/home'
     try:
         group = grp.getgrgid(uid)
         if group.gr_name != name:
@@ -154,6 +190,19 @@ def provision_fresh(token, binding):
     migrate(token, apply=True, fresh=True)
 
 
+def binding_path(uid):
+    directory=ROOT+'/active/'+str(uid)
+    try:
+        os.mkdir(directory,0o750)
+        os.chown(directory,0,uid)
+    except FileExistsError:
+        pass
+    st=os.lstat(directory)
+    if not __import__('stat').S_ISDIR(st.st_mode) or st.st_uid!=0 or st.st_gid!=uid or (st.st_mode&0o7777)!=0o750:
+        fail('UNSAFE_REGISTRY')
+    return directory+'/binding.json'
+
+
 def lookup(target):
     if not isinstance(target, str) or not IDENTITY.fullmatch(target):
         fail('INVALID_TARGET')
@@ -162,9 +211,12 @@ def lookup(target):
     if not entry:
         fail('MIGRATION_REQUIRED')
     ensure_account(entry)
-    path = ROOT + '/active/' + str(entry['uid']) + '.json'
+    path = binding_path(entry['uid'])
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     with os.fdopen(fd) as file:
+        st=os.fstat(file.fileno())
+        if st.st_uid!=0 or st.st_gid!=entry['gid'] or (st.st_mode&0o7777)!=0o440 or st.st_nlink!=1 or st.st_size>4096:
+            fail('UNSAFE_REGISTRY')
         active = json.load(file)
     if active.get('state') != 'active' or any(active[k] != entry[k] for k in ['uid','gid','targetId','workspaceId','sessionId','policySha256']):
         fail('IDENTITY_REVOKED')
@@ -181,12 +233,12 @@ def admitted(token, stop=False, recon=False):
 
 
 def command(entry, operation, provider=None, profile=None):
-    home = HOMES + '/' + str(entry['uid'])
+    home = HOMES + '/' + str(entry['uid']) + '/home'
     cwd = '/workspaces/' + entry['workspaceId']
     env = {'PATH': '/usr/local/bin:/usr/bin:/bin', 'HOME': home, 'USER': 'research-' + str(entry['uid']), 'LOGNAME': 'research-' + str(entry['uid']), 'TERM': 'xterm-256color', 'LANG': 'C.UTF-8', 'CODEX_HOME': home + '/.codex', 'CLAUDE_CONFIG_DIR': home + '/.claude', 'DISABLE_AUTOUPDATER': '1', 'PLAYWRIGHT_BROWSERS_PATH': '/ms-playwright', 'TMUX_TMPDIR': home + '/run', 'TMPDIR': home + '/tmp'}
     if provider not in PROFILES or profile not in PROFILES[provider]:
         fail('INVALID_PROFILE')
-    name = 'bughunter_' + provider + '_' + entry['targetId']
+    name = ('bughunter-' if provider=='codex' else 'bughunter_claude_') + entry['targetId']
     tmux = ['tmux', '-S', home + '/run/tmux.sock']
     commands = {
         'start': tmux + ['-f', '/etc/bughunter/tmux.conf', 'new-session', '-d', '-s', name, '-c', cwd, '-e', 'BUGHUNTER_LAUNCH_PROFILE=' + profile, '/usr/local/bin/bughunter-' + provider, '--bughunter-profile', profile],
@@ -218,7 +270,8 @@ def revoke_locked(token):
         entry = ledger()['targets'].get(claims['targetId'])
         if not entry or entry['workspaceId'] != claims['workspaceId']:
             fail('IDENTITY_CHANGED')
-        atomic(ROOT + '/active/' + str(entry['uid']) + '.json', {**entry, 'state':'revoked'}, entry['gid'], 0o440)
+        with metadata_lock('lifecycle-'+str(entry['uid'])):
+            atomic(binding_path(entry['uid']), {**entry, 'state':'revoked'}, entry['gid'], 0o440)
     # Re-scan descendants while admission is locked; pidfds prevent PID reuse.
     deadline=time.monotonic()+2
     while True:
@@ -260,12 +313,36 @@ def revoke(token, delete=False):
             from cleanup import remove_home,retain_reviewed_export
             remove_home(entry)
             retain_reviewed_export(entry)
-            with LOCK, open(ROOT+'/allocation.lock','a') as lock:
-                fcntl.flock(lock,fcntl.LOCK_EX)
+            with LOCK, metadata_lock('allocation'):
                 data=ledger()
                 data['targets'][claims['targetId']]['state']='deleted'
                 atomic(ROOT+'/ledger.json',data)
         return result
+
+
+def installation_status(provider):
+    if provider not in PROFILES:fail('INVALID_PROVIDER')
+    home='/var/empty/bughunter-probe'
+    env={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':home,'CODEX_HOME':home+'/.codex','CLAUDE_CONFIG_DIR':home+'/.claude','DISABLE_AUTOUPDATER':'1'}
+    prefix=['setpriv','--reuid=199999','--regid=199999','--clear-groups','--bounding-set=-all','--inh-caps=-all','--ambient-caps=-all','--no-new-privs','--',provider]
+    version=subprocess.run(prefix+['--version'],cwd=home,env=env,capture_output=True,text=True,timeout=5,close_fds=True)
+    help_result=subprocess.run(prefix+['--help'],cwd=home,env=env,capture_output=True,text=True,timeout=5,close_fds=True)
+    if version.returncode or help_result.returncode:fail('CLI_UNAVAILABLE')
+    found=re.search(r'\b\d+\.\d+\.\d+\b',version.stdout)
+    help_text=help_result.stdout
+    profiles=([*(['standard'] if '--ask-for-approval' in help_text and '--sandbox' in help_text else []),*(['yolo'] if '--dangerously-bypass-approvals-and-sandbox' in help_text else [])] if provider=='codex' else (['standard','plan'] if '--permission-mode' in help_text and '"manual"' in help_text and '"plan"' in help_text else []))
+    return {'provider':provider,'installation':'available','authentication':'required','version':found[0] if found else None,'code':None,'profiles':profiles,'runningProfile':None}
+
+
+def inspect_engine(target,provider,profile):
+    if not isinstance(target,str) or not IDENTITY.fullmatch(target):fail('INVALID_TARGET')
+    entry=ledger()['targets'].get(target)
+    if not entry or entry.get('state')=='deleted':return installation_status(provider)
+    entry=lookup(target)
+    status=json.loads(run(entry,'probe',provider,profile)['stdout'])
+    available=installation_status(provider)
+    running=run(entry,'profile',provider,profile)
+    return {**status,'profiles':available['profiles'],'runningProfile':running['stdout'].strip().removeprefix('BUGHUNTER_LAUNCH_PROFILE=') if running['code']==0 else None}
 
 
 def handle(connection):
@@ -311,6 +388,7 @@ def handle(connection):
             if set(request) != {'operation','token'}:
                 fail('INVALID_REQUEST')
             binding = admitted(request['token'])
+            verify_workspace_root()
             with LOCK:
                 if binding['targetId'] not in ledger()['targets'] or ledger()['targets'][binding['targetId']].get('state')=='deleted':
                     provision_fresh(request['token'], binding)
@@ -321,6 +399,9 @@ def handle(connection):
         else:
             if set(request) != allowed:
                 fail('INVALID_REQUEST')
+            if operation=='inspect':
+                connection.sendall(json.dumps({'code':0,'stdout':json.dumps(inspect_engine(request['targetId'],request['provider'],request['profile']))}).encode()+b'\n')
+                return
             entry = lookup(request['targetId'])
             if operation == 'attach':
                 # Dedicated PTY and no inherited workspace descriptors. Only
@@ -388,6 +469,27 @@ def handle(connection):
         connection.close()
 
 
+def verify_workspace_root():
+    # A private A cannot coexist with a world-readable, unmigrated B. Refuse
+    # serving unknown/unsafe roots instead of silently chmod/chowning them.
+    import stat
+    parent=os.lstat('/workspaces')
+    if not stat.S_ISDIR(parent.st_mode) or parent.st_uid not in {0,SERVICE_UID} or parent.st_gid not in {0,SERVICE_GID,2000} or parent.st_mode&0o002:
+        fail('UNSAFE_WORKSPACE_ROOT')
+    known=ledger()['targets']
+    for count,item in enumerate(os.scandir('/workspaces')):
+        if count>=200000:fail('WORKSPACE_INVENTORY_LIMIT')
+        st=item.stat(follow_symlinks=False)
+        if stat.S_ISLNK(st.st_mode) or st.st_mode&0o007 or st.st_uid not in {0,SERVICE_UID}:
+            fail('OPERATOR_REVIEW_REQUIRED')
+        if FIRST<=st.st_gid<=LAST:
+            target=item.name.removeprefix('research_')
+            if not item.name.startswith('research_') or target not in known or known[target]['gid']!=st.st_gid or (st.st_mode&0o7777)!=0o750 or st.st_uid!=0:
+                fail('OPERATOR_REVIEW_REQUIRED')
+        elif st.st_gid not in {0,SERVICE_GID,2000}:
+            fail('OPERATOR_REVIEW_REQUIRED')
+
+
 def serve():
     if os.getuid() != 0:
         fail('ROOT_BROKER_REQUIRED')
@@ -399,6 +501,7 @@ def serve():
         if not __import__('stat').S_ISSOCK(st.st_mode) or st.st_uid != SERVICE_UID:
             fail('UNSAFE_SOCKET')
         os.unlink(SOCKET)
+    verify_workspace_root()
     for entry in ledger()['targets'].values():
         ensure_account(entry)
     listener = socket.socket(socket.AF_UNIX)

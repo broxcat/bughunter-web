@@ -38,7 +38,7 @@ def load_export(binding, inventory):
         own='/workspaces/'+binding['workspaceId']
         project=own.replace('/','-').replace('_','-')
         for name in actual:
-            allowed = name.startswith(('.codex/sessions/','.codex/archived_sessions/', '.claude/projects/'+project+'/')) or name=='.codex/state_5.sqlite'
+            allowed = (name.endswith('.jsonl') and name.startswith(('.codex/sessions/','.codex/archived_sessions/', '.claude/projects/'+project+'/'))) or name=='.codex/state_5.sqlite'
             if not allowed or any(part in ['.','..',''] for part in name.split('/')):
                 fail('OPERATOR_REVIEW_REQUIRED')
             if name.endswith('.jsonl'):
@@ -117,4 +117,27 @@ def import_export(export, home, uid):
                 os.close(parent)
     finally:
         os.close(home_fd)
+    reconcile_native_index(home,uid,files)
     return len(files)
+
+
+def reconcile_native_index(home,uid,files):
+    if '.codex/state_5.sqlite' not in files:return
+    # Native rollout paths pointed into the former aggregate home. Rewrite only
+    # paths whose exact transcript bytes were explicitly approved and copied.
+    path=home+'/.codex/state_5.sqlite'
+    database=sqlite3.connect(path)
+    try:
+        for thread,rollout in database.execute('SELECT id,rollout_path FROM threads').fetchall():
+            prefix='/home/researcher/.codex/'
+            if not isinstance(rollout,str) or not rollout.startswith(prefix):fail('OPERATOR_REVIEW_REQUIRED')
+            relative='.codex/'+rollout[len(prefix):]
+            if relative not in files or any(part in ['.','..',''] for part in relative.split('/')):fail('OPERATOR_REVIEW_REQUIRED')
+            database.execute('UPDATE threads SET rollout_path=? WHERE id=?',(home+'/'+relative,thread))
+        database.commit()
+    finally:
+        database.close()
+    os.chown(path,uid,uid)
+    # SQLite may create journal/WAL state; it belongs only to this workspace.
+    for suffix in ['-wal','-shm','-journal']:
+        if os.path.exists(path+suffix):os.chown(path+suffix,uid,uid)

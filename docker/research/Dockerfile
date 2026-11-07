@@ -70,6 +70,10 @@ COPY docker/research/tmux.conf /etc/bughunter/tmux.conf
 COPY --chmod=755 docker/research/entrypoint docker/research/healthcheck docker/research/console-entrypoint docker/research/console-healthcheck /usr/local/bin/
 COPY docker/research/banner /etc/motd
 RUN if [ "$RESEARCH_WORKSPACE_GID" != 2000 ]; then groupadd -g 2000 research-legacy && usermod -aG research-legacy researcher; fi
+# Read-only installation probes have no workspace or provider authentication.
+RUN groupadd -g 199999 research-probe \
+    && useradd -u 199999 -g 199999 -d /var/empty/bughunter-probe -s /usr/sbin/nologin research-probe \
+    && install -d -o root -g root -m 0555 /var/empty/bughunter-probe /var/empty/bughunter-probe/.codex /var/empty/bughunter-probe/.claude
 EXPOSE 22 7681
 HEALTHCHECK --interval=30s --start-period=10s --timeout=5s CMD ["console-healthcheck"]
 ENTRYPOINT ["console-entrypoint"]

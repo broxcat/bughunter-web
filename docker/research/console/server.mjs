@@ -121,6 +121,7 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
         const previous=pending.get(name)??Promise.resolve();
         const creating=previous.catch(()=>{}).then(async()=>{
           const running=await launcherEngine(claims.targetId,provider);
+          if(!running.profiles.includes(profile))throw new Error('PROFILE_UNAVAILABLE');
           if(running.runningProfile&&running.runningProfile!==profile)throw new Error('PROFILE_CONFLICT');
           if(!running.runningProfile)await workspaceRequest(claims.targetId,'start',provider,profile);
         });

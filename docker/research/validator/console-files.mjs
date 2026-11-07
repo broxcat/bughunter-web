@@ -27,6 +27,8 @@ async function readConsoleWorkspace(cwd) {
     if (policy.workspaceId !== cwd.split('/').at(-1) || createHash('sha256').update(scope).digest('hex') !== policy.scopeSha256) throw new Error('POLICY_CHANGED');
     const target = JSON.parse(await readBounded(metadata, 'target.json', 65536, true));
     if (target.id !== policy.targetId || target.host !== policy.targetHost || target.requiredUserAgent !== policy.requiredUserAgent) throw new Error('POLICY_CHANGED');
+    const session=JSON.parse(await readBounded(metadata,'session.json',16384,true));
+    if(session.source!==`ResearchSession ${policy.sessionId}`||session.targetId!==policy.targetId||session.workspaceId!==policy.workspaceId)throw new Error('POLICY_CHANGED');
     return { root, policy, policySha256: createHash('sha256').update(raw).digest('hex') };
   } catch (e) { await root.close(); throw e; }
   finally { await metadata?.close(); await agents?.close(); }

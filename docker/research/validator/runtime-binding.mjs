@@ -29,7 +29,7 @@ export async function readRuntimeBinding() {
   let parent;
   try {
     parent = await open('/', directoryFlags);
-    for (const part of registry) {
+    for (const part of [...registry,String(uid)]) {
       const stat = await parent.stat();
       if (stat.uid !== 0 || stat.mode & 0o022) throw denied();
       const next = await open(`/proc/self/fd/${parent.fd}/${part}`, directoryFlags);
@@ -37,7 +37,7 @@ export async function readRuntimeBinding() {
     }
     const stat = await parent.stat();
     if (stat.uid !== 0 || stat.mode & 0o022) throw denied();
-    const file = await open(`/proc/self/fd/${parent.fd}/${uid}.json`, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const file = await open(`/proc/self/fd/${parent.fd}/binding.json`, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const stat = await file.stat();
       if (!stat.isFile() || stat.uid !== 0 || stat.gid !== gid || stat.nlink !== 1 || (stat.mode & 0o7777) !== 0o440 || stat.size > 4096) throw denied();

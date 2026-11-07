@@ -31,7 +31,7 @@ def remove_home(entry):
         name=str(entry['uid'])
         try:st=os.stat(name,dir_fd=parent,follow_symlinks=False)
         except FileNotFoundError:return
-        if not stat.S_ISDIR(st.st_mode) or st.st_uid!=entry['uid'] or st.st_gid!=entry['gid']:
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid!=0 or st.st_gid!=entry['gid'] or (st.st_mode&0o7777)!=0o750:
             fail('CLEANUP_UNEXPECTED_OWNER')
         remove(parent,name)
         os.fsync(parent)

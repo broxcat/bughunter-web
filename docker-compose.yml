@@ -165,9 +165,6 @@ services:
         target: /workspaces
         bind:
           create_host_path: false
-      - research-workspaces:/legacy-workspaces
-      - research-codex:/home/researcher/.codex
-      - research-claude:/home/researcher/.claude
       - research-host-keys:/etc/ssh/host-keys
       - research-identities:/var/lib/bughunter-identities
       - research-private-homes:/var/lib/bughunter-homes
