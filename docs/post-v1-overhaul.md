@@ -220,3 +220,67 @@ Remaining: collection pagination/filter acceptance, all CRUD ownership/conflict/
 - `npm audit`: **8 moderate development advisories**, no high/critical; `npm audit --omit=dev`: **0**. Registry review still ends minimatch 10 at 10.2.6 and typescript-eslint at 8.72.1; no compatible safe patch was established. Retain the accepted tooling risk; no force fix, major override or Next downgrade applied.
 
 Logs are in `/tmp/bh-m1/`. The five diagnostics WIP files retain their starting checksums and remain excluded from commits. No DeepSeek/auxiliary inference requests were made; account billing is not observable. Production services, volumes, provider authentication, persistent tmux sessions, package version and historical release/tag were not changed. Issue #7 must remain open with Milestone 1 unchecked until the remaining acceptance work above is completed.
+
+## Milestone 1 collection, mutation and accessibility completion pass (base 5f37d9f)
+
+This pass reuses the 21-page/67-handler inventory and preserves the preceding audit checkpoints as historical facts. #8 and #10 remain closed; no Milestone 2 work, production deployment, package version change, tag or release was started.
+
+### Reproduced defects and fixes
+
+The focused issue set is #11–#30. Targets/Recon now have bounded server pages instead of loading the entire Program list (#11); Scope no longer hides rows beyond 1,000 or stops compatibility repair at 1,000 Programs (#14); Research no longer truncates hosts at 500, history at 50 or legacy session reads at 100 (#15). Findings and saved Reports remain reachable beyond 1,000/100 (#16), read-only Hunt history beyond 100 (#19), Evidence Vault beyond its first 100 retained records (#20), and hypotheses/revisions retain URL filters and clamp beyond-end pages (#21). Previous-host adoption inventory is server-paged with a minimal projection (#29). Technical-host ScanRun history is server-paged and transfers a Finding count instead of every Finding body (#30); its Scope breadcrumb now uses the Program filter rather than confusing a Program ID with an asset ID.
+
+Owner predicates stay in SQL. New count/clamp/rows reads use Repeatable Read; sort keys include a unique tie-breaker. Filters and independent page keys survive refresh/back/forward. Final-row deletion/adoption and external fixture removal recover to a valid page. Each request is a fresh snapshot, not an immutable export spanning multiple page requests. Compatibility array shapes remain complete; primary lists explicitly request bounded responses. No speculative indexes, schema migration, new CRUD capability, session migration or pagination of fixed provider enums was introduced.
+
+[Collection contracts](post-v1-collection-audit.md) classify every reviewed collection as SMALL_FIXED_COLLECTION, UNBOUNDED_SAFE, CAPPED_NOT_PAGINATED, PAGINATED or CURSOR_PAGINATED. Deliberate recent/context/evidence budgets remain explicitly capped, not relabelled as pagination. Recent-run windows now expose limits/truncation and the diff selector declares its latest-50 processing window. The live log viewer declares its recent 2,000-line window; comparison previews state their limits. Missing coverage remains unknown. Artifact pages count/clamp/read together; immutable snapshot pages clamp and distinguish absent historical fields from observed empty collections (#25).
+
+The [supported mutation-method audit](post-v1-crud-audit.md) records **53 methods across 46 mutating handlers** in the existing 67-handler inventory: 51 protected entries and two public account/authentication entries, no PUT. Its 152 inventory-driven cases cover protected anonymous admission, browser Origin and malformed/missing-resource admission; state, owner, stale/conflict, concurrent and repeat semantics are covered by the documented real-SQL workflow suites. These are layered checks, not a Cartesian assertion for every imaginable payload. Historical immutable records and deliberately retired 410 routes remain so. Private Program/console deletion retains its existing idempotent 200 behavior rather than receiving a fabricated uniform 404.
+
+Explicit foreign-Origin writes are rejected before mutation on 14 legacy entry points (#17). Finding/Scope/credential updates and parent-removal races return their existing private/invalid-reference semantics rather than an unhandled Prisma exception (#18). A two-Program barrier proves legacy host adoption now has exactly one winner; conditional ownership update makes the loser 409 and rolls back its Scope-rule edit, preserving original Scope/ScanRun identity (#24). Finding review now uses current Scope Asset/discovery-parent authorization rather than only the historical active flag (#27). Readiness rejects empty active Scope and retiring Programs (#28). Malformed nonempty Summary input can no longer be interpreted as approval for optional synthesis; input is strict, bounded, and checked before scheduling (#26). Scheduler probes were mocked, with no model call or paid work.
+
+The [functional accessibility record](post-v1-accessibility-audit.md) describes the 21-page matrix and its limits. Shared Dialog focus/Escape (#12), editable-control and dark subtle-text contrast (#13), terminal keyboard escape (#22) and nested Host controls (#23) were fixed narrowly. Native CLI Tab remains default; Ctrl+Shift+M opts into web navigation without changing persistent-session security or provider behavior. Both themes and viewport sizes are covered. This does not claim formal accessibility certification or a new native transport/image acceptance run.
+
+### Disproven concerns and failed attempts
+
+Updating Program metadata did not by itself prove the proposed list-reordering scenario; unique sorting is covered directly instead. Known older owned asset run IDs were already directly readable beyond the recent-30 selector; the positive test preserves that contract, while recent/diff window bounds are now stated honestly. The existing endpoint-preview first-50 disclosure was already adequate and was left intact. Native radio groups correctly use a single Tab stop; the fixture was corrected to test arrow navigation rather than label native behavior a defect.
+
+Initial artifact boundary fixtures omitted required first/last-seen dates. After correcting those fixtures, four cases were rerun against the saved pre-fix handler and independently failed on actual page clamping; the fixture errors are not counted as product reproduction. Reusing the legacy API suite's disposable public schema produced a fixture-cleanup foreign-key error; its rerun used a fresh schema. One browser iteration used an unsuccessful build and correctly failed readiness; a later typed build succeeded. Contrast CSS was verified in compiled browser output after an initial selector rule was optimized away.
+
+A late full attempt passed 1,689 and failed 14 (17 network skips): a disposable Redis stop/start exceeded its test deadline and caused ten queue failures; four credential metadata cases assumed localhost despite the configured AUTH_URL. The credential fixture now explicitly stubs/restores its public origin; production origin validation was not relaxed. A subsequent in-progress run picked up four new Host-history regression cases before the updated handler was loaded; it is not treated as final-source acceptance. All failed attempts are retained in `/tmp/bh-m1-final/`. Final gate results follow only after a stable-source rerun.
+
+The first frozen-source run passed all 1,713 unit/integration cases (17 network opt-ins skipped) and migration/drift, then the new previous-host browser case caught a real 390px form overflow. The existing adoption form now wraps and constrains its selector. A simultaneous standalone network attempt passed 16 and timed out one Playwright case at its unchanged five-second deadline; it is rerun without concurrent heavy acceptance work. A Host effect iteration also triggered the React set-state-in-effect lint rule and was corrected by tracking the loaded request identity, rather than disabling the rule. These failed attempts are not counted as passing gates.
+
+### Final validation
+
+The final combined command exited **zero**, including all browser scripts and disposable-service teardown:
+
+```sh
+TMPDIR=/dev/shm TEST_POSTGRES_TMPFS=1 npm run test:queue -- --target-browser --research-browser --auth-browser --post-v1-browser
+```
+
+| Gate | Passed | Failed | Skipped |
+| --- | ---: | ---: | ---: |
+| Full Vitest through disposable queue runner (129 passing files) | 1,713 | 0 | 17 opt-in network cases in 3 skipped files |
+| Separate network, all 3 files, one worker | 17 | 0 | 0 |
+| Existing Recon report/browser integrity checks | 26 | 0 | 0 |
+| Inventory-driven negative browser checks | 116 | 0 | 0 |
+| Program collection/dialog/contrast browser checks | 12 | 0 | 0 |
+| Scope/Research/management/Hunt navigation matrix | 20 | 0 | 0 |
+| Previous-host adoption navigation matrix | 4 | 0 | 0 |
+| Technical-host history navigation matrix | 4 | 0 | 0 |
+| Findings/Reports navigation matrix | 16 | 0 | 0 |
+| Hypothesis/revision/Evidence Vault navigation | 4 | 0 | 0 |
+| Accessibility page/theme/viewport matrix | 84 | 0 | 0 |
+
+There are **1,730 distinct Vitest cases** across full/network acceptance. The final full run took 295.07 seconds for Vitest. The new focused files contribute 253 cases (23 Program/cap tests, 37 collection boundary tests, 16 detail/history tests, 14 mutation/concurrency tests, 152 method-admission tests, 11 Summary input tests); these overlap the full count and are not added again. Browser totals are **286 named checks/matrix cases**, not a count of every internal assertion. The existing Target, Research and authentication browser workflows also passed; they do not expose individual assertion totals.
+
+The successful separate network command was `npm run test:network -- --maxWorkers=1`; it executes the same 17 local-fixture tests with their unchanged deadlines, avoiding concurrent Chromium startup. No public target scan or provider inference was performed.
+
+`npm run test:migration` passed inside the final runner, preserving historical ScanRun/Finding/Report/item/credential identities, legacy Research sessions/hypotheses/revisions, unknown historical UA/proofs/authorization and decimal values. Schema drift reported **No difference detected**. No new migration/index was needed. `npm run lint`, `npx next typegen`, `npx tsc --noEmit`, `npm run build`, `docker compose config --quiet`, and staged/unstaged `git diff --check` passed. Local web checks include the five preserved diagnostics WIP files; new committed code does not depend on the three untracked diagnostics files. Fresh native PTY/image, model inference and genuine Burp acceptance are not claimed for this read/navigation/admission pass; previous #8 native acceptance remains separately recorded.
+
+`npm audit --omit=dev`: **0 vulnerabilities**. `npm audit`: **8 moderate development advisories**, no high/critical. Registry review found minimatch 10.2.6 and typescript-eslint 8.72.1; no safe compatible fix for the accepted tooling chain was established. No forced fix, major override, Next downgrade or dependency/lockfile change was made.
+
+The first frozen run's Docker remove call timed out for its disposable execution Redis; a follow-up inspect confirmed the container had been removed. Its exact owned tmpfs fixture directory was then removed. The standalone SQL/browser fixtures were removed by name after verifying their disposable labels. The final required runner completed its own cleanup successfully. No production service, volume, workspace or persistent tmux session was restarted or deleted.
+
+Runtime/tests were validated through implementation commit **3fc7e8d**, with the final documentation commit adding these records only. The five original diagnostics files retain their starting SHA-256 hashes and remain outside the commits. The v1.0.0 tag still resolves to 29d35d1c4fe117f1b954b2474c1ba57933dfaddb; package version and published release are unchanged. No DeepSeek or auxiliary inference requests were issued (additional DeepSeek spend $0 from this work; account billing is not independently observable).
+
+**Milestone 1 acceptance is complete.** #8 remains closed; the Program PATCH race remains fixed; collection/cap/order, supported-method CRUD/concurrency, negative states, practical keyboard/form/dialog/contrast/responsive acceptance and required gates pass. The focused defects #11–#30 are verified for closure after the validated commits are pushed. #7 remains open for Milestones 2–8. This is not complete overhaul/release acceptance and no v1.1.0 decision or production deployment occurred. Work stops here.
