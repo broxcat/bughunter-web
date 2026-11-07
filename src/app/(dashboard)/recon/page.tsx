@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
-import { prisma } from '@/lib/prisma';
+import {programCollection} from '@/server/programCollection';
+import {paginationInput} from '@/lib/pagination';
+import CollectionPager from '@/components/CollectionPager';
 import { Badge } from '@/components/ui/Badge';
 import { reconOverview, type ReconTone } from '@/lib/reconOverview';
 
@@ -20,30 +22,17 @@ function stamp(value: Date): string {
   return `${value.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 }
 
-export default async function ReconPage({ searchParams }: { searchParams: Promise<{ program?: string }> }) {
-  const { program } = await searchParams;
+export default async function ReconPage({ searchParams }: { searchParams: Promise<{ program?: string;page?:string;pageSize?:string;q?:string }> }) {
+  const search=await searchParams, {program}=search;
+  const query=new URLSearchParams(Object.entries(search).filter((entry):entry is [string,string]=>typeof entry[1]==='string'));
   // Historical deep links used to forward into the Target workflow tab.
   if (program) redirect(`/targets/${encodeURIComponent(program)}?tab=Recon`);
 
   const session = await auth();
   if (!session?.user?.id) redirect('/login');
 
-  const programs = await prisma.bountyProgram.findMany({
-    where: { ownerId: session.user.id },
-    orderBy: { companyName: 'asc' },
-    select: {
-      id: true,
-      companyName: true,
-      platform: true,
-      deletingAt: true,
-      _count: { select: { scopeAssets: { where: { active: true } } } },
-      reconRuns: {
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: 1,
-        select: { id: true, status: true, outcome: true, createdAt: true },
-      },
-    },
-  });
+  const collection=await programCollection(session.user.id,paginationInput(query,false));
+  const programs=collection.items;
 
   const rows = programs.map(program => ({
     ...program,
@@ -61,11 +50,13 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
         <p className="text-muted">What is authorized, what ran last, and what still needs attention.</p>
       </div>
       <p className="text-sm text-muted" aria-live="polite">
-        {running} running · {needsAttention} need attention
+        On this page: {running} running · {needsAttention} need attention
       </p>
     </div>
 
-    {!rows.length && <p>No Targets yet. <Link href="/targets" className="text-brand">Create a Target</Link> to authorize assets and start Recon.</p>}
+    <form action="/recon" className="flex flex-wrap gap-3"><label>Search Targets<input name="q" defaultValue={search.q??''} maxLength={200} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={collection.pageSize}/><button type="submit" className="ui-btn">Search</button></form>
+    <CollectionPager path="/recon" query={query.toString()} {...collection}/>
+    {!rows.length && <p>No matching Targets. <Link href="/targets" className="text-brand">Create a Target</Link> to authorize assets and start Recon.</p>}
 
     {rows.length > 0 && <div className="overflow-x-auto rounded border border-border">
       <table className="w-full min-w-[680px] text-left text-sm">
