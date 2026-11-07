@@ -39,6 +39,11 @@ async function proxyCa(proxy) {
     req.on('error', () => reject(new BurpTransportError('BURP_PROXY_UNREACHABLE'))); req.end();
   });
 }
+// An observed proxy CONNECT response outranks curl's platform-dependent exit
+// code: a peer that returned502 was reachable. No target HTTP is fabricated.
+export function proxyFailureKind(code,connectStatus){
+  return connectStatus&&connectStatus!==200?'TARGET_CONNECT_FAILURE':[5,7].includes(code)?'BURP_PROXY_UNREACHABLE':code===6?'TARGET_DNS_FAILURE':[35,51,58,60,77].includes(code)?'TARGET_TLS_FAILURE':code===28?'TARGET_TIMEOUT':'BURP_TOOL_ERROR';
+}
 const trailer = '\nBUGHUNTER_CURL_RESULT ';
 function executeCurl(args, body, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -60,7 +65,7 @@ function executeCurl(args, body, timeoutMs) {
       if (!match) return reject(new BurpTransportError('BURP_TOOL_ERROR'));
       const status = Number(match[1]), version = match[2], connectStatus = Number(match[3]);
       if (code !== 0 || !status) {
-        const error = [5,7].includes(code) ? 'BURP_PROXY_UNREACHABLE' : code === 6 ? 'TARGET_DNS_FAILURE' : [35,51,58,60,77].includes(code) ? 'TARGET_TLS_FAILURE' : code === 28 ? 'TARGET_TIMEOUT' : connectStatus && connectStatus !== 200 ? 'TARGET_CONNECT_FAILURE' : 'BURP_TOOL_ERROR';
+        const error = proxyFailureKind(code,connectStatus);
         return reject(new BurpTransportError(error, { proxyConnectStatus: connectStatus || null }));
       }
       let raw = output.slice(0, at);

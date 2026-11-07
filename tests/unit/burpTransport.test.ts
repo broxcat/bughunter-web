@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { X509Certificate } from 'node:crypto';
-import { sendViaBurpProxy } from '../../docker/research/validator/burp-transport.mjs';
+import { sendViaBurpProxy,proxyFailureKind } from '../../docker/research/validator/burp-transport.mjs';
 import { activeObservation } from '../../docker/research/validator/burp-active.mjs';
 import { sanitizeHistoryItem, historyArguments } from '../../docker/research/validator/burp-http.mjs';
 const p={targetId:'fixture',targetHost:'app.example.test',scheme:'http',port:80,mode:'SCOPED_ACTIVE_HTTP',requiredUserAgent:'Research-Test/1',programScope:{rules:['*.example.test'],exclusions:['admin.example.test']}};
@@ -23,6 +23,9 @@ async function proxy(status=200){
  vi.stubEnv('BURP_PROXY_HOST','127.0.0.1');vi.stubEnv('BURP_PROXY_PORT',String(address.port));return {requests,server};
 }
 describe('guarded real HTTP proxy transport',()=>{
+ it.each([5,7,56])('retains observed CONNECT502 even when curl exits with platform-dependent code%i',code=>{expect(proxyFailureKind(code,502)).toBe('TARGET_CONNECT_FAILURE');});
+ it.each([5,7])('keeps genuine unreachable-proxy failures without a CONNECT response (code%i)',code=>{expect(proxyFailureKind(code,0)).toBe('BURP_PROXY_UNREACHABLE');});
+
  it.each([200,502])('preserves actual HTTP %i and injects required UA and correlation, without secret logs',async status=>{
   const upstream=await proxy(status),logs:unknown[]=[];
   // A hostile inherited NO_PROXY must never silently bypass Burp.
