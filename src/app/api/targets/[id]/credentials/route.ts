@@ -1,3 +1,4 @@
+import {Prisma} from '@prisma/client';
 import { normalizeCookies, sessionState } from "@/lib/targetAuth";
 import { credentialMetadataSchema,credentialMetadataPatchSchema, ownedReferenceUrl } from "@/lib/credentialMetadata";
 import { foreignOrigin } from '@/lib/requestOrigin';
@@ -117,7 +118,7 @@ export async function GET(
 
   const rows = await prisma.targetCredential.findMany({
     where: { targetId: id },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{createdAt:'desc'},{id:'desc'}],
   });
 
   const credentials = rows.map(toSafe);
@@ -189,7 +190,8 @@ export async function POST(
         emailCipher: encryptSecret(email),
         passwordCipher: encryptSecret(password),
       },
-    });
+     }).catch(error=>{if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2003')return null;throw error;});
+    if(!created)return NextResponse.json({error:'Not found'},{status:404});
     return NextResponse.json(
       { credential: toSafe(created) },
       { status: 201 },
@@ -225,7 +227,8 @@ export async function POST(
       cookiesCipher: cookieMap ? encryptSecret(JSON.stringify(cookieMap)) : null,
       headerCipher: token ? encryptSecret(token) : null,
     },
-  });
+   }).catch(error=>{if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2003')return null;throw error;});
+  if(!created)return NextResponse.json({error:'Not found'},{status:404});
 
   // Safe shape only — never the cipher or plaintext.
   return NextResponse.json({ credential: toSafe(created) }, { status: 201 });
@@ -284,6 +287,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!credential) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
     const data = {...(parsed.data.purpose!==undefined?{purpose:parsed.data.purpose}:{}),...(parsed.data.ownedObjectUrl!==undefined?{ownedObjectUrl:ownedObjectReference(target,parsed.data.ownedObjectUrl)}:{}),...(parsed.data.persona!==undefined?{persona:parsed.data.persona}:{}),...(parsed.data.reconEnabled!==undefined?{reconEnabled:parsed.data.reconEnabled}:{})};
-    return NextResponse.json({ credential: toSafe(await prisma.targetCredential.update({ where: { id: credential.id }, data })) });
-  } catch { return NextResponse.json({ error: "Owned object must be an authorized same-host URL without secrets" }, { status: 400 }); }
+    return NextResponse.json({ credential: toSafe(await prisma.targetCredential.update({ where: { id: credential.id,targetId:id }, data })) });
+  } catch(error) {
+    if(error instanceof Prisma.PrismaClientKnownRequestError){
+      if(error.code==='P2025')return NextResponse.json({error:'Not found'},{status:404});
+      return NextResponse.json({error:'Credential metadata update unavailable'},{status:503});
+    }
+    return NextResponse.json({ error: "Owned object must be an authorized same-host URL without secrets" }, { status: 400 });
+  }
 }

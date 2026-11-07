@@ -1,4 +1,4 @@
-import { beforeEach,describe,expect,it,vi } from 'vitest';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import { credentialMetadataPatchSchema,credentialMetadataSchema } from '@/lib/credentialMetadata';
 
 const mocks=vi.hoisted(()=>({auth:vi.fn(),target:vi.fn(),find:vi.fn(),list:vi.fn(),create:vi.fn(),update:vi.fn()}));
@@ -10,7 +10,8 @@ const params={params:Promise.resolve({id:'owned'})};
 const request=(body:unknown,origin='http://localhost')=>new Request('http://localhost/api/targets/owned/credentials',{method:'PATCH',headers:{'Content-Type':'application/json',Origin:origin},body:JSON.stringify(body)});
 
 describe('Recon credential metadata',()=>{
-  beforeEach(()=>{vi.clearAllMocks();mocks.auth.mockResolvedValue({user:{id:'operator'}});mocks.target.mockResolvedValue(target);mocks.find.mockResolvedValue(row);mocks.list.mockResolvedValue([row]);mocks.update.mockImplementation(async({data})=>({...row,...data}));});
+  afterEach(()=>vi.unstubAllEnvs());
+  beforeEach(()=>{vi.stubEnv('AUTH_URL','http://localhost');vi.clearAllMocks();mocks.auth.mockResolvedValue({user:{id:'operator'}});mocks.target.mockResolvedValue(target);mocks.find.mockResolvedValue(row);mocks.list.mockResolvedValue([row]);mocks.update.mockImplementation(async({data})=>({...row,...data}));});
   it('defaults new credentials to explicit Recon opt-out and normalizes only operator persona text',()=>{
     expect(credentialMetadataSchema.parse({})).toMatchObject({purpose:'OTHER',reconEnabled:false});
     expect(credentialMetadataSchema.parse({persona:'  Manager  '})).toMatchObject({persona:'Manager'});

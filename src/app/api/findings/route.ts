@@ -1,3 +1,4 @@
+import {Prisma} from '@prisma/client';
 import {paginationInput} from '@/lib/pagination';
 import {findingCollection} from '@/server/findingCollections';
 import {safeFindingField,publicFinding} from '@/server/findingPrivacy';
@@ -141,7 +142,11 @@ export async function POST(req: NextRequest) {
       remediation: safeFindingField(parsed.data.remediation),
       gateStatus: "UNVALIDATED",
     },
-  });
+   }).catch(error=>{if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2003')return null;throw error;});
+  if(!finding){
+    const present=await prisma.target.count({where:{id:target.id,userId:session.user.id}});
+    return NextResponse.json({error:present?'Referenced scanRun is no longer available':'Target not found'},{status:present?400:404});
+  }
 
   return NextResponse.json(publicFinding(finding), { status: 201 });
 }

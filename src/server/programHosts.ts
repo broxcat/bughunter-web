@@ -27,7 +27,13 @@ export async function mutateHost(ownerId: string, programId: string, action: "AD
       const old = await tx.target.findFirst({ where: { id: input.legacyTargetId, userId: ownerId, programId: null }, include: { scope: true } });
       if (!old || normalizeFqdn(old.host) !== host) throw new HostError("Previous host not found or FQDN differs", 404);
       if (old.scope.status !== "APPROVED") throw new HostError("This previous host cannot be reused. Add its FQDN as a new scope host.");
-      return tx.target.update({ where: { id: old.id }, data: { programId, active: true } });
+      // Different Programs hold different locks. Admission must still compare
+      // the legacy identity's unassigned state atomically; a stale adopter
+      // must never move a Target already claimed by the other transaction.
+      return tx.target.update({ where: { id: old.id,userId:ownerId,programId:null }, data: { programId, active: true } }).catch(error=>{
+        if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2025')throw new HostError('This previous host was assigned to another Target; reload Scope',409);
+        throw error;
+      });
     }
     if (previous) await tx.target.update({ where: { id: previous.id }, data: { active: false } });
     const scope = await tx.scope.create({ data: { userId: ownerId, hostPattern: host, status: "APPROVED" } });

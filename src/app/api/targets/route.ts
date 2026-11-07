@@ -1,3 +1,4 @@
+import {Prisma} from '@prisma/client';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -104,7 +105,8 @@ export async function POST(req: NextRequest) {
       scheme,
       label: parsed.data.label,
     },
-  });
+   }).catch(error=>{if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2003')return null;throw error;});
+  if(!target)return NextResponse.json({error:'Scope not found or not owned by you'},{status:400});
 
   return NextResponse.json(target, { status: 201 });
 }

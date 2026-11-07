@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { evidenceReviewSchema, reviewDecision } from "@/lib/evidenceReview";
-import { scanRejection } from "@/server/execution";
+import {assertResearchTarget,researchTargetSelect} from '@/server/research/workspace';
 import {safeFindingText} from "@/server/findingPrivacy";
 import {foreignOrigin} from "@/lib/requestOrigin";
 
@@ -14,10 +14,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const parsed = evidenceReviewSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Choose an evidence-review decision" }, { status: 400 });
-  const finding = await prisma.finding.findFirst({ where: { id, target: { userId: session.user.id } }, include: { target: { include: { scope: true, program: true } }, scanRun: { select: { reconCorpus: true } } } });
+  const finding = await prisma.finding.findFirst({ where: { id, target: { userId: session.user.id } }, include: { target: {select:researchTargetSelect}, scanRun: { select: { reconCorpus: true } } } });
   if (!finding) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const { status, notes } = parsed.data;
-  const inScope = !scanRejection(finding.target);
+  const inScope=(()=>{try{assertResearchTarget(finding.target,session.user.id!);return true;}catch{return false;}})();
   const error = reviewDecision(finding, status, notes, inScope);
   if (error) return NextResponse.json({ error }, { status: 400 });
   const metadata = finding.huntMetadata as { controls?: string[]; evidenceLevel?: string } | null;
