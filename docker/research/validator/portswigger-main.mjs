@@ -42,7 +42,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
 });
 // A private per-process control socket allows the authenticated terminal to
 // reconnect this workspace's relay and wait for tools/list before acknowledging.
-const socketPath = `/tmp/bughunter-burp-${process.pid}.sock`;
+const socketPath = `/var/lib/bughunter-homes/${process.getuid()}/home/run/burp-${process.pid}.sock`;
 const control = createServer(socket => {
   socket.setTimeout(15000, () => socket.destroy());
   socket.once('data', data => {

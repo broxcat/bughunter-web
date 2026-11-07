@@ -54,7 +54,7 @@ def legacy_active(expected_uid=SERVICE_UID):
         try:
             status = open('/proc/' + pid + '/status').read()
             uid = int(next(line.split()[1] for line in status.splitlines() if line.startswith('Uid:')))
-            if uid == expected_uid:
+            if uid == expected_uid and not any(line.startswith('State:') and line.split()[1]=='Z' for line in status.splitlines()):
                 return True
         except (OSError, StopIteration):
             pass

@@ -31,6 +31,7 @@ LOCK = threading.RLock()
 LIFECYCLE = {}
 RECON_SPENT = {}
 ATTACHMENTS = {}
+RUNNING = {}
 
 def identity_lock(uid):
     with LOCK:
@@ -250,6 +251,7 @@ def command(entry, operation, provider=None, profile=None):
         'probe': ['node','/opt/bughunter/docker/research/broker/probe.mjs',provider,'probe'],
         'recon': ['node','/opt/bughunter/docker/research/broker/recon.mjs'],
         'mcp': ['node','/opt/bughunter/docker/research/broker/probe.mjs',provider,'mcp'],
+        'mcp-reconnect': ['node','/opt/bughunter/docker/research/broker/probe.mjs',provider,'reconnect'],
     }
     if operation not in commands:
         fail('INVALID_OPERATION')
@@ -258,10 +260,32 @@ def command(entry, operation, provider=None, profile=None):
 
 
 def run(entry, operation, provider, profile, payload=None):
-    args, cwd, env = command(entry, operation, provider, profile)
-    result = subprocess.run(args, cwd=cwd, env=env, input=payload.encode() if payload else None, capture_output=True, timeout=25, close_fds=True)
-    # Help/version only contain installation metadata. Never return transcripts.
-    return {'code': result.returncode, 'stdout': result.stdout[:65536].decode(errors='replace') if operation in ['help','version','profile','probe','mcp','recon'] else ''}
+    # Serialize admission and process creation, not long native MCP probes.
+    # Track the launcher's pidfd before releasing the lock: revocation must kill
+    # it even if setpriv has not yet changed its credentials.
+    uid=entry['uid']
+    with identity_lock(uid):
+        current=lookup(entry['targetId'])
+        if current!=entry:fail('IDENTITY_CHANGED')
+        args,cwd,env=command(current,operation,provider,profile)
+        child=subprocess.Popen(args,cwd=cwd,env=env,stdin=subprocess.PIPE if payload else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,close_fds=True,start_new_session=True)
+        descriptor=os.pidfd_open(child.pid)
+        RUNNING.setdefault(uid,set()).add(descriptor)
+    try:
+        try:
+            stdout,_=child.communicate(payload.encode() if payload else None,timeout=25)
+        except subprocess.TimeoutExpired:
+            try:os.killpg(child.pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+            child.communicate()
+            fail('NATIVE_CHECK_TIMEOUT')
+        with identity_lock(uid):
+            if lookup(entry['targetId'])!=entry:fail('IDENTITY_CHANGED')
+        return {'code':child.returncode,'stdout':stdout[:65536].decode(errors='replace') if operation in ['help','version','profile','probe','mcp','mcp-reconnect','recon'] else ''}
+    finally:
+        with identity_lock(uid):
+            RUNNING.get(uid,set()).discard(descriptor)
+            os.close(descriptor)
 
 
 def revoke_locked(token):
@@ -272,6 +296,10 @@ def revoke_locked(token):
             fail('IDENTITY_CHANGED')
         with metadata_lock('lifecycle-'+str(entry['uid'])):
             atomic(binding_path(entry['uid']), {**entry, 'state':'revoked'}, entry['gid'], 0o440)
+    # Stop tracked launchers before scanning their dedicated-UID descendants.
+    for descriptor in RUNNING.get(entry['uid'],set()):
+        try:signal.pidfd_send_signal(descriptor,signal.SIGKILL)
+        except ProcessLookupError:pass
     # Re-scan descendants while admission is locked; pidfds prevent PID reuse.
     deadline=time.monotonic()+2
     while True:
@@ -369,8 +397,7 @@ def handle(connection):
                 if claims['deliveryId'] in RECON_SPENT or len(RECON_SPENT)>=10000: fail('REPLAY')
                 RECON_SPENT[claims['deliveryId']]=claims['exp']
             entry=lookup(claims['targetId'])
-            with identity_lock(entry['uid']):
-                response=run(lookup(claims['targetId']),'recon',claims['provider'],'standard' if claims['provider']=='claude' else 'yolo',request['token'])
+            response=run(entry,'recon',claims['provider'],'standard' if claims['provider']=='claude' else 'yolo',request['token'])
         elif operation == 'resize':
             if set(request)!={'operation','targetId','provider','profile','cols','rows'} or any(type(request[k]) is not int or not 2<=request[k]<=500 for k in ['cols','rows']): fail('INVALID_REQUEST')
             entry=lookup(request['targetId'])
@@ -418,6 +445,8 @@ def handle(connection):
                             os.execve('/usr/bin/setpriv', args, env)
                         finally:
                             os._exit(127)
+                    launcher_descriptor=os.pidfd_open(pid)
+                    RUNNING.setdefault(entry['uid'],set()).add(launcher_descriptor)
                 import termios
                 import select
                 try:
@@ -454,10 +483,11 @@ def handle(connection):
                         try:os.kill(pid,signal.SIGKILL)
                         except ProcessLookupError:pass
                         os.waitpid(pid,0)
+                    with identity_lock(entry['uid']):
+                        RUNNING.get(entry['uid'],set()).discard(launcher_descriptor)
+                        os.close(launcher_descriptor)
                 return
-            with identity_lock(entry['uid']):
-                entry = lookup(request['targetId'])
-                response = run(entry, operation, request['provider'], request['profile'])
+            response = run(entry, operation, request['provider'], request['profile'])
         connection.sendall(json.dumps(response).encode() + b'\n')
     except Exception:
         # Safe code only; never paths, tickets, command output or note contents.
@@ -493,6 +523,8 @@ def verify_workspace_root():
 def serve():
     if os.getuid() != 0:
         fail('ROOT_BROKER_REQUIRED')
+    probe_descriptor=os.pidfd_open(os.getpid())
+    os.close(probe_descriptor)
     for path in [ROOT, ROOT + '/active', HOMES, '/run/bughunter-broker']:
         secure_dir(path)
     # Refuse stale/unexpected socket rather than unlink arbitrary content.

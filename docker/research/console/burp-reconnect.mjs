@@ -1,15 +1,17 @@
+import {openConsoleWorkspace} from '../validator/console-files.mjs';
 import { readFile } from 'node:fs/promises';
 import { connect } from 'node:net';
 import { workspaceProcesses } from './stop.mjs';
 import { diagnoseOfficialBurp } from '../validator/burp-proxy.mjs';
 export async function reconnectWorkspaceBurp(cwd) {
+  const workspace=await openConsoleWorkspace(cwd);await workspace.root.close();
   const diagnostics = [];
   for (const pid of await workspaceProcesses([cwd])) {
     const command = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
     if (!command.split('\0').includes('/opt/bughunter/docker/research/validator/portswigger-main.mjs')) continue;
     diagnostics.push(await new Promise(resolve => {
       let data = '';
-      const socket = connect(`/tmp/bughunter-burp-${pid}.sock`);
+      const socket = connect(`/var/lib/bughunter-homes/${process.getuid()}/home/run/burp-${pid}.sock`);
       const fail = () => { socket.destroy(); resolve({ status: 'unavailable', toolCount: 0 }); };
       socket.setTimeout(15000, fail); socket.on('error', fail);
       socket.once('connect', () => socket.write('reconnect\n'));

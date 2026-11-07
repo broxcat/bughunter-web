@@ -20,5 +20,5 @@ export function workspaceRequest(targetId,operation,provider='codex',profile=pro
   return brokerRequest({operation,targetId,provider,profile});
 }
 export async function isolatedLauncherEngine(targetId,provider) {
-  return launcherStatusSchema.parse([JSON.parse((await workspaceRequest(targetId,'inspect',provider)).stdout)])[0];
+  return launcherStatusSchema.element.parse(JSON.parse((await workspaceRequest(targetId,'inspect',provider)).stdout));
 }

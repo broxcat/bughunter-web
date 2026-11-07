@@ -89,10 +89,11 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
     const profile=claims.profile??legacyProfile(provider);
     ws.targetId = claims.targetId; connections.add(ws); let terminal, closed = false, lease = claims.exp * 1000, inputBytes = 0, messages = 0, checking = false, auth = 'checking';
     const send = value => { if (ws.readyState === ws.OPEN) { if (ws.bufferedAmount > 1024 * 1024) ws.close(1009, 'Slow terminal'); else ws.send(JSON.stringify(value)); } };
-    const checkBurp = async () => {
+    const checkBurp = async (reconnect = false) => {
       if (checking || closed) return; checking = true;
       send({ type: 'status', provider, authentication: auth, codex: provider === 'codex' ? auth : undefined, burp: 'starting' });
       try {
+        if(reconnect)await workspaceRequest(claims.targetId,'mcp-reconnect',provider,profile);
         const diagnostic = JSON.parse((await workspaceRequest(claims.targetId,'mcp',provider,profile)).stdout);
         send({ type: 'status', provider, authentication: auth, codex: provider === 'codex' ? auth : undefined, burp: diagnostic.status, burpDetails: { provider: diagnostic.provider, toolCount: diagnostic.toolCount, version: diagnostic.version, optional: diagnostic.optional } });
       } finally { checking = false; }

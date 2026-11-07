@@ -23,7 +23,7 @@ await writeFile(join(temporary,'public.pem'),keys.publicKey.export({type:'spki',
 const label='bughunter.issue42='+nonce;
 let created=false,started=false;
 try {
- const sourceFiles=[...(await readdir('docker/research/broker')).filter(name=>/\.(?:py|mjs)$/.test(name)).map(name=>'docker/research/broker/'+name),...['server.mjs','broker.mjs','launcher.mjs','recon-context.mjs','providers.mjs'].map(name=>'docker/research/console/'+name),...['console-files.mjs','runtime-binding.mjs','burp-files.mjs','codex-launch.mjs','claude-config.mjs','validate-hypotheses.mjs'].map(name=>'docker/research/validator/'+name)];
+ const sourceFiles=[...(await readdir('docker/research/broker')).filter(name=>/\.(?:py|mjs)$/.test(name)).map(name=>'docker/research/broker/'+name),...['server.mjs','broker.mjs','launcher.mjs','recon-context.mjs','providers.mjs','burp-reconnect.mjs'].map(name=>'docker/research/console/'+name),...['codex-rpc.mjs','portswigger-main.mjs','console-files.mjs','runtime-binding.mjs','burp-files.mjs','codex-launch.mjs','claude-config.mjs','validate-hypotheses.mjs'].map(name=>'docker/research/validator/'+name)];
  const hashes=Object.fromEntries(await Promise.all(sourceFiles.map(async path=>['/opt/bughunter/'+path,createHash('sha256').update(await readFile(path)).digest('hex')])));
  const verify='const fs=require("fs"),crypto=require("crypto"),expected='+JSON.stringify(hashes)+';for(const[p,h]of Object.entries(expected))if(crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex")!==h)throw new Error("IMAGE_SOURCE_MISMATCH");console.log("EXACT_IMAGE_SOURCE_MATCH");';
  console.log(await run(['run','--rm','--network','none','--entrypoint','node',image,'-e',verify]));
@@ -42,10 +42,13 @@ try {
  const inspection=JSON.parse(await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'inspect',targetId:'m8-alice',provider:'codex',profile:'yolo'})]));
  assert.equal(JSON.parse(inspection.stdout).authentication,'required');
  await assert.rejects(()=>exec(['test','-e','/var/lib/bughunter-identities/ledger.json']));
+ const nativeReadiness=JSON.parse(await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','node','--input-type=module','-e','import {isolatedLauncherEngine} from "/opt/bughunter/docker/research/console/broker.mjs";console.log(JSON.stringify(await isolatedLauncherEngine("m8-alice","codex")))']));
+ assert.equal(nativeReadiness.authentication,'required');assert(nativeReadiness.profiles.includes('yolo'));
  console.log('READ_ONLY_INSTALLATION_PROBE_WITHOUT_WORKSPACE_ALLOCATION_PASS');
  await writeFile(join(temporary,'legacy.mjs'),await readFile('tests/research/legacyProviderFixture.mjs'));
  await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','--no-new-privs','env','HOME=/home/researcher','CODEX_HOME=/home/researcher/.codex','node','/fixtures/legacy.mjs']);
  await exec(['pkill','-KILL','-u','1000']).catch(()=>{});
+ await exec(['chown','0:0','/tmp/legacy-threads.json']);await exec(['chmod','0600','/tmp/legacy-threads.json']);
  const ids:Record<string,number>={};
  await writeFile(join(temporary,'validator.mjs'),await readFile('tests/research/runtimeValidatorProbe.mjs'));
  const migrations:Array<()=>Promise<string>>=[];
@@ -55,7 +58,7 @@ try {
   await writeFile(join(temporary,suffix+'.ticket'),ticket,{mode:0o600});
   await exec(['sh','-c',`node /opt/bughunter/docker/research/broker/admit.mjs < /fixtures/${suffix}.ticket`]);
   if(suffix==='alice') {
-   const dryRun=()=>exec(['sh','-c','python3 /opt/bughunter/docker/research/broker/migrate.py < /fixtures/alice.ticket']);
+   const dryRun=async()=>{await writeFile(join(temporary,'alice.ticket'),issueTerminalTicket({userId:'owner-alice',targetId:'m8-alice',sessionId:'session-alice',policySha256:hash},privateKey).token,{mode:0o600});return exec(['sh','-c','python3 /opt/bughunter/docker/research/broker/migrate.py < /fixtures/alice.ticket']);};
    await assert.rejects(dryRun); // Unreviewed legacy history never auto-imports.
    await writeFile(join(temporary,'export.py'),await readFile('tests/research/providerExportFixture.py'));await exec(['python3','/fixtures/export.py',suffix]);
    for(const attack of ['symlink','hardlink','owner']) {
@@ -63,10 +66,12 @@ try {
     await exec(['node','-e',`const fs=require('fs'),p=process.argv[1];if(process.argv[2]==='symlink')fs.symlinkSync('/workspaces/research_m8-bob',p);else if(process.argv[2]==='hardlink')fs.linkSync('/workspaces/research_m8-alice/scope.md',p);else{fs.writeFileSync(p,'fixture');fs.chownSync(p,65534,65534)}`,path,attack]);
     await assert.rejects(dryRun);await exec(['rm',path]);
    }
+   await run(['exec','-d',name,'setpriv','--reuid=1000','--regid=1000','--clear-groups','sleep','30']);
+   await assert.rejects(dryRun);await exec(['pkill','-KILL','-u','1000']);
    assert(JSON.parse(await dryRun()).status==='DRY_RUN');
    console.log('MIGRATION_UNREVIEWED_SYMLINK_HARDLINK_UNKNOWN_OWNER_DENIED_PASS');
   } else {await writeFile(join(temporary,'export.py'),await readFile('tests/research/providerExportFixture.py'));await exec(['python3','/fixtures/export.py',suffix]);}
-  const migrate=()=>exec(['sh','-c',`python3 -c 'import sys;sys.path.insert(0,"/opt/bughunter/docker/research/broker");from migrate import migrate;print(migrate(sys.stdin.read(),True))'  < /fixtures/${suffix}.ticket`]);
+  const migrate=async()=>{await writeFile(join(temporary,suffix+'.ticket'),issueTerminalTicket({userId:'owner-'+suffix,targetId:'m8-'+suffix,sessionId:'session-'+suffix,policySha256:hash},privateKey).token,{mode:0o600});return exec(['sh','-c',`python3 -c 'import sys;sys.path.insert(0,"/opt/bughunter/docker/research/broker");from migrate import migrate;print(migrate(sys.stdin.read(),True))'  < /fixtures/${suffix}.ticket`]);};
   migrations.push(migrate);
  }
  console.log(await Promise.all(migrations.map(migrate=>migrate())));
@@ -144,7 +149,10 @@ try {
  for(const [suffix,provider,profile] of [['alice','codex','yolo'],['bob','claude','standard']] as const)await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'start',targetId:'m8-'+suffix,provider,profile})]);
  const stop=issueStopTicket('m8-alice','research_m8-alice',privateKey);
  await writeFile(join(temporary,'revoke.json'),JSON.stringify({operation:'revoke',token:stop}),{mode:0o600});
+ const racingProbe=exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'mcp',targetId:'m8-alice',provider:'claude',profile:'standard'})]).catch(()=>null);
+ await new Promise(resolve=>setTimeout(resolve,100));
  await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','sh','-c','python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/revoke.json']);
+ await racingProbe;
  await assert.rejects(()=>exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'start',targetId:'m8-alice',provider:'codex',profile:'yolo'})]));
  await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'exists',targetId:'m8-bob',provider:'claude',profile:'standard'})]);
  const remaining=await exec(['ps','-eo','uid,stat,args']);assert(!remaining.split('\n').some(line=>line.trim().split(/\s+/)[0]===String(ids.alice)&&!line.trim().split(/\s+/)[1].startsWith('Z')));
@@ -155,6 +163,18 @@ try {
  await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'exists',targetId:'m8-bob',provider:'claude',profile:'standard'})]);
  const retired=JSON.parse(await exec(['cat','/var/lib/bughunter-identities/ledger.json']));assert.equal(retired.targets['m8-alice'].state,'deleted');assert.equal(retired.next,200004);
  console.log('IDEMPOTENT_PRIVATE_HOME_DELETION_AND_UID_TOMBSTONE_PASS');
+ await exec(['node','-e',`const fs=require('fs'),base='/workspaces/research_m8-alice/.agents/bughunter/';let p=JSON.parse(fs.readFileSync(base+'policy.json'));p.sessionId='session-alice-recreated';fs.writeFileSync(base+'policy.json',JSON.stringify(p));let s=JSON.parse(fs.readFileSync(base+'session.json'));s.source='ResearchSession '+p.sessionId;fs.writeFileSync(base+'session.json',JSON.stringify(s));fs.writeFileSync(base+'isolation-new.json',JSON.stringify({version:1,targetId:p.targetId,workspaceId:p.workspaceId,sessionId:p.sessionId}),{mode:0o440})`]);
+ await exec(['node','-e',"const fs=require('fs');for(const n of ['link','nested','renamed']){try{fs.unlinkSync('/workspaces/research_m8-alice/findings/'+n)}catch(e){if(e.code!=='ENOENT')throw e}}"]);
+ const recreatedHash=(await exec(['sha256sum','/workspaces/research_m8-alice/.agents/bughunter/policy.json'])).split(' ')[0];
+ const recreatedTicket=issueTerminalTicket({userId:'owner-alice',targetId:'m8-alice',sessionId:'session-alice-recreated',policySha256:recreatedHash},privateKey).token;
+ await writeFile(join(temporary,'recreate.json'),JSON.stringify({operation:'admit',token:recreatedTicket}),{mode:0o600});
+ try{await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','sh','-c','python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/recreate.json']);}catch(error){console.error(await exec(['sh','-c',`python3 -c 'import sys,json;sys.path.insert(0,"/opt/bughunter/docker/research/broker");from migrate import migrate;print(migrate(json.load(sys.stdin)["token"],True,True))' < /fixtures/recreate.json`]).catch(diagnostic=>diagnostic.stderr));throw error;}
+
+ const recreated=JSON.parse(await exec(['cat','/var/lib/bughunter-identities/ledger.json']));assert.equal(recreated.targets['m8-alice'].uid,200004);assert.equal(recreated.retired[0].uid,ids.alice);
+ assert((await exec(['cat','/workspaces/research_m8-alice/findings/notes.md'])).includes('ISOLATED_NOTE'));
+ await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'exists',targetId:'m8-bob',provider:'claude',profile:'standard'})]);
+ console.log('RECREATE_RETIRES_OLD_UID_PRESERVES_NOTES_AND_B_PASS');
+
 } finally {
  if(started){assert.equal(await run(['inspect','--format','{{index .Config.Labels "bughunter.issue42"}}',name]),nonce);await run(['rm','-f',name]);}
  if(created){assert.equal(await run(['volume','inspect','--format','{{index .Labels "bughunter.issue42"}}',volume]),nonce);await run(['volume','rm',volume]);}

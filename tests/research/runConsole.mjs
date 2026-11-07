@@ -118,7 +118,8 @@ try {
  await page.getByLabel('Moteur IA',{exact:true}).selectOption('claude');
  await page.getByRole('button',{name:'Open Claude Code',exact:true}).click();
  await page.getByText('Claude: login required',{exact:true}).waitFor({timeout:30000});
- await page.getByText('Terminal: connected',{exact:true}).waitFor();
+ try{await page.getByText('Terminal: connected',{exact:true}).waitFor();}catch(error){console.error('Provider-switch UI:',(await page.locator('body').innerText()).slice(0,1800));console.error(await compose('logs','--tail','40','research-console'));console.error(await dexec('ps','-eo','uid,gid,args'));throw error;}
+
  assert.match(await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','claude','--version'),/^2\.1\.312 \(Claude Code\)$/);
  const claudeSession='bughunter_claude_'+data.ids[0];
  const claudePane=()=>dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','tmux','list-panes','-t',claudeSession+':0','-F','#{pane_pid}:#{pane_current_path}');
@@ -321,6 +322,11 @@ try {
  console.log('RUNNING_CONSOLE_DELETE_NATIVE_PASSED: UI confirmation stops actual Codex + Claude PTYs, removes the exclusive workspace, retains Target/Recon. No model inference.');
 
  console.log(await run(process.execPath,['tests/e2e/targetWorkflow.mjs'],{env:{...process.env,TEST_APP_URL:origin},timeout:90000}));
+} catch(error) {
+ const failedPage=browser?.contexts()[0]?.pages()[0];
+ if(failedPage)console.error('Native-console failure UI:',(await failedPage.locator('body').innerText().catch(()=>'' )).slice(0,1800));
+ if(started)console.error(await compose('logs','--tail','35','research-console').catch(()=>''));
+ throw error;
 } finally {
  reconWorker?.kill('SIGTERM');
  await mcp?.close().catch(()=>{});tunnel?.kill('SIGTERM');await fixture?.close().catch(()=>{});await browser?.close();

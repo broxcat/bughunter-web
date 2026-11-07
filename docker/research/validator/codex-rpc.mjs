@@ -3,6 +3,7 @@ import { consoleMcpOverrides } from './console-mcp-config.mjs';
 export async function codexRead(method, params, cwd = process.cwd(), timeout = 5000, initializeThread = false) {
   const trust = `projects={${JSON.stringify(cwd)}={trust_level="trusted"}}`;
   const child = spawn('codex', ['-c', trust, ...consoleMcpOverrides(cwd), 'app-server', '--stdio'], { cwd, stdio: ['pipe', 'pipe', 'ignore'] });
+  const exited = new Promise(resolve => child.once('close', resolve));
   let buffer = '', bytes = 0, next = 1, timer;
   const waiting = new Map();
   const request = (method, params) => new Promise((resolve, reject) => { const id = next++; waiting.set(id, { resolve, reject }); child.stdin.write(JSON.stringify({ id, method, params }) + '\n'); });
@@ -40,5 +41,5 @@ export async function codexRead(method, params, cwd = process.cwd(), timeout = 5
       })(),
       new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('CODEX_READ_TIMEOUT')), timeout); }),
     ]);
-  } finally { clearTimeout(timer); child.stdin.end(); child.kill('SIGTERM'); const force = setTimeout(() => child.kill('SIGKILL'), 500); force.unref(); }
+  } finally { clearTimeout(timer); child.stdin.end(); child.kill('SIGTERM'); const force = setTimeout(() => child.kill('SIGKILL'), 500); await exited; clearTimeout(force); }
 }
