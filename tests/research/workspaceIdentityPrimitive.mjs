@@ -22,7 +22,7 @@ for (const [id,uid] of [['a',200001],['b',200002]]) {
  }
  await mkdir('/private-homes/'+id,{mode:0o700});await chown('/private-homes/'+id,uid,uid);
  const binding={v:1,uid,gid:uid,targetId:id,workspaceId:'research_'+id,sessionId:'session_'+id,policySha256:id.repeat(64),state:'active'};
- const path='/var/lib/bughunter-identities/active/'+uid+'.json';await writeFile(path,JSON.stringify(binding));await chown(path,0,uid);await chmod(path,0o440);
+ const directory='/var/lib/bughunter-identities/active/'+uid;await mkdir(directory,{mode:0o750});await chown(directory,0,uid);const path=directory+'/binding.json';await writeFile(path,JSON.stringify(binding));await chown(path,0,uid);await chmod(path,0o440);
 }
 const consumer=${JSON.stringify(await readFile(new URL('./workspaceIdentityConsumer.mjs',import.meta.url),'utf8'))};
 await writeFile('/tmp/consumer.mjs',consumer);

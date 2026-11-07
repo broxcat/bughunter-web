@@ -1,9 +1,12 @@
-import {describe,it,expect,vi} from 'vitest';
+import {describe,it,expect,vi,beforeEach,afterEach} from 'vitest';
 import {generateKeyPairSync} from 'node:crypto';
 import {launchProfiles,assertLaunchProfile,codexProfileArguments,claudePermissionMode} from '@/lib/research/launchProfiles.mjs';
 import {providerSelection} from '@/lib/research/provider';
 import {issueLauncherTicket,verifyLauncherTicket,issueTerminalTicket,verifyTerminalTicket} from '@/lib/research/terminal';
 import {launcherEngine,createLauncherSnapshot} from '../../docker/research/console/launcher.mjs';
+// Pure launcher-probe tests use a UID value only; OS denial acceptance is separate.
+beforeEach(()=>{vi.spyOn(process,'getuid').mockReturnValue(200001);});
+afterEach(()=>{vi.restoreAllMocks();});
 const help='--ask-for-approval on-request --sandbox workspace-write --dangerously-bypass-approvals-and-sandbox --permission-mode "manual" "plan"';
 function runner({running=false,recorded='standard',auth=true,output=help}={}) {
   return vi.fn(async (file:string,args:string[])=>{

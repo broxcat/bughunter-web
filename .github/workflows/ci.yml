@@ -117,3 +117,25 @@ jobs:
           trap cleanup EXIT
           docker buildx create --name "$builder" --driver docker-container --buildkitd-config "$config" --bootstrap
           docker buildx build --builder "$builder" --progress plain --load --target tools -t "$image" .
+
+  research-runtime-isolation:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://fixture:fixture@127.0.0.1/unused
+      AUTH_SECRET: isolation-fixture-only
+      CREDENTIALS_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://fixture:fixture@127.0.0.1/unused
+      - name: Build exact Research image
+        run: docker build -f docker/research/Dockerfile -t bughunter-issue42-research:local .
+      - name: Verify actual broker identities, native providers and kernel boundary
+        run: npx tsx tests/research/runtimeIsolation.mts

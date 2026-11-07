@@ -25,7 +25,8 @@ describe('persistent managed MCP', () => {
       const args = claudeArguments('/workspaces/research_a', '', true, file);
       expect(args[args.indexOf('--mcp-config') + 1]).toBe(file);
       expect(args).toContain('--continue');
-      expect(claudeConfigDirectory('/workspaces/research_a')).not.toBe(claudeConfigDirectory('/workspaces/research_b'));
+      expect(()=>claudeConfigDirectory('/workspaces/research_a')).toThrow('RESEARCH_IDENTITY_DENIED');
+      expect(()=>claudeConfigDirectory('/workspaces/research_b')).toThrow('RESEARCH_IDENTITY_DENIED');
     } finally { await rm(root, { recursive: true, force: true }); }
   });
   it('refuses configuration symlinks without changing their target', async () => {

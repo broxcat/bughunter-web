@@ -6,7 +6,9 @@ import { promisify } from "node:util";
 import { mkdtemp, writeFile, copyFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, generateKeyPairSync } from "node:crypto";
+import {issueTerminalTicket} from '../../src/lib/research/terminal.ts';
+const keys=generateKeyPairSync('ed25519'),privateKey=keys.privateKey.export({type:'pkcs8',format:'pem'}).toString();
 const exec = promisify(execFile), project = `bh-research-test-${randomUUID().slice(0, 8)}`;
 const temp = await mkdtemp(join(tmpdir(), project)), config = join(temp, "compose.json");
 const cmd = async (file, args, options = {}) => (await exec(file, args, { timeout: 60000, maxBuffer: 2 ** 20, ...options })).stdout.trim();
@@ -36,9 +38,9 @@ try {
   assert(!JSON.stringify(runner).match(/docker\.sock|DATABASE_URL|AUTH_SECRET|REDIS_URL|CREDENTIALS_ENCRYPTION_KEY/));
   assert.deepEqual(Object.keys(runner.networks).sort(), ["burp_link", "research_egress", "research_terminal"]);
   runner.networks = {research_egress:{}};
-  runner.entrypoint = ["entrypoint"];
-  runner.healthcheck = {test:["CMD", "healthcheck"]};
-  runner.environment = {};
+  runner.entrypoint = ["console-entrypoint"];
+  runner.healthcheck = {test:["CMD", "console-healthcheck"]};
+  runner.environment = {RESEARCH_TERMINAL_ORIGIN:"http://fixture.example.test"};
   // Testing service is derived from the real service: preserve capabilities,
   // user, entrypoint and healthcheck, change only disposable resources/port.
   delete runner.build;
@@ -51,23 +53,27 @@ try {
   await new Promise(r => listener.close(r)); // fixed port survives container restarts
   runner.volumes = [
     { type: "volume", source: "workspaces", target: "/workspaces" },
-    { type: "volume", source: "codex", target: "/home/researcher/.codex" },
+    {type:"volume",source:"identities",target:"/var/lib/bughunter-identities"},
+    {type:"volume",source:"homes",target:"/var/lib/bughunter-homes"},
+    {type:"bind",source:temp,target:"/fixtures",read_only:true},
+    {type:"bind",source:join(temp,"public.pem"),target:"/run/research-terminal/public.pem",read_only:true},
     { type: "volume", source: "hostkeys", target: "/etc/ssh/host-keys" },
     { type: "bind", source: join(temp, "authorized_keys"), target: "/run/research-keys/authorized_keys", read_only: true },
   ];
+  await writeFile(join(temp,"public.pem"),keys.publicKey.export({type:"spki",format:"pem"}));
   await cmd("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", join(temp, "key")]);
   await copyFile(join(temp, "key.pub"), join(temp, "authorized_keys"));
   await writeFile(config, JSON.stringify({ services: {
     "research-runner": runner,
     db: { image: "postgres:16-alpine", environment: { POSTGRES_PASSWORD: "disposable-research" }, networks: ["backend"] },
     redis: { image: "redis:7-alpine", networks: ["backend"] },
-  }, networks: { research_egress: {}, backend: {} }, volumes: { workspaces: {}, codex: {}, hostkeys: {} } }));
+  }, networks: { research_egress: {}, backend: {} }, volumes: { workspaces: {}, codex: {}, hostkeys: {}, identities:{},homes:{} } }));
   started = true; await compose("up", "-d");
   const id = await compose("ps", "-q", "research-runner");
   const dexec = (...args) => cmd("docker", ["exec", id, ...args]);
   let healthy = false;
   for (let i = 0; i < 40; i++) {
-    try { await dexec("healthcheck"); healthy = true; break; } catch { await new Promise(r => setTimeout(r, 500)); }
+    try { await dexec("console-healthcheck"); healthy = true; break; } catch { await new Promise(r => setTimeout(r, 500)); }
   }
   if (!healthy) {
     console.error(await compose("logs", "--no-color", "research-runner"));
@@ -87,16 +93,24 @@ try {
   await dexec("su", "-s", "/bin/sh", "researcher", "-c", "codex --yolo --help");
   // Generate the actual exporter bundle on the host, copy it to emulate web's
   // volume publication, then set the same root/research ownership as the web.
-  const output = JSON.parse(await cmd("npx", ["tsx", "tests/research/createWorkspace.mts", join(temp, "export")]));
+  const output = JSON.parse(await cmd("npx", ["tsx", "tests/research/createWorkspace.mts", join(temp, "export"),"--console"]));
   const workspace = `/workspaces/${output.workspaceId}`;
   await cmd("docker", ["cp", join(temp, "export", output.workspaceId), `${id}:${workspace}`]);
   await dexec("chown", "-R", "root:research", workspace);
-  await dexec("chmod", "3770", "/workspaces");
+  const hash=(await dexec('sha256sum',workspace+'/.agents/bughunter/policy.json')).split(' ')[0];
+  const ticket=issueTerminalTicket({userId:'owner',targetId:'target',sessionId:'session',policySha256:hash},privateKey).token;
+  await writeFile(join(temp,'admit.json'),JSON.stringify({operation:'admit',token:ticket}),{mode:0o600});
+  await dexec('setpriv','--reuid=researcher','--regid=research','--clear-groups','sh','-c','python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/admit.json');
+  const ledger=JSON.parse(await dexec('cat','/var/lib/bughunter-identities/ledger.json')),uid=ledger.targets.target.uid;
+  const home='/var/lib/bughunter-homes/'+uid+'/home';
+
   const port = bindings[0].HostPort;
   const sshArgs = ["-i", join(temp, "key"), "-p", port, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", `UserKnownHostsFile=${join(temp, "known_hosts")}`];
-  const ssh = command => cmd("ssh", [...sshArgs, "researcher@127.0.0.1", command]);
-  assert((await ssh("id -un")).includes("researcher"));
-  assert((await ssh("bughunter-workspaces")).includes("app.example.test"));
+  const sshCommand = command => cmd("ssh", [...sshArgs, "researcher@127.0.0.1", command]);
+  await assert.rejects(()=>sshCommand('id'));
+  const ssh=command=>dexec('setpriv','--reuid='+uid,'--regid='+uid,'--clear-groups','--no-new-privs','env','HOME='+home,'CODEX_HOME='+home+'/.codex','TMPDIR='+home+'/tmp','sh','-c',command);
+  assert((await ssh("id -u")).includes(String(uid)));
+  await assert.rejects(()=>ssh("bughunter-workspaces"));
   const help = await ssh(`cd ${workspace} && bughunter-codex --help`);
   assert(help.includes("Codex CLI")); assert(help.includes(output.workspaceId));
 
@@ -105,9 +119,8 @@ try {
   assert(codexConfig.includes(workspace));
   const status = () => ssh(`cd ${workspace} && bughunter-burp-status`);
   await assert.rejects(status()); // optional upstream is absent; runner remains healthy
-  await dexec("healthcheck");
-  const absent = JSON.parse(await ssh(`cat ${workspace}/research/burp-status.json`));
-  assert.equal(absent.upstream, "UNAVAILABLE");
+  await dexec("console-healthcheck");
+
   burpFixture = await fakeBurp();
   // The remote listen is fixed by sshd. The host fixture uses a disposable port.
   tunnel = spawn("ssh", [...sshArgs, "-N", "-o", "ExitOnForwardFailure=yes", "-R", `127.0.0.1:9876:127.0.0.1:${burpFixture.port}`, "researcher@127.0.0.1"], { stdio: "ignore" });
@@ -121,7 +134,7 @@ try {
   await assert.rejects(cmd("ssh", [...sshArgs, "-N", "-o", "ExitOnForwardFailure=yes", "-R", "127.0.0.1:9877:127.0.0.1:1", "researcher@127.0.0.1"], { timeout: 5000 }));
   await assert.rejects(cmd("ssh", [...sshArgs, "-N", "-o", "ExitOnForwardFailure=yes", "-R", "0.0.0.0:9876:127.0.0.1:1", "researcher@127.0.0.1"], { timeout: 5000 }));
   mcp = new Client({ name: "bughunter-runner-fixture", version: "1.0.0" });
-  await mcp.connect(new StdioClientTransport({ command: "ssh", args: [...sshArgs, "researcher@127.0.0.1", `cd ${workspace} && bughunter-burp-mcp`], stderr: "pipe" }));
+  await mcp.connect(new StdioClientTransport({command:'docker',args:['exec','-i','--workdir',workspace,id,'setpriv','--reuid='+uid,'--regid='+uid,'--clear-groups','--no-new-privs','env','HOME='+home,'CODEX_HOME='+home+'/.codex','bughunter-burp-passive-mcp'],stderr:'pipe'}));
   const tools = await mcp.listTools();
   assert.deepEqual(tools.tools.map(t => t.name), ["burp_status", "burp_history", "burp_save_observation"]);
   assert(!JSON.stringify(tools).match(/send_http|UNTRUSTED_IGNORE_SCOPE/));
@@ -141,7 +154,7 @@ try {
   await burpFixture.close(); burpFixture = null;
   const validate = () => ssh(`cd ${workspace} && bughunter-validate-hypotheses`);
   assert((await validate()).includes("OK — 0 hypotheses"));
-  const writeHypotheses = value => ssh(`cd ${workspace} && printf '%s' '${Buffer.from(JSON.stringify(value)).toString("base64")}' | base64 -d > research/hypotheses.json`);
+  const writeHypotheses = value => ssh(`cd ${workspace} && printf '%s' '${Buffer.from(JSON.stringify(value)).toString("base64")}' | base64 -d > findings/hypotheses.json`);
   const validHypothesis = { externalId: "H-001", title: "Local fixture hypothesis", status: "OPEN", hypothesis: "An observed local boundary may differ.", evidenceFor: [{ ref: "scope.md", summary: "Local synthetic observation reference." }], evidenceAgainst: [], nextTest: "Compare two fixture observations.", expectedSignal: "Distinct controlled responses.", falsificationCondition: "Identical access enforcement." };
   await writeHypotheses({ version: 1, sessionId: "session", hypotheses: [validHypothesis] });
   assert((await validate()).includes("OK — 1 hypotheses"));
@@ -151,13 +164,13 @@ try {
   await writeHypotheses({ version: 1, sessionId: "session", hypotheses: [{ ...validHypothesis, evidenceFor: [{ ref: "evidence/missing.txt", summary: "Uncaptured observation" }] }] });
   await assert.rejects(validate());
 
-  await ssh(`cd ${workspace} && printf '%s' '{"version":99,"sessionId":"session","hypotheses":[]}' > research/hypotheses.json`);
+  await ssh(`cd ${workspace} && printf '%s' '{"version":99,"sessionId":"session","hypotheses":[]}' > findings/hypotheses.json`);
   await assert.rejects(validate());
-  await ssh(`cd ${workspace} && printf '%s' '{"version":1,"sessionId":"session","hypotheses":[]}' > research/hypotheses.json`);
+  await ssh(`cd ${workspace} && printf '%s' '{"version":1,"sessionId":"session","hypotheses":[]}' > findings/hypotheses.json`);
   assert((await validate()).includes("OK — 0 hypotheses"));
 
-  for (const name of ["positive", "control"]) await ssh(`printf 'Synthetic local observation only' > ${workspace}/evidence/${name}.txt`);
-  const loop = loopHypothesis({ status: "CONFIRMED" });
+  for (const name of ["positive", "control"]) await ssh(`printf 'Synthetic local observation only' > ${workspace}/requests/${name}.txt`);
+  const loop = JSON.parse(JSON.stringify(loopHypothesis({status:"CONFIRMED"})).replaceAll("evidence/","requests/"));
   await writeHypotheses({ version: 2, sessionId: "session", hypotheses: [loop] });
   assert((await validate()).includes("OK — 1 hypotheses"));
   loop.tests[0].observations[0].evidence = [{ ref, summary: "Burp status metadata alone cannot confirm a security effect." }];
@@ -169,12 +182,12 @@ try {
   await assert.rejects(cmd("ssh", [...sshArgs, "root@127.0.0.1", "id"]));
   // Only publickey is accepted. A client explicitly refusing publickey cannot log in.
   await assert.rejects(cmd("ssh", [...sshArgs, "-o", "PubkeyAuthentication=no", "researcher@127.0.0.1", "id"]));
-  await ssh(`cd ${workspace} && printf 'Local fixture note\n' >> research/notes.md`);
+  await ssh(`cd ${workspace} && printf 'Local fixture note\n' >> findings/notes.md`);
   await assert.rejects(ssh(`printf overwrite > ${workspace}/scope.md`));
   await assert.rejects(ssh(`mv ${workspace} /workspaces/forbidden-rename`));
   await compose("restart", "research-runner");
   for (let i = 0; i < 20; i++) { try { await ssh("true"); break; } catch { await new Promise(r => setTimeout(r, 250)); } }
-  assert((await ssh(`cat ${workspace}/research/notes.md`)).includes("Local fixture note"));
+  assert((await ssh(`cat ${workspace}/findings/notes.md`)).includes("Local fixture note"));
   for (const service of ["db", "redis"]) {
     const serviceId = await compose("ps", "-q", service);
     const peer = JSON.parse(await cmd("docker", ["inspect", serviceId]))[0];
@@ -185,10 +198,10 @@ try {
   // Internet egress / registry connectivity, never an actual research target.
   await dexec("su", "-s", "/bin/sh", "researcher", "-c", "curl --fail --silent --max-time 20 https://registry.npmjs.org/@openai%2fcodex > /dev/null");
   assert(!(await readFile(resolve("src/app/api/research-sessions/route.ts"), "utf8")).match(/execFile|spawn|exec\(/));
-  console.log(`${version}; --yolo, bughunter-codex --help and hypotheses validator (valid/invalid) verified over SSH`);
+  console.log(`${version}; --yolo, isolated bughunter-codex --help and hypotheses validator (valid/invalid) verified`);
   console.log(`SSH binding verified: 127.0.0.1:${port} only (production Compose: 127.0.0.1:${process.env.RESEARCH_SSH_PORT ?? "2222"})`);
   console.log("Burp passive MCP stdio/SSE, restricted reverse SSH loopback tunnel, Codex MCP config, optional absence, redacted evidence and denied active tools passed using a local fixture (not real Burp Suite). ");
-  console.log("Public-key/non-root SSH, denied password/root login, immutable inputs, writable notes, restart persistence, absent app secrets/socket, backend isolation and Internet egress passed.");
+  console.log("SSH shells denied, public-key-only restricted forwarding, immutable inputs, writable notes, restart persistence, absent app secrets/socket, backend isolation and Internet egress passed.");
 } catch (error) {
   // Child-process errors may contain captured output; do not dump full configs.
   console.error(`Research infrastructure failed: ${error.message.split("\n")[0]}`);

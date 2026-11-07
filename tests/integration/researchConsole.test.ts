@@ -1,4 +1,4 @@
-import { describe, it, beforeAll, beforeEach, afterAll, vi, expect } from 'vitest';
+import { describe, it, beforeAll, beforeEach, afterAll, afterEach, vi, expect } from 'vitest';
 import { randomUUID, generateKeyPairSync } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, writeFile, rm, readFile, symlink } from 'node:fs/promises';
@@ -11,6 +11,9 @@ if(db){const u=new URL(db);u.searchParams.set('schema',schema);process.env.DATAB
 let prisma: typeof import('@/lib/prisma').prisma, ensure: typeof import('@/server/research/consoleWorkspace').ensureTargetConsole, route: typeof import('@/app/api/research-targets/[id]/terminal/route').POST;
 let root:string,userId:string,otherId:string,targetId:string,publicKey:string;
 (db?describe:describe.skip)('owned persistent Target console admission',()=>{
+ // Transport readiness is isolated here; real broker/kernel acceptance runs separately.
+ beforeEach(()=>{vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{"ready":true}',{status:200}));});
+ afterEach(()=>{vi.restoreAllMocks();});
  beforeAll(async()=>{
   execFileSync('npx',['prisma','migrate','deploy'],{env:process.env,stdio:'pipe'});
   ({prisma}=await import('@/lib/prisma'));({ensureTargetConsole:ensure}=await import('@/server/research/consoleWorkspace'));({POST:route}=await import('@/app/api/research-targets/[id]/terminal/route'));
@@ -39,6 +42,11 @@ let root:string,userId:string,otherId:string,targetId:string,publicKey:string;
  it('issues a verified ticket bound to server-owned target/session; returns no app credentials/paths',async()=>{
   const result=await request();expect(result.status).toBe(200);const body=await result.json(),claims=verifyTerminalTicket(body.token,publicKey);
   expect(claims.targetId).toBe(targetId);expect(claims.userId).toBe(userId);expect(body.requiredUserAgent).toBe('Console-UA/1');expect(JSON.stringify(body)).not.toMatch(/DATABASE_URL|AUTH_SECRET|private.pem|workspacePath|command/);
+ });
+ it('fails closed when isolation readiness is unavailable and returns no ticket',async()=>{
+  vi.mocked(globalThis.fetch).mockResolvedValue(new Response('{"error":"migration"}',{status:409}));
+  const response=await request();expect(response.status).toBe(409);
+  const body=await response.json();expect(body.token).toBeUndefined();expect(body.error).toContain('requires isolation migration');
  });
  it('persists provider selection, signs the selected engine and preserves historical defaults', async () => {
   const initial = await (await request()).json();
