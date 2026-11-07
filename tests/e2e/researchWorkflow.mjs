@@ -139,6 +139,17 @@ try {
   await writeFile(join(root, research.workspaceId, "research/hypotheses.json"), "invalid");
   await page.getByRole("button", { name: "Sync from workspace", exact: true }).click();
   await page.getByText("Hypotheses sync failed", { exact: true }).waitFor();
+  // M5: current policy context must never refresh immutable session authorization.
+  const frozenScope=await readFile(join(root,research.workspaceId,'scope.md'),'utf8');
+  const frozenSession=await prisma.researchSession.findUniqueOrThrow({where:{id:research.id}});
+  const currentBefore=await context.request.get(origin+`/api/programs/${program.id}/scope.md`);assert.equal(currentBefore.status(),200);
+  const changedPolicy=await context.request.patch(origin+`/api/programs/${program.id}`,{data:{requiredUserAgent:'BrowserResearch/2'}});assert.equal(changedPolicy.status(),200);
+  const currentAfter=await context.request.get(origin+`/api/programs/${program.id}/scope.md`);assert.equal(currentAfter.status(),200);assert((await currentAfter.text()).includes('BrowserResearch/2'));
+  assert.equal(await readFile(join(root,research.workspaceId,'scope.md'),'utf8'),frozenScope);
+  const staleSession=await prisma.researchSession.findUniqueOrThrow({where:{id:research.id}});assert.deepEqual(staleSession.authorizationSnapshot,frozenSession.authorizationSnapshot);assert.equal(staleSession.scopeMarkdown,frozenSession.scopeMarkdown);
+  await page.reload();await page.getByText(/Program or scope changed since export/).first().waitFor();
+  assert.equal(await readFile(join(root,research.workspaceId,'scope.md'),'utf8'),frozenScope);
+  console.log('M5_RESEARCH_SNAPSHOT_BROWSER: 1 passed, 0 failed, 0 skipped (current update, old bytes, stale policy on reload)');
   const scope = await prisma.target.findUniqueOrThrow({ where: { id: target.id } });
   await prisma.scope.update({ where: { id: scope.scopeId }, data: { status: "REVOKED" } });
   await page.reload(); await page.getByText(/Scope no longer active/).waitFor();

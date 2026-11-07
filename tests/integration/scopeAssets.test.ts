@@ -77,7 +77,7 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
     expect(response.headers.get('Content-Type')).toContain('text/markdown'); expect(response.headers.get('Content-Disposition')).toMatch(/^attachment; filename="asset-[a-z0-9-]+-scope.md"$/);
     const text = await response.text(); expect(text).toContain(a.id); expect(text).toContain('Target ID: ' + programId); expect(text).toContain('No data collected yet.'); expect(text).toContain('Équipe \\| asset fixture'); expect(text).toContain('LLM Safety Boundary');
     expect(await (await markdown.scopeMarkdownDownload(userId, programId, a.id)).text()).toBe(text);
-    const global = await (await markdown.scopeMarkdownDownload(userId, programId)).text(); expect(global).toContain('# Bug Bounty Target Intelligence'); expect(global).toContain('Critical'); expect(global).toContain(a.id);
+    const global = await (await markdown.scopeMarkdownDownload(userId, programId)).text(); expect(global).toContain('# BugHunter Scope'); expect(global).toContain('CRITICAL'); expect(global).toContain(a.id);
     expect((await markdown.scopeMarkdownDownload(otherId, programId, a.id)).status).toBe(404);
   });
   it('enriches existing ResearchReconSnapshot with type, value and precise asset scope without rewriting history', async () => {

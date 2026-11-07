@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { authContextCount } from '@/lib/reconTimeline';
 import { ResearchError } from '../research/workspace';
@@ -5,13 +6,30 @@ import { readAuthSurface } from '../authenticatedRecon';
 import { exportAuthSurfaces } from './authExport';
 import type { ReportFacts, ReportArtifact, ReportScan } from '@/lib/reconReportModel';
 
+const reportScanSelect = {
+          id: true, scopeAssetId:true, status: true, outcome: true, startedAt: true, finishedAt: true,
+          scopeAssetSnapshot: true, requiredUserAgent: true, reconPlan: true, toolVersions: true,
+          authenticatedContextsSnapshot: true, changeSet: true,
+          reconSteps: { orderBy: { position: 'asc' }, select: { id: true, name: true, state: true, reason: true, details: true } },
+          _count: { select: { artifacts: true } },
+        } satisfies Prisma.ScanRunSelect;
+
 /** Evidence rows bounded per host; counts still reflect the complete stored set. */
 export const REPORT_ARTIFACTS_PER_HOST = 400;
 
-/**
- * Read the persisted facts a deterministic Recon report is built from.
- * No AI, no network, no scope mutation.
+/** A single retained asset run uses the same model and evidence budgets as parent reports.
+ * For standalone context, facts.run.id is the real ScanRun; consumers must not
+ * label it a TargetReconRun. Current scope context renders explicit stored IDs.
  */
+export async function loadAssetReportFacts(userId: string, programId: string, scanId: string): Promise<ReportFacts> {
+  const scan = await prisma.scanRun.findFirst({
+    where: { id: scanId, type: 'RECON', scopeAsset: { programId, program: { ownerId: userId } }, target: { userId } },
+    select: { ...reportScanSelect, createdAt: true, assessmentModeSnapshot: true,
+      scopeAsset: { select: { program: { select: { companyName: true, platform: true } } } } },
+  });
+  if (!scan?.scopeAsset) throw new ResearchError('Recon run not found', 404);
+  return reportFacts({ ...scan, program: scan.scopeAsset.program, scans: [scan] });
+}
 export async function loadReconReportFacts(userId: string, runId: string): Promise<ReportFacts> {
   const run = await prisma.targetReconRun.findFirst({
     where: { id: runId, program: { ownerId: userId } },
@@ -24,18 +42,21 @@ export async function loadReconReportFacts(userId: string, runId: string): Promi
       },
       scans: {
         orderBy: [{ reconOrder: 'asc' }, { id: 'asc' }],
-        select: {
-          id: true, scopeAssetId:true, status: true, outcome: true, startedAt: true, finishedAt: true,
-          scopeAssetSnapshot: true, requiredUserAgent: true, reconPlan: true, toolVersions: true,
-          authenticatedContextsSnapshot: true, changeSet: true,
-          reconSteps: { orderBy: { position: 'asc' }, select: { id: true, name: true, state: true, reason: true, details: true } },
-          _count: { select: { artifacts: true } },
-        },
+        select: reportScanSelect,
       },
     },
   });
   if (!run) throw new ResearchError('Recon run not found', 404);
 
+  return reportFacts(run);
+}
+
+async function reportFacts(run: {
+  id: string; status: ReportFacts['run']['status']; outcome: ReportFacts['run']['outcome'];
+  createdAt: Date; startedAt: Date | null; finishedAt: Date | null; assessmentModeSnapshot: string | null;
+  program: { companyName: string; platform: string | null };
+  scans: Prisma.ScanRunGetPayload<{select: typeof reportScanSelect}>[];
+}): Promise<ReportFacts> {
   // Bound each host independently. A noisy first host must never consume the
   // report budget of another host. Retained artifacts themselves are unchanged.
   const scanIds = run.scans.map(scan => scan.id);

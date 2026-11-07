@@ -1,3 +1,4 @@
+import { currentTargetScope, CURRENT_SCOPE_VERSION } from './currentTargetScope';
 import { prisma } from '@/lib/prisma';
 import { assetTypeLabel,assetValueLabel,assetValueRank,assetReconStatus } from '@/lib/scopeAssets';
 import { classifyReconUrl,deduplicateArtifacts,type ReconArtifactData } from '@/lib/reconArtifacts';
@@ -101,6 +102,7 @@ export function renderScopeMarkdown(brief:ScopeIntelligenceBrief,assetId?:string
   text+=footer;return text+`\n<!-- SHA256: ${reconHash(text)} -->\n`;
 }
 export async function scopeMarkdownDownload(userId:string,programId:string,assetId?:string) {
+  if(!assetId)try{const doc=await currentTargetScope(userId,programId);const program=await prisma.bountyProgram.findFirst({where:{id:programId,ownerId:userId},select:{companyName:true}});if(!program)throw new ResearchError('Target not found',404);return new Response(doc.markdown,{headers:{'Content-Type':'text/markdown; charset=utf-8','Content-Disposition':`attachment; filename="${scopeFilename('target',program.companyName)}"`,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','X-BugHunter-Scope-Version':String(CURRENT_SCOPE_VERSION),ETag:`"${doc.markdownSha256}"`}});}catch(e){return Response.json({error:e instanceof ResearchError?e.message:'Current Scope publication unavailable; previous revision retained'},{status:e instanceof ResearchError?e.status:503});}
   try{const brief=await loadScopeBrief(userId,programId,assetId),text=renderScopeMarkdown(brief,assetId),name=scopeFilename(assetId?'asset':'target',assetId?brief.assets[0].normalizedValue:brief.program.companyName);return new Response(text,{headers:{'Content-Type':'text/markdown; charset=utf-8','Content-Disposition':`attachment; filename="${name}"`,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','X-BugHunter-Scope-Version':'2',ETag:`"${reconHash(text)}"`}});}catch(e){return Response.json({error:e instanceof ResearchError?e.message:'Scope export unavailable'},{status:e instanceof ResearchError?e.status:503});}
 }
 export async function materializeReconMarkdown(parentId:string) {

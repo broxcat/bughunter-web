@@ -156,7 +156,20 @@ enum AssessmentSourceKind {
   OTHER
 }
 
+// Current program context only. Historical Research/Recon snapshots are separate.
+model TargetScopeContext {
+  programId String @id
+  policyFingerprint String
+  sourceFingerprint String
+  rendererVersion Int
+  markdown String @db.Text
+  markdownSha256 String
+  generatedAt DateTime
+  program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+}
+
 model BountyProgram {
+  currentScopeContext TargetScopeContext?
   researchPlans ResearchPlan[]
   // Legacy enum retained; current programs are constrained to BLACK_BOX.
   assessmentMode AssessmentMode @default(BLACK_BOX)
