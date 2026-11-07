@@ -39,6 +39,7 @@ export const programSchema = z.object({
 // Zod 4 applies nested defaults even under partial(). A PATCH must leave every
 // absent policy field untouched, especially the wildcard discovery rules.
 export const programUpdateSchema = programSchema.omit({ scopeHosts: true }).extend({
+  expectedUpdatedAt:z.iso.datetime().optional(),
   rewardCurrency: programSchema.shape.rewardCurrency.removeDefault(),
   scopeRules: programSchema.shape.scopeRules.removeDefault(),
   outOfScope: programSchema.shape.outOfScope.removeDefault(),

@@ -45,46 +45,82 @@ export async function listScopeAssets(userId: string, programId: string) {
   for(const asset of result){const run=asset.scanRuns[0];if(run&&run.artifactVersion<2&&!['RUNNING','QUEUED'].includes(run.status)){await ensureLegacyArtifacts(run.id);run._count.artifacts=await prisma.reconArtifact.count({where:{scanRunId:run.id}});}}
   return result;
 }
-export async function createScopeAsset(userId: string, programId: string, input: { value: string; type?: 'API' | 'WEB_APPLICATION' | 'WILDCARD' | 'OTHER'; assetValue: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' }) {
-  const detected = detectScopeAsset(input.value);
-  return prisma.$transaction(async tx => {
-    const program = await lockOwnedProgram(tx, userId, programId);
-    await backfillProgramAssets(tx, programId, userId);
-    if (await tx.scopeAsset.count({ where: { programId, active: true } }) >= 1000) throw new ResearchError('Scope limit reached (1000 active assets)', 429);
-    const old = await tx.scopeAsset.findUnique({ where: { programId_normalizedValue: { programId, normalizedValue: detected.normalizedValue } } });
-    if (old?.active) throw new ResearchError('This asset is already in scope', 409);
-    const data = { originalValue: input.value, normalizedValue: detected.normalizedValue, format: detected.format, type: input.type ?? detected.inferredType, typeSource: input.type ? 'USER' : 'HEURISTIC', assetValue: input.assetValue, active: true };
-    const asset = old ? await tx.scopeAsset.update({ where: { id: old.id }, data: old.formatSource==='MANUAL'?{active:true,...(input.type?{type:input.type,typeSource:'USER'}:{}),assetValue:input.assetValue}:data }) : await tx.scopeAsset.create({ data: { programId, ...data } });
-    if (['DOMAIN', 'SUBDOMAIN', 'WILDCARD_DOMAIN'].includes(detected.format) && !program.scopeRules.includes(detected.normalizedValue)) await tx.bountyProgram.update({ where: { id: programId }, data: { scopeRules: [...program.scopeRules, detected.normalizedValue] } });
-    return asset;
-  }, { timeout: 30000 });
+type AssetInput = {value:string;format?:AssetFormat;type?:'API'|'WEB_APPLICATION'|'WILDCARD'|'OTHER';assetValue:'CRITICAL'|'HIGH'|'MEDIUM'|'LOW'};
+const nextAssetTime=(previous:Date)=>new Date(Math.max(Date.now(),previous.getTime()+1));
+function checkAssetVersion(asset:{updatedAt:Date},expected?:string){
+  if(expected&&asset.updatedAt.toISOString()!==expected)throw new ResearchError('Scope changed. Reload the asset before saving.',409);
 }
-export async function editScopeAsset(userId: string, programId: string, assetId: string, input: { format?: AssetFormat; resetFormatToAuto?:boolean; confirmBoundaryChange?:boolean; type?: 'API' | 'WEB_APPLICATION' | 'WILDCARD' | 'OTHER'; assetValue?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' } | null) {
-  const result = await prisma.$transaction(async tx => {
-    const program = await lockOwnedProgram(tx, userId, programId);
-    const asset = await tx.scopeAsset.findFirst({ where: { id: assetId, programId, ...(input ? {active:true} : {}) } });
-    if (!asset) throw new ResearchError('Asset not found', 404);
-    if (input) {
-      const {format,resetFormatToAuto,confirmBoundaryChange,...fields}=input;
-      const choice=resetFormatToAuto ? detectScopeAsset(asset.originalValue).format : format;
-      let change;try{change=choice ? overrideAssetFormat(asset,choice) : null;}catch(e){throw new ResearchError((e as Error).message,422);}
-      if(change?.requiresConfirmation && !confirmBoundaryChange) throw new ResearchError('Confirm the changed authorization boundary before saving this format',409);
-      if(change && change.normalizedValue !== asset.normalizedValue) {
-        await tx.bountyProgram.update({where:{id:programId},data:{scopeRules:[...program.scopeRules.filter(r=>r!==asset.normalizedValue),change.normalizedValue]}});
-        const host=change.format==='URL'?new URL(change.normalizedValue).hostname:change.normalizedValue;
-        const target=await tx.target.findUnique({where:{scopeAssetId:assetId}});
-        if(target){await tx.target.update({where:{id:target.id},data:{host,scheme:change.format==='URL'?new URL(change.normalizedValue).protocol.slice(0,-1):'https'}});await tx.scope.update({where:{id:target.scopeId},data:{hostPattern:host}});}
-      }
-      return tx.scopeAsset.update({where:{id:assetId},data:{...fields,...(fields.type?{typeSource:'USER'}:{}),...(change?{format:change.format,normalizedValue:change.normalizedValue,formatSource:resetFormatToAuto?'AUTO':'MANUAL'}:{})}});
-    }
-    await tx.scanRun.updateMany({where:{OR:[{scopeAssetId:assetId},{target:{discoveredFromAssetId:assetId}}],status:{in:['QUEUED','RUNNING']}},data:{cancelRequestedAt:new Date()}});
-    await tx.reconSummary.updateMany({where:{scopeAssetId:assetId,status:{in:['PENDING','RUNNING']}},data:{status:'CANCELLED'}});
-    // Archive the authorization. Scans, discoveries, snapshots and Findings remain readable.
-    await tx.bountyProgram.update({ where: { id: programId }, data: { scopeRules: program.scopeRules.filter(rule => rule !== asset.normalizedValue) } });
-    return tx.scopeAsset.update({ where: { id: assetId }, data: { active: false } });
+/** Caller holds the owned Program lock. No filesystem or native-console I/O here. */
+async function admitAsset(tx:Prisma.TransactionClient,program:Prisma.BountyProgramGetPayload<object>,input:AssetInput,capacityCredit=0){
+  const detected=detectScopeAsset(input.value);
+  let identity={format:detected.format,normalizedValue:detected.normalizedValue};
+  if(input.format){try{const choice=overrideAssetFormat(detected,input.format);identity={format:choice.format,normalizedValue:choice.normalizedValue};}catch(e){throw new ResearchError((e as Error).message,422);}}
+  const old=await tx.scopeAsset.findUnique({where:{programId_normalizedValue:{programId:program.id,normalizedValue:identity.normalizedValue}}});
+  if(old?.active)throw new ResearchError('This asset is already in scope',409);
+  // Retained history reserves its Format/value pair. Reauthorization can reuse
+  // that identity, but must never reinterpret an old execution Target.
+  if(old&&old.format!==identity.format)throw new ResearchError('This value belongs to a retained identity with another Format. Choose a different replacement value.',409);
+  if(await tx.scopeAsset.count({where:{programId:program.id,active:true}})>=1000+capacityCredit)throw new ResearchError('Scope limit reached (1000 active assets)',429);
+  const asset=old?await tx.scopeAsset.update({where:{id:old.id},data:{active:true,assetValue:input.assetValue,...(input.type?{type:input.type,typeSource:'USER'}:{}),updatedAt:nextAssetTime(old.updatedAt)}}):await tx.scopeAsset.create({data:{programId:program.id,originalValue:input.value,...identity,formatSource:input.format?'MANUAL':'AUTO',type:input.type??detected.inferredType,typeSource:input.type?'USER':'HEURISTIC',assetValue:input.assetValue}});
+  if(['DOMAIN','SUBDOMAIN','WILDCARD_DOMAIN'].includes(asset.format)&&!program.scopeRules.includes(asset.normalizedValue))await tx.bountyProgram.update({where:{id:program.id},data:{scopeRules:[...program.scopeRules,asset.normalizedValue]}});
+  return asset;
+}
+export async function retireScopeAssetInTransaction(tx:Prisma.TransactionClient,programId:string,asset:Prisma.ScopeAssetGetPayload<object>){
+  await tx.scanRun.updateMany({where:{OR:[{scopeAssetId:asset.id},{target:{discoveredFromAssetId:asset.id}}],status:{in:['QUEUED','RUNNING']}},data:{cancelRequestedAt:new Date()}});
+  await tx.reconSummary.updateMany({where:{scopeAssetId:asset.id,status:{in:['PENDING','RUNNING']}},data:{status:'CANCELLED'}});
+  const program=await tx.bountyProgram.findUniqueOrThrow({where:{id:programId}});
+  await tx.bountyProgram.update({where:{id:programId},data:{scopeRules:program.scopeRules.filter(rule=>rule!==asset.normalizedValue)}});
+  // Preserve immutable Target/Scope identity and every historical relation.
+  return tx.scopeAsset.update({where:{id:asset.id},data:{active:false,updatedAt:nextAssetTime(asset.updatedAt)}});
+}
+export async function settleScopeAssetRetirement(userId:string,assetId:string){
+  const {pauseAssetResearch}=await import('./research/archiveAsset');await pauseAssetResearch(userId,assetId);
+  const {settleQueuedCancellations}=await import('./queue/scanCancellation');await settleQueuedCancellations();
+}
+export async function createScopeAsset(userId:string,programId:string,input:AssetInput){
+  return prisma.$transaction(async tx=>{
+    const program=await lockOwnedProgram(tx,userId,programId);await backfillProgramAssets(tx,programId,userId);
+    return admitAsset(tx,program,input);
+  },{timeout:30000});
+}
+export async function editScopeAsset(userId:string,programId:string,assetId:string,input:{format?:AssetFormat;resetFormatToAuto?:boolean;confirmBoundaryChange?:boolean;type?:'API'|'WEB_APPLICATION'|'WILDCARD'|'OTHER';assetValue?:'CRITICAL'|'HIGH'|'MEDIUM'|'LOW';expectedUpdatedAt?:string}|null,expectedRetirementVersion?:string){
+  const result=await prisma.$transaction(async tx=>{
+    await lockOwnedProgram(tx,userId,programId);
+    const asset=await tx.scopeAsset.findFirst({where:{id:assetId,programId,...(input?{active:true}:{})}});
+    if(!asset)throw new ResearchError('Asset not found',404);
+    checkAssetVersion(asset,input?.expectedUpdatedAt??expectedRetirementVersion);
+    if(!input)return retireScopeAssetInTransaction(tx,programId,asset);
+    const {format,resetFormatToAuto}=input;
+    const fields={...(input.type?{type:input.type}:{}),...(input.assetValue?{assetValue:input.assetValue}:{})};
+    const choice=resetFormatToAuto?detectScopeAsset(asset.originalValue).format:format;
+    let change;try{change=choice?overrideAssetFormat(asset,choice):null;}catch(e){throw new ResearchError((e as Error).message,422);}
+    if(change&&(change.normalizedValue!==asset.normalizedValue||change.format!==asset.format))throw new ResearchError('Format and normalized value identify this asset. Use explicit replacement; existing execution identities cannot be changed.',409);
+    return tx.scopeAsset.update({where:{id:assetId},data:{...fields,...(fields.type?{typeSource:'USER'}:{}),...(change?{formatSource:resetFormatToAuto?'AUTO':'MANUAL'}:{}),updatedAt:nextAssetTime(asset.updatedAt)}});
   });
-  if(!input || input.format || input.resetFormatToAuto){const {pauseAssetResearch}=await import('./research/archiveAsset');await pauseAssetResearch(userId,assetId);const {settleQueuedCancellations}=await import('./queue/scanCancellation');await settleQueuedCancellations();}
+  if(!input)try{await settleScopeAssetRetirement(userId,assetId);}catch{throw new ResearchError('Scope authorization retired; Research cleanup is unconfirmed. Retry cleanup from the retired asset.',503);}
   return result;
+}
+/** One Program lock serializes replacement, metadata edits, retirement and
+ * Recon admission. Creation failure rolls back everything. A process dying
+ * after commit leaves a new authorization and a revoked historical identity;
+ * retrying DELETE on the old identity safely retries native cleanup only. */
+export async function replaceScopeAsset(userId:string,programId:string,assetId:string,input:AssetInput&{expectedUpdatedAt:string}){
+  const replacement=await prisma.$transaction(async tx=>{
+    const program=await lockOwnedProgram(tx,userId,programId);
+    const original=await tx.scopeAsset.findFirst({where:{id:assetId,programId}});
+    if(!original)throw new ResearchError('Asset not found',404);
+    if(!original.active)throw new ResearchError('This asset has already been retired. Reload Scope.',409);
+    checkAssetVersion(original,input.expectedUpdatedAt);
+    await backfillProgramAssets(tx,programId,userId);
+    const asset=await admitAsset(tx,program,input,1);
+    await retireScopeAssetInTransaction(tx,programId,original);
+    return asset;
+  },{timeout:30000});
+  // Authorization is already committed: never report a failed creation when
+  // only post-commit quiescence failed. Expose a retryable cleanup warning.
+  let cleanupWarning:string|undefined;
+  try{await settleScopeAssetRetirement(userId,assetId);}catch{cleanupWarning='Replacement saved and original authorization revoked. Research cleanup is unconfirmed; retry cleanup from the retired asset.';}
+  return{asset:replacement,retiredAssetId:assetId,...(cleanupWarning?{cleanupWarning}:{})};
 }
 export async function ensureAssetExecution(userId: string, programId: string, assetId: string) {
   return prisma.$transaction(async tx => {

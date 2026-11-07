@@ -67,7 +67,9 @@ export const assetInputSchema = z.strictObject({
   value: z.string().min(1).max(2048).refine(v => { try { detectScopeAsset(v); return true; } catch { return false; } }, 'Invalid or unsupported scope value'),
   type: z.enum(ASSET_TYPES).optional(), assetValue: z.enum(ASSET_VALUES).default('MEDIUM'),
 });
-export const assetEditSchema = z.strictObject({ format: z.enum(ASSET_FORMATS).optional(), resetFormatToAuto: z.boolean().optional(), confirmBoundaryChange: z.boolean().optional(), type: z.enum(ASSET_TYPES).optional(), assetValue: z.enum(ASSET_VALUES).optional() }).refine(v => Object.keys(v).length > 0, 'Choose a type or asset value');
+export const assetEditSchema = z.strictObject({ format: z.enum(ASSET_FORMATS).optional(), resetFormatToAuto: z.boolean().optional(), confirmBoundaryChange: z.boolean().optional(), expectedUpdatedAt:z.iso.datetime().optional(), type: z.enum(ASSET_TYPES).optional(), assetValue: z.enum(ASSET_VALUES).optional() }).refine(v => Object.keys(v).length > 0, 'Choose a type or asset value');
+export const assetReplaceSchema=assetInputSchema.extend({format:z.enum(ASSET_FORMATS).optional(),expectedUpdatedAt:z.iso.datetime(),confirmReplacement:z.literal(true)});
+export const assetRetireSchema=z.strictObject({expectedUpdatedAt:z.iso.datetime().optional()});
 export function assetReconStatus(run: { status: string; outcome: string | null; finishedAt: string | Date | null } | null, now = Date.now()) {
   if (!run) return 'NOT_STARTED';
   if (run.status === 'QUEUED' || run.status === 'RUNNING' || run.status === 'CANCELLED') return run.status;

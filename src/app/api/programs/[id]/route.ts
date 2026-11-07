@@ -29,14 +29,16 @@ export async function PATCH(req: Request, { params }: Params) {
     if (!rows.length) return Response.json({ error: 'Target unavailable' }, { status: 409 });
     // The preflight read establishes existence only. Another policy writer can
     // commit before this lock is acquired; derive removals from the locked row.
-    const current = await tx.bountyProgram.findUniqueOrThrow({ where: { id }, select: { scopeRules: true } });
+    const current = await tx.bountyProgram.findUniqueOrThrow({ where: { id }, select: { scopeRules: true,updatedAt:true } });
+    if(parsed.data.expectedUpdatedAt&&current.updatedAt.toISOString()!==parsed.data.expectedUpdatedAt)return Response.json({error:'Target settings changed. Reload before saving.'},{status:409});
+    const changes={...parsed.data};delete changes.expectedUpdatedAt;
     if (parsed.data.scopeRules) {
       const removed = current.scopeRules.filter(rule => !parsed.data.scopeRules!.includes(rule));
       const assets = await tx.scopeAsset.findMany({ where: { programId: id, normalizedValue: { in: removed }, active: true }, select: { id: true } });
       if (await tx.scanRun.count({ where: { scopeAssetId: { in: assets.map(a => a.id) }, status: { in: ['QUEUED', 'RUNNING'] } } })) return Response.json({ error: 'Stop active Recon before removing its scope rules' }, { status: 409 });
       await tx.scopeAsset.updateMany({ where: { id: { in: assets.map(a => a.id) } }, data: { active: false } });
     }
-    return NextResponse.json(await tx.bountyProgram.update({ where: { id }, data: parsed.data }));
+    return NextResponse.json(await tx.bountyProgram.update({ where: { id }, data: {...changes,updatedAt:new Date(Math.max(Date.now(),current.updatedAt.getTime()+1))} }));
   });
 }
 
