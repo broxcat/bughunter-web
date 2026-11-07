@@ -1,3 +1,4 @@
+import {auditMilestone2Scope} from './milestone2ScopeManagement.mjs';
 import {auditHostHistoryNavigation} from './hostHistoryNavigation.mjs';
 import {auditLegacyHostNavigation} from './legacyHostNavigation.mjs';
 import {auditResearchEvidenceNavigation} from './researchEvidenceNavigation.mjs';
@@ -21,7 +22,7 @@ assert.equal((await exec('docker', ['inspect', '--format', '{{index .Config.Labe
 const listener = createServer(); await new Promise(r => listener.listen(0, '127.0.0.1', r)); const port = listener.address().port; await new Promise(r => listener.close(r));
 const origin = `http://127.0.0.1:${port}`, schema = 'postv1_' + randomUUID().replaceAll('-', '');
 const url = new URL(db); url.searchParams.set('schema', schema);
-const env = { ...process.env, DATABASE_URL: url.toString(), REDIS_URL: redis, AUTH_URL: origin, AUTH_SECRET: randomUUID(), CREDENTIALS_ENCRYPTION_KEY: 'ab'.repeat(32), LOG_LEVEL: 'silent' };
+const env = { ...process.env, DATABASE_URL: url.toString(), REDIS_URL: redis, AUTH_URL: origin, AUTH_SECRET: randomUUID(), CREDENTIALS_ENCRYPTION_KEY: 'ab'.repeat(32), LOG_LEVEL: 'silent',RESEARCH_CONSOLE_ROOT:'/dev/shm/bh-m2-nonexistent-consoles-'+schema,RESEARCH_WORKSPACE_ROOT:'/dev/shm/bh-m2-nonexistent-workspaces-'+schema,RESEARCH_TERMINAL_PRIVATE_KEY_FILE:'/dev/shm/bh-m2-absent-key-'+schema,RESEARCH_TERMINAL_CONTROL_URL:'http://127.0.0.1:1' };
 const prisma = new PrismaClient({ datasourceUrl: env.DATABASE_URL });
 let web, browser, checks = 0;
 const check = (name, work) => { work(); checks++; console.log(`PASS ${checks}: ${name}`); };
@@ -58,7 +59,7 @@ try {
   check('anonymous API JSON contract', () => { assert.equal(anonymous.status(), 401); assert.equal(anonymous.headers()['location'], undefined); });
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
   await login(page, owner.email, password);
-  if(process.env.POST_V1_A11Y_ONLY==='1'){await auditAccessibility({prisma,owner,origin,context,page,program,scope,asset,target,parent});}else{
+  if(process.env.POST_V1_M2_ONLY==='1'){await auditMilestone2Scope({prisma,owner,origin,context,page});}else if(process.env.POST_V1_A11Y_ONLY==='1'){await auditAccessibility({prisma,owner,origin,context,page,program,scope,asset,target,parent});}else{
   for (const mode of ['light', 'dark']) for (const width of [1280, 390]) {
     await page.evaluate(theme => localStorage.setItem('theme', theme), mode); await page.emulateMedia({ colorScheme: mode }); await page.setViewportSize({ width, height: 900 });
     await page.goto(`${origin}/recon/runs/${parent.id}`); await page.getByRole('heading', { name: 'Recon run', exact: true }).waitFor();
@@ -97,6 +98,7 @@ try {
   await auditFindingReportCollections({prisma,owner,origin,context,page});
   await auditResearchEvidenceNavigation({prisma,owner,origin,context,page});
   await auditAccessibility({prisma,owner,origin,context,page,program,scope,asset,target,parent});
+  await auditMilestone2Scope({prisma,owner,origin,context,page});
   check('no page exceptions or foreign browser requests', () => { assert.deepEqual(errors, []); assert.equal(foreign, 0); });
   console.log(`POST_V1_BROWSER: ${checks} passed, 0 failed, 0 skipped`);
   }

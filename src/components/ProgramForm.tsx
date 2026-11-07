@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/Button";
 
 export interface ProgramData {
   assessmentMode?: 'BLACK_BOX'|'WHITE_BOX';
+  updatedAt?:string;
   id: string; companyName: string; platform: string | null; programUrl: string | null;
   rewardCurrency: string; rewardLow: string | null; rewardMedium: string | null; rewardHigh: string | null; rewardCritical: string | null;
   requiredUserAgent: string; outOfScope: string[]; qualifying: string[]; nonQualifying: string[];
@@ -14,7 +15,7 @@ export interface ProgramData {
 }
 const inputClass = "w-full rounded border border-border bg-surface p-2";
 function Hosts({ title, value, onChange }: { title: string; value: string[]; onChange: (v: string[]) => void }) {
-  return <fieldset className="space-y-2"><legend className="font-semibold">{title}</legend>
+  return <fieldset id={title==='Out of Scope'?'out-of-scope':undefined} className="space-y-2"><legend className="font-semibold">{title}</legend>
     {value.map((host, i) => <div className="flex gap-2" key={i}><input aria-label={`${title} FQDN ${i + 1}`} required placeholder="api.example.com" className={inputClass} value={host} onChange={e => onChange(value.map((v, n) => n === i ? e.target.value : v))} /><Button variant="ghost" onClick={() => onChange(value.filter((_, n) => n !== i))}>Remove</Button></div>)}
     <Button variant="secondary" onClick={() => onChange([...value, ""])}>+ Add host</Button>
   </fieldset>;
@@ -30,7 +31,7 @@ export default function ProgramForm({ initial, onSaved }: { initial?: ProgramDat
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault(); setBusy(true); setError("");
     const data = Object.fromEntries(new FormData(e.currentTarget));
-    const body = { ...data, platform: data.platform || null, programUrl: data.programUrl || null,
+    const body = { ...data, ...(initial?.updatedAt?{expectedUpdatedAt:initial.updatedAt}:{}), platform: data.platform || null, programUrl: data.programUrl || null,
       ...Object.fromEntries(["rewardLow", "rewardMedium", "rewardHigh", "rewardCritical"].map(k => [k, data[k] || null])),
       ...(initial ? {} : { scopeHosts, scopeRules }), outOfScope, qualifying, nonQualifying };
     try {
@@ -39,7 +40,7 @@ export default function ProgramForm({ initial, onSaved }: { initial?: ProgramDat
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
   const families = (title: string, values: string[], set: (v: string[]) => void) => <fieldset><legend className="mb-2 font-semibold">{title} <span className="font-normal text-muted">(optional)</span></legend><div className="grid gap-2 sm:grid-cols-3">{VULNERABILITY_FAMILIES.map(f => <label key={f} className="text-sm"><input type="checkbox" checked={values.includes(f)} onChange={e => set(e.target.checked ? [...values, f] : values.filter(v => v !== f))} /> {f.replaceAll("_", " ")}</label>)}</div></fieldset>;
-  return <form className="space-y-6" onSubmit={submit}>
+  return <form className="space-y-6" onSubmit={submit} aria-busy={busy}>
     <label className="block">Company / Program name *<input autoFocus={!initial} required name="companyName" maxLength={200} defaultValue={initial?.companyName} className={inputClass} /></label>
     <label className="block">Platform<select aria-label="Platform" name="platform" defaultValue={initial?.platform ?? ""} className={inputClass}><option value="">Choose platform</option>{BOUNTY_PLATFORMS.map(p => <option key={p}>{p}</option>)}</select></label>
     <label className="block">Program URL<input name="programUrl" type="url" defaultValue={initial?.programUrl ?? ""} className={inputClass} /></label>
@@ -54,6 +55,7 @@ export default function ProgramForm({ initial, onSaved }: { initial?: ProgramDat
     {families("Non-qualifying vulnerabilities", nonQualifying, setNonQualifying)}
     <label className="block">Required User-Agent *<input required name="requiredUserAgent" maxLength={512} placeholder="BugHunter/1.0" defaultValue={initial?.requiredUserAgent} className={inputClass} /><span className="text-sm text-muted">Used for every future scan. Enter BugHunter/1.0 explicitly if the program has no special value.</span></label>
     {error && <p role="alert" className="text-danger">{error}</p>}
+    {busy&&<p role="status">Saving Target settings…</p>}
     <Button type="submit" disabled={busy}>{busy ? "Saving…" : initial ? "Save Target" : "Create Target"}</Button>
   </form>;
 }
