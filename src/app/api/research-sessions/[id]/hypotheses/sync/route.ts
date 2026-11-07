@@ -1,9 +1,11 @@
+import { foreignOrigin } from '@/lib/requestOrigin';
 import { auth } from "@/lib/auth";
 import { syncHypotheses } from "@/server/research/hypotheses";
 import { hypothesisErrorResponse } from "@/server/research/hypothesisResponse";
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
   // This action accepts no payload, filesystem path or command.
   if (req.body) {
     // Next may expose an empty stream for a POST without payload. Consume at

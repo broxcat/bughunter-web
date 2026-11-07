@@ -1,3 +1,4 @@
+import { foreignOrigin } from '@/lib/requestOrigin';
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
@@ -38,6 +39,7 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json().catch(() => null);
   const parsed = createScopeSchema.safeParse(body);

@@ -1,3 +1,4 @@
+import { foreignOrigin } from '@/lib/requestOrigin';
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
@@ -14,6 +15,7 @@ const input = z.object({ targetId: z.string().min(1).max(200) }).strict();
 export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
   const parsed = input.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Provide only a targetId" }, { status: 400 });
   try {

@@ -1,3 +1,4 @@
+import {Prisma} from '@prisma/client';
 import {safeFindingField,publicFinding} from '@/server/findingPrivacy';
 import {foreignOrigin} from '@/lib/requestOrigin';
 import { NextRequest, NextResponse } from "next/server";
@@ -58,14 +59,18 @@ export async function PATCH(
     v === undefined ? undefined : v === null || v === "" ? null : v;
 
   const updated = await prisma.finding.update({
-    where: { id: finding.id },
+    where: { id: finding.id, target: { userId: session.user.id } },
     data: {
       cwe,
       ...cvssColumns(cvssVector),
       impact: safeFindingField(blankToNull(impact)),
       remediation: safeFindingField(blankToNull(remediation)),
     },
+   }).catch(error=>{
+    if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2025')return null;
+    throw error;
   });
+  if(!updated)return NextResponse.json({error:'Not found'},{status:404});
 
   return NextResponse.json(publicFinding(updated));
 }

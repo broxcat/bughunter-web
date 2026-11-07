@@ -1,3 +1,5 @@
+import {Prisma} from '@prisma/client';
+import { foreignOrigin } from '@/lib/requestOrigin';
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -20,6 +22,7 @@ export async function PATCH(
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
 
   const { id } = await params;
 
@@ -48,9 +51,13 @@ export async function PATCH(
   if (parsed.data.platform !== undefined) data.platform = parsed.data.platform;
 
   const updated = await prisma.scope.update({
-    where: { id: scope.id },
+    where: { id: scope.id, userId: session.user.id },
     data,
+   }).catch(error=>{
+    if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2025')return null;
+    throw error;
   });
+  if(!updated)return NextResponse.json({error:'Not found'},{status:404});
 
   return NextResponse.json(updated);
 }

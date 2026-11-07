@@ -1,3 +1,4 @@
+import { foreignOrigin } from '@/lib/requestOrigin';
 import { executionSelect } from "@/server/queue/executionAttempts";
 import { scanRejection } from "@/server/execution";
 import { NextRequest, NextResponse } from "next/server";
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json().catch(() => null);
   if (body?.type === "HUNT") return NextResponse.json({ error: "Legacy HUNT is retired. Create a Codex Research Workspace instead." }, { status: 410 });

@@ -1,3 +1,4 @@
+import { foreignOrigin } from '@/lib/requestOrigin';
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -6,6 +7,7 @@ import { refreshTargetCredential } from "@/server/credentials";
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
   const { id } = await params;
   const target = await prisma.target.findFirst({ where: { id, userId: session.user.id } });
   if (!target) return Response.json({ error: "Not found" }, { status: 404 });

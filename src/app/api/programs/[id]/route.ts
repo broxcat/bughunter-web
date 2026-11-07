@@ -18,6 +18,7 @@ export async function GET(_req: Request, { params }: Params) {
 export async function PATCH(req: Request, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
   const { id } = await params;
   const parsed = programUpdateSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });
