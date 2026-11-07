@@ -1,3 +1,9 @@
+import {auditHostHistoryNavigation} from './hostHistoryNavigation.mjs';
+import {auditLegacyHostNavigation} from './legacyHostNavigation.mjs';
+import {auditResearchEvidenceNavigation} from './researchEvidenceNavigation.mjs';
+import {auditAccessibility} from './accessibilityAcceptance.mjs';
+import {auditFindingReportCollections} from './findingReportNavigation.mjs';
+import {auditScopeResearchCollections} from './scopeResearchNavigation.mjs';
 // Built Next + disposable SQL/Redis; all Recon evidence is synthetic. No worker or inference.
 import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
@@ -8,6 +14,7 @@ import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
 import { chromium } from 'playwright-chromium';
 import { auditNegativeStates } from './milestone1NegativeStates.mjs';
+import { auditProgramCollections } from './programCollectionNavigation.mjs';
 const exec = promisify(execFile), db = process.env.TEST_DATABASE_URL, redis = process.env.TEST_ABUSE_REDIS_URL, container = process.env.TEST_ABUSE_REDIS_CONTAINER;
 assert(db && redis && container, 'Use tests/queue/runInfrastructure.mjs --post-v1-browser');
 assert.equal((await exec('docker', ['inspect', '--format', '{{index .Config.Labels "bughunter.queue-test"}}', container])).stdout.trim(), 'disposable');
@@ -51,6 +58,7 @@ try {
   check('anonymous API JSON contract', () => { assert.equal(anonymous.status(), 401); assert.equal(anonymous.headers()['location'], undefined); });
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
   await login(page, owner.email, password);
+  if(process.env.POST_V1_A11Y_ONLY==='1'){await auditAccessibility({prisma,owner,origin,context,page,program,scope,asset,target,parent});}else{
   for (const mode of ['light', 'dark']) for (const width of [1280, 390]) {
     await page.evaluate(theme => localStorage.setItem('theme', theme), mode); await page.emulateMedia({ colorScheme: mode }); await page.setViewportSize({ width, height: 900 });
     await page.goto(`${origin}/recon/runs/${parent.id}`); await page.getByRole('heading', { name: 'Recon run', exact: true }).waitFor();
@@ -82,8 +90,16 @@ try {
   const denied = await otherContext.request.get(`${origin}/api/recon/runs/${parent.id}/report`);
   check('ownership isolation', () => assert.equal(denied.status(), 404));
   await auditNegativeStates({browser,origin,ownerContext:context,otherContext,page});
+  await auditProgramCollections({prisma,owner,origin,context,page});
+  await auditScopeResearchCollections({prisma,owner,origin,page});
+  await auditLegacyHostNavigation({prisma,owner,origin,page});
+  await auditHostHistoryNavigation({prisma,owner,origin,page});
+  await auditFindingReportCollections({prisma,owner,origin,context,page});
+  await auditResearchEvidenceNavigation({prisma,owner,origin,context,page});
+  await auditAccessibility({prisma,owner,origin,context,page,program,scope,asset,target,parent});
   check('no page exceptions or foreign browser requests', () => { assert.deepEqual(errors, []); assert.equal(foreign, 0); });
   console.log(`POST_V1_BROWSER: ${checks} passed, 0 failed, 0 skipped`);
+  }
 } finally {
   if (browser) await browser.close();
   if (web && web.exitCode === null) { const end = new Promise(r => web.once('exit', r)); web.kill('SIGTERM'); const timer = setTimeout(() => web.kill('SIGKILL'), 3000); await end; clearTimeout(timer); }
