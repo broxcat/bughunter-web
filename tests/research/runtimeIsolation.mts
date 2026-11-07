@@ -59,15 +59,18 @@ try {
   await exec(['sh','-c',`node /opt/bughunter/docker/research/broker/admit.mjs < /fixtures/${suffix}.ticket`]);
   if(suffix==='alice') {
    const dryRun=async()=>{await writeFile(join(temporary,'alice.ticket'),issueTerminalTicket({userId:'owner-alice',targetId:'m8-alice',sessionId:'session-alice',policySha256:hash},privateKey).token,{mode:0o600});return exec(['sh','-c','python3 /opt/bughunter/docker/research/broker/migrate.py < /fixtures/alice.ticket']);};
-   await assert.rejects(dryRun); // Unreviewed legacy history never auto-imports.
+   await assert.rejects(dryRun,error=>JSON.parse((error as {stdout:string}).stdout).status==='OPERATOR_REVIEW_REQUIRED'); // Unreviewed legacy history never auto-imports.
    await writeFile(join(temporary,'export.py'),await readFile('tests/research/providerExportFixture.py'));await exec(['python3','/fixtures/export.py',suffix]);
    for(const attack of ['symlink','hardlink','owner']) {
     const path='/workspaces/research_m8-alice/findings/migration-attack';
     await exec(['node','-e',`const fs=require('fs'),p=process.argv[1];if(process.argv[2]==='symlink')fs.symlinkSync('/workspaces/research_m8-bob',p);else if(process.argv[2]==='hardlink')fs.linkSync('/workspaces/research_m8-alice/scope.md',p);else{fs.writeFileSync(p,'fixture');fs.chownSync(p,65534,65534)}`,path,attack]);
-    await assert.rejects(dryRun);await exec(['rm',path]);
+    await assert.rejects(dryRun,error=>JSON.parse((error as {stdout:string}).stdout).status===(attack==='hardlink'?'INVALID_TICKET':'OPERATOR_REVIEW_REQUIRED'));await exec(['rm',path]);
    }
    await run(['exec','-d',name,'setpriv','--reuid=1000','--regid=1000','--clear-groups','sleep','30']);
-   await assert.rejects(dryRun);await exec(['pkill','-KILL','-u','1000']);
+   await assert.rejects(dryRun,error=>JSON.parse((error as {stdout:string}).stdout).status==='LEGACY_SESSION_ACTIVE');await exec(['pkill','-KILL','-u','1000']);
+   await exec(['python3','-c',"import os,struct;p='/workspaces/research_m8-alice';acl=struct.pack('<I',2)+b''.join(struct.pack('<HHI',tag,mode,uid) for tag,mode,uid in [(1,7,4294967295),(2,5,200002),(4,5,4294967295),(16,5,4294967295),(32,0,4294967295)]);os.setxattr(p,'system.posix_acl_access',acl)"]);
+   await assert.rejects(dryRun,error=>JSON.parse((error as {stdout:string}).stdout).status==='OPERATOR_REVIEW_REQUIRED');
+   await exec(['python3','-c',"import os;os.removexattr('/workspaces/research_m8-alice','system.posix_acl_access')"]);
    assert(JSON.parse(await dryRun()).status==='DRY_RUN');
    console.log('MIGRATION_UNREVIEWED_SYMLINK_HARDLINK_UNKNOWN_OWNER_DENIED_PASS');
   } else {await writeFile(join(temporary,'export.py'),await readFile('tests/research/providerExportFixture.py'));await exec(['python3','/fixtures/export.py',suffix]);}
@@ -83,11 +86,11 @@ try {
  await exec(['node','-e',"const fs=require('fs');fs.writeFileSync('/workspaces/research_m8-charlie/.agents/bughunter/isolation-new.json',JSON.stringify({version:1,targetId:'m8-charlie',workspaceId:'research_m8-charlie',sessionId:'session-charlie'}),{mode:0o440})"]);
  await writeFile(join(temporary,'fresh.json'),JSON.stringify({operation:'admit',token:cTicket}),{mode:0o600});
  await exec(['mkdir','-m','0755','/workspaces/research_unverified']);
- await assert.rejects(()=>exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','sh','-c','python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/fresh.json']));
+ await assert.rejects(()=>exec(['sh','-c','setpriv --reuid=1000 --regid=1000 --clear-groups python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/fresh.json']));
  await exec(['mkdir','-m','0700','/var/lib/bughunter-identities/quarantine']);
  await exec(['mv','/workspaces/research_unverified','/var/lib/bughunter-identities/quarantine/']);
  console.log('UNSAFE_UNMIGRATED_SIBLING_BLOCKS_ADMISSION_PASS');
- await Promise.all([1,2].map(()=>exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','sh','-c','python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/fresh.json'])));
+ await Promise.all([1,2].map(()=>exec(['sh','-c','setpriv --reuid=1000 --regid=1000 --clear-groups python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/fresh.json'])));
  const allocated=JSON.parse(await exec(['cat','/var/lib/bughunter-identities/ledger.json']));assert.equal(allocated.targets['m8-charlie'].uid,200003);
  console.log('FRESH_SERVER_BOUND_ALLOCATION_PASS');
  assert.notEqual(ids.alice,ids.bob);
@@ -151,14 +154,14 @@ try {
  await writeFile(join(temporary,'revoke.json'),JSON.stringify({operation:'revoke',token:stop}),{mode:0o600});
  const racingProbe=exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'mcp',targetId:'m8-alice',provider:'claude',profile:'standard'})]).catch(()=>null);
  await new Promise(resolve=>setTimeout(resolve,100));
- await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','sh','-c','python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/revoke.json']);
+ await exec(['sh','-c','setpriv --reuid=1000 --regid=1000 --clear-groups python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/revoke.json']);
  await racingProbe;
  await assert.rejects(()=>exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'start',targetId:'m8-alice',provider:'codex',profile:'yolo'})]));
  await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'exists',targetId:'m8-bob',provider:'claude',profile:'standard'})]);
  const remaining=await exec(['ps','-eo','uid,stat,args']);assert(!remaining.split('\n').some(line=>line.trim().split(/\s+/)[0]===String(ids.alice)&&!line.trim().split(/\s+/)[1].startsWith('Z')));
  console.log('REVOCATION_KILLS_ONLY_A_AND_PREVENTS_RESTART_PASS');
  await writeFile(join(temporary,'delete.json'),JSON.stringify({operation:'delete',token:issueStopTicket('m8-alice','research_m8-alice',privateKey)}),{mode:0o600});
- for(let n=0;n<2;n++)await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','sh','-c','python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/delete.json']);
+ for(let n=0;n<2;n++)await exec(['sh','-c','setpriv --reuid=1000 --regid=1000 --clear-groups python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/delete.json']);
  await assert.rejects(()=>exec(['test','-e','/var/lib/bughunter-homes/'+ids.alice]));
  await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','python3','/opt/bughunter/docker/research/broker/client.py',JSON.stringify({operation:'exists',targetId:'m8-bob',provider:'claude',profile:'standard'})]);
  const retired=JSON.parse(await exec(['cat','/var/lib/bughunter-identities/ledger.json']));assert.equal(retired.targets['m8-alice'].state,'deleted');assert.equal(retired.next,200004);
@@ -168,7 +171,7 @@ try {
  const recreatedHash=(await exec(['sha256sum','/workspaces/research_m8-alice/.agents/bughunter/policy.json'])).split(' ')[0];
  const recreatedTicket=issueTerminalTicket({userId:'owner-alice',targetId:'m8-alice',sessionId:'session-alice-recreated',policySha256:recreatedHash},privateKey).token;
  await writeFile(join(temporary,'recreate.json'),JSON.stringify({operation:'admit',token:recreatedTicket}),{mode:0o600});
- try{await exec(['setpriv','--reuid=1000','--regid=1000','--clear-groups','sh','-c','python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/recreate.json']);}catch(error){console.error(await exec(['sh','-c',`python3 -c 'import sys,json;sys.path.insert(0,"/opt/bughunter/docker/research/broker");from migrate import migrate;print(migrate(json.load(sys.stdin)["token"],True,True))' < /fixtures/recreate.json`]).catch(diagnostic=>diagnostic.stderr));throw error;}
+ try{await exec(['sh','-c','setpriv --reuid=1000 --regid=1000 --clear-groups python3 /opt/bughunter/docker/research/broker/client.py --request-stdin < /fixtures/recreate.json']);}catch(error){console.error(await exec(['sh','-c',`python3 -c 'import sys,json;sys.path.insert(0,"/opt/bughunter/docker/research/broker");from migrate import migrate;print(migrate(json.load(sys.stdin)["token"],True,True))' < /fixtures/recreate.json`]).catch(diagnostic=>diagnostic.stderr));throw error;}
 
  const recreated=JSON.parse(await exec(['cat','/var/lib/bughunter-identities/ledger.json']));assert.equal(recreated.targets['m8-alice'].uid,200004);assert.equal(recreated.retired[0].uid,ids.alice);
  assert((await exec(['cat','/workspaces/research_m8-alice/findings/notes.md'])).includes('ISOLATED_NOTE'));

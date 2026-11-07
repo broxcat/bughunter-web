@@ -7,7 +7,7 @@ import json
 import os
 import stat
 import sys
-from broker import ROOT, HOMES, SERVICE_UID, SERVICE_GID, secure_dir, admitted, allocate, atomic, fail
+from broker import ROOT, HOMES, SERVICE_UID, SERVICE_GID, secure_dir, admitted, allocate, atomic, fail, no_acl
 
 MAX_ENTRIES, MAX_BYTES = 10000, 256 * 1024 * 1024
 
@@ -19,6 +19,7 @@ def inventory(path, allocated=None):
         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
         handles.append(fd)
         st = os.fstat(fd)
+        no_acl(fd)
         if len(handles) > MAX_ENTRIES or st.st_uid not in {0, SERVICE_UID, allocated} or st.st_gid not in {0, SERVICE_UID, SERVICE_GID, 2000, allocated} or st.st_mode & 0o002:
             fail('OPERATOR_REVIEW_REQUIRED')
         if stat.S_ISDIR(st.st_mode):
@@ -115,6 +116,7 @@ def migrate(token, apply=False, fresh=False):
             st=os.lstat(outer)
             if not stat.S_ISDIR(st.st_mode) or st.st_uid!=0 or st.st_gid!=uid or (st.st_mode&0o7777)!=0o750:
                 fail('OPERATOR_REVIEW_REQUIRED')
+        no_acl(outer)
         home = outer+'/home'
         try:
             os.mkdir(home, 0o700)

@@ -42,6 +42,12 @@ def fail(code='ISOLATION_UNAVAILABLE'):
     raise ValueError(code)
 
 
+def no_acl(path):
+    attributes=os.listxattr(path) if isinstance(path,int) else os.listxattr(path,follow_symlinks=False)
+    if any(name in attributes for name in ['system.posix_acl_access','system.posix_acl_default']):
+        fail('OPERATOR_REVIEW_REQUIRED')
+
+
 def secure_dir(path, mode=0o711):
     try:
         os.mkdir(path, mode)
@@ -50,6 +56,7 @@ def secure_dir(path, mode=0o711):
     st = os.lstat(path)
     if not __import__('stat').S_ISDIR(st.st_mode) or st.st_uid != 0 or st.st_gid != 0 or st.st_mode & 0o022:
         fail('UNSAFE_REGISTRY')
+    no_acl(path)
     os.chmod(path,mode)
 
 
@@ -201,6 +208,7 @@ def binding_path(uid):
     st=os.lstat(directory)
     if not __import__('stat').S_ISDIR(st.st_mode) or st.st_uid!=0 or st.st_gid!=uid or (st.st_mode&0o7777)!=0o750:
         fail('UNSAFE_REGISTRY')
+    no_acl(directory)
     return directory+'/binding.json'
 
 
@@ -506,10 +514,12 @@ def verify_workspace_root():
     parent=os.lstat('/workspaces')
     if not stat.S_ISDIR(parent.st_mode) or parent.st_uid not in {0,SERVICE_UID} or parent.st_gid not in {0,SERVICE_GID,2000} or parent.st_mode&0o002:
         fail('UNSAFE_WORKSPACE_ROOT')
+    no_acl('/workspaces')
     known=ledger()['targets']
     for count,item in enumerate(os.scandir('/workspaces')):
         if count>=200000:fail('WORKSPACE_INVENTORY_LIMIT')
         st=item.stat(follow_symlinks=False)
+        no_acl(item.path)
         if stat.S_ISLNK(st.st_mode) or st.st_mode&0o007 or st.st_uid not in {0,SERVICE_UID}:
             fail('OPERATOR_REVIEW_REQUIRED')
         if FIRST<=st.st_gid<=LAST:
