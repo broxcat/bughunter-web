@@ -19,7 +19,8 @@
 FROM golang:1.23.4-bookworm AS passive-tools
 ENV GOTOOLCHAIN=local GOMAXPROCS=4 GOFLAGS=-p=4
 RUN go install github.com/owasp-amass/amass/v4/...@v4.2.0 \
-    && go install github.com/tomnomnom/assetfinder@v0.1.1
+    && go install github.com/tomnomnom/assetfinder@v0.1.1 \
+    && df -h / && go clean -cache -modcache && df -h /
 
 # Nuclei 3.11.1 embeds Sonic 1.15.0: its upstream Go build tags support
 # through Go 1.26. Keep the scanner release/dependencies unchanged and isolate
@@ -40,7 +41,8 @@ RUN set -eux; \
     tar -C /usr/local -xzf /tmp/nuclei-go.tgz; rm /tmp/nuclei-go.tgz; \
     go version; \
     go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.11.1; \
-    go version -m /root/go/bin/nuclei
+    go version -m /root/go/bin/nuclei; \
+    df -h /; go clean -cache -modcache; df -h /
 
 FROM node:22-bookworm AS tools
 
@@ -74,6 +76,9 @@ RUN set -eux; \
     go version
 
 # Scanner binaries land in $GOPATH/bin (= /root/go/bin).
+# Compiler/module caches are build scratch, not runtime evidence. Remove them
+# before each layer is committed so the hosted runner need not store/export
+# several copies. Pinned binaries and the offline smoke gate stay unchanged.
 RUN set -eux; \
     go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.17.0; \
     go install github.com/projectdiscovery/httpx/cmd/httpx@v1.12.0; \
@@ -81,10 +86,12 @@ RUN set -eux; \
     go install github.com/projectdiscovery/dnsx/cmd/dnsx@v1.3.1; \
     go install github.com/ffuf/ffuf/v2@v2.1.0; \
     go install github.com/lc/gau/v2/cmd/gau@v2.2.4; \
-    go install github.com/hahwul/dalfox/v2@v2.13.0
+    go install github.com/hahwul/dalfox/v2@v2.13.0; \
+    df -h /; go clean -cache -modcache; df -h /
 
 # Independent layer preserves the expensive existing scanner build cache.
-RUN GOMAXPROCS=2 go install github.com/OJ/gobuster/v3@v3.8.2
+RUN GOMAXPROCS=2 go install github.com/OJ/gobuster/v3@v3.8.2 \
+    && df -h / && go clean -cache -modcache && df -h /
 
 # Pre-pull nuclei templates into the image (written to /root/nuclei-templates
 # and /root/.config/nuclei); copied into the runtime stage below.

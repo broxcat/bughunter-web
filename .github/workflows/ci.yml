@@ -89,4 +89,31 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Build pinned scanner toolchain and run offline native acceptance
-        run: docker build --target tools -t bughunter-recon-ci .
+        run: |
+          set -euo pipefail
+          # A builder owned only by this job serializes the three Go stages.
+          # No host-wide Docker prune, SDK deletion or shared cache cleanup.
+          builder="bh-native-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          image="bughunter-recon-ci:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          config="${RUNNER_TEMP}/${builder}.toml"
+          printf '[worker.oci]\n  max-parallelism = 1\n' > "$config"
+          df -h / "$RUNNER_TEMP"
+          docker system df
+          cleanup() {
+            result=$?
+            kill "$monitor" 2>/dev/null || true
+            echo 'Disk after build (before job-owned cleanup)'
+            df -h /
+            docker system df || true
+            docker buildx rm "$builder" || true
+            docker image rm "$image" 2>/dev/null || true
+            rm -- "$config"
+            echo 'Disk after job-owned cleanup'
+            df -h /
+            exit "$result"
+          }
+          (while sleep 30; do echo 'Native build disk sample'; df -h /; done) &
+          monitor=$!
+          trap cleanup EXIT
+          docker buildx create --name "$builder" --driver docker-container --buildkitd-config "$config" --bootstrap
+          docker buildx build --builder "$builder" --progress plain --load --target tools -t "$image" .
