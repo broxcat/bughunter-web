@@ -8,7 +8,9 @@ PermitEmptyPasswords no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 AuthenticationMethods publickey
+# Shared-UID SSH shells cannot enter the isolated Research runtime.
 AllowUsers researcher
+MaxSessions 0
 AuthorizedKeysFile /etc/ssh/authorized_keys
 StrictModes yes
 UsePAM no

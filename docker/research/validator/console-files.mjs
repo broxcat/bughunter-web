@@ -1,11 +1,20 @@
-import { constants } from 'node:fs';
+import { constants, readFileSync } from 'node:fs';
 import { open, realpath, access } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { consolePolicySchema } from '../../../src/lib/research/consolePolicy.ts';
 import { readBounded } from './burp-files.mjs';
-const flags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+import { authorizeRuntimeWorkspace } from './runtime-binding.mjs';
+const flags = 0x200000 | constants.O_DIRECTORY | constants.O_NOFOLLOW;
 export const childPath = (parent, name) => `/proc/self/fd/${parent.fd}/${name}`;
 export async function openConsoleWorkspace(cwd = process.cwd()) {
+  return authorizeRuntimeWorkspace(readConsoleWorkspace, cwd);
+}
+export async function openTrustedConsoleWorkspace(cwd) {
+  const serviceUid=Number(readFileSync('/etc/passwd','utf8').split('\n').find(line=>line.startsWith('researcher:'))?.split(':')[2]);
+  if (![0, serviceUid].includes(process.getuid())) throw new Error('TRUSTED_SERVICE_REQUIRED');
+  return readConsoleWorkspace(cwd);
+}
+async function readConsoleWorkspace(cwd) {
   await access(cwd + '/.deleting').then(() => { throw new Error('WORKSPACE_DELETING'); }, e => { if (e.code !== 'ENOENT') throw e; });
   const physical = await realpath(cwd);
   if (physical !== cwd || !/^\/workspaces\/research_[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(cwd)) throw new Error('WORKSPACE_REQUIRED');

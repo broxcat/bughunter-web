@@ -12,6 +12,7 @@ const cwd = process.cwd(), workspace = await openConsoleWorkspace();
 const metadata = await open(`${cwd}/.agents/bughunter`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
 let bootstrap;
 try { bootstrap = await readBounded(metadata, 'bootstrap.md', 16384, true); } finally { await metadata.close(); await workspace.root.close(); }
+if(!bootstrap)throw new Error('BOOTSTRAP_REQUIRED');
 console.log(`Target: ${workspace.policy.targetHost}\nRequired User-Agent: ${workspace.policy.requiredUserAgent}\nCWD: ${cwd}\nRead scope.md before any interaction.\nHypotheses: findings/hypotheses.json; skills retain their confirmation gates.`);
 // Also configure existing immutable workspaces without rewriting scope.md or
 // their authorization snapshot. Project configuration is generated for new ones.
@@ -21,7 +22,7 @@ let args = [...profileArgs, ...trust, ...input];
 if (input.length === 0) {
   let resume;
   try { const result = await codexRead('thread/list', { cwd, limit: 1, sortKey: 'updated_at', sourceKinds: ['cli'] }); resume = result.data?.find(t => t.cwd === cwd && /^[a-f0-9-]{36}$/.test(t.id))?.id; } catch { /* A bounded read failure starts with workspace context, never another CWD's conversation. */ }
-  args = resume ? ['resume', ...profileArgs, ...trust, resume] : [...profileArgs, ...trust, bootstrap];
+  args = resume ? ['resume', ...profileArgs, ...trust, resume] : [...profileArgs, ...trust, 'Read scope.md and .agents/bughunter/bootstrap.md before continuing Research.'];
 }
 const child = spawn('codex', args, { cwd, stdio: 'inherit' });
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => child.kill(signal));

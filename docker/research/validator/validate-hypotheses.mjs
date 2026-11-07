@@ -2,6 +2,7 @@ import { open, constants, realpathSync } from "node:fs";
 import { open as openFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { hypothesesDocumentSchema, HYPOTHESES_MAX_BYTES, safeHypothesisIssues, hypothesisEvidence, researchBindingError } from "../../../src/lib/research/hypotheses.ts";
+import { openConsoleWorkspace } from './console-files.mjs';
 // Local validation only; no HTTP, DB or subprocesses. Print field diagnostics,
 // never source text or credentials from the untrusted document.
 const cwd = realpathSync(process.cwd());
@@ -32,6 +33,8 @@ async function checkArtifact(ref) {
 }
 let research;
 try {
+  const authorization = await openConsoleWorkspace(cwd);
+  await authorization.root.close();
   const consoleWorkspace = /^\/workspaces\/research_[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(cwd);
   if (!consoleWorkspace && !/^\/workspaces\/[0-9a-f-]{36}$/.test(cwd)) throw new Error("cwd");
   research = await promisify(open)(`${cwd}/${consoleWorkspace ? "findings" : "research"}`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);

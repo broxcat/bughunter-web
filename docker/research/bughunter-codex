@@ -4,23 +4,5 @@ workspace=$(pwd -P)
 case "$workspace" in
   /workspaces/research_*) exec node /opt/bughunter/docker/research/validator/codex-launch.mjs "$@" ;;
 esac
-case "$workspace" in
-  /workspaces/*) ;;
-  *) echo 'Enter a BugHunter workspace under /workspaces first.' >&2; exit 1 ;;
-esac
-# Launch only at a session root, never from an arbitrary nested directory.
-test "$(dirname "$workspace")" = /workspaces && test -f AGENTS.md && test -f scope.md && test -f target.json || {
-  echo 'Missing workspace root, AGENTS.md, scope.md or target.json.' >&2; exit 1;
-}
-printf 'Workspace: %s\nTarget: %s\nRead AGENTS.md and scope.md before doing anything.\n' "$(basename "$workspace")" "$(jq -r '.host' target.json)"
-printf 'Hypotheses contract: research/hypotheses.json\nValidate before syncing: bughunter-validate-hypotheses\n'
-printf 'Optional Burp MCP: passive workspace gateway; run bughunter-burp-status.\n'
-# Never execute a config supplied by the workspace/target. This installed helper
-# emits NUL-delimited Codex overrides. No eval; operator CLI arguments stay intact.
-config_args=$(mktemp)
-trap 'rm -f "$config_args"' EXIT
-node /opt/bughunter/docker/research/validator/burp-main.mjs config-args > "$config_args"
-mapfile -d '' -t overrides < "$config_args"
-rm -f "$config_args"
-trap - EXIT
-exec codex --yolo "${overrides[@]}" "$@"
+echo 'Research workspace requires isolation migration before it can be opened.' >&2
+exit 1

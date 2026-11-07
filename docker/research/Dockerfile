@@ -62,6 +62,7 @@ RUN cd /etc/codex/skills && sha256sum --check ../skills.sha256 \
 COPY src/lib/research/hypotheses.ts src/lib/research/burp.ts src/lib/research/terminal.ts src/lib/research/provider.ts src/lib/research/launchProfiles.mjs src/lib/research/consolePolicy.ts src/lib/research/reconDelivery.ts src/lib/research/reconCollection.ts /opt/bughunter/src/lib/research/
 COPY src/lib/bountyProgram.ts src/lib/scopeAssets.ts src/lib/observationSafety.ts src/lib/httpPolicy.mjs /opt/bughunter/src/lib/
 COPY docker/research/validator/*.mjs docker/research/validator/*.cjs /opt/bughunter/docker/research/validator/
+COPY docker/research/broker/ /opt/bughunter/docker/research/broker/
 COPY docker/research/console/ /opt/bughunter/docker/research/console/
 COPY --chmod=755 docker/research/bughunter-* /usr/local/bin/
 COPY docker/research/sshd_config /etc/ssh/sshd_config

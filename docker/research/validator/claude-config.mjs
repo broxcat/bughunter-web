@@ -2,7 +2,8 @@ import { claudePermissionMode } from '../../../src/lib/research/launchProfiles.m
 import { claudeBurpServer } from './managed-mcp.mjs';
 export function claudeConfigDirectory(cwd) {
   if (!/^\/workspaces\/research_[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(cwd)) throw new Error('WORKSPACE_REQUIRED');
-  return `/home/researcher/.claude/workspaces/${cwd.slice('/workspaces/research_'.length)}`;
+  if (process.getuid() < 200001) throw new Error('RESEARCH_IDENTITY_DENIED');
+  return `/var/lib/bughunter-homes/${process.getuid()}/.claude`;
 }
 /** Isolated configuration; never changes user/global MCP files.
  * @param {string} cwd

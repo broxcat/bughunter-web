@@ -33,6 +33,7 @@ export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, find
     authorizationSource: `Scope ${target.scope.id}; Program ${target.program!.id}`, generatedAt: session.createdAt.toISOString(), scopeSha256: sha256(scope), mode: passive ? 'PROGRAM_PASSIVE' : 'SCOPED_ACTIVE_HTTP', ...(asset ? { assetScope: { normalizedValue: asset.normalizedValue, format: asset.format, active: asset.active } } : {}), programScope: {rules:target.scopeAsset?.format === 'WILDCARD_DOMAIN' ? [target.scopeAsset.normalizedValue] : target.program!.scopeRules,exclusions:target.program!.outOfScope} });
   const files: Record<string, string> = {
     'scope.md': scope,
+    '.agents/bughunter/isolation-new.json': JSON.stringify({ version: 1, targetId: target.id, workspaceId: session.workspaceId, sessionId: session.id }) + '\n',
     'assessment-policy.json': old['assessment-policy.json'],
     '.codex/config.toml': consoleCodexConfig(session.workspaceId, instructions, passive),
     '.agents/bughunter/AGENTS.md': instructions + assessmentInstructions + COVERAGE_INSTRUCTIONS,
@@ -69,7 +70,7 @@ export async function refreshConsoleInventory(workspaceId: string, text: string)
   const temporary = `.inventory-${randomUUID()}`;
   try {
     const file = await open(`/proc/self/fd/${directory.fd}/${temporary}`, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o440);
-    try { await file.chown(process.getuid!(), Number(process.env.RESEARCH_WORKSPACE_GID ?? process.getgid?.())); await file.writeFile(text); await file.sync(); } finally {await file.close();}
+    try { await file.chown(process.getuid!(), (await directory.stat()).gid); await file.writeFile(text); await file.sync(); } finally {await file.close();}
     await rename(`/proc/self/fd/${directory.fd}/${temporary}`, `/proc/self/fd/${directory.fd}/hosts.json`);
   } finally { await rm(`/proc/self/fd/${directory.fd}/${temporary}`,{force:true}); await directory.close(); }
 }

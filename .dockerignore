@@ -45,3 +45,5 @@ docker/research/validator/node_modules/
 # Dedicated terminal signing keys / optional SSH public-key configuration
 data/research-terminal/
 data/research-ssh/
+
+**/__pycache__/

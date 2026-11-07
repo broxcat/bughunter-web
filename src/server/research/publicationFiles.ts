@@ -3,6 +3,7 @@ import { open, mkdir, lstat, readdir, unlink, rmdir, type FileHandle } from 'nod
 import { dirname } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
+import {isolatedPublication} from './isolationReceipt';
 import { publicationRoot, descriptorCommand } from './publicationLock';
 import { publicationCheckpoint } from './publicationTestHooks';
 import { ResearchError, workspacePath } from './workspace';
@@ -166,7 +167,9 @@ export async function verifyPublication(root: string, m: PublicationManifest) {
 export async function publicationNeedsActivation(root: string, m: PublicationManifest) {
   workspacePath(root, m.workspaceId); const parent = await publicationRoot(root); let directory;
   try {
-    directory = await childDirectory(parent, m.workspaceId); const info = await directory.stat(), mode = info.mode & 0o7777;
+    directory = await childDirectory(parent, m.workspaceId);
+    if(m.layout==='console'&&await isolatedPublication(directory,{targetId:m.targetId,workspaceId:m.workspaceId,sessionId:m.sessionId}))return false;
+    const info = await directory.stat(), mode = info.mode & 0o7777;
     if (info.uid !== m.uid || info.gid !== m.gid || ![0o2700, 0o2750].includes(mode)) throw new ResearchError('Unsafe workspace admission permissions', 409);
     return mode === 0o2700;
   } finally { await directory?.close(); await parent.close(); }

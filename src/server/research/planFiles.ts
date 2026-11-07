@@ -58,7 +58,7 @@ async function immutablePlanFile(directory: FileHandle, name: string, text: stri
     return;
   }
   try {
-    await file.chown(process.getuid!(), Number(process.env.RESEARCH_WORKSPACE_GID ?? process.getgid?.()));
+    await file.chown(process.getuid!(), (await directory.stat()).gid);
     await file.writeFile(text); await file.sync(); await file.chmod(0o440);
   } finally { await file.close(); }
 }

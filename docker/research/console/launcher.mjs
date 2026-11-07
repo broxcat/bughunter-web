@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { providerStatus, sessionCommand } from './providers.mjs';
 import { launchProfiles, legacyProfile } from '../../../src/lib/research/launchProfiles.mjs';
+import { isolatedLauncherEngine } from './broker.mjs';
 const execute=promisify(execFile);
 // Read-only probes: bounded native help/auth commands, no prompts or inference.
 /** @param {string} targetId
@@ -9,6 +10,7 @@ const execute=promisify(execFile);
  * @param {(file:string,args:string[],options:object)=>Promise<{stdout:string}>} run
  */
 export async function launcherEngine(targetId,provider,run=execute) {
+  if(run===execute)return isolatedLauncherEngine(targetId,provider);
   const cwd=`/workspaces/research_${targetId}`;
   const status=await providerStatus(provider,run,cwd);
   let profiles=[];

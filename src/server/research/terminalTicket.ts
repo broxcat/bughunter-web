@@ -8,7 +8,14 @@ import { ResearchError } from './workspace';
 import { join } from 'node:path';
 import { readTerminalSigningKey } from './terminalKey';
 
-export async function terminalTicket(userId: string, targetId: string, requestedProvider?: ResearchProvider, profile?: LaunchProfile) {
+export function terminalTicket(userId: string, targetId: string, requestedProvider?: ResearchProvider, profile?: LaunchProfile) {
+  return issueCheckedTicket(userId,targetId,requestedProvider,profile,true);
+}
+// Server/operator-only issuance; no HTTP route exposes this pre-migration path.
+export function isolationMigrationTicket(userId:string,targetId:string) {
+  return issueCheckedTicket(userId,targetId,undefined,undefined,false);
+}
+async function issueCheckedTicket(userId: string, targetId: string, requestedProvider: ResearchProvider|undefined, profile: LaunchProfile|undefined, requireIsolation:boolean) {
   if (requestedProvider !== undefined) researchProvider.parse(requestedProvider);
   const { session, target } = await ensureTargetConsole(userId, targetId);
   // Only server-generated paths, and immutable critical files. No shell or runner calls.
@@ -27,6 +34,11 @@ export async function terminalTicket(userId: string, targetId: string, requested
     if (requestedProvider !== undefined && provider !== session.provider) {
       await prisma.researchSession.update({ where: { id: session.id, userId }, data: { provider } });
     }
-    return { ...issueTerminalTicket({ userId, targetId, sessionId: session.id, policySha256: sha256(text), ...(provider === 'claude' ? { provider } : {}), ...(profile ? {profile} : {}) }, privateKey), provider, profile: profile ?? (provider === 'codex' ? 'yolo' : 'standard'), host: target.host, requiredUserAgent: target.program!.requiredUserAgent };
+    const issued = issueTerminalTicket({ userId, targetId, sessionId: session.id, policySha256: sha256(text), ...(provider === 'claude' ? { provider } : {}), ...(profile ? {profile} : {}) }, privateKey);
+    if(requireIsolation){
+    const readiness=await fetch(new URL('/control/isolation',process.env.RESEARCH_TERMINAL_CONTROL_URL??'http://research-console:7681'),{method:'POST',headers:{Authorization:'Bearer '+issued.token},signal:AbortSignal.timeout(10000),redirect:'error'}).catch(()=>null);
+    if(!readiness?.ok)throw new ResearchError('Research workspace requires isolation migration before it can be opened.',409);
+    }
+    return { ...issued, provider, profile: profile ?? (provider === 'codex' ? 'yolo' : 'standard'), host: target.host, requiredUserAgent: target.program!.requiredUserAgent };
   } finally { await directory.close(); }
 }

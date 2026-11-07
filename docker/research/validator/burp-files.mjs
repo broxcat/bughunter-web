@@ -1,6 +1,7 @@
 import { constants } from 'node:fs';
 import { open, realpath, mkdir, readdir, rename, rmdir, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { readRuntimeBinding } from './runtime-binding.mjs';
 import { burpPolicySchema } from '../../../src/lib/research/burp.ts';
 const dirFlags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
 const child = (parent, name) => `/proc/self/fd/${parent.fd}/${name}`;
@@ -16,7 +17,9 @@ export async function readBounded(parent, name, max, immutable = false) {
   } finally { await file.close(); }
 }
 export async function openWorkspace() {
+  const binding = await readRuntimeBinding();
   const cwd = await realpath(process.cwd());
+  if(cwd !== '/workspaces/'+binding.workspaceId)throw new Error('RESEARCH_IDENTITY_DENIED');
   if (!/^\/workspaces\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(cwd)) throw new Error('WORKSPACE_REQUIRED');
   let root = await open('/', dirFlags);
   try {

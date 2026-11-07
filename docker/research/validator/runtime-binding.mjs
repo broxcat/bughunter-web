@@ -14,7 +14,7 @@ const denied = () => new Error('RESEARCH_IDENTITY_DENIED');
 export function checkRuntimeBinding(binding, { uid, gid, policy, policySha256 }) {
   const keys = ['v', 'uid', 'gid', 'targetId', 'workspaceId', 'sessionId', 'policySha256', 'state'];
   if (!binding || typeof binding !== 'object' || Object.keys(binding).length !== keys.length || keys.some(key => !Object.hasOwn(binding, key)) ||
-      binding.v !== 1 || binding.state !== 'active' || !Number.isSafeInteger(uid) || uid < 200000 ||
+      binding.v !== 1 || binding.state !== 'active' || !Number.isSafeInteger(uid) || uid < 200001 || uid > 299999 ||
       binding.uid !== uid || binding.gid !== gid || uid !== gid ||
       !identity.test(binding.targetId) || !identity.test(binding.sessionId) ||
       binding.workspaceId !== `research_${binding.targetId}` || !digest.test(binding.policySha256) ||
@@ -25,7 +25,7 @@ export function checkRuntimeBinding(binding, { uid, gid, policy, policySha256 })
 
 export async function readRuntimeBinding() {
   const uid = process.getuid(), gid = process.getgid();
-  if (uid < 200000 || uid !== process.geteuid() || gid !== process.getegid() || uid !== gid || process.getgroups().some(group => group !== gid)) throw denied();
+  if (uid < 200001 || uid > 299999 || uid !== process.geteuid() || gid !== process.getegid() || uid !== gid || process.getgroups().some(group => group !== gid)) throw denied();
   let parent;
   try {
     parent = await open('/', directoryFlags);
@@ -50,8 +50,7 @@ export async function readRuntimeBinding() {
   finally { await parent?.close(); }
 }
 
-// This is a separate explicit API until trusted broker provisioning exists.
-// Do not claim the legacy openConsoleWorkspace API is identity-bound yet.
+// All console validators use this wrapper; provisioning belongs to the trusted broker.
 export async function authorizeRuntimeWorkspace(openWorkspace, path) {
   const binding = await readRuntimeBinding();
   // Deny a foreign name before opening its context, even if it is valid.

@@ -139,6 +139,7 @@ services:
 
   # Permanent per-target PTY/tmux/Codex environment. No application env_file.
   research-console:
+    init: true
     build:
       context: .
       dockerfile: docker/research/Dockerfile
@@ -168,6 +169,8 @@ services:
       - research-codex:/home/researcher/.codex
       - research-claude:/home/researcher/.claude
       - research-host-keys:/etc/ssh/host-keys
+      - research-identities:/var/lib/bughunter-identities
+      - research-private-homes:/var/lib/bughunter-homes
       - type: bind
         source: ./data/research-ssh
         target: /run/research-keys
@@ -181,7 +184,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     # sshd/setpriv alone authenticate and drop to researcher; Codex/Node are non-root.
-    cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID, SYS_CHROOT]
+    cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID, SYS_CHROOT, FOWNER, KILL, SETPCAP]
     pids_limit: 512
     mem_limit: 3g
     shm_size: 1g
@@ -287,4 +290,6 @@ volumes:
   research-codex:
   research-claude:
   research-host-keys:
+  research-identities:
+  research-private-homes:
   burp-home:
