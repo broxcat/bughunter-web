@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
 import { chromium } from 'playwright-chromium';
+import { auditNegativeStates } from './milestone1NegativeStates.mjs';
 const exec = promisify(execFile), db = process.env.TEST_DATABASE_URL, redis = process.env.TEST_ABUSE_REDIS_URL, container = process.env.TEST_ABUSE_REDIS_CONTAINER;
 assert(db && redis && container, 'Use tests/queue/runInfrastructure.mjs --post-v1-browser');
 assert.equal((await exec('docker', ['inspect', '--format', '{{index .Config.Labels "bughunter.queue-test"}}', container])).stdout.trim(), 'disposable');
@@ -80,6 +81,7 @@ try {
   const otherContext = await browser.newContext(), other = await otherContext.newPage(); await login(other, outsider.email, password);
   const denied = await otherContext.request.get(`${origin}/api/recon/runs/${parent.id}/report`);
   check('ownership isolation', () => assert.equal(denied.status(), 404));
+  await auditNegativeStates({browser,origin,ownerContext:context,otherContext,page});
   check('no page exceptions or foreign browser requests', () => { assert.deepEqual(errors, []); assert.equal(foreign, 0); });
   console.log(`POST_V1_BROWSER: ${checks} passed, 0 failed, 0 skipped`);
 } finally {
