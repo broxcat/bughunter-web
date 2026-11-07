@@ -1,6 +1,6 @@
 # 0042 — Research workspace isolation
 
-Status: UID/GID broker implementation integrated; complete regression/CI acceptance pending. Issue #42 remains OPEN. This record does not supersede or erase the failed acceptance.
+Status: implemented and validated at runtime revision `b32c4b2`, including independent web/native/Research CI. See the [validation record](../research-isolation-42-validation.md). Production migration is a separate, unexecuted operation. This record does not supersede or erase the original failed acceptance.
 
 ## Threat model and invariant
 
@@ -10,7 +10,7 @@ All code inside a Research console is malicious-capable, including either provid
 
 | Approach | Fit and costs | Decision |
 | --- | --- | --- |
-| A: dedicated workspace UID/GID | Works inside the existing container without namespace capabilities. Requires persistent collision-free allocation, separate provider homes/tmux sockets, a narrow trusted process launcher, explicit ownership reconciliation and UID-based cleanup. Native tools support numeric identities, but HOME and passwd lookups need testing. Must drop every supplementary group and capability. Never reuse retired IDs. | Selected design; implementation pending. |
+| A: dedicated workspace UID/GID | Works inside the existing container without namespace capabilities. Requires persistent collision-free allocation, separate provider homes/tmux sockets, a narrow trusted process launcher, explicit ownership reconciliation and UID-based cleanup. Native tools support numeric identities, but HOME and passwd lookups need testing. Must drop every supplementary group and capability. Never reuse retired IDs. | Selected and implemented; validation linked above. |
 | B: workspace container | Strong process/mount separation and natural private homes. Requires a separate trusted host orchestrator for container lifecycle, routing, durable volumes, cleanup and resource quotas. Web/Research must never receive the Docker socket. Current single-service compose routing has no such orchestrator. | Viable larger alternative; no socket added to application. |
 | C: mount namespace/bind mounts | Existing runtime has no CAP_SYS_ADMIN. Both `unshare -m true` and `unshare -Ur true` fail EPERM as the actual researcher UID. Adding capabilities or privileged execution to untrusted Research is unacceptable. A trusted namespace broker would also need PID/proc/descriptor isolation. | Unavailable in current runtime privilege model. |
 | D: filesystem broker only | Native Codex/Claude shells and MCP expect ordinary filesystem paths and subprocesses. A broker API alone cannot constrain arbitrary native file syscalls. Replacing these workflows with virtual file operations is a major incompatible redesign. | Rejected as sole boundary. |

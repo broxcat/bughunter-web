@@ -1,6 +1,6 @@
 # Research isolation: operator migration plan
 
-Status: implementation candidate; production execution is NOT authorized by this document. Release acceptance remains blocked by #42 until all required gates, including CI, pass. The original failed acceptance is retained in `research-workspace-isolation.md`.
+Status: runtime implementation validated in disposable infrastructure, including independent CI; see [results](research-isolation-42-validation.md). Production execution is NOT authorized by this document. Milestone 8 release acceptance remains stopped and is not resumed by fixing #42. The original failed acceptance is retained in `research-workspace-isolation.md`.
 
 ## Boundary and requirements
 
@@ -20,14 +20,14 @@ Expected final permissions:
 | Workspace root and immutable directories | root / workspace GID | 0750 |
 | Immutable authorization/context files | root / workspace GID | 0440 |
 | Mutable requests/scripts/findings directories | workspace UID/GID | 0700 |
-| Mutable files | workspace UID/GID | 0600 |
+| Migrated mutable files | workspace UID/GID | 0600 |
 | Private provider outer directory / active-record directory | root / workspace GID | 0750 |
 | Private provider home, tmp and tmux runtime directories | workspace UID/GID | 0700 |
 | Active identity record and publication receipt | root / workspace GID | 0440 |
 | Durable identity ledger | root | 0600 |
 | Broker socket | admission-service UID | 0600 |
 
-A root-owned 0750 outer directory guards each private home, so a console cannot broaden another host’s access by chmodding its writable home. Active records live in root-owned per-UID 0750 directories at `/var/lib/bughunter-identities/active/<uid>/binding.json`, preventing foreign hard links even without a protected-hardlinks sysctl. Startup/admission rejects unsafe or world-accessible sibling roots rather than exposing them alongside an isolated A.
+Native-created modes may vary inside A’s writable directories. A cannot broaden the root-owned workspace/home ancestors that enforce the boundary. A root-owned 0750 outer directory guards each private home, so a console cannot broaden another host’s access by chmodding its writable home. Active records live in root-owned per-UID 0750 directories at `/var/lib/bughunter-identities/active/<uid>/binding.json`, preventing foreign hard links even without a protected-hardlinks sysctl. Startup/admission rejects unsafe or world-accessible sibling roots rather than exposing them alongside an isolated A.
 
 Root ownership of immutable roots/inputs is intentional: an untrusted owner could chmod a supposedly immutable authorization file. A workspace UID owns its allowed mutable material and provider state. Public `/proc` process/UID metadata and stat of a known workspace root may remain visible; sensitive children, process cwd/root/fd and tmux contents must be inaccessible across UIDs. This is a confidentiality/integrity boundary, not independent CPU/memory quotas for every host.
 
