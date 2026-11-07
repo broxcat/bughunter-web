@@ -181,3 +181,42 @@ The final full run measured **32,735ms filesystem publication**, **56ms durable 
 Issue #8's provisioning/recovery acceptance is complete on the supported Linux/local shared-mount deployment. Unknown pre-fix directories without a trusted reservation still require explicit operator review; multi-host/non-local filesystem locking is not certified. No production deployment, production migration, Research image rebuild, provider-authentication change or persistent production tmux restart occurred. No DeepSeek API calls were issued (estimated additional DeepSeek spend $0; account billing is not independently observable).
 
 This closes only #8 and its part of milestone 1. The remaining overhaul checklist in #7 is unfinished; this is not full application acceptance or a v1.1.0 release decision. Package version, historical v1.0.0 tag/release and existing authorization snapshots are unchanged.
+
+## Milestone 1 follow-up checkpoint (base 95eba04)
+
+The existing 21-page / 67-handler inventory was reused, not regenerated. Issue #8 remains closed; its provisioning regression tests still pass. This checkpoint does **not** complete Milestone 1 or authorize moving to Milestone 2.
+
+### Confirmed Program policy race (#10)
+
+Two real-PostgreSQL barrier tests pause PATCH after its pre-lock read, then commit a competing writer's added rule and ScopeAsset before PATCH acquires its lock. Before the fix, removing that newly added rule returned 200 despite RUNNING Recon (expected 409); without running Recon, the rule was removed while its asset incorrectly remained active. Both regression assertions failed on 95eba04. PATCH now reads current rules after its existing FOR UPDATE lock and derives removals from that row. The active-Recon conflict and asset retirement semantics are preserved. No filesystem operation or additional timeout was introduced. The focused Program workflow suite passes 23 cases, including both races; this concern was confirmed, not disproven.
+
+### Collection triage — remaining work
+
+| Collection | Actual current behavior | Remaining acceptance |
+| --- | --- | --- |
+| Targets / Recon program lists | Complete, unpaginated; company-name ordering without a unique tie-breaker | Large-list navigation and tie ordering still need implementation/scale regression |
+| Scope inventory | At most 1,000 assets; backfill also considers at most 1,000 programs; no page/cursor | A single large Target can exceed the cap; Target filtering alone cannot guarantee access to all assets |
+| Research consoles | At most 500 queried Targets, then authorization filtering and priority sorting | Earlier SQL truncation can hide otherwise authorized entries; not pagination |
+| Research historical sessions | At most 50, newest first | Older sessions need reachable collection navigation; not pagination |
+| Legacy session API | At most 100, newest first | Compatibility-preserving navigation/count contract remains to be designed and tested |
+| Program Findings / Reports API | At most 1,000 Findings / 100 Reports | Validate and fix access beyond caps without breaking array consumers |
+| Asset Recon detail | Recent 30-run history; artifact rendering at 1,000 with an explicit truncation flag | Distinguish intentional bounded evidence rendering from complete history navigation |
+
+These are source-reviewed limits, not new speculative GitHub defects or claimed pagination fixes. Unique ordering, first/middle/last/invalid/out-of-range pages, filter state, empty results and last-row deletion still require collection-specific acceptance. Existing capped responses are not certified safe by this checkpoint.
+
+### Negative-state and interaction coverage
+
+The disposable post-v1 browser fixture now runs 116 additional checks from the checked-in inventory: 64 anonymous protected API URLs require JSON 401 without redirects; 18 protected document URLs preserve login redirects and exact bookmark/query callbacks; 29 authenticated missing-resource GET URLs must return a defined negative-state status rather than success, redirect or server failure; one foreign owner's empty program list remains isolated; four light/dark and desktop/mobile navigation cases verify visible initial keyboard focus, no horizontal overflow, refresh and back/forward query preservation. Missing-resource checks allow each handler's existing 400/403/404/409/410 semantics; they are a surface guard, not an exact-status proof for every method and owner combination. The API route inventory includes multiple methods per handler; these checks do not claim all mutations were exercised.
+
+Remaining: collection pagination/filter acceptance, all CRUD ownership/conflict/idempotency variants, malformed IDs and retired/deleted historical references per workflow, all dialogs/forms/error labels, keyboard containment and contrast checks. Existing full-suite lifecycle/retirement/ownership tests remain useful evidence but do not substitute for this unfinished audit. No Target/Scope redesign, global visual redesign, Research architecture change or production deployment was performed.
+
+### Validation and dependency review
+
+- Focused Program workflow: **23 passed, 0 failed**. Pre-fix race reproduction: **2 failed**, as expected, with 21 unrelated cases filtered out.
+- Required full queue command with Target, Research, auth and post-v1 browser flags: **1,460 passed, 0 failed, 17 opt-in network skips**, exit zero including migration/drift/browser checks and fixture cleanup.
+- Separate network command: **17 passed, 0 failed, 0 skipped**. There are **1,477 distinct Vitest cases** across full/network runs; focused reruns are not added.
+- New browser matrix: **116 passed, 0 failed, 0 skipped**; existing report matrix **26 passed**. Target, Research and auth browser scripts passed (individual assertion totals are not exposed).
+- Additive upgrade via `npm run test:migration` and schema drift passed. Lint, Next typegen, TypeScript, build, Compose config and diff checks passed. No provider execution or Burp integration code changed, so real inference/Burp acceptance was not required or attempted.
+- `npm audit`: **8 moderate development advisories**, no high/critical; `npm audit --omit=dev`: **0**. Registry review still ends minimatch 10 at 10.2.6 and typescript-eslint at 8.72.1; no compatible safe patch was established. Retain the accepted tooling risk; no force fix, major override or Next downgrade applied.
+
+Logs are in `/tmp/bh-m1/`. The five diagnostics WIP files retain their starting checksums and remain excluded from commits. No DeepSeek/auxiliary inference requests were made; account billing is not observable. Production services, volumes, provider authentication, persistent tmux sessions, package version and historical release/tag were not changed. Issue #7 must remain open with Milestone 1 unchecked until the remaining acceptance work above is completed.
