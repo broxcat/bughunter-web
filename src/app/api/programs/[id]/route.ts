@@ -12,7 +12,7 @@ export async function GET(_req: Request, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const program = await prisma.bountyProgram.findFirst({ where: { id, ownerId: session.user.id }, include: { targets: { where: { active: true, contextOnly: false, userId: session.user.id }, orderBy: { host: "asc" } } } });
+  const program = await prisma.bountyProgram.findFirst({ where: { id, ownerId: session.user.id }, include: { targets: { where: { active: true, contextOnly: false, userId: session.user.id }, orderBy: [{host:'asc'},{id:'asc'}] } } });
   return program ? NextResponse.json(program) : NextResponse.json({ error: "Not found" }, { status: 404 });
 }
 export async function PATCH(req: Request, { params }: Params) {

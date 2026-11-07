@@ -55,9 +55,9 @@ export function consoleBundle(target: ResearchTarget, recon: ResearchRecon, find
   return files;
 }
 export async function consoleInventory(tx: Prisma.TransactionClient, target: ResearchTarget) {
-  const hosts = await tx.target.findMany({ where: { programId: target.program!.id, userId: target.userId, active: true, contextOnly: false }, orderBy: { host: 'asc' }, take: 10000, select: {id:true,host:true,createdAt:true,discoverySource:true,discoveredAt:true,discoveredByScanRunId:true} });
-  const runs = await tx.scanRun.findMany({ where: {target:{programId:target.program!.id,userId:target.userId}}, orderBy:{createdAt:'desc'},take:30, select:{id:true,targetId:true,status:true,outcome:true,createdAt:true,finishedAt:true,_count:{select:{discoveries:true}}} });
-  const discoveries = await tx.hostDiscovery.findMany({where:{scanRun:{target:{programId:target.program!.id,userId:target.userId}}},orderBy:{createdAt:'desc'},take:1000,select:{host:true,state:true,source:true,createdAt:true,scanRunId:true,added:true}});
+  const hosts = await tx.target.findMany({ where: { programId: target.program!.id, userId: target.userId, active: true, contextOnly: false }, orderBy: [{host:'asc'},{id:'asc'}], take: 10000, select: {id:true,host:true,createdAt:true,discoverySource:true,discoveredAt:true,discoveredByScanRunId:true} });
+  const runs = await tx.scanRun.findMany({ where: {target:{programId:target.program!.id,userId:target.userId}}, orderBy: [{createdAt:'desc'},{id:'desc'}],take:30, select:{id:true,targetId:true,status:true,outcome:true,createdAt:true,finishedAt:true,_count:{select:{discoveries:true}}} });
+  const discoveries = await tx.hostDiscovery.findMany({where:{scanRun:{target:{programId:target.program!.id,userId:target.userId}}},orderBy: [{createdAt:'desc'},{id:'desc'}],take:1000,select:{host:true,state:true,source:true,createdAt:true,scanRunId:true,added:true}});
   return JSON.stringify({ generatedAt:new Date().toISOString(),programId:target.program!.id,untrustedData:true,authorizationGranted:false,researchCoverage:{path:'research/coverage-current.json',notice:COVERAGE_NOTICE},hosts,runs,discoveries },null,2)+'\n';
 }
 export async function refreshConsoleInventory(workspaceId: string, text: string) {

@@ -17,7 +17,7 @@ export async function GET(request?: Request) {
   }
   return NextResponse.json(await prisma.bountyProgram.findMany({
     where: { ownerId: session.user.id }, orderBy: [{ companyName: "asc" },{id:'asc'}],
-    include: { _count: { select: { scopeAssets: { where: { active: true } } } }, targets: { where: { active: true, contextOnly: false, userId: session.user.id }, orderBy: { host: "asc" } } },
+    include: { _count: { select: { scopeAssets: { where: { active: true } } } }, targets: { where: { active: true, contextOnly: false, userId: session.user.id }, orderBy: [{host:'asc'},{id:'asc'}] } },
   }));
 }
 export async function POST(req: Request) {

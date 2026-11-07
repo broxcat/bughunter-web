@@ -19,7 +19,7 @@ async function owned(tx:Prisma.TransactionClient,userId:string,id:string,write=f
 }
 export async function findingLifecycle(userId:string,id:string):Promise<LifecycleView>{return prisma.$transaction(async tx=>{
  const {finding:f}=await owned(tx,userId,id);
- const events=await tx.findingLifecycleEvent.findMany({where:{findingId:id},orderBy:{revision:'desc'},take:100}),retests=await tx.findingRetest.findMany({where:{findingId:id},orderBy:{createdAt:'desc'},take:100,include:{result:true}});
+ const events=await tx.findingLifecycleEvent.findMany({where:{findingId:id},orderBy:{revision:'desc'},take:100}),retests=await tx.findingRetest.findMany({where:{findingId:id},orderBy: [{createdAt:'desc'},{id:'desc'}],take:100,include:{result:true}});
  return{state:f.lifecycle,revision:f.lifecycleRevision,submission:f.submission as LifecycleView['submission'],next:lifecycleNext(f.lifecycle),events:events.map(e=>({...e,reason:clean(e.reason),createdAt:e.createdAt.toISOString()})),retests:retests.map(r=>({...r,reason:clean(r.reason),createdAt:r.createdAt.toISOString(),result:r.result?{...r.result,performedAt:r.result.performedAt.toISOString(),conclusion:clean(r.result.conclusion)}:null}))};
 });}
 export async function changeFindingLifecycle(userId:string,id:string,raw:unknown){
@@ -47,7 +47,7 @@ export async function changeFindingLifecycle(userId:string,id:string,raw:unknown
    for(const c of covered){const previous=c.events[0];if(!previous)continue;const eventKey=hash(['FINDING_RETEST',id,input.eventKey,c.id]);await tx.researchCoverageEvent.create({data:{coverageId:c.id,targetId:f.targetId,eventKey,contentSha256:eventKey,revision:c.revision+1,state:'NEEDS_RETEST',action:'Finding retest requested; no test performed',result:reason,evidence:[],performedAt:new Date(),actorId:userId,source:'FINDING_RETEST',sessionReferenceId:previous.sessionReferenceId,findingReferenceId:id}});await tx.researchCoverage.update({where:{id:c.id},data:{state:'NEEDS_RETEST',revision:c.revision+1}});}
   }
   if(f.lifecycle==='RETEST_REQUIRED'&&['CLOSED','RESOLVED','VALIDATING'].includes(input.state)){
-   const retest=await tx.findingRetest.findFirst({where:{findingId:id},orderBy:{createdAt:'desc'},include:{result:true}});
+   const retest=await tx.findingRetest.findFirst({where:{findingId:id},orderBy: [{createdAt:'desc'},{id:'desc'}],include:{result:true}});
    if(!retest?.result)throw new ResearchError('Record the pending retest result before leaving retest required',400);
    if(input.state==='CLOSED'&&retest.result.outcome!=='FIX_CONFIRMED')throw new ResearchError('Closing a retest requires a confirmed fix; keep other outcomes open for review',400);
   }

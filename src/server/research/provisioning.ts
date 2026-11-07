@@ -76,7 +76,7 @@ export async function provisionResearch(userId: string, targetId: string, layout
       }
       if (!existing && layout === 'legacy' && await tx.researchSession.count({ where: { userId, createdAt: { gt: new Date(Date.now() - 3600_000) } } }) >= 20) throw new ResearchError('Research workspace quota reached (20 per hour)', 429);
       let recon = await tx.scanRun.findFirst({ where: { targetId, type: 'RECON', status: 'COMPLETED', OR: [{ reconCorpus: { not: Prisma.DbNull } }, { artifacts: { some: {} } }, { surfaceObservations: { some: {} } }] }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { id: true, reconCorpus: true } });
-      const findings = await tx.finding.findMany({ where: { targetId }, orderBy: { createdAt: 'asc' }, take: 1000, select: { id: true, title: true, severity: true, vulnClass: true, reviewStatus: true, location: true } });
+      const findings = await tx.finding.findMany({ where: { targetId }, orderBy: [{createdAt:'asc'},{id:'asc'}], take: 1000, select: { id: true, title: true, severity: true, vulnClass: true, reviewStatus: true, location: true } });
       const assessment = await captureProgramAssessment(tx, target.program!.id);
       const plan = existing?.researchPlanId ? await readCapturedResearchPlan(tx, existing.researchPlanId, userId, targetId) : await captureResearchPlanForTarget(tx, userId, targetId, { scanRunId: recon?.id });
       if (plan && plan.selectedScanRunId !== recon?.id) recon = await tx.scanRun.findUnique({ where: { id: plan.selectedScanRunId }, select: { id: true, reconCorpus: true } });

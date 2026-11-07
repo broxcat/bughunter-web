@@ -69,7 +69,7 @@ export function persistableCorpus(corpus: ReconCorpus) {
   return { authenticated: corpus.raw.authenticated, publicXssSurface: corpus.publicXssSurface, technologies: corpus.technologies, authUrls: corpus.authUrls.slice(0, 20).map(safeObservationUrl), jsUrls: corpus.jsUrls.slice(0, 50).map(safeObservationUrl), forms: corpus.forms.map(f => ({ ...f, url: safeObservationUrl(f.url), fields: f.fields.filter(v => /^[a-z_][a-z0-9_.[\]-]{0,63}$/i.test(v)) })), cookies: corpus.cookies.slice(0, 40).map(c => ({ ...c })), queryParams: corpus.queryInputs.slice(0, 40).map(p => ({ url: safeObservationUrl(p.url), key: p.key })), version: 1 as const, capturedAt: new Date().toISOString(), urls: corpus.urls.map(u => { const url = new URL(safeObservationUrl(u)); url.search = ""; return url.toString(); }).filter(u => !u.includes("REDACTED")), surface: { ...corpus.surface } };
 }
 export async function recentReconCorpus(targetId: string) {
-  const run = await prisma.scanRun.findFirst({ where: { targetId, type: "RECON", status: "COMPLETED" }, orderBy: { createdAt: "desc" }, select: { reconCorpus: true } });
+  const run = await prisma.scanRun.findFirst({ where: { targetId, type: "RECON", status: "COMPLETED" }, orderBy: [{createdAt:'desc'},{id:'desc'}], select: { reconCorpus: true } });
   const parsed = persistedCorpusSchema.safeParse(run?.reconCorpus);
   return parsed.success && Date.now() - Date.parse(parsed.data.capturedAt) < 60 * 60 * 1000 ? parsed.data : null;
 }

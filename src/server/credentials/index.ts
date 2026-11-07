@@ -25,7 +25,7 @@ export function decodeTargetCredential(row: Pick<TargetCredential, 'id' | 'label
 }
 /** Scans consume verified sessions only; never log in or expose stored secrets. */
 export async function loadTargetCredentials(targetId: string): Promise<DecryptedTargetCredential[]> {
-  const rows = await prisma.targetCredential.findMany({ where: { targetId }, orderBy: { createdAt: "asc" } });
+  const rows = await prisma.targetCredential.findMany({ where: { targetId }, orderBy: [{createdAt:'asc'},{id:'asc'}] });
   return rows.filter(row => sessionState(row) === "VALID").map(decodeTargetCredential).filter((c): c is DecryptedTargetCredential => c !== null);
 }
 export function credentialHeaders(cred: DecryptedTargetCredential): Record<string, string> {

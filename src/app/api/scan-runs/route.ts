@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
 
   const runs = await prisma.scanRun.findMany({
     where: { targetId: target.id },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{createdAt:'desc'},{id:'desc'}],
     include: { executionAttempts: executionSelect, jobOutbox: { select: dispatchSelect } },
   });
 
