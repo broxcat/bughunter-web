@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { encryptSecret, decryptSecret } from '../../src/lib/crypto.ts';
+import { modernResearchUpgrade } from './modernResearchUpgrade.mjs';
 const url = process.env.TEST_MIGRATION_DATABASE_URL;
 assert(url, "TEST_MIGRATION_DATABASE_URL must point at an EMPTY disposable PostgreSQL database");
 const client = new PrismaClient({ datasourceUrl: url });
@@ -219,4 +220,5 @@ try {
   assert.deepEqual((await client.bountyProgram.findUniqueOrThrow({where:{id:p.id}})).updatedAt,cacheProgramBefore.updatedAt,'Publishing context must not manufacture Research policy drift');
   assert.equal((await client.researchSession.findFirstOrThrow()).scopeMarkdown,cacheSnapshotBefore);
   console.log("Additive upgrade passed: scan/finding/report/item/credential identities preserved, legacy UA remains unknown, Phase 1 ResearchSession unchanged, legacy hypothesis/session/revision preserved, nullable proof/authorization and no promotion backfill, DB rejects empty UA, decimal money stays exact.");
+  await modernResearchUpgrade(url, client);
 } finally { await client.$disconnect(); }
