@@ -103,4 +103,9 @@ const context=(assetId:string)=>({params:Promise.resolve({id:programId,assetId})
   const a=await asset();mocks.pause.mockRejectedValueOnce(new Error('fixture transport unavailable'));const response=await route.DELETE(req('DELETE'),context(a.id));expect(response.status).toBe(503);expect((await response.json()).error).toContain('authorization retired');expect((await p.scopeAsset.findUniqueOrThrow({where:{id:a.id}})).active).toBe(false);expect((await route.DELETE(req('DELETE'),context(a.id))).status).toBe(200);
  });
 
+ it('a stale retired-view cleanup token cannot revoke an explicitly reauthorized identity',async()=>{
+  const a=await asset(),retired=await service.editScopeAsset(userId,programId,a.id,null);const restored=await asset();expect(restored.id).toBe(a.id);
+  expect((await route.DELETE(req('DELETE',{expectedUpdatedAt:retired.updatedAt.toISOString()}),context(a.id))).status).toBe(409);expect((await p.scopeAsset.findUniqueOrThrow({where:{id:a.id}})).active).toBe(true);expect(mocks.pause).toHaveBeenCalledTimes(1);
+ });
+
 });
