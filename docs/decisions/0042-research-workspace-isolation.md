@@ -1,0 +1,43 @@
+# 0042 — Research workspace isolation
+
+Status: design selected; implementation and acceptance pending. Issue #42 remains OPEN. This record does not supersede or erase the failed acceptance.
+
+## Threat model and invariant
+
+All code inside a Research console is malicious-capable, including either provider, MCP, shell commands and children. The invariant is that a workspace process cannot access another workspace's authorization inputs, evidence, provider configuration, transcripts, tmux sockets or processes. Scope/network admission remains independent. The trusted web admission service and a narrow launcher broker are outside that untrusted process boundary. No Docker socket, DB/Redis credentials or BugHunter provider keys enter Research.
+
+## Alternatives
+
+| Approach | Fit and costs | Decision |
+| --- | --- | --- |
+| A: dedicated workspace UID/GID | Works inside the existing container without namespace capabilities. Requires persistent collision-free allocation, separate provider homes/tmux sockets, a narrow trusted process launcher, explicit ownership reconciliation and UID-based cleanup. Native tools support numeric identities, but HOME and passwd lookups need testing. Must drop every supplementary group and capability. Never reuse retired IDs. | Selected design; implementation pending. |
+| B: workspace container | Strong process/mount separation and natural private homes. Requires a separate trusted host orchestrator for container lifecycle, routing, durable volumes, cleanup and resource quotas. Web/Research must never receive the Docker socket. Current single-service compose routing has no such orchestrator. | Viable larger alternative; no socket added to application. |
+| C: mount namespace/bind mounts | Existing runtime has no CAP_SYS_ADMIN. Both `unshare -m true` and `unshare -Ur true` fail EPERM as the actual researcher UID. Adding capabilities or privileged execution to untrusted Research is unacceptable. A trusted namespace broker would also need PID/proc/descriptor isolation. | Unavailable in current runtime privilege model. |
+| D: filesystem broker only | Native Codex/Claude shells and MCP expect ordinary filesystem paths and subprocesses. A broker API alone cannot constrain arbitrary native file syscalls. Replacing these workflows with virtual file operations is a major incompatible redesign. | Rejected as sole boundary. |
+| E: Landlock/seccomp | Potential unprivileged filesystem confinement, but requires verified ABI support, a complete library/runtime allowlist, process/ptrace and Unix-socket protection, private homes, descriptor closure and immutable identity binding. Path confinement alone does not solve same-UID process/state access. | Not selected without complete process-isolation proof. |
+
+## Selected design requirements
+
+Keep the externally reachable admission/control service non-root. Untrusted provider, shell, tmux and MCP processes execute as a dedicated numeric UID/GID for the Target workspace, with empty supplementary groups, zero capabilities and no-new-privileges. Separate a narrowly scoped trusted launcher broker from provider code. Its local authenticated interface accepts only server-admitted identities and fixed lifecycle operations, never arbitrary filesystem paths or shell commands. Broker privilege must not become available through a console or provider home. Existing root SSH/setup is not authority to launch arbitrary root Research commands.
+
+A durable root-owned registry allocates monotonically increasing IDs from an operator-reserved range, serializes concurrent allocation and retains tombstones forever. Allocation must fail on exhaustion or collision with existing accounts/files; IDs are never immediately reused. Configure range compatibility with Docker userns/remapping and host ownership before enabling service. A filesystem-backed ledger must be durable across container replacement; `/run` alone is insufficient.
+
+Each UID has a root-owned binding record mapping UID/GID to Target ID, workspace ID, ResearchSession and exact authorization snapshot digest. An ephemeral active/revoked state controls admission. Validators select the record from the kernel real/effective UID, never an environment variable or supplied path. Require real/effective IDs to agree, a verified protected registry ancestry, immutable regular single-link binding file, exact workspace/Target/session/snapshot agreement, and current active authorization. Signed ticket renewal cannot silently adopt a different binding. Stale/revoked identities fail closed. Existing network Scope checks and Burp policy checks continue independently.
+
+Publication and reconciliation must apply dedicated group ownership to immutable directories/files and dedicated ownership to mutable research files. Intended modes: parent traversal only (0711, without sibling listing); workspace root root:workspace-GID 0750; immutable directories 0750 and files 0440; mutable directories workspace-UID:workspace-GID 0700 and files 0600. Trusted application publication/access needs a broker operation or narrowly scoped ACL; adding all workspace groups to every Research process is prohibited. Test final access, not calls to chmod/chown.
+
+Each workspace receives separate persistent Codex and Claude homes and tmux socket directories mode 0700. Do not mount the existing aggregate Codex state into untrusted sessions. Codex has a global SQLite thread index and sessions, so merely filtering cwd does not isolate transcripts. Claude's existing per-workspace directories are currently protected only by the common UID and need new ownership. Share no complete provider home. Authentication may be explicitly provisioned separately into a workspace; automatic copying of tokens/configuration or BugHunter provider keys is prohibited. Any supported shared auth transport must expose authentication only, not host-specific conversation state.
+
+Tmux must run its server and attached shells as the dedicated identity, with socket isolation. Session names alone are insufficient. Disconnect preserves tmux; reconnect reuses the same registry identity. Service restart reloads durable identity mappings. Cleanup revokes admission before terminating all processes for precisely that identity, confirms exit, and retains a tombstone. PID collection by cwd alone misses escaped/reparented processes and is insufficient. Deleting A must not signal B or reuse A's UID. UID-only isolation permits limited public sibling name/stat metadata beneath a traversal-only parent; sensitive paths must deny traversal. If strict namespace concealment is required, use B instead.
+
+## Migration and operational gate
+
+No production migration is authorized. Operator migration must use copies first, validate publication identity and historical snapshot, inventory all descendants without following symlinks, reject links/multiple-link files, unexpected ownership, sockets/devices and unknown roots, and record a bounded dry-run plan. Avoid recursive arbitrary chown. Preserve byte hashes of notes, Recon, Plan/Coverage, snapshots and transcripts before and after. Aggregate Codex SQLite/WAL and transcript export requires a consistent offline snapshot and an explicit per-Target partition; never guess ownership from a mutable cwd alone. Unverifiable conversations remain quarantined for operator resolution, not silently reassigned or deleted. Preserve original volumes read-only until acceptance and rollback review.
+
+Running legacy same-UID sessions cannot be made isolated in place. A supported operator transition must quiesce them explicitly, snapshot state, provision new private state, verify it, then enable new admission. Normal product action remains Open console. Failure to establish identity must produce “Research workspace isolation could not be established.” Never fall back to the common researcher identity.
+
+Unsupported until verified: insufficient subordinate-ID mapping, exhausted UID range, unverifiable legacy state, unavailable broker, writable identity registry or inability to terminate retired UID processes. No namespace capability or Docker socket is added to Research.
+
+## Evidence and remaining work
+
+2026-11-07: disposable image `bughunter-m7-research:local`, actual researcher 1000:1000 with supplementary legacy group 2000, CapEff 0, NoNewPrivs 1: mount and user namespace probes both EPERM. Retained baseline test still demonstrates foreign reads/writes/validator acceptance. No isolation implementation or passing provider/migration/lifecycle/full-suite/CI acceptance is claimed by this decision.
