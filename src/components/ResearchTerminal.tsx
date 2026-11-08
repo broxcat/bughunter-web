@@ -6,8 +6,9 @@ import { terminalHandlesKey } from '@/lib/research/terminalClipboard';
 import ResearchReconContext from './ResearchReconContext';
 import '@xterm/xterm/css/xterm.css';
 
-export default function ResearchTerminal({ targetId, company, host, requiredUserAgent, embedded = false, initialSelection }: { initialSelection?: {provider:ResearchProvider;profile?:LaunchProfile}; targetId: string; company: string; host: string; requiredUserAgent: string; embedded?: boolean }) {
+export default function ResearchTerminal({ targetId, company, host, requiredUserAgent, embedded = false, initialSelection, initialSessionId }: { initialSessionId?: string; initialSelection?: {provider:ResearchProvider;profile?:LaunchProfile}; targetId: string; company: string; host: string; requiredUserAgent: string; embedded?: boolean }) {
   const element = useRef<HTMLDivElement>(null);
+  const [sessionId, setSessionId] = useState(initialSessionId);
   const socket = useRef<WebSocket | undefined>(undefined);
   const [selectedProvider, setSelectedProvider] = useState<ResearchProvider>(initialSelection?.provider??'codex');
   const [requestedProvider, setRequestedProvider] = useState<ResearchProvider | undefined>(initialSelection?.provider);
@@ -32,6 +33,7 @@ export default function ResearchTerminal({ targetId, company, host, requiredUser
         const data = await r.json(); if (!r.ok) throw new Error(data.error ?? 'Console unavailable'); return data;
       };
       const signed = await ticket(); if (disposed) return;
+      if (typeof signed.sessionId === 'string' && signed.sessionId) setSessionId(signed.sessionId);
       selection={provider:signed.provider??'codex',profile:signed.profile??(signed.provider==='claude'?'standard':'yolo')};
       setSelectedProfile(selection.profile!);
       setSelectedProvider(signed.provider ?? 'codex'); setProviderState('checking');
@@ -66,6 +68,7 @@ export default function ResearchTerminal({ targetId, company, host, requiredUser
     <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-800 px-3 py-2 text-xs">
       <Link className="text-slate-400 hover:text-white" href="/research">← Research</Link>
       <h1 className="mr-auto truncate text-sm font-medium">{company} / {host}</h1>
+      {sessionId && <Link className="rounded border border-slate-700 px-2 py-1 hover:bg-slate-800" href={`/research/history/${encodeURIComponent(sessionId)}#hypotheses`} target="_blank" rel="noopener">Hypothèses</Link>}
       <span className="max-w-48 truncate" title={requiredUserAgent}>UA: {requiredUserAgent}</span><span aria-live="polite">Terminal: {state}</span><span title={providerState}>{selectedProvider === 'codex' ? 'Codex' : 'Claude'}: {codex}</span><span title={burpDetails}>Burp MCP: {burp}</span>
       <label className="flex items-center gap-2">Moteur IA
         <select aria-label="Moteur IA" value={switchTo ?? selectedProvider} className="rounded border border-slate-700 bg-slate-900 p-1" onChange={e => setSwitchTo(e.target.value as ResearchProvider)}>

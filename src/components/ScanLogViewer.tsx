@@ -1,6 +1,7 @@
 "use client";
 
 import ScanCancelButton from "./ScanCancelButton";
+import ScanSummaryPanel from "./ScanSummaryPanel";
 import { useEffect, useRef, useState } from "react";
 import { scanPresentation } from "@/lib/scanPresentation";
 import { Badge } from "@/components/ui/Badge";
@@ -11,10 +12,11 @@ type LogEntry = { line: string; stream: "STDOUT" | "STDERR"; createdAt: string }
 const TERMINAL = new Set<string>(["COMPLETED", "FAILED", "CANCELLED"]);
 
 type Stage={name:string;state:string;reason:string|null};
-export default function ScanLogViewer({ scanRunId,stages,cancelled }: { scanRunId: string;stages?:Stage[];cancelled?:boolean }) {
-  return <ScanLogSession key={scanRunId} scanRunId={scanRunId} stages={stages} cancelled={cancelled} />;
+type ScanLogProps = { scanRunId: string; stages?: Stage[]; cancelled?: boolean; showReconSummary?: boolean };
+export default function ScanLogViewer({ scanRunId, stages, cancelled, showReconSummary = Boolean(stages) }: ScanLogProps) {
+  return <ScanLogSession key={scanRunId} scanRunId={scanRunId} stages={stages} cancelled={cancelled} showReconSummary={showReconSummary} />;
 }
-function ScanLogSession({ scanRunId,stages,cancelled }: { scanRunId: string;stages?:Stage[];cancelled?:boolean }) {
+function ScanLogSession({ scanRunId, stages, cancelled, showReconSummary }: ScanLogProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<string>("CONNECTING");
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -84,6 +86,7 @@ function ScanLogSession({ scanRunId,stages,cancelled }: { scanRunId: string;stag
       </div>
       {stages&&<ol className="space-y-1 border-b border-border px-4 py-3 font-mono text-xs text-foreground">{stages.map(s=><li key={s.name} className="flex flex-wrap gap-x-3"><span className="min-w-48">{s.name}</span><span>{cancelled&&['PENDING','RUNNING','SKIPPED'].includes(s.state)?'Cancelled':s.state.toLowerCase().replaceAll('_',' ').replace(/^./,c=>c.toUpperCase())}</span>{s.reason&&['PARTIAL','BLOCKED','FAILED','SKIPPED','SKIPPED_UNSUPPORTED','SKIPPED_NOT_APPLICABLE','COMPLETED_WITH_FALLBACK','CANCELLED'].includes(s.state)&&<span className="basis-full text-muted">{s.reason}</span>}</li>)}</ol>}
       {execution?.state === "INTERRUPTED" && <p role="status" className="px-4 py-2 text-sm text-muted">Exécution interrompue · relance automatique désactivée.</p>}
+      {showReconSummary && TERMINAL.has(status) && <ScanSummaryPanel scanRunId={scanRunId} />}
       <p className="px-4 py-1 text-xs text-muted">Displays the most recent 2,000 received log entries.</p>
       <details className="border-t border-border">
       <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-foreground">Raw scan output ({logs.length} received lines)</summary>

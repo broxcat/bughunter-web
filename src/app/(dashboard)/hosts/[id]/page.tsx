@@ -211,7 +211,7 @@ function TargetDetailContent({
                   {openRun === run.id && (
                     <div id={`logs-${run.id}`} className="border-t border-border p-4">
                       {run.requiredUserAgent && <p>User-Agent used: <code>{run.requiredUserAgent}</code></p>}
-                      <ScanLogViewer scanRunId={run.id} />
+                      <ScanLogViewer scanRunId={run.id} showReconSummary={run.type === "RECON"} />
                     </div>
                   )}
                 </Card>
