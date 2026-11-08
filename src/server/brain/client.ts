@@ -46,6 +46,7 @@ export interface ChatOptions {
   contextWindow?: number;
   format?: Record<string, unknown>;
   maxResponseBytes?: number;
+  rejectRedirects?: boolean;
 }
 
 const DEFAULT_MAX_TOKENS = 4000;
@@ -172,6 +173,7 @@ export class BrainClient {
         headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify(body),
         signal,
+        ...(opts.rejectRedirects ? { redirect: 'error' } : {}),
       });
       if (!res.ok) {
         const detail = opts.format ? await boundedErrorDetail(res) : await res.text().catch(() => "");

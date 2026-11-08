@@ -302,6 +302,10 @@ or host list APIs. Findings undergo an evidence review before they
 can be included in reports.
 
 
+## Research harness
+
+Configure model profiles in **AI Provider Settings → Research model routing**. The application selects the planning model for mapping and test preparation, and the review model for validation and impact tracing. Configure a trusted Ollama embedding endpoint with `RESEARCH_EMBEDDING_URL` and `RESEARCH_EMBEDDING_MODEL`; see the [Research harness guide](docs/RESEARCH-HYPOTHESES.md#research-harness).
+
 ## Research: Codex and Claude
 
 **Recon → per-target Codex console → hypotheses/tests/controls → human Finding draft → Evidence Review → Report.**

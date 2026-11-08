@@ -161,21 +161,20 @@ silently reimported into that Finding.
 Redaction cannot discover every arbitrary token/PII in free text, filenames or URL
 paths: do not put credentials there; inspect artifacts before keeping/syncing them.
 
-## Guided Research workflow
+## Research harness
 
-In a host console, open **View plan** and use **Map the observed surface** to work from existing Recon and Burp evidence. **Prepare a hypothesis-led test** appears on eligible objectives when the current plan is captured by that console. Open the console and deliver updated Recon context if the plan has changed. The brief asks the agent to check prior Research Coverage and pause before a specific active test.
+1. Configure **Research model routing** in Settings. Mapping and test preparation use the planning profile. Independent validation and tracing use the review profile. Either profile can use the default provider, an explicitly saved provider, or a model override on that provider. The application selects the profile and captures the actual provider and model on each run.
+2. Open a concrete authorized Research console. In **View plan**, run **Map the observed surface**. Use **Prepare a hypothesis-led test** on one eligible objective from the plan captured by this console. Review the proposed falsification, controls and expected signal. The operator approves and executes any target interaction through the existing scoped console.
+3. Sync a v2 hypothesis with recorded tests. Open its details and run **Challenge the hypothesis**. Run **Trace the demonstrated impact** after a supported automated validation for the same revision. The review model receives a fresh request with bounded, redacted summaries and exact evidence references. Its response remains advisory.
+4. On the synced revision, use **Independent evidence decision**. A supported human decision requires a specific test with direct proof and a control or justified non-applicability. Attest to reproduction in a fresh authorized context, the observed security effect and minimum privileges. Refuted and Inconclusive decisions remain in history. Promotion creates a Candidate draft only after a supported decision on that revision. Evidence Review remains a separate human decision. If later evidence invalidates a Finding, reopen Evidence Review and record Rejected or Inconclusive.
 
-After recording and syncing a v2 hypothesis, open its details in Research history. **Challenge the hypothesis** prepares a separate, passive review in a fresh agent conversation. **Trace the demonstrated impact** uses the same evidence after the operator reviews the verdict. Both briefs bind the hypothesis to the digest of the synced workspace document. Sync again if that document changed. Record negative results through the existing Research Coverage workflow.
+### Semantic retrieval
 
-The operator reviews and pastes each brief into the target's Codex or Claude console. A brief does not invoke a model, launch a scan, or change the status of a hypothesis. When the operator accepts the trace, return it to the original research conversation to update the v2 hypothesis, run the workspace validator and sync.
+Configure `RESEARCH_EMBEDDING_URL` with the base URL of a trusted Ollama service and `RESEARCH_EMBEDDING_MODEL` with an installed embedding model. Example model: `embeddinggemma`. The application builds a bounded corpus on demand from the current target's Recon metadata, prior tests, human verdicts and Finding state. It embeds the stage query and corpus in one batch, ranks by cosine similarity, and supplies up to six matches with their references. Raw artifacts, credentials, cross-target data and historical source-code workspaces are excluded. Provider errors are shown as stage errors. Model output never enters the memory corpus as established evidence.
 
-On the synced revision, use **Independent evidence decision**. A supported decision requires a specific test with direct evidence and a control or justified non-applicability. The operator attests to reproduction in a fresh authorized context, the observed security effect and the minimum privileges needed. Select Refuted or Inconclusive when a check fails or evidence is missing. Each decision belongs to one revision. A new revision needs its own decision. The server refuses console promotion without a supported decision and creates a Candidate draft only after a separate explicit action. Historical ZIP sessions keep their existing promotion flow.
+Stage results can be reloaded from the console and hypothesis details. Model review uses recorded observations and redacted metadata. The operator checks direct evidence. Research coverage and human decisions provide the feedback for future requests. **Update agent context** also republishes that knowledge to the native Codex and Claude consoles.
 
-Review a later invalidation through the Finding’s existing Evidence Review controls. Start a new review and record Rejected or Inconclusive with the new evidence. Subsequent reports use the current Finding state. The original hypothesis revision and earlier decision remain available in history.
-
-**Update agent context** republishes the Research Coverage snapshot with bounded, redacted prior verdicts for matching objective keys on the same target. The handoff includes current Finding state when available, so a later rejection remains visible alongside the earlier decision.
-
-The workflow adapts Andy Gill's [MCP research write-up](https://blog.zsec.uk/bullyingllms/) and [harness design](https://blog.zsec.uk/harnessing-harnesses/) to BugHunter's black-box, target-scoped Research consoles.
+This flow adapts Andy Gill's [MCP research workflow](https://blog.zsec.uk/bullyingllms/) and [harness design](https://blog.zsec.uk/harnessing-harnesses/) to BugHunter's black-box workspaces. Historical ZIP exports and Hunt results remain available as archival data.
 
 ## Explicit human promotion and idempotence
 

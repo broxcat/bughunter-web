@@ -75,6 +75,8 @@ export async function modernResearchUpgrade(url, historicalClient) {
     assert.deepEqual(await snapshot(), before, 'Migration must preserve all populated historical product rows');
     assert.equal((await client.researchSession.findUniqueOrThrow({ where: { id: session.id } })).publicationManifest, null);
     assert.equal(await client.targetScopeContext.count(), 0);
+    assert.equal(await client.researchModelRouting.count(), 0);
+    assert.equal(await client.researchHarnessRun.count(), 0);
     assert.equal((await client.researchHypothesisRevision.findUniqueOrThrow({ where: { id: revision.id } })).humanReview, null);
     execFileSync('npx', ['prisma', 'migrate', 'diff', '--from-url', databaseUrl, '--to-schema-datamodel', schema, '--exit-code'], { env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: 'pipe' });
     const [{ count }] = await client.$queryRaw`SELECT count(*)::int AS count FROM "_prisma_migrations"`;

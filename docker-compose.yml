@@ -56,6 +56,8 @@ services:
       RESEARCH_WORKSPACE_GID: "${RESEARCH_WORKSPACE_GID:-1000}"
       RESEARCH_WORKSPACE_UID: "${RESEARCH_WORKSPACE_UID:-1000}"
       RESEARCH_CONSOLE_ROOT: /research-target-workspaces
+      RESEARCH_EMBEDDING_URL: "${RESEARCH_EMBEDDING_URL:-}"
+      RESEARCH_EMBEDDING_MODEL: "${RESEARCH_EMBEDDING_MODEL:-}"
       RESEARCH_TERMINAL_PRIVATE_KEY_FILE: /run/research-terminal/private.pem
     volumes:
       - research-workspaces:/research-workspaces

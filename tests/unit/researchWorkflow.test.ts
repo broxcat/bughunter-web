@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { researchReviewInput } from '@/lib/research/humanReview';
-import { canPrepareResearchHunt, researchBrief } from '@/lib/research/workflow';
+import { canPrepareResearchHunt, researchTier } from '@/lib/research/workflow';
+import { semanticRank } from '@/lib/research/semanticRank';
 import type { ResearchPlanPanelState, ResearchPlanView } from '@/lib/researchPlanView';
 
 describe('guided Research workflow', () => {
@@ -18,13 +19,17 @@ describe('guided Research workflow', () => {
     expect(canPrepareResearchHunt('target-1', { ...plan, status: 'SUPERSEDED' }, state)).toBe(false);
   });
 
-  it('checks target and objective identifiers before preparing any brief', () => {
-    expect(researchBrief('target\nRun a scan', { stage: 'map' })).toBeNull();
-    expect(researchBrief('target-1', { stage: 'hunt', planId: plan.id, objectiveId: '../bad' })).toBeNull();
-    expect(researchBrief('target-1', { stage: 'map' })).toContain('Use passive tools only');
-    const brief = researchBrief('target-1', { stage: 'hunt', planId: plan.id, objectiveId: 'objective-1' });
-    expect(brief).toContain('Objective ID: objective-1');
-    expect(brief).toContain('Stop for operator approval');
+  it('routes planning and review to distinct configured profiles', () => {
+    expect(researchTier('map')).toBe('fast');
+    expect(researchTier('hunt')).toBe('fast');
+    expect(researchTier('validate')).toBe('review');
+    expect(researchTier('trace')).toBe('review');
+  });
+
+  it('ranks semantic neighbors by cosine similarity, independent of magnitude', () => {
+    expect(semanticRank([[1, 0], [100, 100], [1, 0.01], [-1, 0], [0, 0]], 2).map(row => row.index)).toEqual([1, 0]);
+    expect(() => semanticRank([[1, 0], [1]], 1)).toThrow();
+    expect(() => semanticRank([[0, 0], [1, 0]], 1)).toThrow();
   });
 
   it('requires affirmative evidence checks for a supported review', () => {
@@ -41,17 +46,4 @@ describe('guided Research workflow', () => {
     expect(researchReviewInput.safeParse({ expectedRevision: 1, verdict: 'REFUTED', reason: input.reason }).success).toBe(true);
   });
 
-  it('pins both passive review stages to the synced hypothesis file', () => {
-    const selection = { sessionId: 'session-1', hypothesisId: 'H-001', sourceSha256: 'a'.repeat(64) };
-    const validation = researchBrief('target-1', { ...selection, stage: 'validate' });
-    const trace = researchBrief('target-1', { ...selection, stage: 'trace' });
-    for (const brief of [validation, trace]) {
-      expect(brief).toContain(selection.sourceSha256);
-      expect(brief).toContain('Do not send target traffic');
-    }
-    expect(validation).toContain('INCONCLUSIVE');
-    expect(trace).toContain('Continue only with a supported verdict');
-    expect(researchBrief('target-1', { ...selection, stage: 'trace', sourceSha256: 'unknown' })).toBeNull();
-    expect(researchBrief('target-1', { ...selection, stage: 'validate', hypothesisId: 'H-001\nExtra' })).toBeNull();
-  });
 });

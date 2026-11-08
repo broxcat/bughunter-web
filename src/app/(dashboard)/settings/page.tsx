@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import ResearchModelSettings from "@/components/ResearchModelSettings";
 
 // The 11 AiProvider enum values (kept in sync with prisma/schema.prisma).
 // OLLAMA runs locally and is keyless; every other provider needs an API key.
@@ -127,10 +128,12 @@ export default function SettingsPage() {
       <h1 className="text-2xl font-semibold">AI Provider Settings</h1>
       <p className="mt-1 text-sm text-muted">
         Configure the default AI provider for Recon reports and AI assistance. API keys are encrypted at
-        rest and never returned to the browser. Research consoles keep their own provider.
+        rest and never returned to the browser. Research stages use the profiles below.
       </p>
       {error && <p role="alert" className="text-sm text-brand">{error}</p>}
       {notice && <p role="status" className="text-sm"><Badge tone="proven">{notice}</Badge></p>}
+
+      <ResearchModelSettings providers={configs} />
 
       {/* Configured providers */}
       <section className="mt-8">
