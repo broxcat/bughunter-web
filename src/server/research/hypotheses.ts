@@ -143,6 +143,7 @@ export async function hypothesisDetail(sessionId: string, hypothesisId: string, 
   const bounds=paginationBounds({page:revisionPage,pageSize:25,q:''},await tx.researchHypothesisRevision.count({where:{hypothesisId,hypothesis:{sessionId}}}));
   const hypothesis = await tx.researchHypothesis.findFirst({ where: { id: hypothesisId, sessionId }, include: { promotion: { select: { findingId: true, hypothesisRevision: true } }, revisions: { orderBy: { revision: "desc" }, take: 25, skip:bounds.skip } } });
   if (!hypothesis) throw new HypothesisSyncError("NOT_FOUND", "Research hypothesis not found", 404);
-  return { session, hypothesis: safeResearchRead(hypothesis), revisionPage:bounds.page,revisionPages:bounds.pages,revisionTotal:bounds.total, revisionPageSize:25 };
+  const source = await tx.researchSession.findUnique({ where: { id: session.id }, select: { hypothesesSourceSha256: true } });
+  return { session, hypothesesSourceSha256: source?.hypothesesSourceSha256 ?? null, hypothesis: safeResearchRead(hypothesis), revisionPage:bounds.page,revisionPages:bounds.pages,revisionTotal:bounds.total, revisionPageSize:25 };
   },{isolationLevel:'RepeatableRead'});
 }

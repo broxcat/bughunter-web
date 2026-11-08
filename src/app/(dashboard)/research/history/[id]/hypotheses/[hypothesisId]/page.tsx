@@ -2,6 +2,8 @@ import EvidencePanel from '@/components/EvidencePanel';
 import Link from "next/link";
 import ResearchProof from "@/components/ResearchProof";
 import ResearchPromotion from "@/components/ResearchPromotion";
+import ResearchBrief from "@/components/ResearchBrief";
+import { researchBrief } from "@/lib/research/workflow";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { hypothesisDetail, HypothesisSyncError } from "@/server/research/hypotheses";
@@ -24,6 +26,10 @@ export default async function HypothesisPage({ params, searchParams }: { params:
   const h = data.hypothesis;
   const policyState = await researchPolicyState(data.session.targetId, session.user.id, data.session.authorizationSnapshot);
   const scopeActive = policyState !== "INACTIVE";
+  const reviewInput = policyState === "CURRENT" && data.session.status === "READY" &&
+    data.session.workspaceId.startsWith("research_") && data.hypothesesSourceSha256 && h.researchData
+    ? { sessionId: id, hypothesisId: h.externalId, sourceSha256: data.hypothesesSourceSha256 }
+    : null;
   return <div className="space-y-5"><Link className="text-brand" href={`/research/history/${id}`}>← Research Session</Link><h1 className="text-2xl font-semibold">{h.externalId} — {h.title}</h1>
     {!scopeActive && <p role="alert">Scope no longer active. Do not continue active testing.</p>}
     {policyState === "CHANGED" && <p role="alert">Program or scope changed since export. Create a current workspace before promotion.</p>}
@@ -36,6 +42,10 @@ export default async function HypothesisPage({ params, searchParams }: { params:
     <Card className="p-5"><h2 className="text-xl">WHAT WOULD DISPROVE IT</h2><p className="whitespace-pre-wrap">{h.falsificationCondition}</p></Card>
     <Card className="p-5"><h2 className="text-xl">WHAT TO TEST NEXT</h2><p className="whitespace-pre-wrap">{h.nextTest}</p><p>Expected signal: {h.expectedSignal}</p></Card>
     <Card className="p-5"><ResearchProof value={h.researchData} /></Card>
+    {reviewInput && <section aria-label="Independent Research review" className="space-y-2">
+      <ResearchBrief key={reviewInput.sourceSha256 + ":validate"} title="Challenge the hypothesis" brief={researchBrief(data.session.targetId, { ...reviewInput, stage: "validate" })} />
+      <ResearchBrief key={reviewInput.sourceSha256 + ":trace"} title="Trace the demonstrated impact" brief={researchBrief(data.session.targetId, { ...reviewInput, stage: "trace" })} />
+    </section>}
     <EvidencePanel targetId={data.session.targetId} sessionId={id} link={{entity:'hypothesis',id:h.id,role:'SUPPORTS'}}/><ResearchPromotion sessionId={id} hypothesisId={h.id} targetId={data.session.targetId} revision={h.revision} eligible={h.status === "CONFIRMED" && Boolean(h.researchData) && policyState === "CURRENT" && data.session.status === "READY"} existing={h.promotion} />
     <Evidence title="Evidence for" entries={h.evidenceFor} /><Evidence title="Evidence against" entries={h.evidenceAgainst} />
     <p>Tags: {h.tags.join(", ") || "None"}. Workspace: {data.session.workspaceId}. Raw evidence is not imported.</p>

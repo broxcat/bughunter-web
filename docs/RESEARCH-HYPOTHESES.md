@@ -161,6 +161,16 @@ silently reimported into that Finding.
 Redaction cannot discover every arbitrary token/PII in free text, filenames or URL
 paths: do not put credentials there; inspect artifacts before keeping/syncing them.
 
+## Guided Research workflow
+
+In a host console, open **View plan** and use **Map the observed surface** to work from existing Recon and Burp evidence. **Prepare a hypothesis-led test** appears on eligible objectives when the current plan is captured by that console. Open the console and deliver updated Recon context if the plan has changed. The brief asks the agent to check prior Research Coverage and pause before a specific active test.
+
+After recording and syncing a v2 hypothesis, open its details in Research history. **Challenge the hypothesis** prepares a separate, passive review in a fresh agent conversation. **Trace the demonstrated impact** uses the same evidence after the operator reviews the verdict. Both briefs bind the hypothesis to the digest of the synced workspace document. Sync again if that document changed. Record negative results through the existing Research Coverage workflow.
+
+The operator reviews and pastes each brief into the target's Codex or Claude console. A brief does not invoke a model, launch a scan, or change the status of a hypothesis. When the operator accepts the trace, return it to the original research conversation to update the v2 hypothesis, run the workspace validator and sync. Use the existing Finding draft and Evidence Review flow.
+
+The workflow adapts Andy Gill's [MCP research write-up](https://blog.zsec.uk/bullyingllms/) and [harness design](https://blog.zsec.uk/harnessing-harnesses/) to BugHunter's black-box, target-scoped Research consoles.
+
 ## Explicit human promotion and idempotence
 
 On a CONFIRMED v2 detail, the operator inspects source/evidence/reproduction/controls,
