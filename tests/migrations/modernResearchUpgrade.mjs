@@ -41,7 +41,7 @@ export async function modernResearchUpgrade(url, historicalClient) {
     // Select only old fields: publicationManifest does not exist at migration 37.
     const session = await client.researchSession.create({ data: { userId: user.id, targetId: target.id, workspaceId: randomUUID(), status: 'READY', targetHost: target.host, programName: program.companyName, scopeMarkdown: run.scopeMarkdown, authorizationSnapshot: { version: 1, targetId: target.id, fixture: true }, researchPlanId: plan.id, reconScanRunId: run.id, files: ['scope.md', 'research/notes.md'], exportSha256: 'fixture-export' }, select: { id: true } });
     const hypothesis = await client.researchHypothesis.create({ data: { sessionId: session.id, planItemId: item.id, externalId: 'H-001', title: 'Controlled historical hypothesis', status: 'CONFIRMED', hypothesis: 'Fixture hypothesis', evidenceFor: ['EV-original'], evidenceAgainst: [], nextTest: 'Retest separately', expectedSignal: 'Access denied after fix', falsificationCondition: 'No reproducible difference', contentSha256: 'fixture-hypothesis' } });
-    await client.researchHypothesisRevision.create({ data: { hypothesisId: hypothesis.id, revision: 1, snapshot: { status: 'CONFIRMED', fixture: true } } });
+    const revision = await client.researchHypothesisRevision.create({ data: { hypothesisId: hypothesis.id, revision: 1, snapshot: { status: 'CONFIRMED', fixture: true } }, select: { id: true } });
     const coverage = await client.researchCoverage.create({ data: { targetId: target.id, scopeAssetId: asset.id, scopeAssetReferenceId: asset.id, planItemId: item.id, planItemReferenceId: item.id, objectiveKey: 'object-access', coverageKey: 'fixture-coverage', category: 'AUTHORIZATION', surface: '/objects/fixture', method: 'GET', contextKey: 'ACCOUNT_A', contextLabel: 'Controlled account A', contextRunId: run.id, testKey: 'controlled-object', revision: 1, state: 'NEEDS_RETEST' } });
     const event = await client.researchCoverageEvent.create({ data: { coverageId: coverage.id, targetId: target.id, eventKey: randomUUID(), contentSha256: 'fixture-event', revision: 1, state: 'NEEDS_RETEST', action: 'Compared controlled fixture accounts', result: 'Separate retest required', evidence: ['EV-original'], performedAt: new Date(), actorId: user.id, source: 'MANUAL', sessionId: session.id, sessionReferenceId: session.id, hypothesisReferenceId: hypothesis.id } });
     for (const id of ['EV-original', 'EV-retest']) {
@@ -75,8 +75,10 @@ export async function modernResearchUpgrade(url, historicalClient) {
     assert.deepEqual(await snapshot(), before, 'Migration must preserve all populated historical product rows');
     assert.equal((await client.researchSession.findUniqueOrThrow({ where: { id: session.id } })).publicationManifest, null);
     assert.equal(await client.targetScopeContext.count(), 0);
+    assert.equal((await client.researchHypothesisRevision.findUniqueOrThrow({ where: { id: revision.id } })).humanReview, null);
     execFileSync('npx', ['prisma', 'migrate', 'diff', '--from-url', databaseUrl, '--to-schema-datamodel', schema, '--exit-code'], { env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: 'pipe' });
-    console.log(`M8_MODERN_UPGRADE_PASS: migrations 37→39; ${Object.values(before).reduce((n, rows) => n + rows.length, 0)} populated rows preserved across ${tables.size} tables; Scope snapshots, Recon history, Plan, Coverage, hypotheses, evidence links, Finding review, distinct Retest proof and Report; schema drift absent.`);
+    const [{ count }] = await client.$queryRaw`SELECT count(*)::int AS count FROM "_prisma_migrations"`;
+    console.log(`M8_MODERN_UPGRADE_PASS: migrations 37→${count}; ${Object.values(before).reduce((n, rows) => n + rows.length, 0)} populated rows preserved across ${tables.size} tables; Scope snapshots, Recon history, Plan, Coverage, hypotheses, evidence links, Finding review, distinct Retest proof and Report; schema drift absent.`);
   } finally {
     await client.$disconnect();
     await historicalClient.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${namespace}" CASCADE`);
