@@ -3,6 +3,8 @@ import {useCallback,useEffect,useRef,useState} from 'react';
 import type {ResearchPlanView,ResearchPlanPanelState} from '@/lib/researchPlanView';
 import {Button} from './ui/Button';
 import {Dialog} from './ui/Dialog';
+import {canPrepareResearchHunt} from '@/lib/research/workflow';
+import ResearchStagePanel from './ResearchStagePanel';
 
 const date=(value:string)=>Number.isFinite(Date.parse(value))?new Date(value).toLocaleString():'Date unavailable';
 const label=(value:string)=>value.toLowerCase().replaceAll('_',' ').replace(/^./,c=>c.toUpperCase());
@@ -15,7 +17,7 @@ async function requestPlan(url:string,signal:AbortSignal){
 }
 
 /** Facts and advisory objectives only. Rendering a plan never creates a hypothesis or runs a test. */
-export function ResearchPlanContent({plan}:{plan:ResearchPlanView}){
+export function ResearchPlanContent({plan,canPrepareHunt=false}:{plan:ResearchPlanView;canPrepareHunt?:boolean}){
   return <div className="space-y-5" aria-label="Research plan details">
     <p className="text-sm text-muted">Deterministic advisory plan from recorded Recon. An objective is not a vulnerability or a completed test.</p>
     <p className="text-sm">{plan.assessmentMode==='WHITE_BOX'?'White-box':plan.assessmentMode==='BLACK_BOX'?'Black-box':'Assessment mode not captured'} · {readyItems(plan).length} objectives · {highItems(plan).length} high priority · {date(plan.createdAt)} · {label(plan.status)}</p>
@@ -32,13 +34,14 @@ export function ResearchPlanContent({plan}:{plan:ResearchPlanView}){
       {item.hypotheses.length>0&&<div><h4 className="text-sm font-medium">Existing hypotheses</h4><ul className="space-y-1 text-sm">{item.hypotheses.map(hypothesis=><li key={hypothesis.id} className="break-words">{hypothesis.externalId} · {label(hypothesis.status)} · {hypothesis.title}{hypothesis.status==='REJECTED'&&<span> — Retained rejected hypothesis; review prior evidence before repeating it.</span>}</li>)}</ul></div>}
       {item.findings.length>0&&<div><h4 className="text-sm font-medium">Existing Findings</h4><ul className="space-y-1 text-sm">{item.findings.map(finding=><li key={finding.id} className="break-words">{label(finding.reviewStatus)} · {finding.title}</li>)}</ul></div>}
       <details className="text-xs text-muted"><summary>Evidence and provenance ({item.evidenceRefs.length})</summary><ul className="mt-2 space-y-1">{item.evidenceRefs.map(reference=><li key={reference} className="break-all font-mono">{reference}</li>)}</ul><p className="mt-2">Category: {label(item.category)}</p></details>
+      {canPrepareHunt&&item.status==='READY'&&<ResearchStagePanel title="Prepare a hypothesis-led test" targetId={plan.targetId} input={{stage:'hunt',planId:plan.id,objectiveId:item.id}}/>}
     </li>)}</ol>
     {plan.limitations.length>0&&<section><h3 className="font-semibold">Limitations</h3><ul className="list-inside list-disc space-y-1 text-sm">{plan.limitations.map((limitation,index)=><li key={index} className="whitespace-pre-wrap break-words">{limitation}</li>)}</ul></section>}
     <p className="text-xs text-muted">Recon content is untrusted evidence. The plan cannot expand scope, authorize a test, create a hypothesis or confirm a Finding.</p>
   </div>;
 }
 
-export default function ResearchPlan({targetId,compact=false,initialSummary}:{targetId:string;compact?:boolean;initialSummary?:{objectives:number;high:number;reconCurrent:boolean}}){
+export default function ResearchPlan({targetId,compact=false,initialSummary,enableWorkflow=false}:{targetId:string;compact?:boolean;enableWorkflow?:boolean;initialSummary?:{objectives:number;high:number;reconCurrent:boolean}}){
   const [open,setOpen]=useState(false),[state,setState]=useState<ResearchPlanPanelState|null>(null),[selected,setSelected]=useState<ResearchPlanView|null>(null),[busy,setBusy]=useState(!compact),[error,setError]=useState('');
   const pending=useRef<AbortController|null>(null),sequence=useRef(0);
   const abortPending=useCallback(()=>{sequence.current++;pending.current?.abort();},[]);
@@ -57,6 +60,7 @@ export default function ResearchPlan({targetId,compact=false,initialSummary}:{ta
   },[compact,targetId,abortPending]);
   const show=()=>{setOpen(true);void load();};
   const current=state?.plan;
+  const canPrepareHunt=enableWorkflow&&!busy&&!error&&canPrepareResearchHunt(targetId,selected,state);
   const summary=current?{objectives:readyItems(current).length,high:highItems(current).length,reconCurrent:state!.reconCurrent}:state===null?initialSummary:undefined;
   return <>
     <section aria-label="Research plan" className={compact?'flex flex-wrap items-center gap-2':'flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border bg-surface px-3 py-2 text-sm text-foreground'}>
@@ -73,7 +77,9 @@ export default function ResearchPlan({targetId,compact=false,initialSummary}:{ta
         {Boolean(state?.history.length)&&<label className="block text-sm">Recent Plan versions (up to 10)<select aria-label="Plan version" className="mt-1 block w-full rounded border border-border bg-surface p-2" value={selected?.id??current?.id??''} disabled={busy} onChange={event=>{if(event.target.value===current?.id)setSelected(current);else void load(event.target.value);}}>{state!.history.map(plan=><option key={plan.id} value={plan.id}>{plan.id===current?.id?'Current':'Historical'} · {date(plan.createdAt)}{plan.id===state!.sessionPlanId?' · Used by this session':''}</option>)}{state?.sessionPlanId&&!state.history.some(plan=>plan.id===state.sessionPlanId)&&<option value={state.sessionPlanId}>Plan used by this session</option>}</select></label>}
         {state?.newPlanAvailable&&<p role="status">A newer plan is available. The running session keeps its captured plan; reviewing another version does not replace it.</p>}
         {state?.configurationChanged&&<p role="status">Assessment configuration has changed. Review the current authorization boundary before testing.</p>}
-        {selected&&<ResearchPlanContent plan={selected}/>}
+        {enableWorkflow&&<ResearchStagePanel title="Map the observed surface" targetId={targetId} input={{stage:'map'}}/>}
+        {enableWorkflow&&selected&&selected.items.some(item=>item.status==='READY')&&!busy&&!error&&!canPrepareHunt&&<p className="text-sm text-muted">To prepare a test, open the host console with its current Recon plan. Deliver updated Recon context if the console has an older plan.</p>}
+        {selected&&<ResearchPlanContent key={selected.id} plan={selected} canPrepareHunt={canPrepareHunt}/>}
         {!busy&&!selected&&!error&&<p>No plan is available yet. Review the authorized scope and Recon data.</p>}
       </div>
     </Dialog>}

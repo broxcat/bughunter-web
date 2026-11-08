@@ -45,10 +45,10 @@ export async function resolveProviderApiKey(userId: string, provider: AiProvider
   return providerKey(provider, config.apiKeyCipher);
 }
 
-export async function resolveAiConfigForProvider(userId: string, provider: AiProviderName, options: { includeApiKey?: boolean } = {}): Promise<ResolvedAiConfig> {
+export async function resolveAiConfigForProvider(userId: string, provider: AiProviderName, options: { includeApiKey?: boolean; modelOverride?: string | null } = {}): Promise<ResolvedAiConfig> {
   const config = await prisma.aiProviderConfig.findUnique({ where: { userId_provider: { userId, provider } } });
   if (!config) throw new AiConfigurationError('Save this provider configuration in Settings first.');
-  const fields = resolveConfiguredProviderFields({ ...config, hasApiKey: Boolean(config.apiKeyCipher) });
+  const fields = resolveConfiguredProviderFields({ ...config, model: options.modelOverride ?? config.model, hasApiKey: Boolean(config.apiKeyCipher) });
   return { configId: config.id, ...fields, ...(options.includeApiKey === false ? {} : { apiKey: providerKey(fields.provider, config.apiKeyCipher) }) };
 }
 

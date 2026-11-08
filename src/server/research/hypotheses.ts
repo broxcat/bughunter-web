@@ -112,7 +112,7 @@ export async function syncHypotheses(sessionId: string, userId: string) {
 }
 
 export async function ownedHypothesisSession(sessionId: string, userId: string) {
-  const session = await prisma.researchSession.findFirst({ where: { id: sessionId, ...ownedResearch(userId) }, select: { id: true, workspaceId: true, targetId: true, status: true, hypothesesSyncedAt: true, authorizationSnapshot: true } });
+  const session = await prisma.researchSession.findFirst({ where: { id: sessionId, ...ownedResearch(userId) }, select: { id: true, workspaceId: true, targetId: true, consoleTargetId: true, status: true, hypothesesSyncedAt: true, authorizationSnapshot: true } });
   if (!session) throw new HypothesisSyncError("NOT_FOUND", "Research session not found", 404);
   return session;
 }
@@ -143,6 +143,10 @@ export async function hypothesisDetail(sessionId: string, hypothesisId: string, 
   const bounds=paginationBounds({page:revisionPage,pageSize:25,q:''},await tx.researchHypothesisRevision.count({where:{hypothesisId,hypothesis:{sessionId}}}));
   const hypothesis = await tx.researchHypothesis.findFirst({ where: { id: hypothesisId, sessionId }, include: { promotion: { select: { findingId: true, hypothesisRevision: true } }, revisions: { orderBy: { revision: "desc" }, take: 25, skip:bounds.skip } } });
   if (!hypothesis) throw new HypothesisSyncError("NOT_FOUND", "Research hypothesis not found", 404);
-  return { session, hypothesis: safeResearchRead(hypothesis), revisionPage:bounds.page,revisionPages:bounds.pages,revisionTotal:bounds.total, revisionPageSize:25 };
+  const currentRevision = await tx.researchHypothesisRevision.findUnique({
+    where: { hypothesisId_revision: { hypothesisId, revision: hypothesis.revision } },
+    select: { humanReview: true },
+  });
+  return { session, humanReview: safeResearchRead(currentRevision?.humanReview ?? null), hypothesis: safeResearchRead(hypothesis), revisionPage:bounds.page,revisionPages:bounds.pages,revisionTotal:bounds.total, revisionPageSize:25 };
   },{isolationLevel:'RepeatableRead'});
 }

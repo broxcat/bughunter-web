@@ -5,6 +5,10 @@ import {mkdtemp,writeFile,readFile,lstat,rm,symlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {coverageRecordSchema} from '@/lib/research/coverage';
+import {loopDocument} from '../fixtures/researchLoop.mjs';
+const mockAuth = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/auth', () => ({ auth: mockAuth }));
+vi.mock('@/lib/rateLimit', () => ({ rateLimit: vi.fn(async () => ({ status: 'ALLOWED', remaining: 9, resetSec: 300 })) }));
 const db=process.env.TEST_DATABASE_URL,schema='coverage_'+randomUUID().replaceAll('-','');
 if(db){const u=new URL(db);u.searchParams.set('schema',schema);process.env.DATABASE_URL=u.toString();}
 let p:typeof import('@/lib/prisma').prisma,service:typeof import('@/server/research/coverage'),workspace:typeof import('@/server/research/workspace'),root:string,userId:string,targetId:string,sessionId:string,itemId:string,planId:string,scopeId:string,folder:string;
@@ -27,6 +31,111 @@ const body=(extra:Record<string,unknown>={})=>coverageRecordSchema.parse({testKe
   const {consoleBundle,writeConsoleWorkspace}=await import('@/server/research/consoleWorkspace');await writeConsoleWorkspace(root,targetId,consoleBundle(selected,null,[],session));folder=join(root,workspaceId);await writeFile(join(folder,'requests/control.json'),'Synthetic redacted evidence',{mode:0o600});
  });
  afterAll(async()=>{if(p){await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);await p.$disconnect();}if(root)await rm(root,{recursive:true,force:true});});
+ it('enforces reviewed console promotion, retains verdict history, and republishes later invalidation', async () => {
+  const {syncHypotheses} = await import('@/server/research/hypotheses');
+  const {promoteHypothesis, recordResearchReview} = await import('@/server/research/promotion');
+  const document = loopDocument(sessionId, {targetId, status:'CONFIRMED', ref:'requests/positive.json'});
+  const hypothesis = {...document.hypotheses[0], planItemId:itemId};
+  await writeFile(join(folder,'requests/positive.json'),'Synthetic controlled positive capture',{mode:0o600});
+  const sync = async () => {
+   const content = JSON.stringify({...document,hypotheses:[hypothesis]})
+     .replaceAll('https://app.example.test/objects/fixture',surface).replaceAll('evidence/control.txt','requests/control.json');
+   await writeFile(join(folder,'findings/hypotheses.json'),content);
+   await syncHypotheses(sessionId,userId);
+  };
+  await sync();
+  const h = await p.researchHypothesis.findFirstOrThrow({where:{sessionId}});
+  const promote = (revision:number) => promoteHypothesis(sessionId,h.id,userId,revision);
+  await expect(promote(1)).rejects.toMatchObject({code:'REVIEW_REQUIRED'});
+  const refuted = {expectedRevision:1,verdict:'REFUTED' as const,reason:'The control independently explained the observed difference.'};
+  const recorded = await recordResearchReview(sessionId,h.id,userId,refuted);
+  expect(await recordResearchReview(sessionId,h.id,userId,refuted)).toEqual(recorded);
+  await expect(promote(1)).rejects.toMatchObject({code:'REVIEW_REQUIRED'});
+  const supported = {
+   expectedRevision:2,verdict:'SUPPORTED' as const,testId:'T-001',accessContext:'Standard fixture account',
+   reproducedInFreshContext:true as const,impactDemonstrated:true as const,minimumPrivilegesVerified:true as const,
+   reason:'The controlled marker reproduces only for the fixture account. Cookie: PRIVATE_COOKIE',
+  };
+  await expect(recordResearchReview(sessionId,h.id,userId,{...supported,expectedRevision:1})).rejects.toMatchObject({code:'ALREADY_REVIEWED'});
+  hypothesis.title = 'Independent controlled comparison with a new fixture object';
+  await sync();
+  await expect(promote(1)).rejects.toMatchObject({code:'REVISION_CHANGED'});
+  await expect(promote(2)).rejects.toMatchObject({code:'REVIEW_REQUIRED'});
+  await expect(recordResearchReview(sessionId,h.id,userId,{...supported,testId:'T-999'})).rejects.toMatchObject({code:'PROOF_REQUIRED'});
+  await recordResearchReview(sessionId,h.id,userId,supported);
+  const {findingId} = await promote(2);
+  expect(await p.finding.findUniqueOrThrow({where:{id:findingId}})).toMatchObject({reviewStatus:'CANDIDATE',gateStatus:'UNVALIDATED'});
+  const {NextRequest} = await import('next/server');
+  const {POST:reviewFinding} = await import('@/app/api/findings/[id]/validate/route');
+  mockAuth.mockResolvedValue({user:{id:userId}});
+  for (const status of ['EVIDENCE_REVIEW','REJECTED']) {
+   const request = new NextRequest('http://app.example.test', {
+    method:'POST', body:JSON.stringify({status,notes:'Later evidence disproved the original fixture access boundary.'}),
+   });
+   expect((await reviewFinding(request,{params:Promise.resolve({id:findingId})})).status).toBe(200);
+  }
+  const reference = await service.publishResearchCoverage(userId,targetId);
+  const content = await readFile(join(folder,reference.jsonPath),'utf8');
+  expect(content).not.toContain('PRIVATE_COOKIE');
+  expect(JSON.parse(content).reviewMemory).toEqual([
+   expect.objectContaining({revision:2,verdict:'SUPPORTED',finding:expect.objectContaining({id:findingId,reviewStatus:'REJECTED'})}),
+   expect.objectContaining({revision:1,verdict:'REFUTED',currentRevision:false}),
+  ]);
+ });
+ it('routes review, retrieves scoped semantic memory, and gates Trace on the exact validated revision', async () => {
+  vi.stubEnv('RESEARCH_EMBEDDING_URL','http://ollama.test:11434');
+  vi.stubEnv('RESEARCH_EMBEDDING_MODEL','embedding-fixture');
+  const {syncHypotheses} = await import('@/server/research/hypotheses');
+  const {routeResearchModel,saveResearchRouting} = await import('@/server/research/harnessRouting');
+  const {runResearchStage,latestResearchStage} = await import('@/server/research/harness');
+  await p.aiProviderConfig.create({data:{userId,provider:'OLLAMA',model:'fixture-chat',baseUrl:'http://ollama.test:11434',isActive:true}});
+  await saveResearchRouting(userId,{fastProvider:'OLLAMA',fastModel:'fixture-fast',reviewProvider:'OLLAMA',reviewModel:'fixture-review'});
+  expect((await routeResearchModel(userId,'hunt')).model).toBe('fixture-fast');
+  await service.recordResearchCoverage(userId,targetId,body());
+  const doc = loopDocument(sessionId,{targetId,status:'CONFIRMED',ref:'requests/positive.json'});
+  const hypothesis = {...doc.hypotheses[0],planItemId:itemId};
+  await writeFile(join(folder,'requests/positive.json'),'Synthetic controlled capture');
+  const sync = async () => {
+   await writeFile(join(folder,'findings/hypotheses.json'),JSON.stringify({...doc,hypotheses:[hypothesis]})
+    .replaceAll('https://app.example.test/objects/fixture',surface).replaceAll('evidence/control.txt','requests/control.json'));
+   await syncHypotheses(sessionId,userId);
+  };
+  await sync();
+  const h = await p.researchHypothesis.findFirstOrThrow({where:{sessionId}});
+  const scoped = {sessionId,hypothesisId:h.id,revision:h.revision};
+  const run = (stage:'validate'|'trace',requestKey=randomUUID()) => runResearchStage(userId,targetId,{requestKey,input:{...scoped,stage}},new AbortController().signal);
+  const mockFetch = vi.spyOn(globalThis,'fetch').mockImplementation(async (url,options) => {
+   const input = JSON.parse(String(options?.body));
+   expect(String(options?.body)).not.toContain('PRIVATE_COOKIE');
+   if (String(url).endsWith('/api/embed')) {
+    expect(input.model).toBe('embedding-fixture');
+    expect(input.input.length).toBe(2);
+    expect(input.input[1]).toContain('negative result retained');
+    return Response.json({embeddings:[[1,0],[1,0]]});
+   }
+   expect(String(url)).toBe('http://ollama.test:11434/api/chat');
+   expect(input.model).toBe('fixture-review');
+   expect(input.tools).toBeUndefined();
+   return Response.json({message:{content:JSON.stringify({assessment:'SUPPORTED',summary:'Recorded control distinguishes the two cases.',nextStep:'Check the scoped evidence independently.',citations:['F2','M1']})}});
+  });
+  try {
+   await expect(run('trace')).rejects.toMatchObject({status:409});
+   expect(mockFetch).not.toHaveBeenCalled();
+   const key = randomUUID();
+   const validated = await run('validate',key);
+   expect(validated).toMatchObject({model:'fixture-review',status:'SUCCEEDED',result:{assessment:'SUPPORTED',memoryUsed:1}});
+   expect(await run('validate',key)).toEqual(validated);
+   expect(mockFetch).toHaveBeenCalledTimes(2);
+   expect(await latestResearchStage(userId,targetId,{...scoped,stage:'validate'})).toEqual(validated);
+   expect((await run('trace')).status).toBe('SUCCEEDED');
+   expect(mockFetch).toHaveBeenCalledTimes(4);
+   hypothesis.title='Newly synced hypothesis revision';
+   await sync();
+   await expect(run('trace')).rejects.toMatchObject({status:409});
+   await expect(runResearchStage(userId,targetId,{requestKey:randomUUID(),input:{...scoped,revision:2,stage:'trace'}},new AbortController().signal)).rejects.toMatchObject({status:409});
+   expect(await p.finding.count({where:{targetId}})).toBe(0);
+  } finally { mockFetch.mockRestore(); vi.unstubAllEnvs(); }
+ });
  it('keeps negative tests, method and authentication comparisons separate without creating Findings',async()=>{
   const network=vi.spyOn(globalThis,'fetch').mockRejectedValue(new Error('No network expected'));
   try{await service.recordResearchCoverage(userId,targetId,body());await service.recordResearchCoverage(userId,targetId,body({contextKey:'AUTH_A',comparisonKey:'AUTH_B'}));await service.recordResearchCoverage(userId,targetId,body({method:'PATCH',state:'NOT_TESTED',evidence:[],result:'Not tested yet'}));

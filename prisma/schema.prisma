@@ -32,6 +32,7 @@ model User {
   scanRequestKeys  ScanRequestKey[]
   researchSessions ResearchSession[]
   researchPromotions ResearchFindingPromotion[]
+  researchRouting ResearchModelRouting?
 }
 
 model Account {
@@ -732,6 +733,7 @@ model ResearchSession {
   hypotheses ResearchHypothesis[]
   reconSnapshots ResearchReconSnapshot[]
   reconDeliveries ResearchReconDelivery[]
+  harnessRuns ResearchHarnessRun[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -811,6 +813,7 @@ model ResearchHypothesisRevision {
   hypothesisId String
   revision     Int
   snapshot     Json
+  humanReview  Json?
   source       ResearchHypothesisRevisionSource @default(WORKSPACE_IMPORT)
   createdAt    DateTime @default(now())
 
@@ -1389,4 +1392,30 @@ model FindingRetestResult {
  evidenceIds String[]
  createdAt DateTime @default(now())
  retest FindingRetest @relation(fields:[retestId],references:[id],onDelete:Cascade)
+}
+
+model ResearchModelRouting {
+  userId String @id
+  fastProvider AiProvider?
+  fastModel String? @db.VarChar(200)
+  reviewProvider AiProvider?
+  reviewModel String? @db.VarChar(200)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ResearchHarnessRun {
+  id String @id @default(cuid())
+  sessionId String
+  requestKey String @db.Uuid
+  stage String
+  subject String
+  status String
+  provider AiProvider
+  model String @db.VarChar(200)
+  result Json?
+  createdAt DateTime @default(now())
+  session ResearchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, requestKey])
+  @@index([sessionId, stage, subject, createdAt])
 }

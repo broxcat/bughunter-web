@@ -164,8 +164,7 @@ Build checks SKILL.md and a SHA-256 manifest; tests query native `skills/list`.
 Their mandatory authorization/command confirmation gates are unchanged. YOLO
 never means stripping those rules. Choose a relevant skill rather than running
 all of them; missing optional tools referenced by a skill are not auto-installed.
-Skills do not prove vulnerability/coverage. Bootstrap coordinates up to four
-subagents on distinct mechanisms, tracks global state and rejects duplicates.
+Use the [Research harness](RESEARCH-HYPOTHESES.md#research-harness) to map observations, plan a specific test and review recorded evidence. The native console provides the existing scoped MCP tools for operator-approved work.
 
 Useful TUI commands after operator login: `/status`, `/mcp`, `/skills`.
 Remote inference and signed-in TUI checks require an operator Codex account; tests
@@ -244,5 +243,4 @@ The real-image console suite verifies auth/tickets, xterm/PTY/tmux refresh,
 different Targets, revoked scope, official proxy SSE, UA at a local HTTP receiver,
 Playwright through a local bridge, skills discovery and backend isolation. All
 network fixtures are disposable/local. Burp reports PROTOCOL_VERIFIED, not a real
-GUI test. Earlier architecture/verification records are preserved in
-[history/CODEX-RESEARCH-PHASES-1-4.md](history/CODEX-RESEARCH-PHASES-1-4.md).
+GUI test. The current staged process is documented in [Research harness](RESEARCH-HYPOTHESES.md#research-harness).

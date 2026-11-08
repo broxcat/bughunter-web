@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { Button } from "./ui/Button";
-export default function ResearchPromotion({ sessionId, hypothesisId, targetId, revision, eligible, existing }: { sessionId: string; hypothesisId: string; targetId: string; revision: number; eligible: boolean; existing: { findingId: string; hypothesisRevision: number } | null }) {
+export default function ResearchPromotion({ sessionId, hypothesisId, targetId, revision, eligible, existing, requiresReview = false }: { sessionId: string; hypothesisId: string; targetId: string; revision: number; eligible: boolean; requiresReview?: boolean; existing: { findingId: string; hypothesisRevision: number } | null }) {
   const [draft, setDraft] = useState(existing), [acknowledged, setAcknowledged] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const pending = useRef(false);
   async function promote() {
@@ -21,7 +21,7 @@ export default function ResearchPromotion({ sessionId, hypothesisId, targetId, r
     {draft ? <><p>Finding already created from Research revision {draft.hypothesisRevision}. Later Research edits do not overwrite its review.</p><Link className="text-brand" href={`/targets/${targetId}/findings#finding-${draft.findingId}`}>Open Finding draft</Link></> : eligible ? <>
       <label className="block"><input type="checkbox" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} /> I reviewed this revision, its provenance, reproduction and controls. Create only an unvalidated Finding draft.</label>
       <Button disabled={busy || !acknowledged} onClick={promote}>{busy ? "Creating draft…" : "Create Finding Draft"}</Button>
-    </> : <p>Promotion unavailable: a CONFIRMED v2 hypothesis, current authorization snapshot and reproducible controlled evidence are required. Legacy hypotheses remain readable.</p>}
+    </> : <p>{requiresReview ? "A supported independent decision on this revision is required before promotion." : "Promotion requires a CONFIRMED v2 hypothesis, current authorization and reproducible controlled evidence."}</p>}
     {error && <p role="alert">{error}</p>}
   </section>;
 }
