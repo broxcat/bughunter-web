@@ -116,6 +116,7 @@ const body=(extra:Record<string,unknown>={})=>coverageRecordSchema.parse({testKe
    expect(String(url)).toBe('http://ollama.test:11434/api/chat');
    expect(input.model).toBe('fixture-review');
    expect(input.tools).toBeUndefined();
+   expect(input.format.properties.assessment.enum).toEqual(['SUPPORTED','REFUTED','INCONCLUSIVE']);
    return Response.json({message:{content:JSON.stringify({assessment:'SUPPORTED',summary:'Recorded control distinguishes the two cases.',nextStep:'Check the scoped evidence independently.',citations:['F2','M1']})}});
   });
   try {

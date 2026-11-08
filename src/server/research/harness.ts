@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { rateLimit } from '@/lib/rateLimit';
-import type { HarnessResult, HarnessRunView, ResearchStage } from '@/lib/research/workflow';
+import { stageAssessments, type HarnessResult, type HarnessRunView, type ResearchStage } from '@/lib/research/workflow';
 import { BrainClient } from '@/server/brain/client';
 import { captureHarnessContext, harnessText, ownedHarnessSession } from './harnessContext';
 import { routeResearchModel } from './harnessRouting';
@@ -23,15 +23,15 @@ const modelResult = z.strictObject({
   nextStep: z.string().trim().min(1).max(1500),
   citations: z.array(z.string().regex(/^[FM][1-9][0-9]*$/)).min(1).max(12),
 });
-const format = {
+const stageFormat = (stage: ResearchStage['stage']) => ({
   type: 'object', additionalProperties: false,
   properties: {
-    assessment: { type: 'string', enum: assessments },
+    assessment: { type: 'string', enum: stageAssessments(stage) },
     summary: { type: 'string' }, nextStep: { type: 'string' },
     citations: { type: 'array', items: { type: 'string' } },
   },
   required: ['assessment', 'summary', 'nextStep', 'citations'],
-};
+});
 
 const instructions = {
   map: 'Map up to three observed surfaces, trust boundaries, access contexts and one knowledge gap. Use PLANNED.',
@@ -116,7 +116,7 @@ Return one JSON object with assessment, summary, nextStep, and citations (an arr
     const output = await brain.chat(system, JSON.stringify({
       sources,
       ...(validation?.result ? { previousAssessment: (validation.result as HarnessResult).summary } : {}),
-    }), { format, maxTokens: 1600, timeoutMs: 50000, retries: 0, preserveModel: true, rejectRedirects: true,
+    }), { format: stageFormat(input.stage), maxTokens: 1600, timeoutMs: 50000, retries: 0, preserveModel: true, rejectRedirects: true,
       maxResponseBytes: 96 * 1024, signal: requestSignal, temperature: 0.1 });
     const raw = output.trim().replace(/^\x60{3}(?:json)?\s*/i, '').replace(/\s*\x60{3}$/, '');
     const parsed = modelResult.parse(JSON.parse(raw));
