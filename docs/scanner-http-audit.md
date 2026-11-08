@@ -6,7 +6,7 @@
 Hunt catalogue update: this table documents the lower-level wrappers. Current
 bounded Hunt does not invoke external CLIs or the former CSRF action replay.
 It uses the internal shared corpus, request guard and catalogue described in
-[hunt-readiness.md](hunt-readiness.md). Credential login requires explicit action;
+the historical Hunt readiness policy. Credential login requires explicit action;
 normal scans only consume fresh cached sessions. Dalfox uses its own JSON config.
 
 Audited against the repository wrappers and installed `--help`, 2026-10-26.

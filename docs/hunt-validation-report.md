@@ -13,7 +13,7 @@ browser workflow tests used disposable PostgreSQL/Redis and no scan worker.
 19 capabilities: 18 existing scanner modules plus information disclosure. The
 complete original audit matrix is [hunt-current-audit.md](hunt-current-audit.md).
 Policy names/aliases, prerequisites and per-family technique counts are documented
-in [hunt-readiness.md](hunt-readiness.md). The catalogue has 57 unique descriptors:
+in the historical Hunt readiness policy. The catalogue had 57 unique descriptors:
 42 implemented automatic passive/safe methods, 4 implemented fixed timing methods
 requiring explicit per-run approval, and 11 intentionally unsupported methods.
 Supported family means some safe coverage exists, not complete exploitation.
