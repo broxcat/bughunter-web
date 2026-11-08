@@ -3,11 +3,13 @@ import Link from "next/link";
 import ResearchProof from "@/components/ResearchProof";
 import ResearchPromotion from "@/components/ResearchPromotion";
 import ResearchBrief from "@/components/ResearchBrief";
+import ResearchHumanReview, { ResearchReviewResult } from "@/components/ResearchHumanReview";
+import { reproducibleResearchTests, savedResearchReview } from "@/lib/research/humanReview";
 import { researchBrief } from "@/lib/research/workflow";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { hypothesisDetail, HypothesisSyncError } from "@/server/research/hypotheses";
-import { REGISTRY_NOTICE, type ResearchEvidenceReference } from "@/lib/research/hypotheses";
+import { REGISTRY_NOTICE, researchDataSchema, type ResearchEvidenceReference } from "@/lib/research/hypotheses";
 import { researchPolicyState } from "@/server/research/sessions";
 import { Card } from "@/components/ui/Card";
 function Evidence({ title, entries }: { title: string; entries: unknown }) {
@@ -26,6 +28,11 @@ export default async function HypothesisPage({ params, searchParams }: { params:
   const h = data.hypothesis;
   const policyState = await researchPolicyState(data.session.targetId, session.user.id, data.session.authorizationSnapshot);
   const scopeActive = policyState !== "INACTIVE";
+  const proof = researchDataSchema.safeParse(h.researchData);
+  const review = savedResearchReview.safeParse(data.humanReview).data ?? null;
+  const requiresReview = Boolean(data.session.consoleTargetId);
+  const reviewable = policyState === "CURRENT" && data.session.status === "READY" && proof.success;
+  const testIds = h.status === "CONFIRMED" && proof.success ? reproducibleResearchTests(proof.data).map(test => test.id) : [];
   const reviewInput = policyState === "CURRENT" && data.session.status === "READY" &&
     data.session.workspaceId.startsWith("research_") && data.hypothesesSourceSha256 && h.researchData
     ? { sessionId: id, hypothesisId: h.externalId, sourceSha256: data.hypothesesSourceSha256 }
@@ -46,9 +53,11 @@ export default async function HypothesisPage({ params, searchParams }: { params:
       <ResearchBrief key={reviewInput.sourceSha256 + ":validate"} title="Challenge the hypothesis" brief={researchBrief(data.session.targetId, { ...reviewInput, stage: "validate" })} />
       <ResearchBrief key={reviewInput.sourceSha256 + ":trace"} title="Trace the demonstrated impact" brief={researchBrief(data.session.targetId, { ...reviewInput, stage: "trace" })} />
     </section>}
-    <EvidencePanel targetId={data.session.targetId} sessionId={id} link={{entity:'hypothesis',id:h.id,role:'SUPPORTS'}}/><ResearchPromotion sessionId={id} hypothesisId={h.id} targetId={data.session.targetId} revision={h.revision} eligible={h.status === "CONFIRMED" && Boolean(h.researchData) && policyState === "CURRENT" && data.session.status === "READY"} existing={h.promotion} />
+    <EvidencePanel targetId={data.session.targetId} sessionId={id} link={{entity:'hypothesis',id:h.id,role:'SUPPORTS'}}/>
+    {requiresReview && (review || !h.promotion) && <ResearchHumanReview key={h.revision} sessionId={id} hypothesisId={h.id} revision={h.revision} review={review} canReview={reviewable} testIds={testIds}/>}
+    <ResearchPromotion key={h.revision} sessionId={id} hypothesisId={h.id} targetId={data.session.targetId} revision={h.revision} eligible={h.status === "CONFIRMED" && reviewable && (!requiresReview || review?.verdict === "SUPPORTED")} existing={h.promotion} requiresReview={requiresReview && review?.verdict !== "SUPPORTED"}/>
     <Evidence title="Evidence for" entries={h.evidenceFor} /><Evidence title="Evidence against" entries={h.evidenceAgainst} />
     <p>Tags: {h.tags.join(", ") || "None"}. Workspace: {data.session.workspaceId}. Raw evidence is not imported.</p>
-    <section className="space-y-3"><h2 className="text-xl">Revision history</h2>{h.revisions.map(r => <Card key={r.id} className="p-4"><p>Revision {r.revision}{r.revision === h.revision ? " — current" : ""} · {r.createdAt.toISOString()} · {r.source}</p><p>Status: {String((r.snapshot as { status?: string }).status ?? "Unknown")}</p><details><summary>View snapshot</summary><pre className="whitespace-pre-wrap break-words">{JSON.stringify(r.snapshot, null, 2)}</pre></details></Card>)}<div className="flex gap-4">{data.revisionPage > 1 && <Link className="text-brand" href={`?revisionPage=${data.revisionPage - 1}`}>Newer revisions</Link>}{data.revisionPage < data.revisionPages && <Link className="text-brand" href={`?revisionPage=${data.revisionPage + 1}`}>Older revisions</Link>}</div></section>
+    <section className="space-y-3"><h2 className="text-xl">Revision history</h2>{h.revisions.map(r => { const decision = savedResearchReview.safeParse(r.humanReview).data; return <Card key={r.id} className="p-4"><p>Revision {r.revision}{r.revision === h.revision ? " — current" : ""} · {r.createdAt.toISOString()} · {r.source}</p><p>Status: {String((r.snapshot as { status?: string }).status ?? "Unknown")}</p><details><summary>View snapshot</summary><pre className="whitespace-pre-wrap break-words">{JSON.stringify(r.snapshot, null, 2)}</pre></details>{decision && <ResearchReviewResult review={decision}/>}</Card>; })}<div className="flex gap-4">{data.revisionPage > 1 && <Link className="text-brand" href={`?revisionPage=${data.revisionPage - 1}`}>Newer revisions</Link>}{data.revisionPage < data.revisionPages && <Link className="text-brand" href={`?revisionPage=${data.revisionPage + 1}`}>Older revisions</Link>}</div></section>
   </div>;
 }

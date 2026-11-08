@@ -811,6 +811,7 @@ model ResearchHypothesisRevision {
   hypothesisId String
   revision     Int
   snapshot     Json
+  humanReview  Json?
   source       ResearchHypothesisRevisionSource @default(WORKSPACE_IMPORT)
   createdAt    DateTime @default(now())
 

@@ -167,7 +167,13 @@ In a host console, open **View plan** and use **Map the observed surface** to wo
 
 After recording and syncing a v2 hypothesis, open its details in Research history. **Challenge the hypothesis** prepares a separate, passive review in a fresh agent conversation. **Trace the demonstrated impact** uses the same evidence after the operator reviews the verdict. Both briefs bind the hypothesis to the digest of the synced workspace document. Sync again if that document changed. Record negative results through the existing Research Coverage workflow.
 
-The operator reviews and pastes each brief into the target's Codex or Claude console. A brief does not invoke a model, launch a scan, or change the status of a hypothesis. When the operator accepts the trace, return it to the original research conversation to update the v2 hypothesis, run the workspace validator and sync. Use the existing Finding draft and Evidence Review flow.
+The operator reviews and pastes each brief into the target's Codex or Claude console. A brief does not invoke a model, launch a scan, or change the status of a hypothesis. When the operator accepts the trace, return it to the original research conversation to update the v2 hypothesis, run the workspace validator and sync.
+
+On the synced revision, use **Independent evidence decision**. A supported decision requires a specific test with direct evidence and a control or justified non-applicability. The operator attests to reproduction in a fresh authorized context, the observed security effect and the minimum privileges needed. Select Refuted or Inconclusive when a check fails or evidence is missing. Each decision belongs to one revision. A new revision needs its own decision. The server refuses console promotion without a supported decision and creates a Candidate draft only after a separate explicit action. Historical ZIP sessions keep their existing promotion flow.
+
+Review a later invalidation through the Finding’s existing Evidence Review controls. Start a new review and record Rejected or Inconclusive with the new evidence. Subsequent reports use the current Finding state. The original hypothesis revision and earlier decision remain available in history.
+
+**Update agent context** republishes the Research Coverage snapshot with bounded, redacted prior verdicts for matching objective keys on the same target. The handoff includes current Finding state when available, so a later rejection remains visible alongside the earlier decision.
 
 The workflow adapts Andy Gill's [MCP research write-up](https://blog.zsec.uk/bullyingllms/) and [harness design](https://blog.zsec.uk/harnessing-harnesses/) to BugHunter's black-box, target-scoped Research consoles.
 

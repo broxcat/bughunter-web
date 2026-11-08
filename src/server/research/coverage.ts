@@ -1,5 +1,8 @@
 import {registerEvidence,linkEvidence} from '@/server/evidenceVault';
 import {createHash} from 'node:crypto';
+import {savedResearchReview} from '@/lib/research/humanReview';
+import {findingReviewStatus} from '@/lib/evidenceReview';
+import type { CoverageReviewMemory } from '@/lib/research/coverage';
 import {Prisma} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
 import {COVERAGE_NOTICE,coverageCounts,coverageRecordSchema,coverageDocumentSchema,type CoverageView,type CoverageRecord,type CoverageEntry} from '@/lib/research/coverage';
@@ -27,13 +30,56 @@ async function owned(tx:Prisma.TransactionClient,userId:string,targetId:string,w
  return target;
 }
 const safeEvent=(e:Prisma.ResearchCoverageEventGetPayload<object>&{vaultEvidence?:Array<{evidenceId:string}>})=>({id:e.id,revision:e.revision,state:e.state,action:clean(e.action),result:clean(e.result),evidenceIds:e.vaultEvidence?.map(v=>v.evidenceId)??[],evidence:(e.evidence as Array<{ref:string;summary:string}>).map(v=>({ref:v.ref,summary:clean(v.summary)})),performedAt:e.performedAt.toISOString(),createdAt:e.createdAt.toISOString(),source:e.source,sessionReferenceId:e.sessionReferenceId,hypothesisReferenceId:e.hypothesisReferenceId,hypothesisTestId:e.hypothesisTestId,findingReferenceId:e.findingReferenceId});
+async function coverageReviewMemory(tx: Prisma.TransactionClient, userId: string, targetId: string, objectiveKeys: string[]) {
+  if (!objectiveKeys.length) return { reviews: [], truncated: false };
+  const limit = 30;
+  const rows = await tx.researchHypothesisRevision.findMany({
+    where: {
+      humanReview: { not: Prisma.DbNull },
+      hypothesis: {
+        session: { targetId, ...ownedResearch(userId) },
+        planItem: { stableKey: { in: objectiveKeys }, plan: { targetId } },
+      },
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit + 1,
+    select: {
+      humanReview: true, revision: true, snapshot: true,
+      hypothesis: {
+        select: {
+          id: true, externalId: true, sessionId: true, revision: true,
+          planItem: { select: { id: true, stableKey: true } },
+          promotion: { select: { hypothesisRevision: true, finding: { select: { id: true, reviewStatus: true, gateStatus: true, reviewEvidence: true, lifecycle: true } } } },
+        },
+      },
+    },
+  });
+  const reviews: CoverageReviewMemory[] = [];
+  for (const { hypothesis, humanReview, revision, snapshot } of rows.slice(0, limit)) {
+    const result = savedResearchReview.safeParse(humanReview);
+    if (!result.success || !hypothesis.planItem ||
+      (snapshot as { planItemId?: string } | null)?.planItemId !== hypothesis.planItem.id) continue;
+    const review = result.data;
+    const finding = hypothesis.promotion?.hypothesisRevision === revision ? hypothesis.promotion.finding : null;
+    reviews.push({
+      objectiveKey: hypothesis.planItem.stableKey, hypothesisId: hypothesis.id, sessionId: hypothesis.sessionId,
+      externalId: hypothesis.externalId, revision, currentRevision: revision === hypothesis.revision,
+      verdict: review.verdict, reason: clean(review.reason).slice(0, 300), reviewedAt: review.reviewedAt,
+      ...(review.verdict === 'SUPPORTED' ? { testId: review.testId } : {}),
+      ...(finding ? { finding: { id: finding.id, reviewStatus: findingReviewStatus(finding), lifecycle: finding.lifecycle } } : {}),
+    });
+  }
+  return { reviews, truncated: rows.length > limit };
+}
+
 export async function coverageView(tx:Prisma.TransactionClient,userId:string,targetId:string,plan:ResearchPlanView|null):Promise<CoverageView>{
  const target=await owned(tx,userId,targetId);let readOnly=false;try{assertResearchTarget(target,userId);}catch{readOnly=true;}
  const rows=await tx.researchCoverage.findMany({where:{targetId},orderBy:{id:'asc'},take:501,include:eventInclude});
  const entries:CoverageEntry[]=rows.slice(0,500).map(({events,...row})=>({...row,events:events.map(safeEvent)}));
  const session=await tx.researchSession.findFirst({where:{targetId,...ownedResearch(userId),consoleTargetId:targetId,status:'READY'},select:{id:true}});
  const objectives=(plan?.items??[]).filter(i=>i.status==='READY').map(i=>({id:i.id,stableKey:i.stableKey,title:i.title,category:i.category,surfaces:i.surfaceRefs.map(s=>({url:s.url,method:s.method})),contexts:[{contextKey:'UNKNOWN',label:'Context not captured'},{contextKey:'ANONYMOUS',label:'Anonymous'},...i.contextRefs.filter(c=>!['UNKNOWN','ANONYMOUS'].includes(c.contextKey)).map(c=>({contextKey:c.contextKey,label:safeAuthLabel(c.label)}))],untested:!entries.some(e=>e.objectiveKey===i.stableKey&&e.contextRunId===plan!.scanRunId&&e.state!=='NOT_TESTED')}));
- return{version:1,targetId,planId:plan?.id??null,contextRunId:plan?.scanRunId??null,sessionId:readOnly?null:session?.id??null,notice:COVERAGE_NOTICE+(readOnly?' Current scope is inactive; historical coverage is read-only.':''),truncated:rows.length>500,entries,objectives,counts:coverageCounts(entries,objectives.filter(o=>!entries.some(e=>e.objectiveKey===o.stableKey&&e.contextRunId===plan?.scanRunId)).length)};
+ const memory = await coverageReviewMemory(tx, userId, targetId, objectives.map(objective => objective.stableKey));
+ return{version:1,targetId,planId:plan?.id??null,contextRunId:plan?.scanRunId??null,sessionId:readOnly?null:session?.id??null,notice:COVERAGE_NOTICE+(readOnly?' Current scope is inactive; historical coverage is read-only.':''),truncated:rows.length>500||memory.truncated,...(memory.reviews.length?{reviewMemory:memory.reviews}:{}),entries,objectives,counts:coverageCounts(entries,objectives.filter(o=>!entries.some(e=>e.objectiveKey===o.stableKey&&e.contextRunId===plan?.scanRunId)).length)};
 }
 export async function researchCoverageState(userId:string,targetId:string){
  let current;try{current=await researchPlanState(userId,targetId);}catch(e){if(e instanceof ResearchError&&[400,409].includes(e.status))return prisma.$transaction(tx=>coverageView(tx,userId,targetId,null));throw e;}

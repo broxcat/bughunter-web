@@ -112,7 +112,7 @@ export async function syncHypotheses(sessionId: string, userId: string) {
 }
 
 export async function ownedHypothesisSession(sessionId: string, userId: string) {
-  const session = await prisma.researchSession.findFirst({ where: { id: sessionId, ...ownedResearch(userId) }, select: { id: true, workspaceId: true, targetId: true, status: true, hypothesesSyncedAt: true, authorizationSnapshot: true } });
+  const session = await prisma.researchSession.findFirst({ where: { id: sessionId, ...ownedResearch(userId) }, select: { id: true, workspaceId: true, targetId: true, consoleTargetId: true, status: true, hypothesesSyncedAt: true, authorizationSnapshot: true } });
   if (!session) throw new HypothesisSyncError("NOT_FOUND", "Research session not found", 404);
   return session;
 }
@@ -144,6 +144,10 @@ export async function hypothesisDetail(sessionId: string, hypothesisId: string, 
   const hypothesis = await tx.researchHypothesis.findFirst({ where: { id: hypothesisId, sessionId }, include: { promotion: { select: { findingId: true, hypothesisRevision: true } }, revisions: { orderBy: { revision: "desc" }, take: 25, skip:bounds.skip } } });
   if (!hypothesis) throw new HypothesisSyncError("NOT_FOUND", "Research hypothesis not found", 404);
   const source = await tx.researchSession.findUnique({ where: { id: session.id }, select: { hypothesesSourceSha256: true } });
-  return { session, hypothesesSourceSha256: source?.hypothesesSourceSha256 ?? null, hypothesis: safeResearchRead(hypothesis), revisionPage:bounds.page,revisionPages:bounds.pages,revisionTotal:bounds.total, revisionPageSize:25 };
+  const currentRevision = await tx.researchHypothesisRevision.findUnique({
+    where: { hypothesisId_revision: { hypothesisId, revision: hypothesis.revision } },
+    select: { humanReview: true },
+  });
+  return { session, hypothesesSourceSha256: source?.hypothesesSourceSha256 ?? null, humanReview: safeResearchRead(currentRevision?.humanReview ?? null), hypothesis: safeResearchRead(hypothesis), revisionPage:bounds.page,revisionPages:bounds.pages,revisionTotal:bounds.total, revisionPageSize:25 };
   },{isolationLevel:'RepeatableRead'});
 }

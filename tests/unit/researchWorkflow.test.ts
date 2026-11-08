@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { researchReviewInput } from '@/lib/research/humanReview';
 import { canPrepareResearchHunt, researchBrief } from '@/lib/research/workflow';
 import type { ResearchPlanPanelState, ResearchPlanView } from '@/lib/researchPlanView';
 
@@ -24,6 +25,20 @@ describe('guided Research workflow', () => {
     const brief = researchBrief('target-1', { stage: 'hunt', planId: plan.id, objectiveId: 'objective-1' });
     expect(brief).toContain('Objective ID: objective-1');
     expect(brief).toContain('Stop for operator approval');
+  });
+
+  it('requires affirmative evidence checks for a supported review', () => {
+    const input = {
+      expectedRevision: 1, verdict: 'SUPPORTED', reason: 'Independent evidence trace reproduced the security effect.',
+      testId: 'T-001', accessContext: 'Standard account', reproducedInFreshContext: true,
+      impactDemonstrated: true, minimumPrivilegesVerified: true,
+    };
+    expect(researchReviewInput.safeParse(input).success).toBe(true);
+    for (const key of ['reproducedInFreshContext', 'impactDemonstrated', 'minimumPrivilegesVerified']) {
+      expect(researchReviewInput.safeParse({ ...input, [key]: false }).success).toBe(false);
+    }
+    expect(researchReviewInput.safeParse({ ...input, verdict: 'REFUTED' }).success).toBe(false);
+    expect(researchReviewInput.safeParse({ expectedRevision: 1, verdict: 'REFUTED', reason: input.reason }).success).toBe(true);
   });
 
   it('pins both passive review stages to the synced hypothesis file', () => {
