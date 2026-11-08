@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { researchReviewInput } from '@/lib/research/humanReview';
-import { canPrepareResearchHunt, researchTier } from '@/lib/research/workflow';
+import { canPrepareResearchHunt, researchTier, stageAssessments } from '@/lib/research/workflow';
 import { semanticRank } from '@/lib/research/semanticRank';
 import type { ResearchPlanPanelState, ResearchPlanView } from '@/lib/researchPlanView';
 
@@ -24,6 +24,8 @@ describe('guided Research workflow', () => {
     expect(researchTier('hunt')).toBe('fast');
     expect(researchTier('validate')).toBe('review');
     expect(researchTier('trace')).toBe('review');
+    expect(stageAssessments('hunt')).toEqual(['PLANNED']);
+    expect(stageAssessments('validate')).toEqual(['SUPPORTED', 'REFUTED', 'INCONCLUSIVE']);
   });
 
   it('ranks semantic neighbors by cosine similarity, independent of magnitude', () => {

@@ -88,6 +88,7 @@ const body=(extra:Record<string,unknown>={})=>coverageRecordSchema.parse({testKe
   const {syncHypotheses} = await import('@/server/research/hypotheses');
   const {routeResearchModel,saveResearchRouting} = await import('@/server/research/harnessRouting');
   const {runResearchStage,latestResearchStage} = await import('@/server/research/harness');
+  const {recordResearchReview} = await import('@/server/research/promotion');
   await p.aiProviderConfig.create({data:{userId,provider:'OLLAMA',model:'fixture-chat',baseUrl:'http://ollama.test:11434',isActive:true}});
   await saveResearchRouting(userId,{fastProvider:'OLLAMA',fastModel:'fixture-fast',reviewProvider:'OLLAMA',reviewModel:'fixture-review'});
   expect((await routeResearchModel(userId,'hunt')).model).toBe('fixture-fast');
@@ -104,6 +105,7 @@ const body=(extra:Record<string,unknown>={})=>coverageRecordSchema.parse({testKe
   const h = await p.researchHypothesis.findFirstOrThrow({where:{sessionId}});
   const scoped = {sessionId,hypothesisId:h.id,revision:h.revision};
   const run = (stage:'validate'|'trace',requestKey=randomUUID()) => runResearchStage(userId,targetId,{requestKey,input:{...scoped,stage}},new AbortController().signal);
+  let verdict = 'SUPPORTED';
   const mockFetch = vi.spyOn(globalThis,'fetch').mockImplementation(async (url,options) => {
    const input = JSON.parse(String(options?.body));
    expect(String(options?.body)).not.toContain('PRIVATE_COOKIE');
@@ -116,7 +118,10 @@ const body=(extra:Record<string,unknown>={})=>coverageRecordSchema.parse({testKe
    expect(String(url)).toBe('http://ollama.test:11434/api/chat');
    expect(input.model).toBe('fixture-review');
    expect(input.tools).toBeUndefined();
-   return Response.json({message:{content:JSON.stringify({assessment:'SUPPORTED',summary:'Recorded control distinguishes the two cases.',nextStep:'Check the scoped evidence independently.',citations:['F2','M1']})}});
+   expect(input.format.properties.assessment.enum).toEqual(['SUPPORTED','REFUTED','INCONCLUSIVE']);
+   expect(input.format.properties.citations.items.enum).toEqual(['F1','F2','M1']);
+   expect(JSON.parse(input.messages[1].content).sources.every((source: {reference?: string}) => source.reference === undefined)).toBe(true);
+   return Response.json({message:{content:JSON.stringify({assessment:verdict,summary:'Recorded control distinguishes the two cases.',nextStep:'Check the scoped evidence independently.',citations:['F2','M1']})}});
   });
   try {
    await expect(run('trace')).rejects.toMatchObject({status:409});
@@ -129,6 +134,16 @@ const body=(extra:Record<string,unknown>={})=>coverageRecordSchema.parse({testKe
    expect(await latestResearchStage(userId,targetId,{...scoped,stage:'validate'})).toEqual(validated);
    expect((await run('trace')).status).toBe('SUCCEEDED');
    expect(mockFetch).toHaveBeenCalledTimes(4);
+   verdict = 'REFUTED';
+   expect((await run('validate')).result?.assessment).toBe('REFUTED');
+   await expect(run('trace')).rejects.toMatchObject({status:409});
+   await recordResearchReview(sessionId,h.id,userId,{
+    expectedRevision:h.revision,verdict:'SUPPORTED',testId:'T-001',accessContext:'Standard fixture account',
+    reproducedInFreshContext:true,impactDemonstrated:true,minimumPrivilegesVerified:true,
+    reason:'Independent human review of the synthetic positive test and control.',
+   });
+   verdict = 'SUPPORTED';
+   expect((await run('trace')).status).toBe('SUCCEEDED');
    hypothesis.title='Newly synced hypothesis revision';
    await sync();
    await expect(run('trace')).rejects.toMatchObject({status:409});

@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { redactEvidenceText } from '@/lib/evidenceVault';
 import { researchDataSchema } from '@/lib/research/hypotheses';
+import { savedResearchReview } from '@/lib/research/humanReview';
 import { canPrepareResearchHunt, type HarnessSource, type ResearchStage } from '@/lib/research/workflow';
 import { coverageView } from './coverage';
 import { researchPlanState } from './plans';
@@ -40,6 +41,7 @@ export async function captureHarnessContext(userId: string, targetId: string, in
   let subject = input.stage === 'hunt' ? `${input.planId}:${input.objectiveId}` : plan?.id ?? 'initial';
   let query = objective ? `${objective.title} ${objective.objective} ${objective.rationale}` : 'Map observed web surfaces, authentication and trust boundaries. Find missing evidence.';
   const facts: Source[] = [];
+  let humanSupported = false;
   const objectives = objective ? [objective] : input.stage === 'map' ? (plan?.items ?? []).filter(item => item.status === 'READY').slice(0, 5) : [];
   for (const item of objectives) {
     const surfaces = item.surfaceRefs.filter(surface => policy.inScope(surface.url)).slice(0, 4);
@@ -54,6 +56,13 @@ export async function captureHarnessContext(userId: string, targetId: string, in
     });
     if (!h) throw new ResearchError('Hypothesis not found', 404);
     if (h.revision !== input.revision) throw new ResearchError('Reload the current hypothesis revision.', 409);
+    if (input.stage === 'trace') {
+      const revision = await prisma.researchHypothesisRevision.findUnique({
+        where: { hypothesisId_revision: { hypothesisId: input.hypothesisId, revision: h.revision } },
+        select: { humanReview: true },
+      });
+      humanSupported = savedResearchReview.safeParse(revision?.humanReview).data?.verdict === 'SUPPORTED';
+    }
     const result = researchDataSchema.safeParse(h.researchData);
     if (!result.success || !result.data.tests.length) throw new ResearchError('Sync a v2 hypothesis with recorded tests before requesting a review.', 409);
     const proof = result.data;
@@ -108,5 +117,5 @@ export async function captureHarnessContext(userId: string, targetId: string, in
     if (input.stage === 'map' && facts.length < 5) facts.push(source);
     else corpus.push(source);
   }
-  return { sessionId: session.id, subject, query: harnessText(query, 2000), facts: indexed(facts, 'F'), corpus: indexed(corpus, 'M') };
+  return { sessionId: session.id, subject, humanSupported, query: harnessText(query, 2000), facts: indexed(facts, 'F'), corpus: indexed(corpus, 'M') };
 }

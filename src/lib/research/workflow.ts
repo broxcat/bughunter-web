@@ -38,3 +38,6 @@ export type HarnessRunView = {
 };
 
 export const researchTier = (stage: ResearchStage['stage']) => stage === 'map' || stage === 'hunt' ? 'fast' : 'review';
+
+export const stageAssessments = (stage: ResearchStage['stage']): HarnessResult['assessment'][] =>
+  researchTier(stage) === 'fast' ? ['PLANNED'] : ['SUPPORTED', 'REFUTED', 'INCONCLUSIVE'];
