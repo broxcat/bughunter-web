@@ -16,7 +16,7 @@ type ScanLogProps = { scanRunId: string; stages?: Stage[]; cancelled?: boolean; 
 export default function ScanLogViewer({ scanRunId, stages, cancelled, showReconSummary = Boolean(stages) }: ScanLogProps) {
   return <ScanLogSession key={scanRunId} scanRunId={scanRunId} stages={stages} cancelled={cancelled} showReconSummary={showReconSummary} />;
 }
-function ScanLogSession({ scanRunId,stages,cancelled }: { scanRunId: string;stages?:Stage[];cancelled?:boolean }) {
+function ScanLogSession({ scanRunId, stages, cancelled, showReconSummary }: ScanLogProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<string>("CONNECTING");
   const [outcome, setOutcome] = useState<string | null>(null);
