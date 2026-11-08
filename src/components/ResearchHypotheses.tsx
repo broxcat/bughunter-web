@@ -31,7 +31,7 @@ export default function ResearchHypotheses({ sessionId, initial,initialStatus }:
       setResult(`Synced: ${body.created} created, ${body.updated} updated, ${body.unchanged} unchanged.`);
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
-  return <section className="space-y-4" aria-label="Hypotheses">
+  return <section id="hypotheses" className="space-y-4" aria-label="Hypotheses">
     <h2 className="text-xl">Hypotheses</h2>
     <p>Workspace → BugHunter, read-only registry. A CONFIRMED hypothesis is a research claim requiring human evidence review before any Finding.</p>
     <p>Last synced: {data.session.hypothesesSyncedAt ? new Date(data.session.hypothesesSyncedAt).toLocaleString() : "Never"}</p>

@@ -35,5 +35,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     finally { clearTimeout(timer); await reader.cancel().catch(() => {}); }
   }
   try { return Response.json(await terminalTicket(session.user.id, id, provider, profile), { headers: { 'Cache-Control': 'no-store' } }); }
-  catch (error) { return Response.json({ error: error instanceof ResearchError ? error.message : 'Research console unavailable' }, { status: error instanceof ResearchError ? error.status : 503, headers: { 'Cache-Control': 'no-store' } }); }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    const message = error instanceof ResearchError ? error.message :
+      code === 'EACCES' || code === 'EPERM' ? 'Research console cannot access its workspace or signing key. Check the deployment mounts.' :
+      'Research console unavailable';
+    return Response.json({ error: message }, { status: error instanceof ResearchError ? error.status : 503, headers: { 'Cache-Control': 'no-store' } });
+  }
 }

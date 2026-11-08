@@ -23,5 +23,9 @@ export default async function ConsolePage({ params,searchParams }: { params: Pro
   const selection=await searchParams;
   const launch=selection.engine||selection.profile?providerSelection.safeParse({provider:selection.engine,profile:selection.profile}):undefined;
   if(launch&&!launch.success)return <p role="alert" className="p-6">Unsupported engine or launch profile. <Link href="/research" className="underline">Return to Research</Link> and choose a supported profile.</p>;
-  return <div className="flex h-dvh flex-col"><ResearchPlan key={target.id} targetId={target.id} enableWorkflow={!researchIsPassive(target)}/><ResearchCoverage key={target.id+':coverage'} targetId={target.id}/><ResearchKeyboardBoundary><ResearchTerminal initialSelection={launch?.success?launch.data:undefined} targetId={target.id} company={target.program!.companyName} host={target.host} requiredUserAgent={target.program!.requiredUserAgent} /></ResearchKeyboardBoundary></div>;
+  const researchSession = await prisma.researchSession.findFirst({
+    where: { consoleTargetId: target.id, targetId: target.id, status: 'READY', ...ownedResearch(session.user.id) },
+    select: { id: true },
+  });
+  return <div className="flex h-dvh flex-col"><ResearchPlan key={target.id} targetId={target.id} enableWorkflow={!researchIsPassive(target)}/><ResearchCoverage key={target.id+':coverage'} targetId={target.id}/><ResearchKeyboardBoundary><ResearchTerminal key={target.id} initialSessionId={researchSession?.id} initialSelection={launch?.success?launch.data:undefined} targetId={target.id} company={target.program!.companyName} host={target.host} requiredUserAgent={target.program!.requiredUserAgent} /></ResearchKeyboardBoundary></div>;
 }
