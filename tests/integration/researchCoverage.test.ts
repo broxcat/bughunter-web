@@ -117,6 +117,8 @@ const body=(extra:Record<string,unknown>={})=>coverageRecordSchema.parse({testKe
    expect(input.model).toBe('fixture-review');
    expect(input.tools).toBeUndefined();
    expect(input.format.properties.assessment.enum).toEqual(['SUPPORTED','REFUTED','INCONCLUSIVE']);
+   expect(input.format.properties.citations.items.enum).toEqual(['F1','F2','M1']);
+   expect(JSON.parse(input.messages[1].content).sources.every((source: {reference?: string}) => source.reference === undefined)).toBe(true);
    return Response.json({message:{content:JSON.stringify({assessment:'SUPPORTED',summary:'Recorded control distinguishes the two cases.',nextStep:'Check the scoped evidence independently.',citations:['F2','M1']})}});
   });
   try {
