@@ -5,7 +5,7 @@
 //   CWE / CVSS 3.1 lines
 //   Description
 //   Impact
-//   Proof of Concept
+//   Proof of concept
 //   Remediation
 //
 // Platforms differ only in their small formatting specifics (heading text and the
@@ -118,7 +118,7 @@ function oobLines(hits: ReportOobHit[]): string {
 }
 
 /**
- * Proof of Concept = the confirmation data already stored on the finding: its
+ * Proof of concept = the confirmation data already stored on the finding: its
  * location, its evidence (for XSS this is the confirmed sink evidence), and any
  * correlated OOB callbacks (SSRF). Empty ⇒ explicit placeholder.
  */
@@ -141,13 +141,13 @@ function renderFinding(
     heading,
     meta,
     `Assessment mode: ${assessmentModeLabel(f.assessmentMode)}`,
-    `Assessment provenance: ${f.assessmentModeSource==='RESEARCH_SESSION'?'Research session authorization snapshot':f.assessmentModeSource==='SCAN_RUN'?'Recon ScanRun snapshot':'Not captured'}`,
+    `Assessment provenance: ${f.assessmentModeSource==='RESEARCH_SESSION'?'Research session authorization snapshot':f.assessmentModeSource==='SCAN_RUN'?'Recon scan run snapshot':'Not captured'}`,
     "",
     cweLine(f),
     cvssLine(f),
     "",
     `Finding lifecycle: ${f.lifecycle??'Historical / not captured'}`,
-    ...(f.lifecycle==='RESOLVED'||f.lifecycle==='CLOSED'?['Historical finding: resolution/closure is recorded; this Report does not claim it is currently reproducible.']:[]),
+    ...(f.lifecycle==='RESOLVED'||f.lifecycle==='CLOSED'?['Historical finding: resolution/closure is recorded; this report does not claim it is currently reproducible.']:[]),
     ...(f.retests?.length?['#### Retest history',...f.retests.map(r=>`- ${r.outcome} · requested ${r.requestedAt}${r.performedAt?' · tested '+r.performedAt:''}\n  Original proof: ${r.originalEvidenceIds.join(', ')}\n  Retest proof: ${r.newEvidenceIds.join(', ')||'None recorded'}${r.conclusion?'\n  Conclusion: '+r.conclusion.replace(/[\r\n]/g,' '):''}`)]:[]),
     "",
     "#### Description",
@@ -158,7 +158,7 @@ function renderFinding(
     "",
     text(f.impact) || IMPACT_PLACEHOLDER,
     "",
-    "#### Proof of Concept",
+    "#### Proof of concept",
     "",
     proofOfConcept(f),
     "",
@@ -226,12 +226,12 @@ const RENDERERS: Record<
   ReportPlatform,
   { heading: string; finding: (f: ReportFinding, i: number) => string }
 > = {
-  HACKERONE: { heading: "HackerOne Report", finding: hackeroneFinding },
-  BUGCROWD: { heading: "Bugcrowd Submission", finding: bugcrowdFinding },
-  INTIGRITI: { heading: "Intigriti Submission", finding: intigritiFinding },
-  YESWEHACK: { heading: "YesWeHack Report", finding: yeswehackFinding },
-  IMMUNEFI: { heading: "Immunefi Bug Report", finding: immunefiFinding },
-  GENERIC: { heading: "Security Report", finding: genericFinding },
+  HACKERONE: { heading: "HackerOne report", finding: hackeroneFinding },
+  BUGCROWD: { heading: "Bugcrowd submission", finding: bugcrowdFinding },
+  INTIGRITI: { heading: "Intigriti submission", finding: intigritiFinding },
+  YESWEHACK: { heading: "YesWeHack report", finding: yeswehackFinding },
+  IMMUNEFI: { heading: "Immunefi bug report", finding: immunefiFinding },
+  GENERIC: { heading: "Security report", finding: genericFinding },
 };
 
 /**
