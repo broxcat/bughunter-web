@@ -43,6 +43,7 @@ export const programCreateSchema = programSchema.extend({
 // absent policy field untouched, especially the wildcard discovery rules.
 export const programUpdateSchema = programSchema.omit({ scopeHosts: true }).extend({
   expectedUpdatedAt:z.iso.datetime().optional(),
+  requiredUserAgent: z.union([requiredUserAgentSchema, z.literal('')]),
   rewardCurrency: programSchema.shape.rewardCurrency.removeDefault(),
   scopeRules: programSchema.shape.scopeRules.removeDefault(),
   outOfScope: programSchema.shape.outOfScope.removeDefault(),

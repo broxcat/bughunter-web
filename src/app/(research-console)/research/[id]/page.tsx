@@ -5,7 +5,7 @@ import ResearchCoverage from '@/components/ResearchCoverage';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { redirect, notFound } from 'next/navigation';
-import { assertResearchTarget, researchIsPassive, researchTargetSelect, ResearchError } from '@/server/research/workspace';
+import { researchUserAgent, assertResearchTarget, researchIsPassive, researchTargetSelect, ResearchError } from '@/server/research/workspace';
 import { ownedResearch } from '@/server/research/sessions';
 import ResearchTerminal from '@/components/ResearchTerminal';
 import ResearchPlan from '@/components/ResearchPlan';
@@ -27,5 +27,5 @@ export default async function ConsolePage({ params,searchParams }: { params: Pro
     where: { consoleTargetId: target.id, targetId: target.id, status: 'READY', ...ownedResearch(session.user.id) },
     select: { id: true },
   });
-  return <div className="flex h-dvh flex-col"><ResearchPlan key={target.id} targetId={target.id} enableWorkflow={!researchIsPassive(target)}/><ResearchCoverage key={target.id+':coverage'} targetId={target.id}/><ResearchKeyboardBoundary><ResearchTerminal key={target.id} initialSessionId={researchSession?.id} initialSelection={launch?.success?launch.data:undefined} targetId={target.id} company={target.program!.companyName} host={target.host} requiredUserAgent={target.program!.requiredUserAgent} /></ResearchKeyboardBoundary></div>;
+  return <div className="flex h-dvh flex-col"><ResearchPlan key={target.id} targetId={target.id} enableWorkflow={!researchIsPassive(target)}/><ResearchCoverage key={target.id+':coverage'} targetId={target.id}/><ResearchKeyboardBoundary><ResearchTerminal key={target.id} initialSessionId={researchSession?.id} initialSelection={launch?.success?launch.data:undefined} targetId={target.id} company={target.program!.companyName} host={target.host} requiredUserAgent={researchUserAgent(target)} /></ResearchKeyboardBoundary></div>;
 }

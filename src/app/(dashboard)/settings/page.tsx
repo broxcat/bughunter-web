@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import HunterIdentitySettings from '@/components/HunterIdentitySettings';
 import ResearchModelSettings from "@/components/ResearchModelSettings";
 
 // The 11 AiProvider enum values (kept in sync with prisma/schema.prisma).
@@ -125,6 +126,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <h1>Settings</h1>
+      <HunterIdentitySettings />
       <h2 className="text-lg font-semibold">AI providers</h2>
       <p className="mt-1 text-sm text-muted">
         Choose the default for optional AI assistance. Configure Research stage routing below.

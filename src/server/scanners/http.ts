@@ -1,5 +1,5 @@
 import { beforeScanNetwork, currentScanControl, recordUsefulScanWork, throwIfScanAborted } from "@/server/scanControl";
-import { assertExecutionUrl, authenticatedExecutionHeaders, currentTargetExecution } from "@/server/execution";
+import { acquireExecution, assertExecutionUrl, authenticatedExecutionHeaders, currentTargetExecution } from "@/server/execution";
 // Minimal HTTP probe helper for the vuln-class scanners. Uses global fetch with
 // a hard per-request timeout and manual redirect handling (so a 30x is observed,
 // not silently followed — important for auth/bypass checks). Never throws: a
@@ -10,6 +10,7 @@ import { assertExecutionUrl, authenticatedExecutionHeaders, currentTargetExecuti
 
 export interface ProbeOptions {
   signal?: AbortSignal;
+  tool?: string;
   method?: string;
   headers?: Record<string, string>;
   /** Optional request body (e.g. an XML/SOAP document for an XXE probe). */
@@ -44,6 +45,7 @@ export async function probe(
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT);
   const started = Date.now();
   let release: (() => void) | undefined;
+  let releaseTraffic: (() => Promise<void>) | undefined;
   let resourceDone!: () => void;
   const done = new Promise<void>(resolve => { resourceDone = resolve; });
   const scan = currentScanControl();
@@ -62,12 +64,14 @@ export async function probe(
     const requestHeaders = await authenticatedExecutionHeaders(url, method, opts.headers, opts.body);
     throwIfScanAborted();
     opts.signal?.throwIfAborted();
+    const signal = AbortSignal.any([controller.signal, ...(scan ? [scan.signal] : []), ...(opts.signal ? [opts.signal] : []), ...(guard ? [guard.signal, AbortSignal.timeout(Math.max(1, Math.min(5000, guard.remainingMs())))] : [])]);
+    releaseTraffic = await acquireExecution({ tool: opts.tool ?? (guard || currentTargetExecution().authenticatedRequestHeaders ? 'authenticated-probe' : 'http-probe'), url }, signal);
     const res = await fetch(url, {
       method,
       headers: requestHeaders,
       body: opts.body,
       redirect: "manual",
-      signal: AbortSignal.any([controller.signal, ...(scan ? [scan.signal] : []), ...(opts.signal ? [opts.signal] : []), ...(guard ? [guard.signal, AbortSignal.timeout(Math.max(1, Math.min(5000, guard.remainingMs())))] : [])]),
+      signal,
     });
     const reader = res.body?.getReader();
     const chunks: Uint8Array[] = []; let bytes = 0;
@@ -109,6 +113,7 @@ export async function probe(
       error: err instanceof Error ? err.message : String(err),
     };
   } finally {
+    await releaseTraffic?.();
     release?.();
     clearTimeout(timer);
     resourceDone(); releaseResource?.();

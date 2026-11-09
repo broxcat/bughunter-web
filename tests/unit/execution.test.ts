@@ -43,7 +43,7 @@ describe("enforced Target HTTP context", () => {
         expect(safeCommandSummary(tool, args)).not.toContain("secret");
       }
       expect(enforcedToolArgs("nmap", ["-sV", "-A", "foreign.example"])).toEqual(["-sT", "-Pn", "-n", "127.0.0.1"]);
-      expect(() => enforcedToolArgs("curl", [base])).toThrow(/Unaudited/);
+      expect(() => enforcedToolArgs("curl", [base])).toThrow(/Unclassified/);
       expect(() => enforcedToolArgs("ffuf", ["-u", base])).toThrow(/Unaudited/);
       expect(() => enforcedToolArgs("httpx", ["-H", "Cookie: fixture\r\nUser-Agent: wrong"])).toThrow(/Multiline/);
       expect(() => enforcedToolArgs("httpx", ["-u", "http://foreign.example"])).toThrow(/Scope/);

@@ -6,6 +6,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { enforceHttp1, enforceHttp2, activeObservation } from './burp-active.mjs';
+import { acquireResearchTraffic, mergeResearchHeaders } from './program-traffic.mjs';
 import { burpEndpoint } from './burp-proxy.mjs';
 import { matchesHost } from '../../../src/lib/bountyProgram.ts';
 
@@ -78,12 +79,12 @@ function executeCurl(args, body, timeoutMs) {
     });
   });
 }
-export async function sendViaBurpProxy(name, input, policy, { audit = value => { process.stderr.write(JSON.stringify(value) + '\n'); }, timeoutMs = 15000 } = {}) {
+export async function sendViaBurpProxy(name, input, policy, { audit = value => { process.stderr.write(JSON.stringify(value) + '\n'); }, timeoutMs = 15000, acquire = acquireResearchTraffic } = {}) {
   const h2 = name === 'send_http2_request';
   // Policy validation precedes CA fetch, child creation or any other network I/O.
   const args = authorize(input, policy, h2), proxy = proxyEndpoint(), mcp = burpEndpoint(), requestId = randomUUID();
   const trace = { requestId, targetId: policy.targetId, destinationHost: policy.targetHost, destinationPort: policy.port, protocol: h2 ? 'HTTP/2' : 'HTTP/1.1', proxyHost: proxy.host, proxyPort: proxy.port, mcpHost: mcp.host, mcpPort: mcp.port, mcpTool: name };
-  let directory;
+  let directory, permit;
   try {
     let method, path, headers, body;
     if (h2) { method = args.pseudoHeaders[':method']; path = args.pseudoHeaders[':path']; headers = Object.entries(args.headers); body = args.requestBody; }
@@ -100,11 +101,13 @@ export async function sendViaBurpProxy(name, input, policy, { audit = value => {
     // credentials, alternate proxies or output files behind the policy gateway.
     const curl = ['-q','--silent','--show-error','--globoff','--path-as-is','--proto','=http,https','--proxy',`http://${proxy.host}:${proxy.port}`,'--noproxy','','--connect-timeout','5','--max-time',String(timeoutMs/1000),h2?'--http2-prior-knowledge':'--http1.1','--include','--suppress-connect-headers','--write-out',trailer+'%{http_code} %{http_version} %{http_connect}\n'];
     directory = await mkdtemp(join(tmpdir(),'bughunter-burp-request-'));
-    const config = [['request',method],['request-target',policy.scheme==='http'?url:requestPath],['user-agent',policy.requiredUserAgent],['url',url]];
+    const config = [['request',method],['request-target',policy.scheme==='http'?url:requestPath],['url',url]];
     if (policy.scheme === 'https') {
       const ca = await proxyCa(proxy);
       const file = join(directory,'ca.pem'); await writeFile(file,ca,{mode:0o600}); curl.push('--cacert',file);
     }
+    permit = await acquire(policy, 'research-http', url);
+    headers = Object.entries(mergeResearchHeaders(headers, permit.headers));
     for (const [key,value] of headers) config.push(['header',`${key}: ${value}`]);
     for (const key of ['Accept','Content-Type','Expect']) if (!headers.some(([name])=>name.toLowerCase()===key.toLowerCase())) config.push(['header',key+':']);
     if (body || headers.some(([key])=>key.toLowerCase()==='content-length')) { const file=join(directory,'body'); await writeFile(file,body,{mode:0o600}); config.push(['data-binary','@'+file]); }
@@ -115,7 +118,7 @@ export async function sendViaBurpProxy(name, input, policy, { audit = value => {
     const result = { ...activeObservation({content:[{type:'text',text:response.raw}]},policy), requestId, targetId: policy.targetId, transport: 'BURP_PROXY', transportResult: 'TARGET_HTTP_RESPONSE', remoteStatus: response.status, protocol: h2?'HTTP/2':'HTTP/1.1', responseOrigin: 'PROXIED_HTTP_RESPONSE', historyCapture: true };
     audit({ ...trace, transportResult: result.transportResult, remoteStatus: response.status }); return result;
   } catch (error) {
-    const failure = error instanceof BurpTransportError ? error : new BurpTransportError('BURP_TOOL_ERROR');
+    const failure = error instanceof BurpTransportError ? error : new BurpTransportError(error.message === 'TOOL_NOT_ALLOWED' ? error.message : 'BURP_TOOL_ERROR');
     failure.details = { ...trace, ...failure.details }; audit(failure.details); throw failure;
-  } finally { if (directory) await rm(directory,{recursive:true,force:true}); }
+  } finally { await permit?.release(); if (directory) await rm(directory,{recursive:true,force:true}); }
 }

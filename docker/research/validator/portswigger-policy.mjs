@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { normalizeFqdn, matchesHost } from '../../../src/lib/bountyProgram.ts';
-import { enforceHttp1, enforceHttp2, activeObservation } from './burp-active.mjs';
+import { enforceHttp1, enforceHttp2 } from './burp-active.mjs';
 import { sanitizeHistoryItem } from './burp-http.mjs';
-import { BurpTransportError, sendViaBurpProxy } from './burp-transport.mjs';
+import { sendViaBurpProxy } from './burp-transport.mjs';
 const paging = z.object({ count: z.number().int().min(1).max(20), offset: z.number().int().min(0).max(10000), regex: z.string().max(500).optional() }).strict();
 const histories = new Set(['get_proxy_http_history', 'get_proxy_http_history_regex', 'get_organizer_items', 'get_organizer_items_regex']);
 const utilities = new Set(['url_encode', 'url_decode', 'base64_encode', 'base64_decode', 'generate_random_string']);
@@ -13,7 +13,7 @@ export function allowedHistoryHost(host, p) {
 }
 export function toolPolicy(name, p) {
   if (histories.has(name) || utilities.has(name)) return 'Scoped, redacted read or bounded local utility';
-  if (['send_http1_request', 'send_http2_request', 'create_repeater_tab', 'create_repeater_tab_http2'].includes(name) && p.mode !== 'PROGRAM_PASSIVE') return 'Exact authorized host only; enforced User-Agent; no automatic retry';
+  if (['send_http1_request', 'send_http2_request'].includes(name) && p.mode !== 'PROGRAM_PASSIVE' && !(name === 'send_http2_request' && p.scheme === 'http')) return 'Exact authorized host only; enforced User-Agent; no automatic retry';
   return 'Blocked by BugHunter policy: no applicable permission or no independently verifiable per-target attribution';
 }
 export async function callScopedPortSwigger(connection, name, input, p, { send = sendViaBurpProxy } = {}) {
@@ -49,14 +49,7 @@ export async function callScopedPortSwigger(connection, name, input, p, { send =
     if (Buffer.byteLength(JSON.stringify(input)) > 8192 || (name === 'generate_random_string' && (!Number.isInteger(input.length) || input.length < 1 || input.length > 4096))) throw new Error('UNSAFE_REQUEST');
     return connection.call(name, input);
   }
-  const repeater = name.startsWith('create_repeater_tab'), http2 = name.endsWith('http2') || name === 'send_http2_request';
-  const { tabName, ...request } = input;
-  if (tabName !== undefined && tabName !== null && (typeof tabName !== 'string' || tabName.length > 100 || /[\x00-\x1f]/.test(tabName))) throw new Error('UNSAFE_REQUEST');
-  const args = http2 ? enforceHttp2(request, p) : enforceHttp1(request, p);
+  const args = name === 'send_http2_request' ? enforceHttp2(input, p) : enforceHttp1(input, p);
   if (!allowedHistoryHost(args.targetHostname, p)) throw new Error('OUT_OF_SCOPE');
-  if (!repeater && !(http2 && p.scheme === 'http')) return send(name, args, p);
-  if (repeater && tabName != null) args.tabName = tabName;
-  const result = await connection.call(name, args);
-  if (result.isError) throw new BurpTransportError('BURP_TOOL_ERROR');
-  return activeObservation(result, p);
+  return send(name, args, p);
 }

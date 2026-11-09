@@ -80,7 +80,7 @@ async function crawl(ctx: ScanContext, seeds: string[] = []): Promise<DiscoveryC
     try { assertExecutionUrl(norm); } catch { continue; }
     visited.add(norm);
 
-    const res = await probe(norm, { timeoutMs: PAGE_TIMEOUT_MS });
+    const res = await probe(norm, { timeoutMs: PAGE_TIMEOUT_MS, tool: 'http-crawl' });
     if (res.error) {
       execution.failedRequests++;
       const code = interruptionCodes.has(res.error) ? res.error : "DISCOVERY_TRANSPORT_ERROR";

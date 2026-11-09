@@ -4,7 +4,7 @@ import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { issueTerminalTicket, sha256 } from '@/lib/research/terminal';
 import { ensureTargetConsole, consoleRoot } from './consoleWorkspace';
-import { ResearchError } from './workspace';
+import { ResearchError, researchUserAgent } from './workspace';
 import { join } from 'node:path';
 import { readTerminalSigningKey } from './terminalKey';
 
@@ -39,6 +39,6 @@ async function issueCheckedTicket(userId: string, targetId: string, requestedPro
     const readiness=await fetch(new URL('/control/isolation',process.env.RESEARCH_TERMINAL_CONTROL_URL??'http://research-console:7681'),{method:'POST',headers:{Authorization:'Bearer '+issued.token},signal:AbortSignal.timeout(10000),redirect:'error'}).catch(()=>null);
     if(!readiness?.ok)throw new ResearchError('Research workspace requires isolation migration before it can be opened.',409);
     }
-    return { ...issued, sessionId: session.id, provider, profile: profile ?? (provider === 'codex' ? 'yolo' : 'standard'), host: target.host, requiredUserAgent: target.program!.requiredUserAgent };
+    return { ...issued, sessionId: session.id, provider, profile: profile ?? (provider === 'codex' ? 'yolo' : 'standard'), host: target.host, requiredUserAgent: researchUserAgent(target) };
   } finally { await directory.close(); }
 }

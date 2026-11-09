@@ -7,6 +7,9 @@ import { dirname, join, resolve, isAbsolute } from "node:path";
 import { persistedCorpusSchema } from "@/server/recon/corpus";
 import { safeObservationUrl, redactObservationText } from "@/lib/observationSafety";
 import { matchesHost, normalizeFqdn } from "@/lib/bountyProgram";
+import { requiredUserAgentSchema } from '@/lib/httpPolicy.mjs';
+import { MISSING_HUNTER_UA } from '@/lib/programExecutionPolicy';
+import { programPolicyInclude, resolveProgramPolicy } from '@/server/programExecutionPolicy';
 import { scanRejection } from "@/server/execution";
 import { hypothesesJsonSchema } from "@/lib/research/hypotheses";
 import { burpCodexConfig, burpPolicySchema } from "@/lib/research/burp";
@@ -23,11 +26,17 @@ export const researchTargetSelect = {
   discoveredFromAsset: { select: { id: true, programId: true, originalValue: true, normalizedValue: true, format: true, type: true, assetValue: true, active: true, updatedAt: true } },
   id: true, userId: true, host: true, scheme: true, active: true, contextOnly: true, discoverySource: true,
   scope: { select: { updatedAt: true, id: true, userId: true, hostPattern: true, status: true, rulesOfEngagement: true, scopeDetails: true, outOfScope: true, disclosurePolicy: true, safeHarbor: true, legalTerms: true, eligibilityCriteria: true, reportingFormat: true } },
-  program: { select: { updatedAt: true, id: true, ownerId: true, companyName: true, requiredUserAgent: true, scopeRules: true, rulesOfEngagement: true, deletingAt: true, outOfScope: true, qualifying: true, nonQualifying: true } },
+  program: { select: { ...programPolicyInclude, programUrl: true, updatedAt: true, id: true, ownerId: true, companyName: true, requiredUserAgent: true, scopeRules: true, rulesOfEngagement: true, deletingAt: true, outOfScope: true, qualifying: true, nonQualifying: true } },
   credentials: { select: { label: true, purpose: true, sessionStatus: true } },
 } satisfies Prisma.TargetSelect;
 type SelectedResearchTarget = Prisma.TargetGetPayload<{ select: typeof researchTargetSelect }>;
-export type ResearchTarget = Omit<SelectedResearchTarget, 'scopeAsset' | 'discoveredFromAsset' | 'consoleDeletingAt'> & Partial<Pick<SelectedResearchTarget, 'scopeAsset' | 'discoveredFromAsset' | 'consoleDeletingAt'>>;
+type SelectedProgram = NonNullable<SelectedResearchTarget['program']>;
+type PolicyFields = 'owner' | 'programUrl' | 'executionPolicies';
+export type ResearchTarget = Omit<SelectedResearchTarget, 'scopeAsset' | 'discoveredFromAsset' | 'consoleDeletingAt' | 'program'> &
+  Partial<Pick<SelectedResearchTarget, 'scopeAsset' | 'discoveredFromAsset' | 'consoleDeletingAt'>> & {
+    program: (Omit<SelectedProgram, PolicyFields> & Partial<Pick<SelectedProgram, PolicyFields>>) | null;
+  };
+export const researchUserAgent = (target: ResearchTarget) => resolveProgramPolicy(target.program!, target.scope).userAgent;
 export const researchIsPassive = (target: ResearchTarget) => target.scopeAsset ? target.scopeAsset.format === 'WILDCARD_DOMAIN' : target.contextOnly;
 export type ResearchRecon = { id: string; reconCorpus: unknown } | null;
 export type ResearchFinding = { id: string; title: string; severity: string; vulnClass: string | null; reviewStatus: string; location: string | null };
@@ -43,14 +52,15 @@ export function assertResearchTarget(target: ResearchTarget, userId: string) {
   if (boundary && (!boundary.active || (target.scopeAsset?.format !== 'WILDCARD_DOMAIN' && !assetAllowsHost(boundary, target.host)))) throw new ResearchError('Scope asset authorization is no longer active', 409);
   const legacyExclusions = target.scope.outOfScope?.toLowerCase().match(/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+/g) ?? [];
   if (boundary && legacyExclusions.some(rule => matchesHost(target.host, rule))) throw new ResearchError('Host is explicitly out of scope');
+  if (!researchIsPassive(target) && !requiredUserAgentSchema.safeParse(researchUserAgent(target)).success) throw new ResearchError(MISSING_HUNTER_UA);
   if (target.scopeAsset) {
     if (target.scope.status !== 'APPROVED') throw new ResearchError('Scope is not approved');
     if (target.scopeAsset.format === 'WILDCARD_DOMAIN') return;
-    const rejection = scanRejection(target); if (rejection) throw new ResearchError(rejection);
+    const rejection = scanRejection(target, 'HOST', false); if (rejection) throw new ResearchError(rejection);
     return;
   }
   if (target.contextOnly) { if (target.scope.status !== "APPROVED") throw new ResearchError("Program scope is not approved"); return; }
-  const rejection = scanRejection(target);
+  const rejection = scanRejection(target, 'HOST', false);
   if (rejection) throw new ResearchError(rejection);
   try { if (normalizeFqdn(target.host) !== target.host || !matchesHost(target.host, target.scope.hostPattern)) throw new Error(); }
   catch { throw new ResearchError("Selected host does not match its authorized scope"); }
@@ -105,7 +115,8 @@ export function createResearchBundle(target: ResearchTarget, recon: ResearchReco
   const assessmentContext = assessmentMarkdown(assessment);
   const assessmentRules = researchAssessmentInstructions(assessment);
   const policy = ["# Program policy", `Source: Scope ${target.scope.id} / Program ${program.id}`, ...Object.entries({ rulesOfEngagement: target.scope.rulesOfEngagement, scopeDetails: target.scope.scopeDetails, outOfScope: target.scope.outOfScope, disclosurePolicy: target.scope.disclosurePolicy, safeHarbor: target.scope.safeHarbor, legalTerms: target.scope.legalTerms, eligibilityCriteria: target.scope.eligibilityCriteria, reportingFormat: target.scope.reportingFormat }).filter(([, value]) => value).map(([key, value]) => `## ${key}\n\n${exportText(value!)}`), `## Program rules of engagement\n\n${exportText(program.rulesOfEngagement ?? "No additional program rules recorded.")}`, `## Qualifying\n\n${program.qualifying.join(", ") || "Not specified."}`, `## Non-qualifying\n\n${program.nonQualifying.join(", ") || "Not specified."}`].join("\n\n") + "\n";
-  const scope = `# Authorized Scope\n\nProgram: ${exportText(program.companyName)}\n\nSource: Target ${target.id}, Scope ${target.scope.id}; snapshot ${provenance.generatedAt}.\nRecheck current authorization in BugHunter before each session.\n\n## Selected target\n\n${target.host}\n\n## Explicitly authorized hosts\n\n- ${target.host}\n\nOnly this selected concrete host is authorized by this workspace.\n\n## Excluded\n\n${program.outOfScope.map(host => `- ${host}`).join("\n") || "No structured host exclusions recorded."}\n${target.scope.outOfScope ? exportText(target.scope.outOfScope) : ""}\n\n## Required User-Agent\n\n${exportText(program.requiredUserAgent)}\n\n## Program rules\n\n${target.scope.rulesOfEngagement ? exportText(target.scope.rulesOfEngagement) : "No additional host rules recorded."}\n${exportText(program.rulesOfEngagement ?? "No additional program rules recorded.")}\nSee program-policy.md for the other recorded policy fields.\n\n## Safety rule\n\nDiscovery does not grant authorization. Hosts discovered during research MUST NOT\nbe treated as authorized unless they appear in the explicitly authorized scope above.\nDo not follow redirects to another host. Authorization revocation requires stopping.\n`;
+  const userAgent = researchUserAgent(target);
+  const scope = `# Authorized Scope\n\nProgram: ${exportText(program.companyName)}\n\nSource: Target ${target.id}, Scope ${target.scope.id}; snapshot ${provenance.generatedAt}.\nRecheck current authorization in BugHunter before each session.\n\n## Selected target\n\n${target.host}\n\n## Explicitly authorized hosts\n\n- ${target.host}\n\nOnly this selected concrete host is authorized by this workspace.\n\n## Excluded\n\n${program.outOfScope.map(host => `- ${host}`).join("\n") || "No structured host exclusions recorded."}\n${target.scope.outOfScope ? exportText(target.scope.outOfScope) : ""}\n\n## Required User-Agent\n\n${exportText(userAgent)}\n\n## Program rules\n\n${target.scope.rulesOfEngagement ? exportText(target.scope.rulesOfEngagement) : "No additional host rules recorded."}\n${exportText(program.rulesOfEngagement ?? "No additional program rules recorded.")}\nSee program-policy.md for the other recorded policy fields.\n\n## Safety rule\n\nDiscovery does not grant authorization. Hosts discovered during research MUST NOT\nbe treated as authorized unless they appear in the explicitly authorized scope above.\nDo not follow redirects to another host. Authorization revocation requires stopping.\n`;
   const files: Record<string, string> = {
     ...(plan ? researchPlanInitialFiles(plan) : {}),
     ...coverageInitialFiles(target.id,session.id,coverage),
@@ -113,12 +124,12 @@ export function createResearchBundle(target: ResearchTarget, recon: ResearchReco
     "assessment-policy.json": json({ formatVersion: 1, capturedAt: provenance.generatedAt, ...assessment, contentAvailable: false }),
     "README.md": `# BugHunter Research Workspace\n\n${exportText(program.companyName)} / ${target.host}\n\nRead AGENTS.md and scope.md before doing anything.\n\nSSH from the Docker host (use your configured SSH port/key):\n\n\`\`\`sh\nssh -i ~/.ssh/bughunter_research -p ${sshPort} researcher@127.0.0.1\ncd /workspaces/${session.workspaceId}\nbughunter-codex\n# Wrapper: codex --yolo with the fixed workspace MCP configuration\n\`\`\`\n\nBootstrap prompt:\n\nRead AGENTS.md, scope.md and all existing recon evidence. Build an initial map of\nthe application and create only evidence-backed hypotheses in research/hypotheses.json, with a human-readable view in research/hypotheses.md.\n\n${recon ? `Recon source: ScanRun ${recon.id}.` : "No Recon evidence was available at creation; do not invent observations."}\nExport contains metadata only, no target credentials or raw HTTP responses.\nNo remote Git repository or automatic Finding creation is configured.\n\nHypothesis workflow:\n1. Inspect evidence.\n2. Create/update research/hypotheses.json (contract v2; see research/hypothesis.schema.json).\n3. Keep research/hypotheses.md human-readable.\n4. Run bughunter-validate-hypotheses.\n5. Return to BugHunter and click Sync from workspace.\nBugHunter stores imported hypotheses and revisions read-only; workspace edits never create Findings.\nInput files are read-only; research/, evidence/ and scripts/ are writable.\nZIP downloads preserve this initial bundle, excluding subsequent local research edits.\nOptional Burp MCP:\nRead evidence/burp/README.md and the repository docs/BURP-MCP-RESEARCH.md.\nThe installed bughunter-codex wrapper configures a passive metadata MCP gateway.\nStart Burp MCP externally and its loopback SSH tunnel, then run bughunter-burp-status.\nThe web displays only the last diagnostic; it cannot control Burp or execute MCP.\nConfigure authorized scope, exclusions and the required User-Agent in Burp before manual testing.\n127.0.0.1 inside the runner refers to the runner, not the Docker host.\n`,
     "scope.md": scope + '\n' + assessmentContext, "program-policy.md": policy,
-    "target.json": json({ source: `Target ${target.id}`, generatedAt: provenance.generatedAt, id: target.id, host: target.host, scheme: target.scheme ?? "https", requiredUserAgent: exportText(program.requiredUserAgent), assessment, contentAvailable: false, authenticatedContexts: target.credentials.map(c => ({ label: exportText(c.label), purpose: c.purpose, available: true, sessionStatus: c.sessionStatus, credentialsExported: false })) }),
+    "target.json": json({ source: `Target ${target.id}`, generatedAt: provenance.generatedAt, id: target.id, host: target.host, scheme: target.scheme ?? "https", requiredUserAgent: exportText(userAgent), assessment, contentAvailable: false, authenticatedContexts: target.credentials.map(c => ({ label: exportText(c.label), purpose: c.purpose, available: true, sessionStatus: c.sessionStatus, credentialsExported: false })) }),
     "evidence/README.md": "# Evidence\n\nStore minimal captured evidence here. Label OBSERVATION, INFERENCE, EVIDENCE and IMPACT.\nCite exact requests/responses and timestamps. Redact credentials and unrelated user data.\n",
     ...(consoleLayout ? {} : { "burp-policy.json": json(burpPolicySchema.parse({
       version: 1, sessionId: session.id, workspaceId: session.workspaceId,
       targetId: target.id, targetHost: target.host, scheme: target.scheme ?? "https",
-      requiredUserAgent: program.requiredUserAgent,
+      requiredUserAgent: userAgent,
       authorizationSource: `Scope ${target.scope.id}; Program ${program.id}`,
       generatedAt: provenance.generatedAt, scopeFile: "scope.md", programPolicyFile: "program-policy.md",
       mode: "PASSIVE_METADATA_ONLY",

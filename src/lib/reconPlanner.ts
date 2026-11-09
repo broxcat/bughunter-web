@@ -3,7 +3,7 @@ import { isExcluded } from './bountyProgram';
 import { buildCapabilityPlans, type ReconCapabilityPlan } from './reconCapabilities';
 import { isSafeReadUrl } from './observationSafety';
 
-export type ReconTool = 'subfinder' | 'amass' | 'assetfinder' | 'httpx' | 'nmap' | 'ffuf' | 'gobuster' | 'nuclei' | 'burp' | 'internal';
+export type ReconTool = 'subfinder' | 'amass' | 'assetfinder' | 'httpx' | 'guarded-tcp' | 'ffuf' | 'gobuster' | 'nuclei' | 'burp' | 'internal';
 export type ReconDepth = 'LIGHT' | 'STANDARD' | 'DEEP';
 export const RECON_CAPACITY = { globalAssets: 2, perTarget: 1, maxHttpRps: 6, processesPerTool: 1 } as const;
 export const RECON_BUDGETS = {
@@ -45,7 +45,7 @@ export function buildReconPlan(asset: { id: string; normalizedValue: string; for
   const stages = RECON_STAGE_NAMES.map(name => {
     const passive = ['Preflight', 'Passive discovery', 'Host prioritization', 'Burp enrichment', 'Normalization', 'Scope intelligence'].includes(name);
     const enabled = name === 'Passive discovery' ? wildcard && asset.active : name === 'Ports / services' ? active && !httpOnly : passive || active;
-    const tools: ReconTool[] = name === 'Passive discovery' ? ['subfinder','amass','assetfinder'] : name === 'HTTP surface' ? ['httpx'] : name === 'Ports / services' ? ['nmap'] : name === 'Content discovery' ? [...(gobuster.dir&&budget.depth==='LIGHT'?[]:['ffuf' as const]),...(gobuster.dir?['gobuster' as const]:[])] : name === 'Scope validation / DNS'&&gobuster.dns ? ['internal','gobuster'] : name === 'Nuclei Recon' ? ['nuclei'] : name === 'Burp enrichment' ? ['burp'] : ['internal'];
+    const tools: ReconTool[] = name === 'Passive discovery' ? ['subfinder','amass','assetfinder'] : name === 'HTTP surface' ? ['httpx'] : name === 'Ports / services' ? ['guarded-tcp'] : name === 'Content discovery' ? [...(gobuster.dir&&budget.depth==='LIGHT'?[]:['ffuf' as const]),...(gobuster.dir?['gobuster' as const]:[])] : name === 'Scope validation / DNS'&&gobuster.dns ? ['internal','gobuster'] : name === 'Nuclei Recon' ? ['nuclei'] : name === 'Burp enrichment' ? ['burp'] : ['internal'];
     return { name, tools, mode: passive ? 'PASSIVE' as const : 'ACTIVE' as const, enabled,
       reason: !enabled ? httpOnly && name === 'Ports / services' ? 'URL authorization does not grant host-wide port discovery.' : !active ? 'Effective authorization does not permit active target traffic.' : 'Exact host/URL: no parent-domain enumeration.' : name === 'Burp enrichment' ? 'Read existing, authorized history only; never start an agent.' : `${budget.depth} ${api ? 'API' : asset.type} collection within the immutable asset boundary.` };
   });

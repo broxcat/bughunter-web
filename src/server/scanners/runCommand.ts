@@ -12,6 +12,7 @@ import { enforcedToolArgs, safeCommandSummary } from "./toolPolicy";
 // live log bus for SSE. The call never throws on a non-zero exit — it resolves
 // with the exit code — so a tool that "fails" is a normal, recordable outcome.
 
+import { assertLiveExecution } from '@/server/execution';
 import { beforeScanNetwork, currentScanControl, recordUsefulScanWork } from "@/server/scanControl";
 import { logger } from "@/lib/logger";
 import { join } from "node:path";
@@ -72,6 +73,8 @@ export async function runCommand(
   await beforeScanNetwork();
   if (signal.aborted) return { code: null, timedOut: false, cancelled: true };
   args = enforcedToolArgs(cmd, args);
+  await assertLiveExecution();
+  if (signal.aborted) return { code: null, timedOut: false, cancelled: true };
   const secrets = args.flatMap((arg, i) => {
     if (!["-H", "-header", "-headers", "--header"].includes(args[i - 1]) || /^user-agent\s*:/i.test(arg)) return [];
     const value = arg.slice(arg.indexOf(":") + 1).trim();

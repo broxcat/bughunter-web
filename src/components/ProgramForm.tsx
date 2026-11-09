@@ -2,9 +2,11 @@
 import {platformLabel} from '@/lib/platformPresentation';
 import { useState } from "react";
 import { BOUNTY_PLATFORMS, VULNERABILITY_FAMILIES } from "@/lib/bountyProgram";
+import { headersFromLines, LEGACY_LIMITS, TEST_CATEGORIES, type ExecutionPolicyInput } from '@/lib/programExecutionPolicy';
 import { Button } from "@/components/ui/Button";
 
 export interface ProgramData {
+  executionPolicies?: { version: number; policy: ExecutionPolicyInput }[];
   assessmentMode?: 'BLACK_BOX'|'WHITE_BOX';
   updatedAt?:string;
   id: string; companyName: string; platform: string | null; programUrl: string | null;
@@ -22,6 +24,9 @@ function Hosts({ title, value, onChange }: { title: string; value: string[]; onC
   </fieldset>;
 }
 export default function ProgramForm({ initial, onSaved, onCancel }: { initial?: ProgramData; onSaved: (id: string) => void; onCancel?: () => void }) {
+  const currentPolicy = initial?.executionPolicies?.[0];
+  const [configurePolicy, setConfigurePolicy] = useState(Boolean(currentPolicy));
+  const policy = currentPolicy?.policy;
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [outOfScope, setOutOfScope] = useState(initial?.outOfScope ?? []);
@@ -29,10 +34,23 @@ export default function ProgramForm({ initial, onSaved, onCancel }: { initial?: 
   const [nonQualifying, setNonQualifying] = useState(initial?.nonQualifying ?? []);
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault(); setBusy(true); setError("");
-    const data = Object.fromEntries(new FormData(e.currentTarget));
+    const form = new FormData(e.currentTarget);
+    const data = Object.fromEntries(form);
+    const field = (name: string) => String(form.get(name) ?? '').trim();
+    const lines = (name: string) => field(name).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    const executionPolicy = initial && configurePolicy ? {
+      automationAllowed: form.has('automationAllowed'),
+      requiredUserAgent: field('requiredUserAgent') || null,
+      requiredHeaders: headersFromLines(field('requiredHeaders')),
+      exclusions: lines('structuredExclusions'),
+      requestsPerSecond: Number(field('requestsPerSecond')),
+      maxConcurrency: Number(field('maxConcurrency')),
+      forbiddenCategories: form.getAll('forbiddenCategories'),
+      sourceSnapshot: { url: data.programUrl || null, rules: field('rulesOfEngagement'), unrepresentedRules: lines('unrepresentedRules') },
+    } : undefined;
     const body = initial ? { ...data, ...(initial?.updatedAt?{expectedUpdatedAt:initial.updatedAt}:{}), platform: data.platform || null, programUrl: data.programUrl || null,
       ...Object.fromEntries(["rewardLow", "rewardMedium", "rewardHigh", "rewardCritical"].map(k => [k, data[k] || null])),
-      outOfScope, qualifying, nonQualifying } : { companyName: data.companyName, platform: data.platform || null, programUrl: data.programUrl || null };
+      requiredUserAgent: field('requiredUserAgent'), executionPolicy, outOfScope, qualifying, nonQualifying } : { companyName: data.companyName, platform: data.platform || null, programUrl: data.programUrl || null };
     try {
       const res = await fetch(initial ? `/api/programs/${initial.id}` : "/api/programs", { method: initial ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const json = await res.json(); if (!res.ok) throw new Error(json.error); onSaved(json.id);
@@ -56,6 +74,21 @@ export default function ProgramForm({ initial, onSaved, onCancel }: { initial?: 
     <p className="text-sm text-muted">Manage authorized assets in scope. Exclusions below take priority.</p>
     <label className="block">Rules of engagement<textarea name="rulesOfEngagement" maxLength={20000} rows={5} defaultValue={initial?.rulesOfEngagement ?? ''} className={inputClass} placeholder="Official program rules, technical restrictions, authorization conditions…" /></label>
     <Hosts title="Out of scope" value={outOfScope} onChange={setOutOfScope} />
+    {!currentPolicy && <label className="block"><input type="checkbox" checked={configurePolicy} onChange={e => setConfigurePolicy(e.target.checked)} /> Configure structured execution policy</label>}
+    {configurePolicy && <fieldset className="space-y-3">
+      <legend className="font-semibold">Execution policy {currentPolicy && <span className="text-muted">(version {currentPolicy.version})</span>}</legend>
+      <label className="block"><input type="checkbox" name="automationAllowed" defaultChecked={policy?.automationAllowed ?? false} /> Allow automation. I verified that all applicable rules are represented.</label>
+      <label className="block">Rules the engine cannot enforce<textarea name="unrepresentedRules" rows={2} defaultValue={policy?.sourceSnapshot.unrepresentedRules.join('\n')} className={inputClass} /><span className="text-sm text-muted">One per line. Any entry blocks automation.</span></label>
+      <label className="block">Structured exclusions<textarea name="structuredExclusions" rows={3} defaultValue={policy?.exclusions.join('\n')} placeholder="https://example.com/admin/*" className={inputClass} /><span className="text-sm text-muted">One URL, domain, wildcard, IP or CIDR per line.</span></label>
+      <label className="block">Required headers<textarea name="requiredHeaders" rows={2} defaultValue={policy?.requiredHeaders.map(({ name, value }) => name + ': ' + value).join('\n')} placeholder="X-Bug-Bounty: your-username" className={inputClass} /></label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label>Requests per second<input required name="requestsPerSecond" type="number" min="0.01" max="100" step="0.01" defaultValue={policy?.requestsPerSecond ?? LEGACY_LIMITS.requestsPerSecond} className={inputClass} /></label>
+        <label>Maximum concurrent requests<input required name="maxConcurrency" type="number" min="1" max="32" defaultValue={policy?.maxConcurrency ?? LEGACY_LIMITS.maxConcurrency} className={inputClass} /></label>
+      </div>
+      <fieldset className="space-y-1"><legend>Forbidden test categories</legend>
+        {TEST_CATEGORIES.map(category => <label key={category} className="block text-sm"><input type="checkbox" name="forbiddenCategories" value={category} defaultChecked={policy?.forbiddenCategories.includes(category)} /> {category.toLowerCase().replaceAll('_', ' ')}</label>)}
+      </fieldset>
+    </fieldset>}
     </div></details>
     <details className="ui-disclosure"><summary>Vulnerability policy</summary><div className="mt-4 space-y-5">
     {families("Qualifying vulnerabilities", qualifying, setQualifying)}
@@ -63,7 +96,7 @@ export default function ProgramForm({ initial, onSaved, onCancel }: { initial?: 
     {families("Non-qualifying vulnerabilities", nonQualifying, setNonQualifying)}
     </div></details>
     <details className="ui-disclosure"><summary>Advanced</summary><div className="mt-4">
-    <label className="block">Required User-Agent *<input required name="requiredUserAgent" maxLength={512} placeholder="Required by the program" defaultValue={initial?.requiredUserAgent} className={inputClass} /><span className="text-sm text-muted">Used for future scans. Set the value required by the program before running Recon.</span></label>
+    <label className="block">Required User-Agent<input name="requiredUserAgent" maxLength={512} placeholder="Required by the program" defaultValue={(policy ? policy.requiredUserAgent : initial.requiredUserAgent) ?? ''} className={inputClass} /><span className="text-sm text-muted">Leave blank to use your default hunter User-Agent from Settings.</span></label>
     </div></details>
     {error && <p role="alert" className="text-danger">{error}</p>}
     {busy&&<p role="status">Saving target settings…</p>}

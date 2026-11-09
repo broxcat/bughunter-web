@@ -31,15 +31,15 @@ describe('PortSwigger scope relay', () => {
     const connection = { call: vi.fn() };
     await expect(callScopedPortSwigger(connection,name,{},program)).rejects.toThrow('TOOL_NOT_ALLOWED'); expect(connection.call).not.toHaveBeenCalled();
   });
-  it('guards real send and Repeater tools with the same destination and UA policy', async () => {
+  it('guards real sends and refuses unmetered Repeater tools', async () => {
     const connection = { call: vi.fn<(name: string, args: Record<string, unknown>) => Promise<{content: {type: string; text: string}[]}>>().mockResolvedValue({content:[{type:'text',text:'OK'}]}) };
     const args = {targetHostname:'app.example.test',targetPort:443,usesHttps:true,content:'GET / HTTP/1.1\r\nHost: app.example.test\r\nUser-Agent: Wrong\r\n\r\n'};
-    await callScopedPortSwigger(connection,'create_repeater_tab',{...args,tabName:'controlled'},policy);
-    expect(String(connection.call.mock.calls[0][1].content)).toContain('User-Agent: Research-Test/1');
-    expect(connection.call.mock.calls[0][1].tabName).toBe('controlled');
-    connection.call.mockClear();
+    const send = vi.fn(async (_name, request) => request);
+    await callScopedPortSwigger(connection,'send_http1_request',args,policy,{send});
+    expect(send.mock.calls[0][1].content).toContain('User-Agent: Research-Test/1');
+    await expect(callScopedPortSwigger(connection,'create_repeater_tab',{...args,tabName:'controlled'},policy)).rejects.toThrow('TOOL_NOT_ALLOWED');
     await expect(callScopedPortSwigger(connection,'send_http1_request',{...args,targetHostname:'evil.example.test'},policy)).rejects.toThrow('OUT_OF_SCOPE'); expect(connection.call).not.toHaveBeenCalled();
-    await expect(callScopedPortSwigger(connection,'create_repeater_tab',args,{...policy,programScope:{rules:[],exclusions:['app.example.test']}})).rejects.toThrow('OUT_OF_SCOPE'); expect(connection.call).not.toHaveBeenCalled();
+    await expect(callScopedPortSwigger(connection,'send_http1_request',args,{...policy,programScope:{rules:[],exclusions:['app.example.test']}})).rejects.toThrow('OUT_OF_SCOPE'); expect(connection.call).not.toHaveBeenCalled();
   });
   it('does not retry a failed active call', async () => {
     const send=vi.fn(async()=>{throw new Error('disconnect');});const connection = {call:vi.fn()};
