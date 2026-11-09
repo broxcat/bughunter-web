@@ -36,7 +36,7 @@ export default async function FindingsPage({searchParams}:{searchParams:Promise<
       <table className="ui-inventory w-full text-left text-sm">
         <thead><tr>{['Title','Severity','Status','Target','Updated'].map(label=><th scope="col" key={label}>{label}</th>)}</tr></thead>
         <tbody>{result.items.map(f=><tr key={f.id}>
-          <td data-label="Title"><Link className="font-medium text-brand" href={f.target.program?'/targets/'+f.target.program.id+'/findings':'/targets/'+f.target.id+'/findings?finding='+f.id+'#finding-'+f.id}>{safeFindingText(f.title)}</Link></td>
+          <td data-label="Title"><Link className="font-medium text-brand" href={'/targets/'+f.target.id+'/findings?finding='+f.id+'#finding-'+f.id}>{safeFindingText(f.title)}</Link></td>
           <td data-label="Severity"><Badge tone={f.severity.toLowerCase() as BadgeTone}>{f.severity}</Badge></td>
           <td data-label="Status">{f.reviewStatus.toLowerCase().replaceAll('_',' ')}</td>
           <td data-label="Target"><div><span>{f.target.program?.companyName??'Legacy host'}</span><p className="text-xs text-muted">{f.target.host}</p></div></td>
