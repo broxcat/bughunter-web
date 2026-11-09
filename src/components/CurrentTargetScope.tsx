@@ -10,17 +10,17 @@ export default function CurrentTargetScope({programId}:{programId:string}) {
   async function view(){
     const id=++request.current;setOpen(true);setLoading(true);setText('');setError('');
     try{const response=await fetch(url,{cache:'no-store'});if(!response.ok)throw new Error('Current scope.md is unavailable. Retry when policy updates have finished.');const body=await response.text();if(request.current===id)setText(body);}
-    catch(e){if(request.current===id)setError(e instanceof Error?e.message:'Current Scope unavailable');}
+    catch(e){if(request.current===id)setError(e instanceof Error?e.message:'Current scope unavailable');}
     finally{if(request.current===id)setLoading(false);}
   }
   return <div className="flex flex-wrap items-center gap-3">
     <Button size="sm" variant="ghost" onClick={()=>void view()}>View scope.md</Button>
     <a className="text-sm text-muted underline" href={url}>Download scope.md</a>
-    {open&&<Dialog title="Current Target scope.md" onClose={()=>{request.current++;setOpen(false);}}>
+    {open&&<Dialog title="Current target scope.md" onClose={()=>{request.current++;setOpen(false);}}>
       <p className="mb-4 text-sm text-muted">Current policy and Recon context. Existing Research authorization snapshots remain unchanged.</p>
       {loading&&<p role="status">Loading current Scope…</p>}
       {error&&<div role="alert" className="space-y-3"><p>{error}</p><Button size="sm" onClick={()=>void view()}>Retry</Button></div>}
-      {text&&<pre tabIndex={0} aria-label="Current Target scope document" className="max-h-[60dvh] overflow-y-auto whitespace-pre-wrap break-words rounded border border-border bg-background p-3 text-xs">{text}</pre>}
+      {text&&<pre tabIndex={0} aria-label="Current target scope document" className="max-h-[60dvh] overflow-y-auto whitespace-pre-wrap break-words rounded border border-border bg-background p-3 text-xs">{text}</pre>}
     </Dialog>}
   </div>;
 }
