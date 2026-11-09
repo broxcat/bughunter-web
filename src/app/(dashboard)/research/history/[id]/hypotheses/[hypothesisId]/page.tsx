@@ -42,12 +42,12 @@ export default async function HypothesisPage({ params, searchParams }: { params:
     <p>Imported: {h.importedAt.toISOString()} · Source updated: {h.sourceUpdatedAt?.toISOString() ?? "Not supplied"}</p>
     <p>Confidence: {h.confidence ?? "Not supplied"} (not severity, validation or impact)</p>
     {h.status === "CONFIRMED" && <p className="font-semibold">{REGISTRY_NOTICE}</p>}
-    <Card className="p-5"><h2 className="text-xl">WHAT WE THINK</h2><p className="whitespace-pre-wrap">{h.hypothesis}</p></Card>
+    <Card className="p-5"><h2 className="text-xl">What we think</h2><p className="whitespace-pre-wrap">{h.hypothesis}</p></Card>
     <Card className="p-5"><h2 className="text-xl">WHY</h2><p>{Array.isArray(h.evidenceFor) && h.evidenceFor.length ? "Supporting observations are referenced below; review their evidence independently." : "No supporting observations recorded."}</p>{h.notes && <p className="whitespace-pre-wrap">{h.notes}</p>}{h.blockedReason && <p>Blocked: {h.blockedReason}</p>}</Card>
-    <Card className="p-5"><h2 className="text-xl">WHAT WOULD DISPROVE IT</h2><p className="whitespace-pre-wrap">{h.falsificationCondition}</p></Card>
-    <Card className="p-5"><h2 className="text-xl">WHAT TO TEST NEXT</h2><p className="whitespace-pre-wrap">{h.nextTest}</p><p>Expected signal: {h.expectedSignal}</p></Card>
+    <Card className="p-5"><h2 className="text-xl">What would disprove it</h2><p className="whitespace-pre-wrap">{h.falsificationCondition}</p></Card>
+    <Card className="p-5"><h2 className="text-xl">What to test next</h2><p className="whitespace-pre-wrap">{h.nextTest}</p><p>Expected signal: {h.expectedSignal}</p></Card>
     <Card className="p-5"><ResearchProof value={h.researchData} /></Card>
-    {reviewInput && <section aria-label="Independent Research review" className="space-y-2">
+    {reviewInput && <section aria-label="Independent research review" className="space-y-2">
       <ResearchStagePanel key={h.revision + ":validate"} title="Challenge the hypothesis" targetId={data.session.targetId} input={{ ...reviewInput, stage: "validate" }} />
       <ResearchStagePanel key={h.revision + ":trace"} title="Trace the demonstrated impact" targetId={data.session.targetId} input={{ ...reviewInput, stage: "trace" }} />
     </section>}
