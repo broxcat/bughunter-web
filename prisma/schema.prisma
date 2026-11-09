@@ -344,6 +344,14 @@ enum CredentialMode {
 model ScanRun {
   surfaceHistory ReconHistoryRun?
   researchPlans ResearchPlan[]
+  researchKey String? @unique
+  researchHandoffId String?
+  researchSourceId String?
+  researchSource ScanRun? @relation("AutomatedResearchSource", fields: [researchSourceId], references: [id], onDelete: SetNull)
+  automatedResearch ScanRun[] @relation("AutomatedResearchSource")
+  executedResearchPlanId String?
+  executedResearchPlan ResearchPlan? @relation("ExecutedResearchPlan", fields: [executedResearchPlanId], references: [id], onDelete: SetNull)
+  researchResults Json?
   authenticatedContextsSnapshot Json?
   authenticatedReconResult Json?
   surfaceObservations ReconSurfaceObservation[]
@@ -400,6 +408,8 @@ model ScanRun {
   @@index([targetId])
   @@index([scopeAssetId, createdAt])
   @@index([targetReconRunId])
+  @@index([researchSourceId])
+  @@index([researchHandoffId])
   @@index([status])
 }
 
@@ -649,6 +659,7 @@ enum ScanType {
   RECON
   HUNT      // Legacy: read-only, execution retired
   VALIDATE
+  RESEARCH
 }
 
 enum ScanOutcome {
@@ -1106,6 +1117,7 @@ model ResearchPlan {
   items ResearchPlanItem[]
   sessions ResearchSession[]
   reconSnapshots ResearchReconSnapshot[]
+  executions ScanRun[] @relation("ExecutedResearchPlan")
   @@unique([targetId, sourceFingerprint])
   @@index([targetId, createdAt])
   @@index([programId])
@@ -1459,6 +1471,7 @@ enum TargetCampaignStatus {
   PAUSED
   BLOCKED
   FAILED
+  RESEARCH_RUNNING
 }
 
 model TargetCampaign {

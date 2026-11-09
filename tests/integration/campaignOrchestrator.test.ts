@@ -30,10 +30,11 @@ suite('durable Target campaign', () => {
     }
     programIds = [];
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
   afterAll(async () => { if (owner) await p.user.delete({ where: { id: owner } }); await p?.$disconnect(); });
 
-  async function target(names: string[], options: { allow?: boolean; source?: CampaignSource; interval?: number } = {}) {
+  async function target(names: string[], options: { allow?: boolean; source?: CampaignSource; interval?: number; forbidActive?: boolean } = {}) {
     const program = await p.bountyProgram.create({ data: {
       ownerId: owner, companyName: 'Campaign fixture', requiredUserAgent: 'Fixture/1',
       platform: options.source?.platform ?? 'PRIVATE', programUrl: options.source?.url,
@@ -41,7 +42,8 @@ suite('durable Target campaign', () => {
         normalizedValue: asset.value, format: 'SUBDOMAIN', type: asset.type })) },
       executionPolicies: { create: { version: 1, policy: {
         reviewState: 'OWNER_REVIEWED', automationAllowed: options.allow ?? true, requiredUserAgent: 'Fixture/1',
-        requiredHeaders: [], exclusions: [], requestsPerSecond: 1, maxConcurrency: 1, forbiddenCategories: [],
+        requiredHeaders: [{ name: 'x-bug-bounty', value: 'fixture-owner' }], exclusions: [], requestsPerSecond: 1, maxConcurrency: 1,
+        forbiddenCategories: options.forbidActive ? ['ACTIVE_SCANNING'] : [],
         sourceSnapshot: { url: options.source?.url ?? null, rules: '', unrepresentedRules: [], ruleDecisions: [] },
       } } },
     } });
@@ -55,6 +57,10 @@ suite('durable Target campaign', () => {
   const runs = (programId: string) => p.targetReconRun.findMany({ where: { programId }, include: { scans: { include: { scopeAsset: true } } },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
   const outbox = (programId: string) => p.scanJobOutbox.count({ where: { scanRun: { target: { programId } } } });
+  const researchJobs = (programId: string) => p.scanRun.findMany({ where: { type: 'RESEARCH', target: { programId } },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  const completeResearch = (programId: string) => p.scanRun.updateMany({ where: { type: 'RESEARCH', status: 'QUEUED', target: { programId } },
+    data: { status: 'COMPLETED', outcome: 'SUCCESS', startedAt: new Date() } });
   async function finish(runId: string, success: boolean) {
     const startedAt = new Date(Date.now() + 1000);
     await p.$transaction([
@@ -81,17 +87,23 @@ suite('durable Target campaign', () => {
     expect(run.campaignKey).toBe(id + ':1:1:recon');
     expect(await outbox(id)).toBe(2);
     await finish(run.id, true);
+    await p.targetReconRun.update({ where: { id: run.id }, data: { scopeMarkdown: null } });
     await expect(advance(owner, id, { beforeCommit: crash })).rejects.toThrow('RESEARCH_PENDING');
     expect((await state(id)).handoffRunId).toBeNull();
     await advance(owner, id);
-    await advance(owner, id);
     expect(await state(id)).toMatchObject({ state: 'RESEARCH_PENDING', handoffRunId: run.id });
-    await expect(change(owner, id, 'handoff', crash)).rejects.toThrow('MONITORING');
-    expect((await state(id)).state).toBe('RESEARCH_PENDING');
-    await change(owner, id, 'handoff');
-    await change(owner, id, 'handoff');
-    expect(await state(id)).toMatchObject({ state: 'MONITORING', nextCycleAt: null });
+    await expect(advance(owner, id, { beforeCommit: crash })).rejects.toThrow('RESEARCH_RUNNING');
     expect(await outbox(id)).toBe(2);
+    await Promise.all([advance(owner, id), advance(owner, id)]);
+    expect((await state(id)).state).toBe('RESEARCH_RUNNING');
+    expect(await outbox(id)).toBe(4);
+    expect(new Set((await researchJobs(id)).map(job => job.researchSourceId))).toEqual(new Set(run.scans.map(scan => scan.id)));
+    await completeResearch(id);
+    await expect(advance(owner, id, { beforeCommit: crash })).rejects.toThrow('MONITORING');
+    expect((await state(id)).state).toBe('RESEARCH_RUNNING');
+    await advance(owner, id);
+    expect(await state(id)).toMatchObject({ state: 'MONITORING', nextCycleAt: null });
+    expect(await outbox(id)).toBe(4);
     expect(await p.researchSession.count({ where: { target: { programId: id } } })).toBe(0);
     expect(await p.finding.count({ where: { target: { programId: id } } })).toBe(0);
   });
@@ -156,7 +168,9 @@ suite('durable Target campaign', () => {
     const first = (await runs(id))[0];
     await finish(first.id, true);
     await advance(owner, id);
-    await change(owner, id, 'handoff');
+    await advance(owner, id);
+    await completeResearch(id);
+    await advance(owner, id);
     const now = (await state(id)).nextCycleAt!;
     const modified = first.scans.find(scan => scan.scopeAsset?.normalizedValue === host('changed'))!;
     await p.scopeAsset.update({ where: { id: modified.scopeAssetId! }, data: { assetValue: 'HIGH', updatedAt: new Date(Date.now() + 5000) } });
@@ -164,6 +178,95 @@ suite('durable Target campaign', () => {
     const followup = (await runs(id)).find(row => row.id !== first.id)!;
     expect(followup.campaignKey).toBe(id + ':2:1:recon');
     expect(followup.scans.map(scan => scan.scopeAsset?.normalizedValue)).toEqual([host('changed')]);
+    await finish(followup.id, true);
+    await advance(owner, id, { now });
+    await advance(owner, id, { now });
+    const jobs = (await researchJobs(id)).filter(job => job.researchHandoffId === followup.id);
+    expect(jobs.map(job => job.researchSourceId)).toEqual([followup.scans[0].id]);
+  });
+
+  it.runIf(Boolean(process.env.TEST_EXECUTION_REDIS_URL))('generates a versioned plan and executes only its observed, authorized reads once', async () => {
+    vi.stubEnv('REDIS_URL', process.env.TEST_EXECUTION_REDIS_URL!);
+    const { createScanProcessor } = await import('@/server/queue/processScan');
+    const fetch = vi.fn(async () => new Response('body must never be stored', {
+      status: 302, headers: { location: 'https://outside.example.test/secret', 'set-cookie': 'session=secret; Secure' },
+    }));
+    vi.stubGlobal('fetch', fetch);
+    const processor = createScanProcessor('automated-research-fixture');
+    for (const forbidActive of [false, true]) {
+      const id = await target([forbidActive ? 'blocked-read' : 'allowed-read'], { forbidActive });
+      await change(owner, id, 'start');
+      await advance(owner, id);
+      const [recon] = await runs(id);
+      const [source] = recon.scans;
+      const url = 'https://' + source.scopeAsset!.normalizedValue + '/api/v1';
+      const action = url + '/delete';
+      const privateUrl = url + '/private';
+      const now = new Date();
+      await p.reconArtifact.createMany({ data: [url, action, privateUrl].map(value => ({
+        scanRunId: source.id, scopeAssetId: source.scopeAssetId!, kind: 'endpoint', canonicalKey: value,
+        value: { url: value, method: 'GET', contentType: 'application/json', statusCode: 200, safeForActiveReview: true },
+        scopeState: 'IN_SCOPE', verification: 'OBSERVED', firstSeenAt: now, lastSeenAt: now, sources: [],
+      })) });
+      await p.reconSurfaceObservation.createMany({ data: [url, action, privateUrl].map(value => ({
+        scanRunId: source.id, scopeAssetId: source.scopeAssetId!, contextKey: value === privateUrl ? 'PRIVATE' : 'ANONYMOUS',
+        contextType: value === privateUrl ? 'AUTHENTICATED' : 'ANONYMOUS', canonicalKey: value, url: value, urlRedacted: false,
+        method: 'GET', statusCode: 200, responseClass: 'CONTENT', source: 'anonymous-recon', observedAt: now,
+      })) });
+      await finish(recon.id, true);
+      await advance(owner, id);
+      await advance(owner, id);
+      const [job] = await researchJobs(id);
+      const delivery = { data: { scanRunId: job.id, targetId: job.targetId, type: 'RESEARCH' }, attemptsStarted: 1 } as Parameters<typeof processor.process>[0];
+      await processor.process(delivery);
+      await processor.process(delivery);
+      const [completed] = await researchJobs(id);
+      expect(completed).toMatchObject({ status: 'COMPLETED', outcome: 'PARTIAL', executedResearchPlanId: expect.any(String) });
+      const plan = await p.researchPlan.findUniqueOrThrow({ where: { id: completed.executedResearchPlanId! } });
+      expect(plan).toMatchObject({ scanRunId: source.id, targetId: job.targetId });
+      const recorded = JSON.stringify(completed.researchResults);
+      expect(recorded).toContain('NOT_TESTED');
+      expect(recorded).not.toMatch(/secret|body must never be stored/);
+      if (forbidActive) {
+        expect(fetch).not.toHaveBeenCalled();
+        expect(recorded).toContain('Blocked by the current Scope or test categories');
+      } else {
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(fetch).toHaveBeenCalledWith(url, expect.objectContaining({ method: 'GET', redirect: 'manual' }));
+        const headers = (fetch.mock.calls as unknown as [string, RequestInit][])[0][1].headers as Headers;
+        expect(headers.get('x-bug-bounty')).toBe('fixture-owner');
+        expect(headers.get('user-agent')).toBe('Fixture/1');
+        expect(recorded).toContain('different origin');
+      }
+      expect(await p.finding.count({ where: { target: { programId: id } } })).toBe(0);
+      await advance(owner, id);
+      expect((await state(id)).state).toBe('MONITORING');
+      fetch.mockClear();
+    }
+    await processor.shutdown();
+  });
+
+  it('resumes only a Research job that was cancelled before start', async () => {
+    const id = await target(['running-research', 'queued-research']);
+    await change(owner, id, 'start');
+    await advance(owner, id);
+    const [run] = await runs(id);
+    await finish(run.id, true);
+    await advance(owner, id);
+    await advance(owner, id);
+    const [running, queued] = await researchJobs(id);
+    await p.scanRun.update({ where: { id: running.id }, data: { status: 'RUNNING', startedAt: new Date() } });
+    await change(owner, id, 'pause');
+    expect((await researchJobs(id)).map(job => Boolean(job.cancelRequestedAt))).toEqual([false, true]);
+    await change(owner, id, 'resume');
+    await advance(owner, id);
+    expect((await state(id)).state).toBe('RESEARCH_PENDING');
+    await p.scanRun.update({ where: { id: queued.id }, data: { status: 'CANCELLED' } });
+    await Promise.all([advance(owner, id), advance(owner, id)]);
+    const jobs = await researchJobs(id);
+    expect(jobs).toHaveLength(3);
+    expect(jobs.filter(job => job.researchSourceId === running.researchSourceId)).toHaveLength(1);
+    expect(jobs.filter(job => job.researchSourceId === queued.researchSourceId).map(job => job.status)).toEqual(['CANCELLED', 'QUEUED']);
   });
 
   it('serializes the global Target limit across concurrent workers', async () => {

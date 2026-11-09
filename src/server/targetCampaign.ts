@@ -49,12 +49,13 @@ export async function campaignFacts(db: Database, ownerId: string, ids: string[]
     SELECT p.id AS "programId", r.id AS "runId", r.status::text AS "runStatus", r.outcome::text AS "runOutcome",
       COALESCE(octet_length(r."scopeMarkdown") > 0, false) AS "hasHandoff",
       COALESCE(r.status = 'COMPLETED' AND r.outcome IN ('SUCCESS','PARTIAL') AND r."scopeMarkdown" IS NULL
-        AND r."finishedAt" > NOW() - INTERVAL '12 seconds', false) AS "handoffPending",
+        AND c."handoffRunId" IS DISTINCT FROM r.id AND r."finishedAt" > NOW() - INTERVAL '12 seconds', false) AS "handoffPending",
       (${scopeCurrent}) AS "scopeCurrent",
       COALESCE(progress.total, 0) AS "reconTotal", COALESCE(progress.finished, 0) AS "reconFinished",
       COALESCE(progress.running, 0) AS "reconRunning",
       standalone.total AS "standaloneTotal", standalone.running AS "standaloneRunning", c.state::text AS "campaignState",
       research.creating AS "researchCreating", research.ready AS "researchReady", research.failed AS "researchFailed",
+      automated.total AS "automatedTotal", automated.running AS "automatedRunning", automated.finished AS "automatedFinished", automated.failed AS "automatedFailed",
       ${findingCounts}
     FROM "BountyProgram" p
     LEFT JOIN "TargetCampaign" c ON c."programId" = p.id
@@ -82,6 +83,14 @@ export async function campaignFacts(db: Database, ownerId: string, ids: string[]
       WHERE t."programId" = p.id AND t."userId" = p."ownerId" AND w."consoleTargetId" IS NOT NULL
         AND (a.active OR d.active OR t."contextOnly" OR (t.active AND t."scopeAssetId" IS NULL AND t."discoveredFromAssetId" IS NULL))
     ) research
+    CROSS JOIN LATERAL (
+      SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE job.status = 'RUNNING')::int AS running,
+        COUNT(*) FILTER (WHERE job.status NOT IN ('QUEUED', 'RUNNING'))::int AS finished,
+        COUNT(*) FILTER (WHERE job.status = 'FAILED')::int AS failed
+      FROM "ScanRun" job
+      WHERE job."researchHandoffId" = c."handoffRunId" AND job.type = 'RESEARCH'
+        AND NOT (job.status = 'CANCELLED' AND job."startedAt" IS NULL)
+    ) automated
     ${findingJoin}
     WHERE p."ownerId" = ${ownerId} AND p.id IN (${Prisma.join(ids)})
   `);
@@ -95,7 +104,7 @@ export function campaignView(program: CampaignProgram, facts: CampaignFacts) {
   const firstRule = (source?.ruleDecisions?.findIndex(rule => !rule.decision) ?? 0) + 1;
   const row = program.campaign;
   const campaign = row ? { state: row.state, reason: row.reason, retryAt: row.retryAt, nextCycleAt: row.nextCycleAt,
-    handoffRunId: row.handoffRunId, pendingCount: pendingScopeSchema.safeParse(row.pendingAssets).data?.length ?? 0 } : null;
+    handoffRunId: row.handoffRunId, handoffReady: row.handoffRunId === facts.runId && facts.hasHandoff, pendingCount: pendingScopeSchema.safeParse(row.pendingAssets).data?.length ?? 0 } : null;
   return { policyBlocker, ...targetCampaign({ ...program, campaign, assetCount: program._count.scopeAssets,
     policyBlocker, undecidedRules, firstRule: Math.max(1, firstRule) }, facts) };
 }

@@ -86,6 +86,7 @@ const toolCategories: Record<string, readonly TestCategory[]> = {
   browser: ['ACTIVE_SCANNING', 'BROWSER', 'CRAWLING', 'AUTHENTICATED_TESTING'],
   'research-browser': [...allHttpTests, 'BROWSER'],
   'research-http': allHttpTests,
+  'research-read-only': ['ACTIVE_SCANNING'],
 };
 
 export function excludedByPolicy(policy: ResolvedProgramPolicy, host: string, url?: URL) {

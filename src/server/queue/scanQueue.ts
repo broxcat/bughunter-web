@@ -7,7 +7,7 @@ export const SCAN_QUEUE_NAME = "scans";
 export type ScanJobData = {
   scanRunId: string;
   targetId: string;
-  type: "RECON" | "HUNT" | "VALIDATE";
+  type: "RECON" | "RESEARCH" | "HUNT" | "VALIDATE";
 };
 export const SCAN_JOB_OPTIONS = {
   attempts: 1,

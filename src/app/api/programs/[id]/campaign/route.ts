@@ -17,7 +17,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     await changeCampaign(userId, id, body.data.action);
     if (body.data.action === 'pause') await settleQueuedCancellations().catch(() => {});
-    else if (body.data.action !== 'handoff') await advanceCampaign(userId, id).catch(() => {});
+    else await advanceCampaign(userId, id).catch(() => {});
     return Response.json({ accepted: true }, { status: 202, headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) { return assetError(error); }
 }
