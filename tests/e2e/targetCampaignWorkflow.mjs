@@ -96,8 +96,8 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     ]);
     assert.equal((await campaign(ready.id, 'start')).status(), 202); // Idempotent wake-up for the test's completed worker fixture.
     await primary('button', 'Open research').waitFor();
-    await page.getByText('1 discovered hosts', { exact: true }).waitFor();
-    await page.getByText('1 active web apps', { exact: true }).waitFor();
+    await page.getByText('1 discovered host', { exact: true }).waitFor();
+    await page.getByText('1 active web app', { exact: true }).waitFor();
     await p.targetCampaign.update({ where: { programId: ready.id }, data: { pendingAssets: ['docs','login','media'].map(name => ({ value: name + '.example.test', type: 'WEB_APPLICATION' })) } });
     await page.reload();
     await page.getByRole('link', { name: '3 new assets to review', exact: true }).waitFor();

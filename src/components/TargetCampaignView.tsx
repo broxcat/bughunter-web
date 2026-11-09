@@ -49,7 +49,8 @@ export default function TargetCampaignView({ program, view, notice, summary }: {
           <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold"><span aria-hidden="true" className="mr-1.5 text-xs text-muted">{index + 1}</span>{step.stage}</h2><CampaignState state={step.state} /></div>
           {step.detail && <p className="text-sm text-muted" role={['blocked', 'running', 'failed', 'needs you'].includes(step.state) ? 'status' : undefined}>{step.detail}</p>}
           {step.stage === 'Recon' && step.state === 'done' && summary && <ul className="space-y-1 text-xs text-muted">
-            <li>{summary.hosts} discovered hosts</li><li>{summary.webApps} active web apps</li>
+            <li>{summary.hosts} discovered {summary.hosts === 1 ? 'host' : 'hosts'}</li>
+            <li>{summary.webApps} active web {summary.webApps === 1 ? 'app' : 'apps'}</li>
             <li>Changes · {summary.added} new, {summary.changed} changed, {summary.notObserved} not observed</li>
           </ul>}
           {step.fix && step.fix !== ('href' in view.action ? view.action.href : undefined) &&
