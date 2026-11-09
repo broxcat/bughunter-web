@@ -139,8 +139,8 @@ export default function ReconReportView({ model,narrative }: { model: ReconRepor
 
 
 
-    <section aria-label="Authenticated Recon" className="space-y-2">
-      <h3 className="font-semibold">Authenticated Recon</h3>
+    <section aria-label="Authenticated recon" className="space-y-2">
+      <h3 className="font-semibold">Authenticated recon</h3>
       <p className="text-sm text-muted">{authenticated.note}</p>
       {authenticated.contexts.length > 0 && <ul className="space-y-1 text-sm">{authenticated.contexts.map((context, index) => <li key={`${context.label}:${index}`}>{context.label} · {context.state} · {context.observations} usable observations</li>)}</ul>}
     </section>
