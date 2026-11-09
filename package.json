@@ -15,6 +15,7 @@
     "test:migration": "node tests/migrations/programUpgrade.mjs",
     "worker": "tsx src/server/queue/worker.ts",
     "user:create": "node scripts/create-user.mjs",
+    "policy:backfill": "tsx scripts/backfill-execution-policies.mts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",

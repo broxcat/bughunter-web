@@ -13,8 +13,8 @@ type Asset=ManagedScopeAsset&{formatSource:string;reconStatus:string;scanRuns:{i
 type ReconState={latest:{id:string;status:string;outcome:string|null}|null;needsRecon:boolean;researchReady:boolean;findingsConfirmed:number;researchStarted:number};
 const format=(value:string)=>({URL:'URL',WILDCARD_DOMAIN:'Wildcard',SUBDOMAIN:'Subdomain',DOMAIN:'Domain',HOSTNAME:'Hostname',IP:'IP',CIDR:'CIDR'}[value]??value);
 const label=(v:string)=>v.toLowerCase().replaceAll('_',' ').replace(/^./,c=>c.toUpperCase());
-export default function ProgramWorkflow(props:{program:ProgramData;view?:'home'|'scope'}){return <Suspense fallback={<p role="status">Loading scope…</p>}><WorkflowCollection {...props}/></Suspense>;}
-function WorkflowCollection({program,view='home'}:{program:ProgramData;view?:'home'|'scope'}) {
+export default function ProgramWorkflow(props:{program:Pick<ProgramData,'id'|'deletingAt'|'outOfScope'>;view?:'home'|'scope'}){return <Suspense fallback={<p role="status">Loading scope…</p>}><WorkflowCollection {...props}/></Suspense>;}
+function WorkflowCollection({program,view='home'}:{program:Pick<ProgramData,'id'|'deletingAt'|'outOfScope'>;view?:'home'|'scope'}) {
   const router=useRouter(),params=useSearchParams(),query=params.toString(),input=paginationInput(new URLSearchParams({page:params.get('assetPage')??'1',pageSize:params.get('pageSize')??'25'}),false);
   const [pages,setPages]=useState<{page:number;pages:number;total:number}|null>(null);
   const [assets,setAssets]=useState<Asset[]>([]),[state,setState]=useState<ReconState>({latest:null,needsRecon:true,researchReady:false,findingsConfirmed:0,researchStarted:0}),[busy,setBusy]=useState(false),[error,setError]=useState('');

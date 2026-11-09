@@ -135,6 +135,29 @@ no start or attempt; it is never falsely acknowledged as completed. The queue
 infrastructure suite also kills/restarts a real worker against a local HTTP target
 and verifies there is no second network execution.
 
+## Backfill execution policies
+
+After applying the Prisma migrations, inspect the selected database with the
+maintenance command. Review the dry-run output before applying it.
+
+```sh
+npm run policy:backfill -- --dry-run
+npm run policy:backfill -- --apply
+```
+
+The dry run reports how many programs were inspected, how many would be blocked,
+and every legacy exclusion that could not be converted. The apply command adds
+one blocked draft to each program without a policy and keeps existing policy
+versions and historical records intact. Repeating it does not create duplicate
+versions.
+
+Use the **Policy review needed** link in Targets to inspect the imported
+sources. Supply the program's limits, translate any free-text restrictions
+that can be enforced, and leave remaining restrictions in the blocking rules
+field. The application keeps reading the original program exclusions and checks
+parity with the structured exclusions before enabling automation. Editing a
+linked Scope's free text requires another review.
+
 ## Run
 
 Next.js 16 / React 19, Prisma 6 / PostgreSQL, BullMQ / Redis, Auth.js, Tailwind 4.

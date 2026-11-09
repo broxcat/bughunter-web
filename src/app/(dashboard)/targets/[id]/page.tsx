@@ -4,8 +4,8 @@ import { redirect, notFound } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { platformLabel } from '@/lib/platformPresentation';
-import { MISSING_HUNTER_UA } from '@/lib/programExecutionPolicy';
-import { programPolicyInclude, resolveProgramPolicy } from '@/server/programExecutionPolicy';
+import { MISSING_HUNTER_UA, POLICY_REVIEW_ANCHOR } from '@/lib/programExecutionPolicy';
+import { programPolicyBlocker, programPolicyInclude } from '@/server/programExecutionPolicy';
 import ProgramWorkflow from '@/components/ProgramWorkflow';
 
 export default async function TargetPage({ params, searchParams }: {
@@ -17,26 +17,13 @@ export default async function TargetPage({ params, searchParams }: {
   if (!session?.user?.id) return null;
   const program = await prisma.bountyProgram.findFirst({
     where: { id, ownerId: session.user.id },
-    include: {
-      ...programPolicyInclude,
-      targets: { where: { active: true, contextOnly: false }, select: { id: true, host: true, active: true } },
-    },
+    include: programPolicyInclude,
   });
   if (!program) {
     if (await prisma.target.findFirst({ where: { id, userId: session.user.id } })) redirect('/hosts/' + id);
     notFound();
   }
-  const { owner, executionPolicies, ...target } = program;
-  const blocker = resolveProgramPolicy({ ...target, owner, executionPolicies }).blocker;
-  const data = {
-    ...target,
-    rewardLow: target.rewardLow?.toString() ?? null,
-    rewardMedium: target.rewardMedium?.toString() ?? null,
-    rewardHigh: target.rewardHigh?.toString() ?? null,
-    rewardCritical: target.rewardCritical?.toString() ?? null,
-    updatedAt: target.updatedAt.toISOString(),
-    deletingAt: target.deletingAt?.toISOString() ?? null,
-  };
+  const blocker = programPolicyBlocker(program);
   return <div className="space-y-5">
     <Link href="/targets" className="text-sm text-brand">← Targets</Link>
     <div className="flex flex-wrap items-center gap-3">
@@ -50,8 +37,10 @@ export default async function TargetPage({ params, searchParams }: {
     </p>
     {(await searchParams).saved === '1' && <p role="status">Target settings saved. Future operations use current policy; captured history is unchanged.</p>}
     {blocker && <p role="status">
-      {blocker} {blocker === MISSING_HUNTER_UA && <Link className="underline" href="/settings">Open Settings</Link>}
+      {blocker} <Link className="underline" href={blocker === MISSING_HUNTER_UA ? '/settings' : '/targets/' + id + '/settings#' + POLICY_REVIEW_ANCHOR}>
+        {blocker === MISSING_HUNTER_UA ? 'Open Settings' : 'Review policy'}
+      </Link>
     </p>}
-    <ProgramWorkflow program={data} />
+    <ProgramWorkflow program={{ id, outOfScope: program.outOfScope, deletingAt: program.deletingAt?.toISOString() ?? null }} />
   </div>;
 }
