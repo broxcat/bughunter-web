@@ -68,10 +68,10 @@ export default function ResearchTerminal({ targetId, company, host, requiredUser
     <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-800 px-3 py-2 text-xs">
       <Link className="text-slate-400 hover:text-white" href="/research">← Research</Link>
       <h1 className="mr-auto truncate text-sm font-medium">{company} / {host}</h1>
-      {sessionId && <Link className="rounded border border-slate-700 px-2 py-1 hover:bg-slate-800" href={`/research/history/${encodeURIComponent(sessionId)}#hypotheses`} target="_blank" rel="noopener">Hypothèses</Link>}
+      {sessionId && <Link className="rounded border border-slate-700 px-2 py-1 hover:bg-slate-800" href={`/research/history/${encodeURIComponent(sessionId)}#hypotheses`} target="_blank" rel="noopener">Hypotheses</Link>}
       <span className="max-w-48 truncate" title={requiredUserAgent}>UA: {requiredUserAgent}</span><span aria-live="polite">Terminal: {state}</span><span title={providerState}>{selectedProvider === 'codex' ? 'Codex' : 'Claude'}: {codex}</span><span title={burpDetails}>Burp MCP: {burp}</span>
-      <label className="flex items-center gap-2">Moteur IA
-        <select aria-label="Moteur IA" value={switchTo ?? selectedProvider} className="rounded border border-slate-700 bg-slate-900 p-1" onChange={e => setSwitchTo(e.target.value as ResearchProvider)}>
+      <label className="flex items-center gap-2">AI engine
+        <select aria-label="AI engine" value={switchTo ?? selectedProvider} className="rounded border border-slate-700 bg-slate-900 p-1" onChange={e => setSwitchTo(e.target.value as ResearchProvider)}>
           {(['codex', 'claude'] as const).map(engine => { const diagnostic = engines.find(row => row.provider === engine); return <option key={engine} value={engine}>{providerName(engine)}{diagnostic ? ` · ${diagnostic.installation} · ${diagnostic.authentication}` : ''}</option>; })}
         </select>
       </label>
@@ -83,7 +83,7 @@ export default function ResearchTerminal({ targetId, company, host, requiredUser
       <button className="rounded border px-2 py-1" onClick={() => setSwitchTo(undefined)}>Cancel</button>
     </div>}
     <p className="shrink-0 px-3 py-1 text-xs" aria-live="polite">{providerName(selectedProvider)} · Profile: {selectedProfile} · {providerState}</p>
-    {selectedProvider==='codex'&&selectedProfile==='yolo'&&<p className="shrink-0 px-3 py-1 text-xs">YOLO bypasses native Codex approval/sandbox prompts. BugHunter Scope authorization and methodology confirmation gates still apply.</p>}
+    {selectedProvider==='codex'&&selectedProfile==='yolo'&&<p className="shrink-0 px-3 py-1 text-xs">YOLO bypasses native Codex approval/sandbox prompts. BugHunter scope authorization and methodology confirmation gates still apply.</p>}
     {selectedProvider === 'claude' && <p className="shrink-0 px-3 py-1 text-xs" title={providerState}>Claude: passive Research and existing Burp observations · login is separate for each target · /login · /model · Ctrl+C to interrupt · /exit to stop. Active security skills are unavailable.</p>}
     {error && <p role="alert" className="shrink-0 bg-red-950 px-3 py-2 text-sm">{error}</p>}
     <ResearchReconContext targetId={targetId} provider={selectedProvider} connected={state === 'connected'} />
