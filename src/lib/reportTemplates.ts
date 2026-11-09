@@ -78,10 +78,10 @@ function aggregateAssessmentMode(input:ReportInput):string{
   return assessmentModeLabel(input.findings[0]?.assessmentMode);
 }
 
-export const IMPACT_PLACEHOLDER = "À compléter : impact business/technique démontré";
+export const IMPACT_PLACEHOLDER = "To complete: demonstrated business or technical impact.";
 export const REMEDIATION_PLACEHOLDER = "Remediation guidance not yet documented.";
-export const POC_PLACEHOLDER = "À compléter : étapes de reproduction (requêtes / réponses).";
-export const DESCRIPTION_PLACEHOLDER = "À compléter : description de la vulnérabilité.";
+export const POC_PLACEHOLDER = "To complete: reproduction steps, including requests and responses.";
+export const DESCRIPTION_PLACEHOLDER = "To complete: vulnerability description.";
 
 function sev(f: ReportFinding): string {
   return (f.severity ?? "INFO").toUpperCase();
