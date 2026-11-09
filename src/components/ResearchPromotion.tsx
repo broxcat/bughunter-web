@@ -17,10 +17,10 @@ export default function ResearchPromotion({ sessionId, hypothesisId, targetId, r
     finally { pending.current = false; setBusy(false); }
   }
   return <section className="space-y-3" aria-label="Human review and Finding draft"><h2 className="text-xl">Human review → Finding draft</h2>
-    <p>Research CONFIRMED is a claim for review. A draft starts CANDIDATE / UNVALIDATED with INFO severity and is excluded from Reports until Evidence Review confirms it.</p>
-    {draft ? <><p>Finding already created from Research revision {draft.hypothesisRevision}. Later Research edits do not overwrite its review.</p><Link className="text-brand" href={`/targets/${targetId}/findings#finding-${draft.findingId}`}>Open Finding draft</Link></> : eligible ? <>
+    <p>Research CONFIRMED is a claim for review. A draft starts CANDIDATE / UNVALIDATED with INFO severity and is excluded from reports until evidence review confirms it.</p>
+    {draft ? <><p>Finding already created from Research revision {draft.hypothesisRevision}. Later Research edits do not overwrite its review.</p><Link className="text-brand" href={`/targets/${targetId}/findings#finding-${draft.findingId}`}>Open finding draft</Link></> : eligible ? <>
       <label className="block"><input type="checkbox" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} /> I reviewed this revision, its provenance, reproduction and controls. Create only an unvalidated Finding draft.</label>
-      <Button disabled={busy || !acknowledged} onClick={promote}>{busy ? "Creating draft…" : "Create Finding Draft"}</Button>
+      <Button disabled={busy || !acknowledged} onClick={promote}>{busy ? "Creating draft…" : "Create finding draft"}</Button>
     </> : <p>{requiresReview ? "A supported independent decision on this revision is required before promotion." : "Promotion requires a CONFIRMED v2 hypothesis, current authorization and reproducible controlled evidence."}</p>}
     {error && <p role="alert">{error}</p>}
   </section>;

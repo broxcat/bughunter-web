@@ -47,17 +47,17 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
     const liveRun=await prisma.targetReconRun.findFirst({where:{programId:history.program.id,program:{ownerId:session.user.id},status:{in:['QUEUED','RUNNING']}},select:{id:true}});
     return <div className="space-y-6">
       <nav aria-label="Recon navigation" className="flex flex-wrap gap-4 text-sm">
-        <Link href="/recon" className="text-brand">Recon Targets</Link>
+        <Link href="/recon" className="text-brand">Recon targets</Link>
         <Link href={`/targets/${history.program.id}`} className="text-brand">Back to {history.program.companyName}</Link>
       </nav>
       <div>
         <h1 className="text-2xl font-semibold">Recon history — {history.program.companyName}</h1>
-        <p className="text-muted">Recent runs, newest first.</p>
+        
         {history.program.deletingAt && <p role="status">Target pending deletion.</p>}
       </div>
       <TargetReconActions programId={history.program.id} running={Boolean(liveRun)} disabled={!!history.program.deletingAt}/>
       <CollectionPager path="/recon" query={query.toString()} {...history} label="Recon history pages" noun="runs"/>
-      {!history.items.length ? <p>No Recon runs recorded. <Link className="text-brand" href={`/scopes?target=${history.program.id}`}>Configure Scope</Link> before starting.</p> :
+      {!history.items.length ? <p>No Recon runs recorded. <Link className="text-brand" href={`/scopes?target=${history.program.id}`}>Configure scope</Link> before starting.</p> :
         <div className="ui-table-scroll overflow-x-auto rounded border border-border" tabIndex={0} aria-label="Recon history table" role="region">
           <table className="ui-inventory w-full text-left text-sm">
             <caption className="sr-only">Retained Recon runs ordered by date and unique run ID</caption>
@@ -104,14 +104,14 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 className="text-2xl font-semibold">Recon</h1>
-        <p className="text-muted">Latest Recon by target.</p>
+        
       </div>
 
     </div>
 
-    <form action="/recon" className="flex flex-wrap gap-3"><label>Search Targets<input name="q" defaultValue={search.q??''} maxLength={200} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={collection.pageSize}/><button type="submit" className="ui-btn">Search</button></form>
+    <form action="/recon" className="flex flex-wrap gap-3"><label>Search targets<input name="q" defaultValue={search.q??''} maxLength={200} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={collection.pageSize}/><button type="submit" className="ui-btn">Search</button></form>
     <CollectionPager path="/recon" query={query.toString()} {...collection}/>
-    {!rows.length && <p>No matching Targets. <Link href="/targets" className="text-brand">Create a Target</Link> to authorize assets and start Recon.</p>}
+    {!rows.length && <p>No matching targets. <Link href="/targets" className="text-brand">Create a target</Link> to authorize assets and start Recon.</p>}
 
     {rows.length > 0 && <div className="ui-table-scroll overflow-x-auto rounded border border-border" tabIndex={0} role="region" aria-label="Targets and their latest Recon result">
       <table className="ui-inventory w-full text-left text-sm">
@@ -134,7 +134,7 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
             </td>
             <td data-label="Last run" className="p-3 text-muted">{row.run ? <time dateTime={row.run.createdAt.toISOString()}>{stamp(row.run.createdAt)}</time> : '—'}</td>
             <td data-label="Action" className="p-3">
-              <Link className="font-medium text-brand" href={row.run?`/recon/runs/${row.run.id}`:`/recon?program=${row.id}`} aria-label={row.run?`Open latest Recon run for ${row.companyName}`:`Open Recon for ${row.companyName}`}>Open</Link>
+              <Link className="font-medium text-brand" href={row.run?`/recon/runs/${row.run.id}`:`/recon?program=${row.id}`} aria-label={row.run?`Open latest recon run for ${row.companyName}`:`Open recon for ${row.companyName}`}>Open</Link>
             </td>
           </tr>)}
         </tbody>

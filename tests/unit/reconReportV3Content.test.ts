@@ -95,7 +95,7 @@ describe('Recon report v3 facts and AI interpretation rendering', () => {
   it('exposes recorded fallback status and HTTP diagnostics without leaking provider data', () => {
     const value = report({ narrativeStatus: 'FACTUAL_ONLY', narrativeFailure: 'FAILED_PROVIDER', generation: { attempts: [{ httpStatus: 400, providerErrorCode: 'PROVIDER_HTTP_ERROR', body: 'PRIVATE_BODY', message: 'PRIVATE_TOKEN' }] } });
     const html = render(value);
-    for (const expected of ['AI synthesis: FALLBACK', 'FAILED_PROVIDER', 'HTTP 400', 'Assessment Overview', 'Recon coverage', 'Methodology', 'Limitations']) expect(html).toContain(expected);
+    for (const expected of ['AI synthesis: FALLBACK', 'FAILED_PROVIDER', 'HTTP 400', 'Assessment overview', 'Recon coverage', 'Methodology', 'Limitations']) expect(html).toContain(expected);
     expect(html).not.toContain('PRIVATE_'); expect(html).not.toContain('PROVIDER_HTTP_ERROR');
     expect(render()).toContain('AI synthesis: READY');
     expect(render(report({ narrativeStatus: 'RECOVERED' }))).toContain('AI synthesis: READY_WITH_WARNINGS');

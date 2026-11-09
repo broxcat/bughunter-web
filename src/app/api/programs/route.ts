@@ -2,7 +2,7 @@ import { foreignOrigin } from '@/lib/requestOrigin';
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { programSchema } from "@/lib/bountyProgram";
+import { programCreateSchema } from "@/lib/bountyProgram";
 import { paginationInput } from '@/lib/pagination';
 import { programCollection } from '@/server/programCollection';
 
@@ -24,13 +24,13 @@ export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
-  const parsed = programSchema.safeParse(await req.json().catch(() => null));
+  const parsed = programCreateSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });
   const { scopeHosts, ...data } = parsed.data;
   data.scopeRules = [...new Set([...data.scopeRules, ...scopeHosts])];
   const ownerId = session.user.id;
   const program = await prisma.$transaction(async tx => {
-    const p = await tx.bountyProgram.create({ data: { ...data, ownerId } });
+    const p = await tx.bountyProgram.create({ data: { ...data, requiredUserAgent: data.requiredUserAgent ?? "", ownerId } });
     for (const host of scopeHosts) {
       const scope = await tx.scope.create({ data: { userId: ownerId, hostPattern: host, programName: p.companyName, status: "APPROVED" } });
       await tx.target.create({ data: { userId: ownerId, programId: p.id, scopeId: scope.id, host, active: true } });

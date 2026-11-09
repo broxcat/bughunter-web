@@ -40,7 +40,7 @@ export default function ResearchStagePanel({ title, targetId, input }: {
 
   return <details className="space-y-2 rounded border border-border p-3">
     <summary className="cursor-pointer font-medium">{title}</summary>
-    <p className="text-sm text-muted">Run sends scoped, redacted research summaries to the embedding service and the model selected in <Link className="text-brand" href="/settings">AI Settings</Link>. Results are advisory. Review them before any target interaction or decision.</p>
+    <p className="text-sm text-muted">Run sends scoped, redacted research summaries to the embedding service and the model selected in <Link className="text-brand" href="/settings">AI settings</Link>. Results are advisory. Review them before any target interaction or decision.</p>
     <div className="flex flex-wrap gap-2">
       <Button size="sm" disabled={busy} onClick={() => void request(true)}>Run stage</Button>
       <Button size="sm" variant="secondary" disabled={busy} onClick={() => void request(false)}>Load last result</Button>

@@ -66,8 +66,8 @@ export async function auditMilestone6Interactions({prisma:p,owner,origin,page}){
   assert(await page.locator('#main-content').evaluate(e=>e===document.activeElement));
   const nav=page.getByRole('navigation',{name:'Primary navigation',exact:true});
   assert.equal(await nav.locator('[aria-current="page"]').innerText(),'Scopes');assert.equal(await nav.getByRole('link',{name:/Findings|Reports/}).count(),0);verify(`${theme}/${width}: active Target, no global Findings/Report inventions`);
-  const scroll=page.getByRole('region',{name:'Scope Assets table',exact:true});await scroll.focus();const before=await scroll.evaluate(e=>({left:e.scrollLeft,wide:e.scrollWidth>e.clientWidth}));
-  if(before.wide){await page.keyboard.press('ArrowRight');await page.waitForFunction(()=>document.querySelector('[aria-label="Scope Assets table"]').scrollLeft>0);}
+  const scroll=page.getByRole('region',{name:'Scope assets table',exact:true});await scroll.focus();const before=await scroll.evaluate(e=>({left:e.scrollLeft,wide:e.scrollWidth>e.clientWidth}));
+  if(before.wide){await page.keyboard.press('ArrowRight');await page.waitForFunction(()=>document.querySelector('[aria-label="Scope assets table"]').scrollLeft>0);}
   assert.equal(before.wide,false);verify(`${theme}/${width}: data table keyboard scrolling`);
   await page.locator('tbody summary').filter({hasText:/^Actions$/}).first().click();
   const retire=page.getByRole('button',{name:'Retire asset app.visual.test',exact:true});await retire.focus();await page.keyboard.press('Enter');const dialog=page.getByRole('dialog',{name:'Retire Scope asset',exact:true});await dialog.waitFor();
@@ -115,7 +115,7 @@ export async function auditScopeUrlState({prisma:p,owner,origin,page}){
   try{
    const requested=page.waitForRequest(r=>new URL(r.url()).pathname===`/api/programs/${program.id}/assets`);
    requested.catch(()=>{});await page.goto(`${origin}/scopes?target=${program.id}&assetPage=2&pageSize=25`);await requested;
-   assert(await page.getByRole('status').filter({hasText:'Loading Scope Assets…'}).isVisible(),'initial Scope request must show loading');
+   assert(await page.getByRole('status').filter({hasText:'Loading scope assets…'}).isVisible(),'initial Scope request must show loading');
    assert.equal(await page.getByText('Add an explicitly authorized Scope Asset to begin.',{exact:true}).count(),0,'pending data is not an empty collection');
   }finally{releaseAssets();await Promise.allSettled([...assetPending]);await page.unroute(assetPattern,holdAssets);}
   await pager.getByRole('status').filter({hasText:'Page 2 of 2 · 26'}).waitFor();

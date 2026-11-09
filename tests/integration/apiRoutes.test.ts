@@ -339,11 +339,11 @@ d("API route authorization (integration)", () => {
     );
     expect(res.status).toBe(201);
     const { markdown } = await res.json();
-    expect(markdown).toContain("YesWeHack Report");
+    expect(markdown).toContain("YesWeHack report");
     expect(markdown).toContain("CWE: CWE-918");
     expect(markdown).toContain("CVSS 3.1 Score: 8.6 (High)");
     expect(markdown).toContain("GET from 203.0.113.9");
-    expect(markdown).toContain("À compléter : impact business/technique démontré");
+    expect(markdown).toContain("To complete: demonstrated business or technical impact.");
   });
   it("creates a business Target atomically with decimal rewards and active hosts", async () => {
     const { POST } = await import("@/app/api/programs/route");
@@ -358,9 +358,13 @@ d("API route authorization (integration)", () => {
     expect(hosts.map(t => t.host).sort()).toEqual(["*.example.vinci.com", "www.vinci.com"]);
     expect(hosts.every(t => t.active && t.scope.status === "APPROVED")).toBe(true);
   });
-  it("rejects missing User-Agent, invalid rewards and malformed scope at program creation", async () => {
+  it("creates an unconfigured target without inventing a User-Agent and rejects invalid explicit policy", async () => {
     const { POST } = await import("@/app/api/programs/route");
-    for (const body of [{ companyName: "x" }, { companyName: "x", requiredUserAgent: "" },
+    const created = await POST(req("http://localhost/api/programs", { companyName: "x" }));
+    expect(created.status).toBe(201);
+    const program = await created.json();
+    expect((await prisma.bountyProgram.findUniqueOrThrow({ where: { id: program.id } })).requiredUserAgent).toBe("");
+    for (const body of [{ companyName: "x", requiredUserAgent: "" },
       { companyName: "x", requiredUserAgent: "x", rewardLow: 0.1 },
       { companyName: "x", requiredUserAgent: "x", scopeHosts: ["https://example.com/path"] }]) {
       expect((await POST(req("http://localhost/api/programs", body))).status).toBe(400);

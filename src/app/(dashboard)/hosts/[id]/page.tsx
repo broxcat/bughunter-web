@@ -127,7 +127,7 @@ function TargetDetailContent({
       )}
 
       <div className="flex flex-wrap items-center gap-3">
-        {target.program && <Link className="text-brand" href={`/targets/${target.program.id}?tab=Recon`}>Recon from Target assets →</Link>}
+        {target.program && <Link className="text-brand" href={`/targets/${target.program.id}?tab=Recon`}>Recon from target assets →</Link>}
         {scopeApproved && target.host.startsWith("*.") && target.program ? <Link className="text-brand" href={`/targets/${target.program.id}?tab=Codex%20Console`}>Open program Codex console</Link> : <CreateResearchButton targetId={id} disabled={!scopeApproved} />}
         <div className="ml-auto flex gap-4 text-sm">
           <Link
@@ -165,7 +165,7 @@ function TargetDetailContent({
           <summary className="cursor-pointer text-sm font-medium text-foreground">
             Program policy{" "}
             <span className="font-normal text-subtle">
-              — review Out of Scope and Rules of Engagement before testing
+              — review out of scope and rules of engagement before testing
             </span>
           </summary>
           <div className="mt-3">
@@ -194,18 +194,18 @@ function TargetDetailContent({
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-medium text-foreground">
-                        {run.type === "HUNT" ? "Legacy Hunt" : run.type}
+                        {run.type === "HUNT" ? "Legacy hunt" : run.type}
                       </span>
                       <Badge tone={scanPresentation(run.status, run.outcome, run.dispatch, run.execution?.state, Boolean(run.cancelRequestedAt)).tone}>
                         {scanPresentation(run.status, run.outcome, run.dispatch, run.execution?.state, Boolean(run.cancelRequestedAt)).label}
                       </Badge>
-                      {run.execution?.state === "INTERRUPTED" && <span className="text-sm text-muted">Relance automatique désactivée.</span>}
+                      {run.execution?.state === "INTERRUPTED" && <span className="text-sm text-muted">Automatic retry disabled.</span>}
                     </div>
                     <span className="text-xs text-subtle">
                       {openRun === run.id ? "Hide logs" : "View live logs"}
                     </span>
                   </button>
-                  {run.type === 'HUNT' && <Link href={`/hunt/${run.id}`} className="text-brand">View Hunt history</Link>}
+                  {run.type === 'HUNT' && <Link href={`/hunt/${run.id}`} className="text-brand">View hunt history</Link>}
                   {run.type === "RECON" && <ScanCancelButton scanRunId={run.id} status={run.status} requested={Boolean(run.cancelRequestedAt)} onRequested={() => void load()} />}
                   </div>
                   {openRun === run.id && (

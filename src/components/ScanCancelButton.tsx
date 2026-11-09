@@ -15,5 +15,5 @@ export default function ScanCancelButton({ scanRunId, status, requested, onReque
     } catch (error) { setError((error as Error).message); }
     finally { setBusy(false); }
   }
-  return <span className="inline-flex flex-col gap-1"><Button size="sm" variant="secondary" disabled={busy || requested || sent} onClick={() => void cancel()}>{requested || sent ? "Annulation demandée" : busy ? "Envoi…" : "Annuler le scan"}</Button>{error && <span role="alert" className="text-sm">{error}</span>}</span>;
+  return <span className="inline-flex flex-col gap-1"><Button size="sm" variant="secondary" disabled={busy || requested || sent} onClick={() => void cancel()}>{requested || sent ? "Cancellation requested" : busy ? "Sending…" : "Cancel scan"}</Button>{error && <span role="alert" className="text-sm">{error}</span>}</span>;
 }

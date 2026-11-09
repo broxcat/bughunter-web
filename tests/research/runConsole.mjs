@@ -119,7 +119,7 @@ try {
  await dexec('sh','-c','cd /etc/codex/skills && sha256sum --check ../skills.sha256');
  // Both providers run as native CLIs in the final runner, without model credentials.
  // Exercise selection and reconnection through the same real WebSocket/PTY protocol.
- await page.getByLabel('Moteur IA',{exact:true}).selectOption('claude');
+ await page.getByLabel('AI engine',{exact:true}).selectOption('claude');
  await page.getByRole('button',{name:'Open Claude Code',exact:true}).click();
  await page.getByText('Claude: login required',{exact:true}).waitFor({timeout:30000});
  try{await page.getByText('Terminal: connected',{exact:true}).waitFor();}catch(error){console.error('Provider-switch UI:',(await page.locator('body').innerText()).slice(0,1800));console.error(await compose('logs','--tail','40','research-console'));console.error(await dexec('ps','-eo','uid,gid,args'));throw error;}
@@ -154,7 +154,7 @@ try {
    assert.equal((await passive.callTool({name:'send_http1_request',arguments:{}})).isError,true,'Passive relay must reject unadvertised active calls');
    assert((await passive.callTool({name:'burp_status',arguments:{}})).content.some(block=>block.type==='text'&&JSON.parse(block.text).configuration==='CONFIGURED'));
  } finally {await passive.close();}
- await page.getByLabel('Moteur IA',{exact:true}).selectOption('codex');await page.getByRole('button',{name:'Open Codex CLI',exact:true}).click();
+ await page.getByLabel('AI engine',{exact:true}).selectOption('codex');await page.getByRole('button',{name:'Open Codex CLI',exact:true}).click();
  await page.getByText('Codex: login required',{exact:true}).waitFor({timeout:30000});assert.equal(await pane(),first);
  // Milestone 7: verified profiles use native startup and persistent panes.
  await page.goto(origin+`/research/${data.ids[2]}?engine=codex&profile=standard`);await page.getByText('Terminal: connected',{exact:true}).waitFor({timeout:30000});
@@ -256,7 +256,7 @@ try {
  const collected=await webScript(`const {collectOwnedRunBurp}=await import('/app/src/server/recon/burpCollection.ts');const result=await collectOwnedRunBurp(${JSON.stringify(queued.id)});console.log(JSON.stringify(result));`);assert.equal(collected.status,'AVAILABLE');assert(collected.observations.length>0);assert(collected.observations[0].requestRef.startsWith('BurpRequest:'));assert(!JSON.stringify(collected).includes('FIXTURE_SECRET')&&!JSON.stringify(collected).includes('COOKIE_SECRET'));console.log('PASSIVE_RECON_BURP_COLLECTION_PASSED: signed web → console control → local SSE history fixture, references and secret redaction; no active replay.');
  await page.goto(origin+'/scopes/'+controlledAsset.assetId);await page.getByText('Recon Console',{exact:true}).waitFor();assert.equal(await page.getByRole('heading',{name:'Hosts and services',exact:true}).count(),0);
  await page.goto(origin+'/targets/'+globalProgram.id);await openGlobal();await page.getByText('Terminal: connected',{exact:true}).waitFor();
- await page.getByLabel('Moteur IA',{exact:true}).selectOption('claude');await page.getByRole('button',{name:'Open Claude Code',exact:true}).click();await page.getByText('Claude: login required',{exact:true}).waitFor({timeout:30000});
+ await page.getByLabel('AI engine',{exact:true}).selectOption('claude');await page.getByRole('button',{name:'Open Claude Code',exact:true}).click();await page.getByText('Claude: login required',{exact:true}).waitFor({timeout:30000});
  const globalClaudeConfig='/home/researcher/.claude/workspaces/'+globalContext.id;await dexec('test','-d',globalClaudeConfig);
  const inventory=JSON.parse(await dexec('cat',globalCwd+'/recon/hosts.json'));assert.equal(inventory.hosts[0].host,'api.example.test');
  // Actual running Recon, native Codex and a real workspace child
@@ -285,19 +285,19 @@ try {
  const unchanged=await webScript(`import {PrismaClient} from '@prisma/client';const p=new PrismaClient();console.log(JSON.stringify({findings:await p.finding.count(),reports:await p.report.count(),scans:await p.scanRun.count()}));await p.$disconnect();`);assert.deepEqual(unchanged,{findings:0,reports:0,scans:0});
  await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','curl','-fsS','--max-time','8','-o','/dev/null','https://registry.npmjs.org/@openai/codex/latest');
  await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','sh','-c',`printf '%s' 'Restart persistence fixture' > /workspaces/research_${data.ids[1]}/findings/restart-note.txt`);
- await page.getByLabel('Moteur IA',{exact:true}).selectOption('claude');await page.getByRole('button',{name:'Open Claude Code',exact:true}).click();await page.getByText('Claude: login required',{exact:true}).waitFor({timeout:30000});
+ await page.getByLabel('AI engine',{exact:true}).selectOption('claude');await page.getByRole('button',{name:'Open Claude Code',exact:true}).click();await page.getByText('Claude: login required',{exact:true}).waitFor({timeout:30000});
  const claudePersistFile='/home/researcher/.claude/workspaces/'+data.ids[1]+'/persistence-fixture';
  await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','node','-e',"require('fs').writeFileSync(process.argv[1],'Claude persistence fixture')",claudePersistFile);
- await page.getByLabel('Moteur IA',{exact:true}).selectOption('codex');await page.getByRole('button',{name:'Open Codex CLI',exact:true}).click();await page.getByText('Codex: login required',{exact:true}).waitFor({timeout:30000});
+ await page.getByLabel('AI engine',{exact:true}).selectOption('codex');await page.getByRole('button',{name:'Open Codex CLI',exact:true}).click();await page.getByText('Codex: login required',{exact:true}).waitFor({timeout:30000});
  await compose('restart','research-console');
  for(let i=0;i<60;i++){try{await dexec('console-healthcheck');break;}catch{if(i===59)throw new Error('Restarted console unhealthy');await wait(200);}}
  await assert.rejects(dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','tmux','has-session','-t','=bughunter-'+data.ids[1]));
  assert.equal(await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','cat',`/workspaces/research_${data.ids[1]}/findings/restart-note.txt`),'Restart persistence fixture');
  await page.reload();await page.getByText('Terminal: connected',{exact:true}).waitFor({timeout:30000});
  assert((await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','tmux','list-panes','-t','bughunter-'+data.ids[1]+':0','-F','#{pane_current_path}')).endsWith('/workspaces/research_'+data.ids[1]));
- await page.getByLabel('Moteur IA',{exact:true}).selectOption('claude');await page.getByRole('button',{name:'Open Claude Code',exact:true}).click();await page.getByText('Claude: login required',{exact:true}).waitFor({timeout:30000});
+ await page.getByLabel('AI engine',{exact:true}).selectOption('claude');await page.getByRole('button',{name:'Open Claude Code',exact:true}).click();await page.getByText('Claude: login required',{exact:true}).waitFor({timeout:30000});
  assert.equal(await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','cat',claudePersistFile),'Claude persistence fixture');
- await page.getByLabel('Moteur IA',{exact:true}).selectOption('codex');await page.getByRole('button',{name:'Open Codex CLI',exact:true}).click();await page.getByText('Codex: login required',{exact:true}).waitFor({timeout:30000});
+ await page.getByLabel('AI engine',{exact:true}).selectOption('codex');await page.getByRole('button',{name:'Open Codex CLI',exact:true}).click();await page.getByText('Codex: login required',{exact:true}).waitFor({timeout:30000});
  console.log('Restart verified: persisted workspace/Codex home, new tmux on attach, same Target CWD; no browser refresh killed the prior session.');
  console.log('MCP/PROXY VERIFIED: HTTP/1 bridge → loopback proxy → local target; bounded official SSE for legacy cleartext HTTP/2/history; policy/UA/redaction/timeout/no replay; real Playwright with blocked cross-host redirect. This mock phase performs no model inference; genuine Burp acceptance follows when enabled.');
  if (process.env.RESEARCH_REAL_BURP_IMAGE) await portSwiggerAcceptance({image:process.env.RESEARCH_REAL_BURP_IMAGE,runnerImage:service.image,prefix,consoleId,run,dexec,connectMcp,page,origin,hostId:data.ids[1],wait,webScript});
@@ -317,7 +317,7 @@ try {
  console.log('CONSOLE_DELETE_NATIVE_PASSED: actual Codex conversation deletion, Claude workspace conversations, both provider tmux cleanup, exclusive workspace removed, Target/Recon retained; second deletion idempotent.');
  const runningDelete=await webScript(`import {prisma} from '/app/src/lib/prisma.ts';const owner=(await prisma.target.findUniqueOrThrow({where:{id:${JSON.stringify(data.ids[0])}}})).userId;const program=await prisma.bountyProgram.create({data:{ownerId:owner,companyName:'Native deletion fixture',requiredUserAgent:'Delete-Fixture/1',scopeRules:['console-delete.example.test']}});const scope=await prisma.scope.create({data:{userId:owner,hostPattern:'console-delete.example.test',status:'APPROVED'}});const target=await prisma.target.create({data:{userId:owner,programId:program.id,scopeId:scope.id,host:'console-delete.example.test'}});const scan=await prisma.scanRun.create({data:{targetId:target.id,type:'RECON',status:'COMPLETED',outcome:'PARTIAL'}});console.log(JSON.stringify({id:target.id,scanId:scan.id}));await prisma.$disconnect();`);
  await page.goto(origin+'/research/'+runningDelete.id);await page.getByText('Terminal: connected',{exact:true}).waitFor({timeout:30000});
- await page.getByLabel('Moteur IA',{exact:true}).selectOption('claude');await page.getByRole('button',{name:'Open Claude Code',exact:true}).click();await page.getByText('Terminal: connected',{exact:true}).waitFor({timeout:30000});
+ await page.getByLabel('AI engine',{exact:true}).selectOption('claude');await page.getByRole('button',{name:'Open Claude Code',exact:true}).click();await page.getByText('Terminal: connected',{exact:true}).waitFor({timeout:30000});
  for(const name of ['bughunter-'+runningDelete.id,'bughunter_claude_'+runningDelete.id])await dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','tmux','has-session','-t','='+name);
  await page.goto(origin+'/research');const deleteRow=page.locator('li').filter({has:page.getByRole('link',{name:'Open console — console-delete.example.test',exact:true})});await deleteRow.getByRole('button',{name:'Delete',exact:true}).click();await page.getByRole('dialog').waitFor();await page.getByRole('button',{name:'Confirm deletion',exact:true}).click();await page.getByRole('dialog').waitFor({state:'detached',timeout:40000});
  for(const name of ['bughunter-'+runningDelete.id,'bughunter_claude_'+runningDelete.id])await assert.rejects(dexec('setpriv','--reuid=researcher','--regid=research','--init-groups','tmux','has-session','-t','='+name));

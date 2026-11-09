@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeFqdn, programSchema, programUpdateSchema, matchesHost, isExcluded, familyAllowed } from "@/lib/bountyProgram";
+import { normalizeFqdn, programCreateSchema, programSchema, programUpdateSchema, matchesHost, isExcluded, familyAllowed } from "@/lib/bountyProgram";
 
 describe("bounty program contract", () => {
   it('does not erase wildcard scope rules or other policy fields in a partial update',()=>{
@@ -7,7 +7,8 @@ describe("bounty program contract", () => {
     expect(programUpdateSchema.parse({requiredUserAgent:'laziza'})).toEqual({requiredUserAgent:'laziza'});
     expect(programUpdateSchema.parse({scopeRules:[]})).toEqual({scopeRules:[]});
   });
-  it("requires explicit company and User-Agent", () => {
+  it("requires User-Agent for configured programs but allows creation before it is configured", () => {
+    expect(programCreateSchema.safeParse({ companyName: "VINCI" }).success).toBe(true);
     expect(programSchema.safeParse({ companyName: "VINCI" }).success).toBe(false);
     for (const ua of ["", " ", "x\r\nInjected: y"]) expect(programSchema.safeParse({ companyName: "VINCI", requiredUserAgent: ua }).success).toBe(false);
     expect(programSchema.parse({ companyName: "VINCI", requiredUserAgent: "BugHunter/1.0", rewardLow: "125.10" }).rewardLow).toBe("125.10");

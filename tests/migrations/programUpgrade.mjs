@@ -209,7 +209,9 @@ try {
   assert.equal(originalFinding.scanRunId, "upgrade-run");
   assert.equal(host.credentials[0].headerCipher, "fixture-cipher");
   assert.equal(host.reports[0].items[0].findingId, "upgrade-finding");
-  await assert.rejects(client.bountyProgram.create({ data: { ownerId: "upgrade-user", companyName: "Invalid", requiredUserAgent: "" } }));
+  const unconfigured = await client.bountyProgram.create({ data: { ownerId: "upgrade-user", companyName: "Unconfigured", requiredUserAgent: "" } });
+  assert.equal(unconfigured.requiredUserAgent, "");
+  await assert.rejects(client.bountyProgram.create({ data: { ownerId: "upgrade-user", companyName: "Invalid", requiredUserAgent: "   " } }));
   const p = await client.bountyProgram.create({ data: { ownerId: "upgrade-user", companyName: "Rewards", requiredUserAgent: "Program/1", rewardCritical: "9999999999999999.99" } });
   assert.equal(p.rewardCritical.toString(), "9999999999999999.99");
   // M5 cache is additive and must not touch historical snapshots or policy clocks.
@@ -219,6 +221,6 @@ try {
   await client.targetScopeContext.create({data:{programId:p.id,policyFingerprint:'fixture-policy',sourceFingerprint:'fixture-source',rendererVersion:3,markdown:'# Current fixture',markdownSha256:'fixture-hash',generatedAt:new Date()}});
   assert.deepEqual((await client.bountyProgram.findUniqueOrThrow({where:{id:p.id}})).updatedAt,cacheProgramBefore.updatedAt,'Publishing context must not manufacture Research policy drift');
   assert.equal((await client.researchSession.findFirstOrThrow()).scopeMarkdown,cacheSnapshotBefore);
-  console.log("Additive upgrade passed: scan/finding/report/item/credential identities preserved, legacy UA remains unknown, Phase 1 ResearchSession unchanged, legacy hypothesis/session/revision preserved, nullable proof/authorization and no promotion backfill, DB rejects empty UA, decimal money stays exact.");
+  console.log("Additive upgrade passed: scan/finding/report/item/credential identities preserved, legacy UA remains unknown, Phase 1 ResearchSession unchanged, legacy hypothesis/session/revision preserved, nullable proof/authorization and no promotion backfill, DB preserves an unconfigured UA and rejects malformed configured values, decimal money stays exact.");
   await modernResearchUpgrade(url, client);
 } finally { await client.$disconnect(); }

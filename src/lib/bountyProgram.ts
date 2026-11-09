@@ -36,6 +36,9 @@ export const programSchema = z.object({
   qualifying: z.array(z.enum(VULNERABILITY_FAMILIES)).default([]),
   nonQualifying: z.array(z.enum(VULNERABILITY_FAMILIES)).default([]),
 });
+export const programCreateSchema = programSchema.extend({
+  requiredUserAgent: requiredUserAgentSchema.optional(),
+});
 // Zod 4 applies nested defaults even under partial(). A PATCH must leave every
 // absent policy field untouched, especially the wildcard discovery rules.
 export const programUpdateSchema = programSchema.omit({ scopeHosts: true }).extend({

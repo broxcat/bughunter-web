@@ -41,7 +41,7 @@ const PLATFORMS: Platform[] = [
   "GENERIC",
 ];
 
-export default function ReportEditor(props:{id:string;programMode?:boolean}){return <Suspense fallback={<p role="status">Loading Report…</p>}><ReportCollection {...props}/></Suspense>;}
+export default function ReportEditor(props:{id:string;programMode?:boolean}){return <Suspense fallback={<p role="status">Loading report…</p>}><ReportCollection {...props}/></Suspense>;}
 function ReportCollection({id,programMode=false}:{id:string;programMode?:boolean}) {
   const router=useRouter(),params=useSearchParams(),query=params.toString();
   const findingInput=paginationInput(new URLSearchParams({page:params.get('findingPage')??'1',pageSize:params.get('pageSize')??'25'}),false);

@@ -10,7 +10,7 @@ export async function auditProgramCollections({prisma,owner,origin,context,page}
   await page.reload();await page.getByRole('status').filter({hasText:'Page 3 of 3'}).waitFor();
   await page.getByRole('link',{name:'Previous page',exact:true}).click();await page.getByRole('status').filter({hasText:'Page 2 of 3'}).waitFor();
   await page.goBack();await page.getByRole('status').filter({hasText:'Page 3 of 3'}).waitFor();await page.goForward();await page.getByRole('status').filter({hasText:'Page 2 of 3'}).waitFor();
-  await page.getByLabel('Search Targets',{exact:true}).fill('No matching pagination fixture');await page.getByRole('button',{name:'Search',exact:true}).click();await page.getByRole('status').filter({hasText:'Page 1 of 1 · 0 results'}).waitFor();assert.equal(new URL(page.url()).searchParams.has('page'),false);
+  await page.getByLabel('Search targets',{exact:true}).fill('No matching pagination fixture');await page.getByRole('button',{name:'Search',exact:true}).click();await page.getByRole('status').filter({hasText:'Page 1 of 1 · 0 results'}).waitFor();assert.equal(new URL(page.url()).searchParams.has('page'),false);
   for(const value of ['invalid','999']){await page.goto(origin+path+'?'+query+'&page='+value);await page.getByRole('status').filter({hasText:value==='invalid'?'Page 1 of 3':'Page 3 of 3'}).waitFor();}
   const deleted=await context.request.delete(origin+'/api/programs/'+prefix+'050');assert.equal(deleted.status(),200);await page.reload();await page.getByRole('status').filter({hasText:'Page 2 of 2 · 50 results'}).waitFor();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
@@ -23,8 +23,8 @@ export async function auditProgramCollections({prisma,owner,origin,context,page}
  const intercept=async route=>{if(route.request().method()!=='DELETE')return route.continue();await gate;return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Synthetic deletion blocked'})});};
  await context.route(pattern,intercept);
  try{
-  await page.goto(origin+'/targets/'+id+'/settings');await page.locator('summary').filter({hasText:/^Delete Target$/}).click();
-  const opener=page.getByRole('button',{name:'Delete Target',exact:true});await opener.click();
+  await page.goto(origin+'/targets/'+id+'/settings');await page.locator('summary').filter({hasText:/^Delete target$/}).click();
+  const opener=page.getByRole('button',{name:'Delete target',exact:true});await opener.click();
   const dialog=page.getByRole('dialog');await dialog.waitFor();
   for(let n=0;n<5;n++){await page.keyboard.press('Tab');assert(await page.evaluate(()=>document.querySelector('dialog')?.matches(':modal')&&(document.activeElement===document.body||Boolean(document.activeElement.closest('dialog')))),'Tab must not activate background controls');}
   await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});assert(await opener.evaluate(e=>e===document.activeElement),'focus returns to opener');
@@ -35,7 +35,7 @@ export async function auditProgramCollections({prisma,owner,origin,context,page}
  }finally{release();await context.unroute(pattern,intercept);}
  const contrast=(a,b)=>{const lum=s=>{const rgb=s.match(/[\d.]+/g).slice(0,3).map(Number).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};const x=lum(a),y=lum(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
  for(const theme of ['light','dark']){
-  await page.evaluate(t=>localStorage.setItem('theme',t),theme);await page.goto(origin+'/targets');await page.getByRole('status').filter({hasText:/^Page /}).waitFor();await page.getByRole('button',{name:'Create Target',exact:true}).click();
+  await page.evaluate(t=>localStorage.setItem('theme',t),theme);await page.goto(origin+'/targets');await page.getByRole('status').filter({hasText:/^Page /}).waitFor();await page.getByRole('button',{name:'Create target',exact:true}).click();
   const input=page.getByLabel('Name',{exact:true});await input.waitFor();
   const colors=await input.evaluate(e=>{const s=getComputedStyle(e);return{fg:s.color,bg:s.backgroundColor,border:s.borderTopColor,ring:s.outlineColor};});
   assert(contrast(colors.fg,colors.bg)>=4.5,theme+' input text contrast');
