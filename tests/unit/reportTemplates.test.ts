@@ -84,7 +84,7 @@ describe("report skeleton", () => {
 
   it("falls back to explicit placeholders when sections are empty", () => {
     const md = renderReport("GENERIC", { title: "T", findings: [EMPTY] });
-    expect(md).toContain("À compléter : impact business/technique démontré");
+    expect(md).toContain(IMPACT_PLACEHOLDER);
     expect(md).toContain("Remediation guidance not yet documented.");
     expect(md).toContain(POC_PLACEHOLDER);
     expect(md).toContain("CWE: not yet assigned");
