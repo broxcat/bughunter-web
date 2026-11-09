@@ -511,7 +511,7 @@ d("API route authorization (integration)", () => {
     authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
     expect((await DELETE(req("http://localhost", {}, "DELETE"), params)).status).toBe(404);
     authMock.auth.mockResolvedValueOnce(null);
-    expect((await GET()).status).toBe(401);
+    expect((await GET(new Request('http://app.example.test/api/programs'))).status).toBe(401);
     expect((await prisma.target.findUniqueOrThrow({ where: { id: h.id } })).active).toBe(true);
   });
   it("serializes concurrent duplicate additions and never rewrites historical scan User-Agents", async () => {

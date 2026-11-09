@@ -1,10 +1,12 @@
 
+import { createHash } from 'node:crypto';
 import { detectScopeAsset, type AssetFormat } from '@/lib/scopeAssets';
 import { structuredExclusionSchema, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
+import { VULNERABILITY_FAMILIES } from '@/lib/bountyProgram';
 import type { ImportPlatform } from '@/lib/platformConnections';
 
 export type ProgramReference = { platform: ImportPlatform; handle: string; url: string };
-export type Rule = { text: string; assetRef?: string };
+export type Rule = { text: string; assetRef?: string; nonQualifyingLabel?: string };
 export type RawAsset = {
   id?: string; value: string | null; type: string; kind: 'WEB' | 'NON_WEB' | 'UNKNOWN';
   disposition: 'IN' | 'OUT' | 'UNKNOWN'; instruction?: string | null;
@@ -31,7 +33,20 @@ export function normalizeProgram(reference: ProgramReference, name: string, rawA
   const scopeIn: PreviewAsset[] = [], scopeOut: PreviewAsset[] = [];
   const nonAutomatable: PreviewAsset[] = [], unrepresentedAssets: PreviewAsset[] = [];
   const exclusions = new Set<string>();
-  const rules = [...rawRules];
+  const nonQualifying = new Set<(typeof VULNERABILITY_FAMILIES)[number]>();
+  const rules: Pick<Rule, 'text' | 'assetRef'>[] = [];
+  for (const { nonQualifyingLabel, ...rule } of rawRules) {
+    const label = nonQualifyingLabel?.trim().toUpperCase().replace(/[ -]+/g, '_');
+    const aliases: Record<string, string> = {
+      CROSS_SITE_SCRIPTING: 'XSS', INSECURE_DIRECT_OBJECT_REFERENCE: 'IDOR',
+      SERVER_SIDE_REQUEST_FORGERY: 'SSRF', CROSS_SITE_REQUEST_FORGERY: 'CSRF',
+      REMOTE_CODE_EXECUTION: 'RCE', XML_EXTERNAL_ENTITY: 'XXE',
+      LOCAL_FILE_INCLUSION: 'LFI', REMOTE_FILE_INCLUSION: 'RFI',
+    };
+    const family = label && VULNERABILITY_FAMILIES.find(value => value === (aliases[label] ?? label));
+    if (family && !rule.assetRef) nonQualifying.add(family);
+    else rules.push(rule);
+  }
   const assets = rawAssets.map(raw => {
     const detected = boundary(raw.value);
     const exclusion = detected && detected.format !== 'HOSTNAME' && structuredExclusionSchema.safeParse(detected.normalizedValue).success
@@ -43,7 +58,7 @@ export function normalizeProgram(reference: ProgramReference, name: string, rawA
     assets.some(({ raw, exclusion }) => raw.disposition !== 'IN' && !exclusion);
 
   for (const { raw, detected, exclusion } of assets) {
-    const ref = raw.id ?? JSON.stringify([raw.type, raw.value]);
+    const ref = raw.id ?? createHash('sha256').update(JSON.stringify([raw.type, raw.value])).digest('hex');
     const item: PreviewAsset = {
       ref, originalValue: raw.value, sourceType: raw.type, normalizedValue: detected?.normalizedValue ?? null,
       format: detected?.format ?? null, automatable: false,
@@ -84,7 +99,7 @@ export function normalizeProgram(reference: ProgramReference, name: string, rawA
   return {
     ...reference, name, scopeIn: sortedUnique(scopeIn), scopeOut: sortedUnique(scopeOut),
     nonAutomatable: sortedUnique(nonAutomatable), unrepresentedAssets: sortedUnique(unrepresentedAssets),
-    unrepresentedRules, policy,
+    unrepresentedRules, nonQualifying: [...nonQualifying].sort(order), policy,
   };
 }
 

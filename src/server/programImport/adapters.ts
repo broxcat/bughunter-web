@@ -1,7 +1,7 @@
 
 import { z } from 'zod';
 import { normalizeProgram, type RawAsset, type Rule } from './normalize';
-import { decodeHtmlAttribute, handlePattern, ImportUnavailable, publicProgram, type ProgramImporter, type Reader } from './types';
+import { handlePattern, ImportUnavailable, requireAvailable, type ProgramImporter, type Reader } from './types';
 
 const nullableText = z.string().nullish();
 const strings = z.array(z.string()).max(1000);
@@ -43,18 +43,12 @@ export const hackerOne: ProgramImporter = {
       ? { platform: 'HACKERONE', handle, url: 'https://hackerone.com/' + handle } : null;
   },
   async fetchProgram(reference, read) {
-    // Verify anonymous visibility before any authenticated program request.
-    const page = await read('/' + reference.handle, 'public');
-    const html = typeof page === 'string' ? page : '';
-    publicProgram(html.includes('controller_teams action_show') && html.includes('signed-out') &&
-      html.includes('property="og:url" content="' + reference.url + '"') &&
-      /property="og:title" content="[^"]+(?:Bug Bounty|Vulnerability Disclosure|VDP)[^"]*HackerOne/i.test(html));
     const result = envelope(z.object({
       id: z.union([z.string(), z.number()]),
       attributes: z.object({ handle: z.string(), name: z.string().min(1), state: z.string(), policy: nullableText, open_scope: z.boolean().optional() }),
     })).parse(await read(h1Base + reference.handle)).data;
     const a = result.attributes;
-    publicProgram(a.handle === reference.handle && a.state === 'public_mode');
+    requireAvailable(a.handle === reference.handle);
     const rules = makeRule(a.policy);
     if (a.open_scope) rules.push({ text: 'HackerOne reports an open scope policy. Review the program wording before adding assets.' });
     if (!a.policy?.trim()) rules.push({ text: 'Review the HackerOne program policy manually.' });
@@ -78,7 +72,8 @@ export const hackerOne: ProgramImporter = {
     const exclusions = envelope(z.array(z.unknown()).max(1000)).parse(await read(h1Base + reference.handle + '/scope_exclusions')).data;
     return [...program.rules ?? [], ...exclusions.map(item => {
       const { attributes } = z.object({ attributes: z.object({ category: z.string(), details: nullableText }) }).parse(item);
-      return { text: 'HackerOne reward exclusion: ' + attributes.category + (attributes.details ? ' — ' + attributes.details : '') };
+      return { text: 'HackerOne reward exclusion: ' + attributes.category + (attributes.details ? ' — ' + attributes.details : ''),
+        nonQualifyingLabel: attributes.details?.trim() ? undefined : attributes.category };
     })];
   },
   normalize: normalizeProgram,
@@ -92,15 +87,6 @@ export const bugcrowd: ProgramImporter = {
       ? { platform: 'BUGCROWD', handle, url: 'https://bugcrowd.com/engagements/' + handle } : null;
   },
   async fetchProgram(reference, read) {
-    // The authenticated API lists invitations too and has no public flag.
-    // Inspect only the anonymous brief's canonical URL and engagement code.
-    const page = await read('/engagements/' + reference.handle, 'public');
-    const match = typeof page === 'string' && /data-props="([^"]+)"\s+data-react-class="ResearcherEngagementBrief"/.exec(page);
-    if (!match) throw new ImportUnavailable('manual');
-    const brief = z.object({
-      engagementBriefUrl: z.string(), earlyFetchProps: z.object({ code: z.string() }),
-    }).parse(JSON.parse(decodeHtmlAttribute(match[1])));
-    publicProgram(brief.engagementBriefUrl === reference.url && brief.earlyFetchProps.code === reference.handle);
     for (let offset = 0; offset < 1200; offset += 100) {
       const page = z.object({
         data: z.array(z.object({
@@ -128,14 +114,16 @@ export const bugcrowd: ProgramImporter = {
         target_groups: z.array(record).optional(),
       })).max(1000),
     }).parse(await read(bcBase + '/' + program.id + '/scope'));
-    publicProgram(data.engagement_id === program.id && !data.in_scope.some(asset => asset.value === 'REDACTED'));
+    requireAvailable(data.engagement_id === program.id && !data.in_scope.some(asset => asset.value === 'REDACTED'));
     const rules: Rule[] = [{ text: 'Review the published Bugcrowd brief manually for engagement rules. The Hacker API scope response does not contain the full brief.' }];
     for (const rule of data.vrt_exclusions) {
       const text = 'Bugcrowd VRT ' + rule.exclusion_type + ': ' + rule.vrt_ids.map(vrt => vrt.version + '/' + vrt.id).sort().join(', ') + (rule.notes ? ' — ' + rule.notes : '');
       for (const target of rule.targets ?? []) rules.push({ assetRef: target.id, text });
       if (rule.all_targets || !rule.targets?.length || rule.target_groups?.length) {
         const groups = rule.target_groups?.map(group => String(group.name ?? group.id ?? '')).filter(Boolean).sort() ?? [];
-        rules.push({ text: text + (groups.length ? ' (target groups: ' + groups.join(', ') + ')' : '') });
+        const labels = rule.all_targets && !groups.length && !rule.notes?.trim() && rule.exclusion_type === 'out_of_scope' ? rule.vrt_ids : [];
+        if (labels.length) for (const vrt of labels) rules.push({ text: 'Bugcrowd VRT exclusion: ' + vrt.id, nonQualifyingLabel: vrt.id.split('.').at(-1) });
+        else rules.push({ text: text + (groups.length ? ' (target groups: ' + groups.join(', ') + ')' : '') });
       }
     }
     program.rules = rules;
@@ -163,16 +151,16 @@ export const intigriti: ProgramImporter = {
     return { platform: 'INTIGRITI', handle: match[2], url: 'https://app.intigriti.com/programs/' + match[1] + '/' + match[2] + '/detail' };
   },
   async fetchProgram(reference, read) {
-    // The public detail page's anonymous data source identifies the program
-    // before the token is used. Application-only programs can also have a public
-    // page, so require the Public confidentiality level, not just HTTP 200.
-    const org = new URL(reference.url).pathname.split('/')[2];
-    const identity = z.object({
-      programId: z.uuid(), companyHandle: z.string(), handle: z.string(),
-      confidentialityLevel: z.literal(4),
-    }).parse(await read('/api/core/public/programs/' + org + '/' + reference.handle, 'public'));
-    publicProgram(identity.companyHandle === org && identity.handle === reference.handle);
-    const id = identity.programId;
+    let id: string | undefined;
+    for (let offset = 0; offset < 3000; offset += 500) {
+      const page = z.object({
+        maxCount: z.number().int().nonnegative(), records: z.array(intIdentity).max(500),
+      }).parse(await read(intBase + '?limit=500&offset=' + offset));
+      const match = page.records.find(row => row.handle === reference.handle && row.webLinks.detail === reference.url);
+      if (match) { id = match.id; break; }
+      if (!page.records.length || offset + page.records.length >= page.maxCount) break;
+    }
+    if (!id) throw new ImportUnavailable('manual');
     const detail = intIdentity.extend({
       domains: z.object({ content: z.array(z.object({
         id: z.uuid(), type: enumeration, tier: enumeration, endpoint: z.string(), description: nullableText,
@@ -184,8 +172,8 @@ export const intigriti: ProgramImporter = {
         testingRequirements: z.object({ intigritiMe: z.boolean().optional(), automatedTooling: z.number().int().nullish(), userAgent: nullableText, requestHeader: nullableText }).nullish(),
       }).nullish(), attachments: z.array(z.object({ url: z.string(), code: z.number() })).optional() }).nullish(),
     }).parse(await read(intBase + '/' + id));
-    publicProgram(detail.id === id && detail.handle === reference.handle && detail.webLinks.detail === reference.url &&
-      detail.confidentialityLevel.value.toLowerCase() === 'public' && detail.domains.content !== null);
+    requireAvailable(detail.id === id && detail.handle === reference.handle && detail.webLinks.detail === reference.url &&
+      detail.domains.content !== null);
     const rules = makeRule(detail.rulesOfEngagement?.content?.description);
     const engagement = detail.rulesOfEngagement;
     if (engagement?.content?.safeHarbour !== undefined) rules.push({ text: 'Intigriti safe harbour: ' + engagement.content.safeHarbour });
@@ -224,10 +212,10 @@ export const yesWeHack: ProgramImporter = {
       out_of_scope: strings.nullish(), non_qualifying_vulnerability: strings.nullish(), qualifying_vulnerability: strings.nullish(),
       rules: nullableText, account_access: nullableText, user_agent: nullableText,
     }).parse(await read('/programs/' + reference.handle));
-    publicProgram(data.public && data.slug === reference.handle && !data.archived && !data.disabled && !data.demo);
+    requireAvailable(data.public && data.slug === reference.handle && !data.archived && !data.disabled && !data.demo);
     const rules = [
       ...makeRule(data.rules), ...makeRule(data.account_access, 'Account access'), ...makeRule(data.user_agent, 'User-Agent'),
-      ...(data.non_qualifying_vulnerability ?? []).flatMap(value => makeRule(value, 'Non-qualifying vulnerability')),
+      ...(data.non_qualifying_vulnerability ?? []).filter(value => value.trim()).map(value => ({ text: 'Non-qualifying vulnerability: ' + value, nonQualifyingLabel: value })),
       ...(data.qualifying_vulnerability ?? []).flatMap(value => makeRule(value, 'Qualifying vulnerability')),
     ];
     if (!data.rules?.trim()) rules.push({ text: 'Review YesWeHack program rules manually.' });

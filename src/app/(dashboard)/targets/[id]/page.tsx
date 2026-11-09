@@ -7,23 +7,26 @@ import { platformLabel } from '@/lib/platformPresentation';
 import { MISSING_HUNTER_UA, POLICY_REVIEW_ANCHOR } from '@/lib/programExecutionPolicy';
 import { programPolicyBlocker, programPolicyInclude } from '@/server/programExecutionPolicy';
 import ProgramWorkflow from '@/components/ProgramWorkflow';
+import { scopeAssetExecutable } from '@/lib/scopeAssets';
 
 export default async function TargetPage({ params, searchParams }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ saved?: string }>;
+  searchParams: Promise<{ saved?: string; cleanup?: string }>;
 }) {
   const { id } = await params;
   const session = await auth();
   if (!session?.user?.id) return null;
   const program = await prisma.bountyProgram.findFirst({
     where: { id, ownerId: session.user.id },
-    include: programPolicyInclude,
+    include: { ...programPolicyInclude, scopeAssets: { where: { active: true }, select: { normalizedValue: true, format: true } } },
   });
   if (!program) {
     if (await prisma.target.findFirst({ where: { id, userId: session.user.id } })) redirect('/hosts/' + id);
     notFound();
   }
   const blocker = programPolicyBlocker(program);
+  const ready = program.scopeAssets.some(scopeAssetExecutable);
+  const query = await searchParams;
   return <div className="space-y-5">
     <Link href="/targets" className="text-sm text-brand">← Targets</Link>
     <div className="flex flex-wrap items-center gap-3">
@@ -35,7 +38,9 @@ export default async function TargetPage({ params, searchParams }: {
       <span>{platformLabel(program.platform)}</span>
       {program.programUrl && <a className="underline" href={program.programUrl} target="_blank" rel="noopener noreferrer">Program ↗</a>}
     </p>
-    {(await searchParams).saved === '1' && <p role="status">Target settings saved. Future operations use current policy; captured history is unchanged.</p>}
+    {query.saved === '1' && <p role="status">Target settings saved.</p>}
+    {query.cleanup === 'pending' && <p role="status">Scope was retired. Research cleanup is unconfirmed. Retry from the retired asset.</p>}
+    {!blocker && !program.deletingAt && <p role="status">{ready ? 'Ready for Recon' : 'Add an authorized in-scope asset before running Recon.'}</p>}
     {blocker && <p role="status">
       {blocker} <Link className="underline" href={blocker === MISSING_HUNTER_UA ? '/settings' : '/targets/' + id + '/settings#' + POLICY_REVIEW_ANCHOR}>
         {blocker === MISSING_HUNTER_UA ? 'Open Settings' : 'Review policy'}

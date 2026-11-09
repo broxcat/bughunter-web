@@ -5,7 +5,8 @@ import {paginationInput} from '@/lib/pagination';
 import {useRouter,useSearchParams} from 'next/navigation';
 import Link from 'next/link';
 import {Suspense,useCallback,useEffect,useState} from 'react';
-import type {ProgramData} from './ProgramForm';
+import type {ProgramData} from '@/lib/targetFormData';
+import { POLICY_REVIEW_ANCHOR } from '@/lib/programExecutionPolicy';
 import {ASSET_FORMATS,ASSET_TYPES,ASSET_VALUES,assetTypeLabel,assetValueLabel,detectScopeAsset,type AssetType,type AssetValue} from '@/lib/scopeAssets';
 import {Button} from './ui/Button';
 import ScopeAssetActions,{ScopeAssetActionDialog,type ManagedScopeAsset,type ScopeActionResult} from './ScopeAssetActions';
@@ -35,11 +36,11 @@ function WorkflowCollection({program,view='home'}:{program:Pick<ProgramData,'id'
   let preview:ReturnType<typeof detectScopeAsset>|undefined;try{preview=detectScopeAsset(value);}catch{}
   return <div className="space-y-6">
     <nav aria-label="Target workflow"><ol className="target-workflow border-y border-border py-3">{[
-      ['Scope',pages?`${pages.total} assets`:'',`/scopes?target=${program.id}`],['Recon',recon,`/recon?program=${program.id}`],['Research',state.researchStarted?'Started':state.researchReady?'Ready':'Pending',`/research?program=${program.id}`],['Findings',String(state.findingsConfirmed??0),`/targets/${program.id}/findings`],['Report','',`/targets/${program.id}/report`],
+      ...(view==='scope'?[['Scope',pages?`${pages.total} assets`:'',`/scopes?target=${program.id}`]]:[]),['Recon',recon,`/recon?program=${program.id}`],['Research',state.researchStarted?'Started':state.researchReady?'Ready':'Pending',`/research?program=${program.id}`],['Findings',String(state.findingsConfirmed??0),`/targets/${program.id}/findings`],['Report','',`/targets/${program.id}/report`],
     ].map(([name,status,href])=><li key={name}><Link aria-current={view==='scope'&&name==='Scope'?'page':undefined} className="block font-medium" href={href}>{name}</Link><p className="text-xs text-muted">{status}</p></li>)}</ol></nav>
     {notice&&<p role="status">{notice.message}{notice.replacementId&&<Link className="ml-2 text-brand underline" href={'/scopes/'+notice.replacementId}>Open replacement</Link>}</p>}
     {error&&<p role="alert">{error}</p>}
-    {view==='home'&&<section className="space-y-3 py-3"><Link className="ui-btn" data-variant="primary" href={pages?.total?`/recon?program=${program.id}`:`/scopes?target=${program.id}`}>{pages?.total?'Open recon':'Add scope'}</Link>{state.latest&&<Link className="ml-4 text-sm text-muted underline" href={`/recon/runs/${state.latest.id}`}>Latest recon run</Link>}</section>}
+    {view==='home'&&<section className="space-y-3 py-3"><Link className="ui-btn" data-variant="primary" href={pages?.total?`/recon?program=${program.id}`:`/targets/${program.id}/settings#${POLICY_REVIEW_ANCHOR}`}>{pages?.total?'Open recon':'Add scope'}</Link>{state.latest&&<Link className="ml-4 text-sm text-muted underline" href={`/recon/runs/${state.latest.id}`}>Latest recon run</Link>}</section>}
     {view==='scope'&&<>
       <section className="space-y-4"><div className="flex flex-wrap items-center gap-3"><h2 className="mr-auto text-lg font-semibold">In scope</h2><Button size="sm" disabled={busy||!!program.deletingAt} onClick={()=>setAdding(!adding)}>{adding?'Cancel':'Add asset'}</Button></div>
         {adding&&<form className="scope-add grid gap-3 sm:grid-cols-2" onSubmit={e=>{e.preventDefault();void act(`/api/programs/${program.id}/assets`,'POST',{value,...(type?{type}:{}),assetValue:importance}).then(ok=>{if(ok){setAdding(false);setValue('');setType('');}});}}>

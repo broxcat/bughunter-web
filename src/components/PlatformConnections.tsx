@@ -54,7 +54,7 @@ export default function PlatformConnections() {
 
   return <section className="space-y-4">
     <h2 className="text-lg font-semibold">Platform connections</h2>
-    <p className="text-sm text-muted">Connections are used for read-only previews of public programs.</p>
+    <p className="text-sm text-muted">Connections are used for read-only previews of programs accessible to your account.</p>
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     {message && <p role="status" className="text-sm">{message}</p>}
     {connections && TOKEN_PLATFORMS.map(platform => <details className="ui-disclosure max-w-2xl" key={platform}>

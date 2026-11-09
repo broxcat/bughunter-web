@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { requiredUserAgentSchema } from './httpPolicy.mjs';
 import { assetInputSchema, detectScopeAsset } from './scopeAssets';
+import { documentedAsset, reviewRule } from './targetReviewData';
 
 export const TEST_CATEGORIES = [
   'PASSIVE_RECON', 'DNS_LOOKUP', 'PORT_SCAN', 'ACTIVE_SCANNING', 'CRAWLING',
@@ -71,6 +72,9 @@ export const storedExecutionPolicySchema = executionPolicySchema.extend({
     url: z.string().nullable(),
     rules: z.string(),
     unrepresentedRules: z.array(z.string()),
+    documentedAssets: z.array(documentedAsset).optional(),
+    sourceDocument: z.string().optional(),
+    ruleDecisions: z.array(reviewRule).optional(),
     legacy: z.strictObject({
       outOfScope: z.array(z.string()),
       scopes: z.array(legacyScopeTextSchema),

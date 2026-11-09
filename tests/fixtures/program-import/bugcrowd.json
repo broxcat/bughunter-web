@@ -1,6 +1,5 @@
 {
   "url": "https://bugcrowd.com/engagements/example-program",
-  "visibility": "<div data-props=\"{&quot;engagementBriefUrl&quot;:&quot;https://bugcrowd.com/engagements/example-program&quot;,&quot;earlyFetchProps&quot;:{&quot;code&quot;:&quot;example-program&quot;}}\" data-react-class=\"ResearcherEngagementBrief\">",
   "programs": {
     "data": [
       {

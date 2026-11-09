@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { detectProgram, previewProgram, readProgramPreview } from '@/server/programImport/preview';
 import { platformReader } from '@/server/programImport/transport';
+import { encryptSecret } from '@/lib/crypto';
 import { policyDraftNeedsReview } from '@/lib/programExecutionPolicy';
 import h1 from '../fixtures/program-import/hackerone.json';
 import bc from '../fixtures/program-import/bugcrowd.json';
@@ -20,14 +21,13 @@ vi.mock('@/server/queue/connection', () => ({ createRedisConnection: () => mocks
 const base = '/v1/hackers/programs/example-program';
 const scopes = base + '/structured_scopes?page%5Bsize%5D=100&page%5Bnumber%5D=1';
 function fixtureReader(records: Record<string, unknown>) {
-  return vi.fn(async (path: string, source = 'api') => {
-    const key = source === 'public' ? 'public:' + path : path;
-    if (!Object.hasOwn(records, key)) throw new Error('Unexpected request to ' + key);
-    return records[key];
+  return vi.fn(async (path: string) => {
+    if (!Object.hasOwn(records, path)) throw new Error('Unexpected request to ' + path);
+    return records[path];
   });
 }
 const h1Reader = (scope = h1.scope) => fixtureReader({
-  'public:/example-program': h1.visibility, [base]: h1.program, [scopes]: scope,
+  [base]: h1.program, [scopes]: scope,
   [base + '/scope_exclusions']: h1.rules,
 });
 
@@ -54,51 +54,68 @@ describe('read-only program import previews', () => {
     expect(await readProgramPreview(h1.url, h1Reader({ data: h1.scope.data.toReversed() }))).toEqual(preview);
   });
 
-  it('requires anonymous Bugcrowd visibility and preserves target-specific VRT rules', async () => {
+  it('uses the authenticated Bugcrowd catalog for invitations and preserves target-specific VRT rules', async () => {
     const read = fixtureReader({
-      'public:/engagements/example-program': bc.visibility,
       '/v1/engagements?limit=100&offset=0': bc.programs,
       ['/v1/engagements/' + bc.scope.engagement_id + '/scope']: bc.scope,
     });
     const preview = await readProgramPreview(bc.url, read);
-    expect(read.mock.calls[0]).toEqual(['/engagements/example-program', 'public']);
+    expect(read.mock.calls[0]).toEqual(['/v1/engagements?limit=100&offset=0']);
     expect(preview.scopeIn[0].normalizedValue).toBe('https://api.example.test/');
     expect(preview.nonAutomatable[0].originalValue).toBe('com.example.app');
     expect(preview.scopeOut[0].normalizedValue).toBe('https://excluded.example.test/');
     expect(preview.unrepresentedRules).toContainEqual({
       assetRef: bc.scope.in_scope[0].id, text: expect.stringContaining('example-category'),
     });
-    const privateBrief = fixtureReader({ 'public:/engagements/example-program': '<form>Sign in</form>' });
-    await expect(readProgramPreview(bc.url, privateBrief)).rejects.toMatchObject({ reason: 'manual' });
-    expect(privateBrief).toHaveBeenCalledTimes(1);
   });
 
-  it('uses the Intigriti public identity before reading scope and keeps testing requirements as prose', async () => {
-    const path = 'public:/api/core/public/programs/example/example-program';
+  it('uses the Intigriti authorized catalog for a private program and retains rule prose', async () => {
+    const program = { ...int.program, confidentialityLevel: { id: 1, value: 'Invite only' } };
     const read = fixtureReader({
-      [path]: int.visibility, ['/external/researcher/v1/programs/' + int.program.id]: int.program,
+      '/external/researcher/v1/programs?limit=500&offset=0': { maxCount: 1, records: [program] },
+      ['/external/researcher/v1/programs/' + program.id]: program,
     });
     const preview = await readProgramPreview(int.url, read);
     expect(preview.scopeIn[0].normalizedValue).toBe('https://example.test/');
     expect(preview.unrepresentedAssets[0].sourceType).toBe('Other');
     expect(preview.policy.sourceSnapshot.rules).toContain('User-Agent: Researcher identity');
     expect(preview.policy.requiredUserAgent).toBeNull();
-    const applicationOnly = fixtureReader({ [path]: { ...int.visibility, confidentialityLevel: 2 } });
-    await expect(readProgramPreview(int.url, applicationOnly)).rejects.toThrow();
-    expect(applicationOnly).toHaveBeenCalledTimes(1);
+  });
+
+  it('imports a HackerOne invitation with the owner token and isolates the cache', async () => {
+    vi.stubEnv('CREDENTIALS_ENCRYPTION_KEY', '1'.repeat(64));
+    mocks.eval.mockResolvedValue(0);
+    mocks.findUnique.mockImplementation(async ({ where }) => ({
+      credentialCipher: encryptSecret(JSON.stringify({ platform: 'HACKERONE', username: where.userId_platform.userId, token: 'fixture-token' })),
+    }));
+    const ownerHeader = 'Basic ' + Buffer.from('invited:fixture-token').toString('base64');
+    const fetch = vi.fn(async (url: URL, options: RequestInit) => {
+      if (new Headers(options.headers).get('Authorization') !== ownerHeader) return new Response(null, { status: 404 });
+      expect(url.origin).toBe('https://api.hackerone.com');
+      if (url.pathname === base) return Response.json({ data: { ...h1.program.data, attributes: { ...h1.program.data.attributes, state: 'private_mode' } } });
+      return Response.json(url.pathname.endsWith('structured_scopes') ? h1.scope : h1.rules);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const input = { url: h1.url, visibility: 'private' as const };
+    await expect(previewProgram('invited', input)).resolves.toMatchObject({ name: 'Example' });
+    await expect(previewProgram('uninvited', input)).rejects.toMatchObject({ reason: 'manual' });
+    expect(mocks.findUnique.mock.calls.map(([query]) => query.where.userId_platform.userId)).toEqual(['invited', 'uninvited']);
+    expect(fetch).toHaveBeenCalledTimes(4);
   });
 
   it('preserves YesWeHack prose exclusions and reward eligibility separately from scope-in', async () => {
-    const read = fixtureReader({ '/programs/example-program': ywh.program });
+    const read = fixtureReader({ '/programs/example-program': { ...ywh.program, non_qualifying_vulnerability: ['SQL injection', 'Reflected XSS on logout', ...ywh.program.non_qualifying_vulnerability] } });
     const preview = await readProgramPreview(ywh.url, read);
     expect(preview.scopeIn).toHaveLength(2);
     expect(preview.scopeOut[0].originalValue).toBe(ywh.program.out_of_scope[0]);
     expect(preview.policy.exclusions).toEqual([]);
+    expect(preview.nonQualifying).toEqual(['SQL_INJECTION']);
+    expect(preview.policy.sourceSnapshot.rules).toContain('Reflected XSS on logout');
     expect(preview.policy.sourceSnapshot.rules).toContain('Non-qualifying vulnerability:');
     expect(read).toHaveBeenCalledTimes(1);
   });
 
-  it('makes no requests for explicitly private, foreign or malformed program URLs', async () => {
+  it('makes no requests for foreign or malformed program URLs', async () => {
     const read = vi.fn();
     for (const url of ['https://example.test/example-program', 'https://hackerone.com.evil.test/example-program',
       'https://hackerone.com/example-program/../security', 'https://hackerone.com/%73ecurity',
@@ -107,7 +124,7 @@ describe('read-only program import previews', () => {
       await expect(readProgramPreview(url, read)).rejects.toMatchObject({ reason: 'manual' });
     }
     await expect(readProgramPreview(h1.url, read, 'BUGCROWD')).rejects.toMatchObject({ reason: 'manual' });
-    await expect(previewProgram('hunter', { url: h1.url, visibility: 'private' })).rejects.toMatchObject({ reason: 'manual' });
+    await expect(previewProgram('hunter', { url: 'https://private.example.test/program', visibility: 'private' })).rejects.toMatchObject({ reason: 'manual' });
     expect(read).not.toHaveBeenCalled();
     expect(mocks.findUnique).not.toHaveBeenCalled();
     expect(mocks.eval).not.toHaveBeenCalled();
@@ -129,24 +146,18 @@ describe('read-only program import previews', () => {
 });
 
 describe('platform request boundaries', () => {
-  it('uses fixed origins, omits auth on public probes and rejects redirects', async () => {
+  it('uses fixed origins, never sends cookies and rejects redirects', async () => {
     vi.stubEnv('CREDENTIALS_ENCRYPTION_KEY', '1'.repeat(64));
     mocks.eval.mockResolvedValue(0);
-    const fetch = vi.fn()
-      .mockResolvedValueOnce(new Response('public', { headers: { 'Content-Type': 'text/html' } }))
-      .mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: 'http://127.0.0.1:80/admin' } }));
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: 'http://127.0.0.1:80/admin' } }));
     vi.stubGlobal('fetch', fetch);
     const reader = platformReader('HACKERONE', { platform: 'HACKERONE', username: 'example', token: 'fixture' });
     try {
       await expect(reader.read('//internal.test/metadata')).rejects.toMatchObject({ reason: 'manual' });
       await expect(reader.read('/%2e%2e/metadata')).rejects.toMatchObject({ reason: 'manual' });
-      await reader.read('/example-program', 'public');
       await expect(reader.read(base)).rejects.toMatchObject({ reason: 'manual' });
-      expect(fetch).toHaveBeenCalledTimes(2);
-      const [publicUrl, publicOptions] = fetch.mock.calls[0];
-      const [apiUrl, apiOptions] = fetch.mock.calls[1];
-      expect(publicUrl.href).toBe(h1.url);
-      expect(publicOptions.headers).toEqual({ Accept: 'text/html' });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const [apiUrl, apiOptions] = fetch.mock.calls[0];
       expect(apiUrl.href).toBe('https://api.hackerone.com' + base);
       expect(apiOptions).toMatchObject({ redirect: 'manual', method: 'GET', headers: { Authorization: expect.stringMatching(/^Basic /) } });
       expect(apiOptions.headers).not.toHaveProperty('Cookie');
@@ -163,7 +174,7 @@ describe('platform request boundaries', () => {
       await expect(a.read('/programs/example-program')).rejects.toMatchObject({ reason: 'rate_limited', retryAfter: 12 });
       await expect(b.read('/programs/second')).rejects.toMatchObject({ reason: 'rate_limited', retryAfter: 8 });
       expect(fetch).toHaveBeenCalledTimes(1);
-      expect(mocks.eval.mock.calls.map(call => call[2])).toEqual(Array(3).fill('platform-import:YESWEHACK:api:anonymous'));
+      expect(mocks.eval.mock.calls.map(call => call[2])).toEqual(Array(3).fill('platform-import:YESWEHACK:anonymous'));
       expect(mocks.eval.mock.calls[1][3]).toBe(12000);
     } finally { a.close(); b.close(); }
   });

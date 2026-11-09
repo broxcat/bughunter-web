@@ -1,6 +1,5 @@
 {
   "url": "https://hackerone.com/example-program",
-  "visibility": "<meta property=\"og:url\" content=\"https://hackerone.com/example-program\"><meta property=\"og:title\" content=\"Example - Bug Bounty Program | HackerOne\"><body class=\"controller_teams action_show signed-out\">",
   "program": {
     "data": {
       "id": "13",

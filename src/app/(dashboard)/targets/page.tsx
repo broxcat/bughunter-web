@@ -3,8 +3,6 @@ import {platformLabel} from '@/lib/platformPresentation';
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import ProgramForm from "@/components/ProgramForm";
-import { Dialog } from "@/components/ui/Dialog";
 import { MISSING_HUNTER_UA, POLICY_REVIEW_ANCHOR } from '@/lib/programExecutionPolicy';
 import { reconOverview } from "@/lib/reconOverview";
 import { Button } from "@/components/ui/Button";
@@ -19,7 +17,6 @@ function TargetsCollection() {
   const [result,setResult]=useState<(Awaited<ReturnType<typeof programCollection>> & {key:string})|null>(null);
   const data=result?.key===key?result:null, programs=data?.items??[];
   const [deleted, setDeleted] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
     const controller=new AbortController();
@@ -33,7 +30,7 @@ function TargetsCollection() {
     return()=>controller.abort();
   },[key,query,input.page,input.pageSize,input.q,router]);
   return <div className="space-y-6">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h1>Targets</h1><Button onClick={() => setCreating(true)}>Create target</Button></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h1>Targets</h1><Link className="ui-btn" data-variant="primary" href="/targets/new">Create target</Link></div>
     <form action="/targets" className="flex flex-wrap gap-3"><label>Search targets<input name="q" maxLength={200} defaultValue={input.q} key={input.q} className="rounded border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={input.pageSize}/><Button variant="secondary" type="submit">Search</Button></form>
     {!data&&!error&&<p role="status">Loading targets…</p>}
     {deleted && <p role="status">Target deleted.</p>}{error && <p role="alert">{error}</p>}
@@ -48,6 +45,5 @@ function TargetsCollection() {
     </tr>)}</tbody></table></div>}
     {data&&<CollectionPager path="/targets" query={query} {...data}/>}
     {data&&!programs.length&&!error&&<p className="text-sm text-muted">{input.q?'No targets match your search.':'No targets yet. Create a target to define its scope.'}</p>}
-    {creating&&<Dialog compact title="Create target" onClose={()=>setCreating(false)}><ProgramForm onCancel={()=>setCreating(false)} onSaved={id=>router.push(`/scopes?target=${id}`)}/></Dialog>}
   </div>;
 }
