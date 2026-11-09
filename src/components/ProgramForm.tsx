@@ -2,7 +2,7 @@
 import {platformLabel} from '@/lib/platformPresentation';
 import { useState } from "react";
 import { BOUNTY_PLATFORMS, VULNERABILITY_FAMILIES } from "@/lib/bountyProgram";
-import { headersFromLines, LEGACY_LIMITS, POLICY_REVIEW_ANCHOR, TEST_CATEGORIES, type LegacyScopeText, type StoredExecutionPolicy } from '@/lib/programExecutionPolicy';
+import { headersFromLines, LEGACY_LIMITS, policyDraftNeedsReview, POLICY_REVIEW_ANCHOR, TEST_CATEGORIES, type LegacyScopeText, type StoredExecutionPolicy } from '@/lib/programExecutionPolicy';
 import { Button } from "@/components/ui/Button";
 
 export interface ProgramData {
@@ -35,7 +35,7 @@ export default function ProgramForm({ initial, onSaved, onCancel }: { initial?: 
   const currentPolicy = initial?.executionPolicies?.[0];
   const policy = currentPolicy?.policy;
   const legacy = initial?.legacyPolicyReview;
-  const draft = policy?.reviewState === 'BACKFILL_DRAFT';
+  const draft = policyDraftNeedsReview(policy?.reviewState);
   const [configurePolicy, setConfigurePolicy] = useState(Boolean(currentPolicy || legacy?.unrepresentedRules.length));
   const [automationAllowed, setAutomationAllowed] = useState(Boolean(policy?.automationAllowed && !draft && !legacy?.scopeChanged));
   const unrepresented = [...new Set([...(policy?.sourceSnapshot.unrepresentedRules ?? []),
@@ -113,8 +113,8 @@ export default function ProgramForm({ initial, onSaved, onCancel }: { initial?: 
       <label className="block">Structured exclusions<textarea name="structuredExclusions" rows={3} defaultValue={structuredExclusions.join('\n')} placeholder="https://example.com/admin/*" className={inputClass} /><span className="text-sm text-muted">One URL, domain, wildcard, IP or CIDR per line.</span></label>
       <label className="block">Required headers<textarea name="requiredHeaders" rows={2} defaultValue={policy?.requiredHeaders.map(({ name, value }) => name + ': ' + value).join('\n')} placeholder="X-Bug-Bounty: your-username" className={inputClass} /></label>
       <div className="grid gap-3 sm:grid-cols-2">
-        <label>Requests per second<input required name="requestsPerSecond" type="number" min="0.01" max="100" step="0.01" defaultValue={draft ? policy.requestsPerSecond ?? '' : policy?.requestsPerSecond ?? LEGACY_LIMITS.requestsPerSecond} className={inputClass} /></label>
-        <label>Maximum concurrent requests<input required name="maxConcurrency" type="number" min="1" max="32" defaultValue={draft ? policy.maxConcurrency ?? '' : policy?.maxConcurrency ?? LEGACY_LIMITS.maxConcurrency} className={inputClass} /></label>
+        <label>Requests per second<input required name="requestsPerSecond" type="number" min="0.01" max="100" step="0.01" defaultValue={draft ? policy?.requestsPerSecond ?? '' : policy?.requestsPerSecond ?? LEGACY_LIMITS.requestsPerSecond} className={inputClass} /></label>
+        <label>Maximum concurrent requests<input required name="maxConcurrency" type="number" min="1" max="32" defaultValue={draft ? policy?.maxConcurrency ?? '' : policy?.maxConcurrency ?? LEGACY_LIMITS.maxConcurrency} className={inputClass} /></label>
       </div>
       <fieldset className="space-y-1"><legend>Forbidden test categories</legend>
         {TEST_CATEGORIES.map(category => <label key={category} className="block text-sm"><input type="checkbox" name="forbiddenCategories" value={category} defaultChecked={policy?.forbiddenCategories.includes(category)} /> {category.toLowerCase().replaceAll('_', ' ')}</label>)}

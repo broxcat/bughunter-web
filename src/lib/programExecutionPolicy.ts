@@ -58,10 +58,14 @@ export const executionPolicySchema = z.strictObject({
 export type ExecutionPolicyInput = z.infer<typeof executionPolicySchema>;
 
 // Only server writers can set review status and capture the legacy source.
+export function policyDraftNeedsReview(state?: string) {
+  return state === 'BACKFILL_DRAFT' || state === 'IMPORT_DRAFT';
+}
+
 export const storedExecutionPolicySchema = executionPolicySchema.extend({
   requestsPerSecond: executionPolicySchema.shape.requestsPerSecond.nullable(),
   maxConcurrency: executionPolicySchema.shape.maxConcurrency.nullable(),
-  reviewState: z.enum(['BACKFILL_DRAFT', 'OWNER_REVIEWED']).optional(),
+  reviewState: z.enum(['BACKFILL_DRAFT', 'IMPORT_DRAFT', 'OWNER_REVIEWED']).optional(),
   sourceSnapshot: sourceSnapshotSchema.extend({
     // Historical data may predate input validation. Preserve it byte for byte.
     url: z.string().nullable(),
@@ -73,7 +77,7 @@ export const storedExecutionPolicySchema = executionPolicySchema.extend({
       programRules: z.string().nullable(),
     }).optional(),
   }),
-}).refine(policy => policy.reviewState === 'BACKFILL_DRAFT' || (policy.requestsPerSecond !== null && policy.maxConcurrency !== null), 'Reviewed policies require request limits');
+}).refine(policy => policyDraftNeedsReview(policy.reviewState) || (policy.requestsPerSecond !== null && policy.maxConcurrency !== null), 'Reviewed policies require request limits');
 export type StoredExecutionPolicy = z.infer<typeof storedExecutionPolicySchema>;
 export const LEGACY_LIMITS = { requestsPerSecond: 5, maxConcurrency: 2 };
 export const POLICY_REVIEW_ANCHOR = 'execution-policy';

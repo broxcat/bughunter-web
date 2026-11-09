@@ -1,0 +1,67 @@
+{
+  "url": "https://bugcrowd.com/engagements/example-program",
+  "visibility": "<div data-props=\"{&quot;engagementBriefUrl&quot;:&quot;https://bugcrowd.com/engagements/example-program&quot;,&quot;earlyFetchProps&quot;:{&quot;code&quot;:&quot;example-program&quot;}}\" data-react-class=\"ResearcherEngagementBrief\">",
+  "programs": {
+    "data": [
+      {
+        "type": "engagement",
+        "id": "b77c14dc-3859-4c6b-bf34-6e7da195bced",
+        "attributes": {
+          "code": "example-program",
+          "name": "Example",
+          "state": "in_progress",
+          "is_demo": false
+        }
+      }
+    ],
+    "pagination": {
+      "has_more": false
+    }
+  },
+  "scope": {
+    "engagement_id": "b77c14dc-3859-4c6b-bf34-6e7da195bced",
+    "vrt_version": "1.14",
+    "in_scope": [
+      {
+        "id": "0a6adc3f-bce1-42b3-ac71-17b84e898716",
+        "type": "website",
+        "value": "https://www.example.test",
+        "description": "Testing is limited to your account."
+      },
+      {
+        "type": "android",
+        "value": "com.example.app"
+      },
+      {
+        "type": "website",
+        "value": "https://api.example.test"
+      }
+    ],
+    "out_of_scope": [
+      {
+        "type": "website",
+        "value": "https://excluded.example.test",
+        "reason": "Third party"
+      }
+    ],
+    "vrt_exclusions": [
+      {
+        "vrt_ids": [
+          {
+            "id": "example-category",
+            "version": "1.14"
+          }
+        ],
+        "exclusion_type": "conditional",
+        "all_targets": false,
+        "notes": "Check the conditions",
+        "targets": [
+          {
+            "id": "0a6adc3f-bce1-42b3-ac71-17b84e898716",
+            "name": "Website"
+          }
+        ]
+      }
+    ]
+  }
+}

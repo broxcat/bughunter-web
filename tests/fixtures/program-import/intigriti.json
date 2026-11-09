@@ -1,0 +1,61 @@
+{
+  "url": "https://app.intigriti.com/programs/example/example-program/detail",
+  "visibility": {
+    "programId": "b77c14dc-3859-4c6b-bf34-6e7da195bced",
+    "companyHandle": "example",
+    "handle": "example-program",
+    "confidentialityLevel": 4
+  },
+  "program": {
+    "id": "b77c14dc-3859-4c6b-bf34-6e7da195bced",
+    "handle": "example-program",
+    "name": "Example",
+    "confidentialityLevel": {
+      "id": 4,
+      "value": "Public"
+    },
+    "webLinks": {
+      "detail": "https://app.intigriti.com/programs/example/example-program/detail"
+    },
+    "domains": {
+      "content": [
+        {
+          "id": "0a6adc3f-bce1-42b3-ac71-17b84e898716",
+          "type": {
+            "id": 1,
+            "value": "URL"
+          },
+          "tier": {
+            "id": 2,
+            "value": "Tier 2"
+          },
+          "endpoint": "https://example.test",
+          "description": ""
+        },
+        {
+          "id": "0a6adc3f-bce1-42b3-ac71-17b84e898717",
+          "type": {
+            "id": 3,
+            "value": "Other"
+          },
+          "tier": {
+            "id": 2,
+            "value": "Tier 2"
+          },
+          "endpoint": "https://other.example.test",
+          "description": ""
+        }
+      ]
+    },
+    "rulesOfEngagement": {
+      "content": {
+        "description": "Use only your test account.",
+        "testingRequirements": {
+          "intigritiMe": true,
+          "automatedTooling": 2,
+          "userAgent": "Researcher identity"
+        }
+      }
+    }
+  }
+}

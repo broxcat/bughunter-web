@@ -13,6 +13,7 @@ datasource db {
 
 model User {
   hunterIdentity HunterIdentity?
+  platformConnections PlatformConnection[]
   id            String    @id @default(cuid())
   name          String?
   email         String    @unique
@@ -1437,4 +1438,13 @@ model HunterIdentity {
   userAgent String?
   headers   Json
   user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PlatformConnection {
+  userId           String
+  platform         BountyPlatform
+  credentialCipher String
+  user             User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, platform])
 }

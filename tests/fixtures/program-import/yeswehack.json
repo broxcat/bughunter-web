@@ -1,0 +1,38 @@
+{
+  "url": "https://yeswehack.com/programs/example-program",
+  "program": {
+    "title": "Example",
+    "slug": "example-program",
+    "public": true,
+    "archived": false,
+    "disabled": false,
+    "rules": "Contact the program before testing a shared system.",
+    "scopes": [
+      {
+        "scope": "https://example.test",
+        "scope_type": "web-application",
+        "scope_type_name": "Web application",
+        "asset_value": "CRITICAL",
+        "report_count": null
+      },
+      {
+        "scope": "https://api.example.test",
+        "scope_type": "api",
+        "scope_type_name": "API",
+        "asset_value": "CRITICAL",
+        "report_count": null
+      }
+    ],
+    "out_of_scope": [
+      "Third-party systems are out of scope."
+    ],
+    "qualifying_vulnerability": [
+      "Server-side injection"
+    ],
+    "non_qualifying_vulnerability": [
+      "Missing optional headers"
+    ],
+    "account_access": null,
+    "user_agent": null
+  }
+}
