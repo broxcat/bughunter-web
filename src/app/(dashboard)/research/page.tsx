@@ -20,7 +20,7 @@ export default async function ResearchPage({searchParams}:{searchParams:Promise<
   const historyInput=paginationInput(new URLSearchParams({page:search.historyPage??'1',pageSize:String(input.pageSize)}),false);
   const session=await auth();if(!session?.user?.id)return null;
   const userId=session.user.id;
-  if (filter && search.view !== 'details') {
+  if (filter && search.view === 'campaign') {
     const campaign = await loadTargetCampaign(userId, filter);
     if (!campaign) notFound();
     const stage = campaign.view.stages[2];

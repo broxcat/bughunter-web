@@ -36,7 +36,8 @@ export function targetCampaign(program: { id: string; deletingAt: Date | null; a
   const root = '/targets/' + program.id;
   const settings = root + '/settings#' + POLICY_REVIEW_ANCHOR;
   const history = '/recon?program=' + program.id;
-  const researchUrl = '/research?program=' + program.id;
+  const researchUrl = '/research?program=' + program.id + '&view=campaign';
+  const researchDetails = '/research?program=' + program.id + '&view=details';
   const busyRecon = facts.runStatus === 'QUEUED' || facts.runStatus === 'RUNNING' || facts.standaloneTotal > 0 || facts.handoffPending;
   const deletion = program.deletingAt ? 'Target deletion is in progress. Retry Delete target to finish cleanup.' : null;
   const blocker = deletion ?? program.policyBlocker;
@@ -71,7 +72,7 @@ export function targetCampaign(program: { id: string; deletingAt: Date | null; a
   else if (facts.researchReady) research = facts.findings
     ? { stage: 'Research', state: 'done', detail: 'Findings available for review.' }
     : { stage: 'Research', state: 'running', detail: facts.researchReady + (facts.researchReady === 1 ? ' workspace available' : ' workspaces available') };
-  else if (facts.researchFailed) research = { stage: 'Research', state: 'blocked', detail: 'Research workspace provisioning failed.', fix: researchUrl + '&view=details' };
+  else if (facts.researchFailed) research = { stage: 'Research', state: 'blocked', detail: 'Research workspace provisioning failed.', fix: researchDetails };
   const findings: StageView = facts.findings
     ? { stage: 'Findings', state: facts.reviewedFindings === facts.findings ? 'done' : 'running',
       detail: facts.reviewedFindings + '/' + facts.findings + ' reviewed' }

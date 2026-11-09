@@ -86,7 +86,7 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     await page.waitForTimeout(5600);
     assert.deepEqual(campaignRequests(afterRun), [], 'terminal Recon stops background requests');
     await primary('link', 'Open research').click();
-    await page.waitForURL(origin + '/research?program=' + ready.id);
+    await page.waitForURL(origin + '/research?program=' + ready.id + '&view=campaign');
     await page.getByRole('heading', { name: 'Research', exact: true }).waitFor();
     assert.equal(await page.getByRole('link', { name: /^Open console/ }).count(), 0);
     await page.getByRole('link', { name: 'View details', exact: true }).click();
