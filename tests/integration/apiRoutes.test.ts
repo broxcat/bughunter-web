@@ -417,7 +417,9 @@ d("API route authorization (integration)", () => {
     expect((await GET(req("http://localhost", {}), context)).status).toBe(404);
     authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
     expect((await PATCH(req("http://localhost", { requiredUserAgent: "stolen" }, "PATCH"), context)).status).toBe(404);
-    expect((await PATCH(req("http://localhost", { requiredUserAgent: "" }, "PATCH"), context)).status).toBe(400);
+    expect((await PATCH(req("http://localhost", { requiredUserAgent: "   " }, "PATCH"), context)).status).toBe(400);
+    expect((await PATCH(req("http://localhost", { requiredUserAgent: "" }, "PATCH"), context)).status).toBe(200);
+    expect((await prisma.bountyProgram.findUniqueOrThrow({ where: { id: p.id } })).requiredUserAgent).toBe("");
   });
 
   it("adds, edits and removes scope hosts while preserving all historical references", async () => {
