@@ -339,11 +339,11 @@ d("API route authorization (integration)", () => {
     );
     expect(res.status).toBe(201);
     const { markdown } = await res.json();
-    expect(markdown).toContain("YesWeHack Report");
+    expect(markdown).toContain("YesWeHack report");
     expect(markdown).toContain("CWE: CWE-918");
     expect(markdown).toContain("CVSS 3.1 Score: 8.6 (High)");
     expect(markdown).toContain("GET from 203.0.113.9");
-    expect(markdown).toContain("À compléter : impact business/technique démontré");
+    expect(markdown).toContain("To complete: demonstrated business or technical impact.");
   });
   it("creates a business Target atomically with decimal rewards and active hosts", async () => {
     const { POST } = await import("@/app/api/programs/route");
