@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { requiredUserAgentSchema } from '@/lib/httpPolicy.mjs';
 import { isExcluded, matchesHost } from '@/lib/bountyProgram';
 import { assetAllowsHost, assetAllowsUrl, detectScopeAsset, type AssetBoundary } from '@/lib/scopeAssets';
-import { storedExecutionPolicySchema, hunterIdentitySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, type TestCategory } from '@/lib/programExecutionPolicy';
+import { policyDraftNeedsReview, storedExecutionPolicySchema, hunterIdentitySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, type TestCategory } from '@/lib/programExecutionPolicy';
 
 import { captureLegacyScopes, legacyExclusionParity, legacyScopeFingerprint, legacyScopeTargets } from './legacyPolicySource';
 
@@ -46,7 +46,7 @@ export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules)
   const unrepresented = sourceMismatch || legacyChanged || (hasScopeProse && !reviewedScope) ||
     Boolean(captured?.scopes.length && !reviewedScope) || Boolean(parity && (parity.missing.length || parity.unconvertible.length)) ||
     (policy ? policy.sourceSnapshot.unrepresentedRules.length > 0 : Boolean(program.rulesOfEngagement?.trim()));
-  const blocker = policy?.reviewState === 'BACKFILL_DRAFT' ? 'Automation is blocked until you review and save the imported policy in Target settings.'
+  const blocker = policyDraftNeedsReview(policy?.reviewState) ? 'Automation is blocked until you review and save the imported policy in Target settings.'
     : unrepresented ? 'Automation is blocked by unrepresented program or scope rules. Review the execution policy in Target settings.'
     : policy && !policy.automationAllowed ? 'Automation is disabled in Target settings.'
     : !requiredUserAgentSchema.safeParse(userAgent).success || userAgent !== userAgent.trim() || /\\[rn]/.test(userAgent) ? MISSING_HUNTER_UA

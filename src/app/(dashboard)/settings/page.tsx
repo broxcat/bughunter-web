@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import PlatformConnections from '@/components/PlatformConnections';
 import HunterIdentitySettings from '@/components/HunterIdentitySettings';
 import ResearchModelSettings from "@/components/ResearchModelSettings";
 
@@ -127,6 +128,7 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <h1>Settings</h1>
       <HunterIdentitySettings />
+      <PlatformConnections />
       <h2 className="text-lg font-semibold">AI providers</h2>
       <p className="mt-1 text-sm text-muted">
         Choose the default for optional AI assistance. Configure Research stage routing below.

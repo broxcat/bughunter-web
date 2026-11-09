@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { currentPolicySelection } from '@/server/programExecutionPolicy';
 import { z } from 'zod';
 import { convertLegacyExclusions, legacyExclusionParity, legacyFreeText, legacyScopeFingerprint, readLegacyScopes } from '@/server/legacyPolicySource';
-import { executionPolicySchema, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
+import { executionPolicySchema, policyDraftNeedsReview, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
 import { programUpdateSchema } from "@/lib/bountyProgram";
 import { deleteProgram } from '@/server/programDeletion';
 import { ResearchError } from '@/server/research/workspace';
@@ -62,7 +62,8 @@ export async function PATCH(req: Request, { params }: Params) {
     if (executionPolicy) {
       const latest = current.executionPolicies[0];
       const currentVersion = latest?.version ?? 0;
-      const isDraft = storedExecutionPolicySchema.safeParse(latest?.policy).data?.reviewState === 'BACKFILL_DRAFT';
+      const reviewState = storedExecutionPolicySchema.safeParse(latest?.policy).data?.reviewState;
+      const isDraft = policyDraftNeedsReview(reviewState);
       if ((expectedPolicyVersion !== undefined || isDraft) && expectedPolicyVersion !== currentVersion) {
         return Response.json({ error: 'Execution policy changed. Reload and review the current version before saving.' }, { status: 409 });
       }
@@ -79,7 +80,7 @@ export async function PATCH(req: Request, { params }: Params) {
         }
       }
       reviewedPolicy = {
-        ...executionPolicy, reviewState: isDraft && !executionPolicy.automationAllowed ? 'BACKFILL_DRAFT' : 'OWNER_REVIEWED',
+        ...executionPolicy, reviewState: isDraft && !executionPolicy.automationAllowed ? reviewState : 'OWNER_REVIEWED',
         sourceSnapshot: {
           ...executionPolicy.sourceSnapshot,
           legacy: {

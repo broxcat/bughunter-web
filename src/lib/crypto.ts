@@ -22,28 +22,39 @@ const TAG_BYTES = 16; // GCM authentication tag length
 // Loaded lazily so that merely importing this module (e.g. during type-checking
 // or in code paths that never touch secrets) doesn't throw when the env var is
 // absent. The key is only required when we actually encrypt or decrypt.
-function loadKey(): Buffer {
-  const hex = process.env.CREDENTIALS_ENCRYPTION_KEY;
+function loadKey(hex = process.env.CREDENTIALS_ENCRYPTION_KEY): Buffer {
   if (!hex) {
     throw new Error(
       "CREDENTIALS_ENCRYPTION_KEY is not set. Generate one with " +
         "`openssl rand -hex 32` (32 bytes = 64 hex chars).",
     );
   }
-  let key: Buffer;
-  try {
-    key = Buffer.from(hex, "hex");
-  } catch {
-    throw new Error("CREDENTIALS_ENCRYPTION_KEY must be valid hex.");
+  if (hex.length !== KEY_BYTES * 2 || !/^[a-f0-9]+$/i.test(hex)) {
+    throw new Error('Credential encryption key must decode to 32 bytes of valid hex.');
   }
-  // Buffer.from silently ignores invalid/odd hex, so validate the decoded length.
-  if (key.length !== KEY_BYTES) {
-    throw new Error(
-      `CREDENTIALS_ENCRYPTION_KEY must decode to ${KEY_BYTES} bytes ` +
-        `(${KEY_BYTES * 2} hex chars); got ${key.length} bytes.`,
-    );
+  return Buffer.from(hex, 'hex');
+}
+
+function keyId(value: string) {
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(value)) throw new Error('Invalid credential encryption key ID.');
+  return value;
+}
+
+function currentKeyId() {
+  return keyId(process.env.CREDENTIALS_ENCRYPTION_KEY_ID ?? 'primary');
+}
+
+function keyForId(id: string) {
+  if (id === currentKeyId()) return loadKey();
+  let keys: unknown;
+  try { keys = JSON.parse(process.env.CREDENTIALS_ENCRYPTION_PREVIOUS_KEYS ?? '{}'); }
+  catch { throw new Error('Invalid previous credential encryption keys configuration.'); }
+  if (!keys || typeof keys !== 'object' || Array.isArray(keys) || !Object.hasOwn(keys, id)) {
+    throw new Error('Credential encryption key version is unavailable.');
   }
-  return key;
+  const hex = (keys as Record<string, unknown>)[id];
+  if (typeof hex !== 'string') throw new Error('Invalid previous credential encryption key.');
+  return loadKey(hex);
 }
 
 /** Non-reversible, domain-separated identity for private runtime references.
@@ -59,8 +70,7 @@ export function privateReferenceFingerprint(domain: string, value: string): stri
 /**
  * Encrypt a secret with AES-256-GCM.
  *
- * Output format: a single compact string `iv:authTag:ciphertext`, each part
- * base64-encoded. A fresh random 12-byte IV is used per call, so encrypting the
+ * Output format: `v1:keyId:iv:authTag:ciphertext`, with three base64 parts. A fresh random 12-byte IV is used per call, so encrypting the
  * same plaintext twice yields different ciphertexts.
  */
 export function encryptSecret(plain: string): string {
@@ -69,13 +79,16 @@ export function encryptSecret(plain: string): string {
   }
   const key = loadKey();
   const iv = randomBytes(IV_BYTES);
+  const envelope = 'v1:' + currentKeyId();
   const cipher = createCipheriv(ALGORITHM, key, iv);
+  cipher.setAAD(Buffer.from(envelope));
   const ciphertext = Buffer.concat([
     cipher.update(plain, "utf8"),
     cipher.final(),
   ]);
   const authTag = cipher.getAuthTag();
   return [
+    envelope,
     iv.toString("base64"),
     authTag.toString("base64"),
     ciphertext.toString("base64"),
@@ -91,17 +104,19 @@ export function decryptSecret(payload: string): string {
     throw new TypeError("decryptSecret expects a string.");
   }
   const parts = payload.split(":");
-  if (parts.length !== 3) {
-    throw new Error("Malformed ciphertext payload.");
-  }
-  const key = loadKey();
-  const iv = Buffer.from(parts[0], "base64");
-  const authTag = Buffer.from(parts[1], "base64");
-  const ciphertext = Buffer.from(parts[2], "base64");
+  const versioned = parts.length === 5 && parts[0] === 'v1';
+  if (!versioned && parts.length !== 3) throw new Error('Malformed ciphertext payload.');
+  const id = keyId(versioned ? parts[1] : process.env.CREDENTIALS_ENCRYPTION_LEGACY_KEY_ID ?? 'primary');
+  const key = keyForId(id);
+  const offset = versioned ? 2 : 0;
+  const iv = Buffer.from(parts[offset], 'base64');
+  const authTag = Buffer.from(parts[offset + 1], 'base64');
+  const ciphertext = Buffer.from(parts[offset + 2], 'base64');
   if (iv.length !== IV_BYTES || authTag.length !== TAG_BYTES) {
     throw new Error("Malformed ciphertext payload.");
   }
   const decipher = createDecipheriv(ALGORITHM, key, iv);
+  if (versioned) decipher.setAAD(Buffer.from('v1:' + id));
   decipher.setAuthTag(authTag);
   const plain = Buffer.concat([
     decipher.update(ciphertext),

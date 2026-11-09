@@ -1,0 +1,104 @@
+{
+  "url": "https://hackerone.com/example-program",
+  "visibility": "<meta property=\"og:url\" content=\"https://hackerone.com/example-program\"><meta property=\"og:title\" content=\"Example - Bug Bounty Program | HackerOne\"><body class=\"controller_teams action_show signed-out\">",
+  "program": {
+    "data": {
+      "id": "13",
+      "attributes": {
+        "handle": "example-program",
+        "name": "Example",
+        "state": "public_mode",
+        "policy": "Exclude customer.example.test from the wildcard."
+      }
+    }
+  },
+  "scope": {
+    "data": [
+      {
+        "id": "1",
+        "attributes": {
+          "asset_type": "WILDCARD",
+          "asset_identifier": "*.EXAMPLE.test",
+          "eligible_for_submission": true
+        }
+      },
+      {
+        "id": "2",
+        "attributes": {
+          "asset_type": "URL",
+          "asset_identifier": "https://App.Example.test",
+          "eligible_for_submission": true
+        }
+      },
+      {
+        "id": "3",
+        "attributes": {
+          "asset_type": "OTHER",
+          "asset_identifier": "https://other.example.test",
+          "eligible_for_submission": true
+        }
+      },
+      {
+        "id": "4",
+        "attributes": {
+          "asset_type": "URL",
+          "asset_identifier": "https://example.test/admin/*",
+          "eligible_for_submission": false
+        }
+      },
+      {
+        "id": "5",
+        "attributes": {
+          "asset_type": "URL",
+          "asset_identifier": "https://own.example.test",
+          "eligible_for_submission": true,
+          "instruction": "Use only accounts you own."
+        }
+      },
+      {
+        "id": "6",
+        "attributes": {
+          "asset_type": "APPLE_STORE_APP_ID",
+          "asset_identifier": "123456789",
+          "eligible_for_submission": true
+        }
+      },
+      {
+        "id": "7",
+        "attributes": {
+          "asset_type": "URL",
+          "asset_identifier": "https://App.Example.test",
+          "eligible_for_submission": false
+        }
+      },
+      {
+        "id": "8",
+        "attributes": {
+          "asset_type": "URL",
+          "asset_identifier": "https://ok.example.test",
+          "eligible_for_submission": true
+        }
+      },
+      {
+        "id": "9",
+        "attributes": {
+          "asset_type": "URL",
+          "asset_identifier": "https://example.test/exact",
+          "eligible_for_submission": true
+        }
+      }
+    ]
+  },
+  "rules": {
+    "data": [
+      {
+        "id": "123",
+        "type": "scope-exclusion",
+        "attributes": {
+          "category": "Example category",
+          "details": "Conditions apply."
+        }
+      }
+    ]
+  }
+}
