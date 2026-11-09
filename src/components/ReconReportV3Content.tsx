@@ -8,7 +8,7 @@ const coverageLabels = {
 };
 const human = (value: string) => value.toLowerCase().replaceAll('_', ' ').replace(/\b\w/, letter => letter.toUpperCase());
 const formatLabel = (value: string) => ['URL', 'IP', 'CIDR'].includes(value) ? value : human(value);
-const typeLabel = (value: string) => value === 'API' ? 'API' : value === 'WEB_APPLICATION' ? 'Web Application' : human(value);
+const typeLabel = (value: string) => value === 'API' ? 'API' : value === 'WEB_APPLICATION' ? 'Web application' : human(value);
 const observationLabel = (value: string) => value === value.toLowerCase() ? human(value.replaceAll('-', ' ')) : value;
 function Evidence({ refs }: { refs: string[] }) {
   return refs.length ? <details className="mt-1 text-xs text-muted"><summary>Evidence references</summary><p className="break-all">{refs.join(', ')}</p></details> : null;
@@ -40,10 +40,10 @@ export default function ReconReportV3Content({ report, provider }: { report: Rec
     <section className="space-y-3" aria-label="Recon facts">
       <h3 className="font-semibold">Recon facts</h3>
       <p className="text-sm text-muted">Generated from structured Recon evidence. Discovered routes do not establish reachability, authorization or a vulnerability.</p>
-      <h4 className="font-medium">Assessment Overview</h4>
+      <h4 className="font-medium">Assessment overview</h4>
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">{[
         ['Asset', assessment.asset], ['Authorized scope', assessment.scopeBoundary], ['Format', formatLabel(assessment.format)],
-        ['Type', typeLabel(assessment.assetType)], ['Asset Value', human(assessment.assetValue)], ['Recon status', human(assessment.reconStatus)], ['Tested at', assessment.testedAt],
+        ['Type', typeLabel(assessment.assetType)], ['Asset value', human(assessment.assetValue)], ['Recon status', human(assessment.reconStatus)], ['Tested at', assessment.testedAt],
       ].map(([label, value]) => <div key={label} className="contents"><dt className="text-muted">{label}</dt><dd className="min-w-0 break-words">{value}</dd></div>)}</dl>
       {assessmentContext?.assessmentMode !== 'BLACK_BOX' && <section className="space-y-2" aria-label="Assessment mode"><h4 className="font-medium">Assessment mode</h4>
         <p className="text-sm">{assessmentContext?.assessmentMode==='WHITE_BOX'?'Historical assessment metadata — White-box mode is retired.':assessmentModeLabel(assessmentContext?.assessmentMode)}</p>
@@ -87,18 +87,18 @@ export default function ReconReportV3Content({ report, provider }: { report: Rec
       {factualOnly ? <p className="text-sm">{fallbackText}</p> : <>
         <p className="whitespace-pre-wrap break-words">{narrative.attackSurfaceSummary}</p>
         <NarrativeEntries title="DNS and Host Intelligence" entries={narrative.dnsAndHostIntelligence} />
-        <NarrativeEntries title="Network Surface" entries={narrative.networkSurface} />
-        <NarrativeEntries title="Web Application Surface" entries={narrative.webSurface} />
-        <NarrativeEntries title="API Surface" entries={narrative.apiSurface} />
-        <NarrativeEntries title="Authentication Surface" entries={narrative.authenticationSurface} />
-        <NarrativeEntries title="Technology Stack" entries={narrative.technologyFingerprint} />
+        <NarrativeEntries title="Network surface" entries={narrative.networkSurface} />
+        <NarrativeEntries title="Web application Surface" entries={narrative.webSurface} />
+        <NarrativeEntries title="API surface" entries={narrative.apiSurface} />
+        <NarrativeEntries title="Authentication surface" entries={narrative.authenticationSurface} />
+        <NarrativeEntries title="Technology stack" entries={narrative.technologyFingerprint} />
         <NarrativeEntries title="TLS and Transport" entries={narrative.tlsAndTransport} />
-        <NarrativeEntries title="Content Discovery" entries={narrative.contentDiscovery} />
-        <NarrativeEntries title="Changes Since Previous Recon" entries={narrative.changesSincePreviousRecon} />
-        {narrative.notableObservations.length > 0 && <section className="space-y-3"><h4 className="font-medium">Notable Observations</h4>{narrative.notableObservations.map((observation, index) => <article key={index}>
+        <NarrativeEntries title="Content discovery" entries={narrative.contentDiscovery} />
+        <NarrativeEntries title="Changes since previous recon" entries={narrative.changesSincePreviousRecon} />
+        {narrative.notableObservations.length > 0 && <section className="space-y-3"><h4 className="font-medium">Notable observations</h4>{narrative.notableObservations.map((observation, index) => <article key={index}>
           <h5 className="text-sm font-medium">{observation.title}</h5><p className="break-words text-sm">{observation.observation}</p><p className="break-words text-sm text-muted">{observation.relevance} · {human(observation.confidence)}</p><Evidence refs={observation.evidenceRefs} />
         </article>)}</section>}
-        {narrative.researchHandoff.length > 0 && <section className="space-y-3"><h4 className="font-medium">Recommended Research Focus</h4><ol className="space-y-3">{narrative.researchHandoff.map((focus, index) => <li key={index}>
+        {narrative.researchHandoff.length > 0 && <section className="space-y-3"><h4 className="font-medium">Recommended research focus</h4><ol className="space-y-3">{narrative.researchHandoff.map((focus, index) => <li key={index}>
           <p className="text-sm font-medium">{index + 1}. {focus.area} · {focus.priority} priority</p><p className="break-words text-sm">{focus.rationale}</p><Evidence refs={focus.evidenceRefs} />
         </li>)}</ol></section>}
         {narrative.limitations.length > 0 && <section><h4 className="font-medium">AI interpretation limits</h4><ul className="list-inside list-disc text-sm">{narrative.limitations.map((limit, index) => <li key={index}>{limit}</li>)}</ul></section>}
