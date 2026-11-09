@@ -12,6 +12,7 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 model User {
+  hunterIdentity HunterIdentity?
   id            String    @id @default(cuid())
   name          String?
   email         String    @unique
@@ -170,6 +171,7 @@ model TargetScopeContext {
 }
 
 model BountyProgram {
+  executionPolicies ProgramExecutionPolicy[]
   currentScopeContext TargetScopeContext?
   researchPlans ResearchPlan[]
   // Legacy enum retained; current programs are constrained to BLACK_BOX.
@@ -1418,4 +1420,21 @@ model ResearchHarnessRun {
 
   @@unique([sessionId, requestKey])
   @@index([sessionId, stage, subject, createdAt])
+}
+
+model ProgramExecutionPolicy {
+  programId String
+  version   Int
+  policy    Json
+  createdAt DateTime @default(now())
+  program   BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  @@id([programId, version])
+}
+
+model HunterIdentity {
+  userId    String @id
+  userAgent String?
+  headers   Json
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

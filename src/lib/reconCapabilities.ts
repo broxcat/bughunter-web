@@ -184,7 +184,7 @@ export function buildCapabilityPlans(input: {
     add('HTTP_DISCOVERY', 'HTTP surface', ['httpx', 'guarded-http'], input.active && (web||authenticated), input.active, 'ACTIVE', 'Authorized HTTP availability mapped with verified responses'),
     add('TECHNOLOGY_FINGERPRINTING', 'Web / API mapping', ['native-fingerprint', 'httpx'], false, input.active, 'ACTIVE', 'Evidence-backed technology signatures without invented versions'),
     add('TLS_MAPPING', 'Web / API mapping', ['native-tls'], false, input.active, 'ACTIVE', 'Transport/certificate observations on selected HTTPS services'),
-    add('PORT_DISCOVERY', 'Ports / services', ['nmap'], input.active && !web, input.active && !input.httpOnly, 'ACTIVE', 'Bounded authorized host service inventory'),
+    add('PORT_DISCOVERY', 'Ports / services', ['guarded-tcp'], input.active && !web, input.active && !input.httpOnly, 'ACTIVE', 'Bounded authorized host service inventory'),
     add('CONTENT_CALIBRATION', 'Content discovery', ['guarded-http'], input.active && web, input.active, 'ACTIVE', 'At least three controlled unknown-path responses or explicit blocking limitation'),
     add('CONTENT_DISCOVERY', 'Content discovery', contentProviders, input.active && web, input.active, 'ACTIVE', 'Bounded calibrated directory enumeration; observed-link crawl alone is insufficient'),
     add('CRAWLING', 'Web / API mapping', ['bounded-crawler'], false, input.active, 'ACTIVE', 'Bounded observation-only traversal of authorized safe links'),

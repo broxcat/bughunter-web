@@ -1,6 +1,6 @@
 import { matchesHost, isExcluded } from '@/lib/bountyProgram';
 import { assetAllowsUrl, assetAllowsHost } from '@/lib/scopeAssets';
-import { assertExecutionUrl } from '@/server/execution';
+import { authorizeExecution, excludedByPolicy, resolveProgramPolicy } from '@/server/programExecutionPolicy';
 import { discoveryState } from '@/server/recon/program';
 import type { ResearchReconContext } from '@/lib/research/recon';
 import { assertResearchTarget, researchIsPassive, type ResearchTarget } from './workspace';
@@ -8,17 +8,19 @@ import { assertResearchTarget, researchIsPassive, type ResearchTarget } from './
 /** Shared Recon-to-Research boundary. A plan is derived advice, never a second
  * authorization engine; legacy free-text restrictions require manual review. */
 export function reconScopePolicy(target: ResearchTarget, scopeAssets: NonNullable<ResearchReconContext['scopeAssets']> = []) {
-  const manualReview = Boolean(target.scope.scopeDetails?.trim() || target.scope.outOfScope?.trim());
+  const policy = resolveProgramPolicy(target.program!, target.scope);
+  const manualReview = Boolean(policy.blocker);
   return {
     activeSuggestionsAllowed: !researchIsPassive(target) && !manualReview,
     warnings: [
-      ...(manualReview ? ['Legacy free-text scope restrictions require manual review; suggestions are passive only. Additional prose restrictions are not interpreted as structured authorization.'] : []),
+      ...(manualReview ? [policy.blocker!] : []),
       ...(researchIsPassive(target) ? ['Program/wildcard console is passive only. Open an individually authorized host console before active investigation.'] : []),
     ],
     inScope(value: string) {
       try {
         const url = value.startsWith('http') ? new URL(value) : null;
         const host = url?.hostname ?? value;
+        if (excludedByPolicy(policy, host, url ?? undefined)) return false;
         const boundary = target.scopeAsset ?? target.discoveredFromAsset;
         if (boundary) return boundary.active && (target.scopeAsset || host === target.host) && !isExcluded(host, target.program!.outOfScope) && (url ? assetAllowsUrl(boundary, value) : assetAllowsHost(boundary, host));
         if (target.contextOnly) {
@@ -28,7 +30,7 @@ export function reconScopePolicy(target: ResearchTarget, scopeAssets: NonNullabl
         assertResearchTarget(target, target.userId);
         if (host !== target.host) return false;
         if (url) {
-          assertExecutionUrl(value, { targetId: target.id, host: target.host, requiredUserAgent: target.program!.requiredUserAgent, qualifying: target.program!.qualifying, nonQualifying: target.program!.nonQualifying });
+          authorizeExecution({ host: target.host }, { url: value });
           if (url.protocol !== `${target.scheme ?? 'https'}:` || Number(url.port || (url.protocol === 'https:' ? 443 : 80)) !== (target.scheme === 'http' ? 80 : 443)) return false;
         }
         return true;

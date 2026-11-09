@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
+vi.mock('@/server/execution', () => ({ assertLiveExecution: vi.fn(async () => {}) }));
 import { runCommand } from "@/server/scanners/runCommand";
 const opts = { scanRunId: "run", timeoutMs: 2000 };
 describe("real runCommand process outcomes", () => {

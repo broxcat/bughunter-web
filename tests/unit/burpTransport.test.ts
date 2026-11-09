@@ -8,6 +8,7 @@ import { X509Certificate } from 'node:crypto';
 import { sendViaBurpProxy,proxyFailureKind } from '../../docker/research/validator/burp-transport.mjs';
 import { activeObservation } from '../../docker/research/validator/burp-active.mjs';
 import { sanitizeHistoryItem, historyArguments } from '../../docker/research/validator/burp-http.mjs';
+const acquire = async () => ({ headers: { 'user-agent': 'Research-Test/1' }, release: async () => {} });
 const p={targetId:'fixture',targetHost:'app.example.test',scheme:'http',port:80,mode:'SCOPED_ACTIVE_HTTP',requiredUserAgent:'Research-Test/1',programScope:{rules:['*.example.test'],exclusions:['admin.example.test']}};
 const input={targetHostname:p.targetHost,targetPort:80,usesHttps:false,content:`GET / HTTP/1.1\r\nHost: ${p.targetHost}\r\nUser-Agent: incorrect\r\nAuthorization: Bearer SECRET\r\n\r\n`};
 const servers:Server[]=[];
@@ -31,7 +32,7 @@ describe('guarded real HTTP proxy transport',()=>{
   // A hostile inherited NO_PROXY must never silently bypass Burp.
   vi.stubEnv('NO_PROXY','*');
   writeFileSync(join(certificateDirectory,'.curlrc'),'output = "/dev/null"\n');vi.stubEnv('CURL_HOME',certificateDirectory);
-  const r=await sendViaBurpProxy('send_http1_request',input,p,{audit:(v:unknown)=>logs.push(v)});
+  const r=await sendViaBurpProxy('send_http1_request',input,p,{acquire,audit:(v:unknown)=>logs.push(v)});
   expect(r.remoteStatus).toBe(status);expect(r.transportResult).toBe('TARGET_HTTP_RESPONSE');expect(r.historyCapture).toBe(true);
   expect(upstream.requests).toHaveLength(1);expect(upstream.requests[0]).toMatchObject({url:'http://app.example.test:80/',ua:p.requiredUserAgent,host:p.targetHost,id:r.requestId});
   expect(r.response).not.toContain('sid=SECRET');expect(JSON.stringify(logs)).not.toMatch(/SECRET|Authorization|Cookie|incorrect/);
@@ -40,18 +41,18 @@ describe('guarded real HTTP proxy transport',()=>{
  it('preserves method, encoded path, UTF-8 body and correct Content-Length',async()=>{
   const up=await proxy(),body=JSON.stringify({value:'é'}),logs:unknown[]=[];
   const content=`POST /objects/../submit?token=QUERY_SECRET HTTP/1.1\r\nHost: ${p.targetHost}\r\nContent-Type: application/json\r\nContent-Length: 999\r\n\r\n${body}`;
-  await sendViaBurpProxy('send_http1_request',{...input,content},p,{audit:(v:unknown)=>{logs.push(v);}});
+  await sendViaBurpProxy('send_http1_request',{...input,content},p,{acquire,audit:(v:unknown)=>{logs.push(v);}});
   expect(up.requests[0]).toMatchObject({method:'POST',body,length:Buffer.byteLength(body),url:'http://app.example.test:80/objects/../submit?token=QUERY_SECRET'});expect(JSON.stringify(logs)).not.toContain('QUERY_SECRET');
  });
  it('does not synthesize HTTP 502 for an unreachable proxy',async()=>{
   const up=await proxy();await new Promise<void>(r=>up.server.close(()=>r()));
-  await expect(sendViaBurpProxy('send_http1_request',input,p,{audit:()=>{}})).rejects.toMatchObject({message:'BURP_PROXY_UNREACHABLE',details:{remoteStatus:null,transportResult:'BURP_PROXY_UNREACHABLE'}});expect(up.requests).toHaveLength(0);
+  await expect(sendViaBurpProxy('send_http1_request',input,p,{acquire,audit:()=>{}})).rejects.toMatchObject({message:'BURP_PROXY_UNREACHABLE',details:{remoteStatus:null,transportResult:'BURP_PROXY_UNREACHABLE'}});expect(up.requests).toHaveLength(0);
  });
  it.each([502,200])('distinguishes CONNECT/TLS failure from a remote HTTP response (CONNECT %i)',async status=>{
   const server=createServer((_req,res)=>res.writeHead(200,{'content-type':'application/octet-stream'}).end(certificate));servers.push(server);
   server.on('connect',(_req,socket)=>{socket.on('error',()=>{});socket.end(`HTTP/1.1 ${status} ${status===200?'Connection established':'Bad Gateway'}\r\nContent-Length: 0\r\n\r\n`,()=>socket.destroy());});
   await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const address=server.address();if(!address||typeof address==='string')throw Error();vi.stubEnv('BURP_PROXY_HOST','127.0.0.1');vi.stubEnv('BURP_PROXY_PORT',String(address.port));
-  await expect(sendViaBurpProxy('send_http1_request',{...input,usesHttps:true,targetPort:443},{...p,scheme:'https',port:443},{audit:()=>{}})).rejects.toMatchObject({message:status===502?'TARGET_CONNECT_FAILURE':'TARGET_TLS_FAILURE',details:{remoteStatus:null,proxyConnectStatus:status}});
+  await expect(sendViaBurpProxy('send_http1_request',{...input,usesHttps:true,targetPort:443},{...p,scheme:'https',port:443},{acquire,audit:()=>{}})).rejects.toMatchObject({message:status===502?'TARGET_CONNECT_FAILURE':'TARGET_TLS_FAILURE',details:{remoteStatus:null,proxyConnectStatus:status}});
  });
  it.each([{...p,mode:'PROGRAM_PASSIVE'},{...p,programScope:{rules:['*.example.test'],exclusions:[p.targetHost]}}])('blocks unauthorized operations before any proxy call',async policy=>{
   const up=await proxy();await expect(sendViaBurpProxy('send_http1_request',input,policy)).rejects.toThrow();expect(up.requests).toHaveLength(0);

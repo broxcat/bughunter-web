@@ -3,6 +3,8 @@ import { matchesHost, normalizeFqdn, reconSeeds } from '@/lib/bountyProgram';
 import { currentTargetExecution, withTargetExecution } from '../execution';
 import { runCommand } from '../scanners/runCommand';
 import { commandStepResult } from '../scanners/result';
+import { authorizeExecution } from '../programExecutionPolicy';
+import { assertLiveExecution } from '../execution';
 import { beforeScanNetwork, currentScanControl, recordUsefulScanWork, throwIfScanAborted } from '../scanControl';
 import { logLine } from '../scanners/context';
 import type { ScanExecutionResult } from '../scanners/result';
@@ -114,9 +116,11 @@ export async function runProgramRecon(scanRunId: string): Promise<ScanExecutionR
     const controller = new AbortController();
     const release = currentScanControl()?.track(async () => { controller.abort(); });
     try {
+      authorizeExecution(execution, { tool: 'certificate-transparency' });
+      await assertLiveExecution(execution);
       await beforeScanNetwork();
       const url = new URL('https://crt.sh/'); url.searchParams.set('q', rules.includes(`*.${seed}`) ? `%.${seed}` : seed); url.searchParams.set('output', 'json');
-      const response = await fetch(url, { headers: { 'User-Agent': execution.requiredUserAgent }, redirect: 'error', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000), ...(currentScanControl() ? [currentScanControl()!.signal] : [])]) });
+      const response = await fetch(url, { redirect: 'error', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000), ...(currentScanControl() ? [currentScanControl()!.signal] : [])]) });
       for await (const name of certificateNames(response)) { if (seen >= 10000) throw new Error('Discovery limit exceeded'); await discover(name, 'CERTIFICATE_TRANSPARENCY'); }
       await recordUsefulScanWork();
     } catch {

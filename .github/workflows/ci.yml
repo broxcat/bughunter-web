@@ -10,11 +10,14 @@ jobs:
     runs-on: ubuntu-latest
 
     # Disposable Postgres so the Phase-6 integration tests (gated on
-    # TEST_DATABASE_URL) run in CI instead of being skipped. Same image as
-    # docker-compose. No Redis service: the integration tests mock @/lib/rateLimit
-    # and @/server/queue/scanQueue, and the unit tests mock prisma/redis, so no
-    # real Redis connection is needed.
+    # TEST_DATABASE_URL) run in CI instead of being skipped. Redis backs
+    # the program traffic tests across independent processes.
     services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 2s --health-retries 10
       postgres:
         image: postgres:16-alpine
         env:
@@ -35,6 +38,7 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bughunter_test
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bughunter_test
       REDIS_URL: redis://localhost:6379
+      TEST_EXECUTION_REDIS_URL: redis://localhost:6379
       # Non-secret placeholders so the app's fail-fast env check and the build
       # pass in CI (these are not real credentials).
       AUTH_SECRET: ci-placeholder-not-a-real-secret

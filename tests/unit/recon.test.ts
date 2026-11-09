@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ command: vi.fn(), dns: vi.fn(), discovery: vi.fn(), context: vi.fn(), credentials: vi.fn(), log: vi.fn(), update: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({ prisma: { scanRun: { updateMany: mocks.update } } }));
-vi.mock("@/server/execution", () => ({ currentTargetExecution: () => ({ targetId: "target", host: "example.test", requiredUserAgent: "Test/1" }) }));
+vi.mock("@/server/execution", () => ({ currentTargetExecution: () => ({ targetId: "target", host: "example.test", requiredUserAgent: "Test/1" }), acquireExecution: async () => async () => {} }));
 vi.mock("@/server/scanners/context", () => ({ loadScanContext: mocks.context, logLine: mocks.log }));
 vi.mock("@/server/scanners/discovery", () => ({ discoverCorpus: mocks.discovery, clearDiscoveryCorpus: vi.fn() }));
 vi.mock("@/server/scanners/runCommand", () => ({ runCommand: mocks.command }));
@@ -19,7 +19,7 @@ beforeEach(() => {
 describe("best-effort Recon", () => {
   it("successful host commands with no output and program-level enumeration are successful", async () => {
     expect(await runRecon("example.test", "run")).toEqual({ outcome: "SUCCESS" });
-    expect(mocks.command.mock.calls.map(c => c[0])).toEqual(["httpx", "nmap", "katana"]);
+    expect(mocks.command.mock.calls.map(c => c[0])).toEqual(["httpx", "katana"]);
     expect(mocks.log.mock.calls.some(c => c[1].includes("subfinder: performed in program Recon"))).toBe(true);
   });
   it.each([
@@ -30,13 +30,13 @@ describe("best-effort Recon", () => {
   ])("continues after httpx %j and returns partial", async result => {
     mocks.command.mockResolvedValueOnce(result);
     expect(await runRecon("example.test", "run")).toMatchObject({ outcome: "PARTIAL", reason: expect.stringContaining("httpx:") });
-    expect(mocks.command).toHaveBeenCalledTimes(3);
+    expect(mocks.command).toHaveBeenCalledTimes(2);
   });
   it("does not hide synchronous command execution failures", async () => {
     mocks.command.mockRejectedValueOnce(new Error("do not expose secret"));
     expect(await runRecon("example.test", "run")).toMatchObject({ outcome: "PARTIAL" });
     expect(JSON.stringify(mocks.log.mock.calls)).not.toContain("do not expose secret");
-    expect(mocks.command).toHaveBeenCalledTimes(3);
+    expect(mocks.command).toHaveBeenCalledTimes(2);
   });
   it("fails if every attempted step fails", async () => {
     mocks.discovery.mockResolvedValue({ html: "", urls: [], authenticated: false, execution: { successfulRequests: 0, failedRequests: 1, issues: ["DISCOVERY_TRANSPORT_ERROR"] } });

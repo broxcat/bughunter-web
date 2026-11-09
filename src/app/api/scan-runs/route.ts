@@ -1,5 +1,6 @@
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { executionSelect } from "@/server/queue/executionAttempts";
+import { programPolicyInclude } from '@/server/programExecutionPolicy';
 import { scanRejection } from "@/server/execution";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -105,7 +106,7 @@ export async function POST(req: NextRequest) {
 
     const target = await prisma.target.findFirst({
       where: { id: parsed.data.targetId, userId: session.user.id },
-      include: { scope: true, program: true, scopeAsset: true },
+      include: { scope: true, program: { include: programPolicyInclude }, scopeAsset: true },
     });
     if (!target) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });

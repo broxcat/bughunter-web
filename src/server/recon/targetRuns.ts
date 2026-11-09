@@ -1,3 +1,4 @@
+import { programPolicyInclude, resolveProgramPolicy } from '../programExecutionPolicy';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { assetValueRank, detectScopeAsset } from '@/lib/scopeAssets';
@@ -14,7 +15,11 @@ import { captureAuthenticatedContexts } from '../authenticatedRecon';
 export async function startTargetRecon(userId:string,programId:string) {
   const parent=await prisma.$transaction(async tx=>{
     await tx.$queryRaw`SELECT id FROM "User" WHERE id=${userId} FOR UPDATE`;
-    const program=await lockOwnedProgram(tx,userId,programId);await backfillProgramAssets(tx,programId,userId);
+    await lockOwnedProgram(tx,userId,programId);
+    const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude });
+    const blocker = resolveProgramPolicy(program).blocker;
+    if (blocker) throw new ResearchError(blocker, 409);
+    await backfillProgramAssets(tx,programId,userId);
     const live=await tx.targetReconRun.findFirst({where:{programId,status:{in:['QUEUED','RUNNING']}},include:{scans:{select:{id:true}}}});if(live)return live;
     const assets=(await tx.scopeAsset.findMany({where:{programId,active:true},include:{executionTarget:{include:{scope:true}}}})).sort((a,b)=>assetValueRank(a.assetValue)-assetValueRank(b.assetValue)||a.normalizedValue.localeCompare(b.normalizedValue));
     if(!assets.length)throw new ResearchError('Add at least one active Scope Asset before Recon',400);

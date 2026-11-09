@@ -7,7 +7,7 @@ import { burpEndpoint } from './burp-proxy.mjs';
 import { withBurp } from './burp-upstream.mjs';
 import { BurpTransportError, sendViaBurpProxy } from './burp-transport.mjs';
 import { BurpResearch } from './burp-service.mjs';
-import { http1Arguments, http2Arguments, enforceHttp2, activeObservation } from './burp-active.mjs';
+import { http1Arguments, http2Arguments } from './burp-active.mjs';
 import { saveConsoleObservation } from './console-evidence.mjs';
 const workspace = await openConsoleWorkspace();
 const passiveOnly = process.argv[2] === 'passive';
@@ -40,14 +40,8 @@ if (process.argv[2] === 'status') {
         case 'burp_history': { const a = paging.parse(req.params.arguments ?? {}); result = await research.history(a.count, a.offset, a.host, a.requestId); break; }
         case 'burp_save_observation': result = { ref: await saveConsoleObservation(workspace.root, research.evidence(save.parse(req.params.arguments).observationId)) }; break;
         case 'send_http1_request': case 'send_http2_request': {
-          if (req.params.name === 'send_http2_request' && workspace.policy.scheme === 'http') {
-            // Preserve the existing cleartext HTTP/2 Montoya capability. It does
-            // not traverse Proxy History; never claim that it does.
-            const args = enforceHttp2(req.params.arguments, workspace.policy);
-            const response = await upstream(client => client.callTool({ name: req.params.name, arguments: args }, undefined, { timeout: 12000 }), 15000);
-            if (response.isError) throw new BurpTransportError('BURP_TOOL_ERROR');
-            result = { ...activeObservation(response, workspace.policy), transport: 'PORTSWIGGER_MONTOYA', historyCapture: false };
-          } else result = await sendViaBurpProxy(req.params.name, req.params.arguments, workspace.policy);
+          if (req.params.name === 'send_http2_request' && workspace.policy.scheme === 'http') throw new Error('TOOL_NOT_ALLOWED');
+          result = await sendViaBurpProxy(req.params.name, req.params.arguments, workspace.policy);
           break;
         }
         default: throw new Error('TOOL_NOT_ALLOWED');

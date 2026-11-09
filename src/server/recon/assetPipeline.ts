@@ -10,14 +10,16 @@ import { prisma } from '@/lib/prisma';
 import { buildReconPlan, rankReconHost, type ReconPlan } from '@/lib/reconPlanner';
 import { assetAllowsUrl } from '@/lib/scopeAssets';
 import { isSafeReadUrl, safeObservationUrl, redactObservationText } from '@/lib/observationSafety';
-import { currentTargetExecution,withTargetExecution } from '../execution';
+import { acquireExecution,currentTargetExecution,withTargetExecution } from '../execution';
 import { beforeScanNetwork,currentScanControl,recordUsefulScanWork,throwIfScanAborted } from '../scanControl';
 import { runCommand } from '../scanners/runCommand';
 import { assetHostAllowed } from '../scopeAssets';
 import { analyzeCorpus } from './corpus';
 import { recordArtifact,artifactData,artifactSelect } from './artifacts';
 import { reconDiff, type ArtifactKind } from '@/lib/reconArtifacts';
-import { parseGobuster,parsePassive,parseHttpx,parseFfuf,parseNmap,parseNuclei,type ParsedRecon } from './parsers';
+import { authorizeExecution } from '../programExecutionPolicy';
+import { probeTcp } from './tcp';
+import { parseGobuster,parsePassive,parseHttpx,parseFfuf,parseNuclei,type ParsedRecon } from './parsers';
 import { collectReconDoctor,type ToolStatus } from './toolchain';
 import { createReconRelay } from './transport';
 import { ReconProtection } from './protection';
@@ -50,7 +52,7 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
   const captured=saved.scopeAssetSnapshot as {type?:string;assetValue?:string}|null;
   const oldPlan=(saved.reconPlan as ReconPlan|null)??buildReconPlan({...asset,type:captured?.type??asset.type,assetValue:captured?.assetValue??asset.assetValue},{active:true,exclusions:asset.program.outOfScope});
   const modern=buildReconPlan({...asset,type:captured?.type??asset.type,assetValue:captured?.assetValue??asset.assetValue},{active:oldPlan.activityMode==='ACTIVE',exclusions:asset.program.outOfScope},{authenticatedContexts:plannedAuthContexts});
-  const plan:ReconPlan={...oldPlan,methodologyVersion:2,strategy:oldPlan.strategy??modern.strategy,authenticatedMapping:oldPlan.authenticatedMapping??modern.authenticatedMapping,capabilities:[...(oldPlan.capabilities??modern.capabilities??[]).filter(c=>c.id!=='AUTHENTICATED_MAPPING'),...modern.capabilities!.filter(c=>c.id==='AUTHENTICATED_MAPPING')]};
+  const plan:ReconPlan={...oldPlan,methodologyVersion:2,strategy:oldPlan.strategy??modern.strategy,authenticatedMapping:oldPlan.authenticatedMapping??modern.authenticatedMapping,capabilities:[...(oldPlan.capabilities??modern.capabilities??[]).filter(c=>c.id!=='AUTHENTICATED_MAPPING'&&c.id!=='PORT_DISCOVERY'),...modern.capabilities!.filter(c=>c.id==='AUTHENTICATED_MAPPING'||c.id==='PORT_DISCOVERY')]};
   const coverage=new ReconCoverage(scanRunId,plan);
   const baselines=new Map<string,UnknownPathBaseline>();
   const relays=new Map<string,Awaited<ReturnType<typeof createReconRelay>>>();
@@ -132,12 +134,16 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
       hosts.clear();bounded||=candidates.length>plan.limits.maxHosts;for(const host of candidates.slice(0,plan.limits.maxHosts))await inventory(host);
     }
     if(asset.format!=='WILDCARD_DOMAIN')await inventory(asset.format==='URL'?new URL(asset.normalizedValue).hostname:asset.normalizedValue);
+    const lookupDns = async <T>(host: string, tool: string, lookup: () => Promise<T>) => {
+      const release = await acquireExecution({ tool, dnsHost: host }, AbortSignal.any([signal, AbortSignal.timeout(5000)]));
+      try { return await lookup(); } finally { await release(); }
+    };
     await stage('Scope validation / DNS',async()=>{
       let dnsFailed=false,wildcardDnsIncomplete=false;let wildcardAddresses:string[]=[];
       if(asset.format==='WILDCARD_DOMAIN'&&plan.activityMode==='ACTIVE'){
         const resolver=new Resolver({timeout:2000,tries:1});const release=currentScanControl()?.track(async()=>resolver.cancel());const abort=()=>resolver.cancel();signal.addEventListener('abort',abort,{once:true});
         try{const feedback=new ReconProtection(plan.limits.rps,8);const baseline=await wildcardDnsBaseline(asset.normalizedValue.slice(2),async host=>{
-          await assertLiveAsset();await feedback.beforeRequest(signal);await beforeScanNetwork();const values=await Promise.allSettled([resolver.resolve4(host),resolver.resolve6(host)]);
+          await assertLiveAsset();await feedback.beforeRequest(signal);await beforeScanNetwork();const values=await Promise.allSettled([lookupDns(host,'dns-fuzz',()=>resolver.resolve4(host)),lookupDns(host,'dns-fuzz',()=>resolver.resolve6(host))]);
           signal.throwIfAborted();
           if(!dnsLookupCoverage(values).complete){const failed=values.find((r):r is PromiseRejectedResult=>r.status==='rejected'&&!dnsLookupCoverage([r]).complete);throw failed!.reason;}
           return values.flatMap(r=>r.status==='fulfilled'?r.value:[]);
@@ -156,7 +162,7 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
       let errors=0,incompleteDns=wildcardDnsIncomplete?1:0;for(const [host,data]of hosts){
       signal.throwIfAborted();await assertLiveAsset();if(!assetHostAllowed(asset,host,asset.program.outOfScope))continue;
       const resolver=new Resolver({timeout:2500,tries:1});const release=currentScanControl()?.track(async()=>resolver.cancel());const abort=()=>resolver.cancel();signal.addEventListener('abort',abort,{once:true});
-      try{signal.throwIfAborted();await beforeScanNetwork();const lookup=async(work:()=>Promise<string[]>)=>{try{return await work();}catch(error){const failure=classifyReconFailure(error,'DNS_RESOLUTION','native-dns');const delay=reconRetryDelay(failure,0);if(delay===null)throw error;await new Promise<void>(resolve=>setTimeout(resolve,delay));await assertLiveAsset();signal.throwIfAborted();await beforeScanNetwork();return work();}};
+      try{signal.throwIfAborted();await beforeScanNetwork();const lookup=async(work:()=>Promise<string[]>)=>{try{return await lookupDns(host,'native-dns',work);}catch(error){const failure=classifyReconFailure(error,'DNS_RESOLUTION','native-dns');const delay=reconRetryDelay(failure,0);if(delay===null)throw error;await new Promise<void>(resolve=>setTimeout(resolve,delay));await assertLiveAsset();signal.throwIfAborted();await beforeScanNetwork();return lookupDns(host,'native-dns',work);}};
         const result=await Promise.allSettled([lookup(()=>resolver.resolve4(host)),lookup(()=>resolver.resolve6(host)),lookup(()=>resolver.resolveCname(host))]);
         signal.throwIfAborted();
         const rejected=result.filter((r):r is PromiseRejectedResult=>r.status==='rejected');
@@ -212,9 +218,14 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
     await stage('Host prioritization',async()=>{for(const [host,data]of hosts){const content=[...data.pages.values()].map(p=>p.body.slice(0,20000)).join(' ');data.rank=rankReconHost(host,{alive:data.alive,auth:/password|login|sign in|bearer/i.test(content),api:/openapi|swagger|graphql|\/api\//i.test(content),admin:/admin|dashboard/i.test(content)});if(data.resolved||data.alive)await add('observation',{hostname:host,type:'recon-budget-ranking',score:data.rank.score,signals:data.rank.signals},'planner');}});
     const selected=[...hosts.entries()].filter(([,h])=>h.alive).sort((a,b)=>b[1].rank.score-a[1].rank.score||a[0].localeCompare(b[0])).slice(0,plan.limits.enrichHosts);
     if([...hosts.values()].filter(h=>h.alive).length>selected.length)bounded=true;
-    await stage('Ports / services',async()=>{let failures=0;for(const [host,data]of [...hosts].filter(([,h])=>h.resolved).sort((a,b)=>b[1].rank.score-a[1].rank.score||a[0].localeCompare(b[0])).slice(0,plan.limits.enrichHosts)){
-      let xml='';try{await withTargetExecution({...execution,programReconId:undefined,host},()=>command('nmap',[host],async line=>{if(xml.length<2*1024*1024)xml+=line+'\n';},50,0,()=>{if(!xml.includes('</nmaprun>'))throw new Error('PARSER_FAILURE: incomplete Nmap XML');return true;}));if(!xml.includes('</nmaprun>'))throw new Error('PARSER_FAILURE: incomplete Nmap XML');await rows(parseNmap(xml,host),'nmap');}catch{failures++;}void data;
-    }if(failures)throw new Error('PARTIAL: Some bounded Nmap executions failed.');});
+    await stage('Ports / services', () => coverage.provider('PORT_DISCOVERY','guarded-tcp',async () => {
+      for (const [host] of available.slice(0, plan.limits.enrichHosts)) {
+        for (const port of plan.limits.ports) {
+          const state = await probeTcp(host, port, signal);
+          await add('port', { hostname: host, port, protocol: 'tcp', state }, 'guarded-tcp', true);
+        }
+      }
+    }));
     const eachWeb=async(work:(host:string,data:typeof hosts extends Map<string,infer D>?D:never,relay:Awaited<ReturnType<typeof createReconRelay>>)=>Promise<void>)=>{
       const failures:unknown[]=[];
       for(const [host,data]of selected){const relay=relays.get(host)!;const protection=protections.get(host)!;
@@ -227,7 +238,7 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
     };
     await stage('Content discovery',()=>eachWeb(async(host,data,relay)=>{
       const base=data.url!.endsWith('/')?data.url!:data.url!+'/';
-      const baseline=await calibrateContent(base,relay.request,{signal,allowed:url=>assetAllowsUrl(asset,url),knownResponses:[...data.pages.values()]});baselines.set(host,baseline);
+      const baseline=await calibrateContent(base,url=>relay.request(url,'GET','content-discovery'),{signal,allowed:url=>assetAllowsUrl(asset,url),knownResponses:[...data.pages.values()]});baselines.set(host,baseline);
       coverage.annotate(host+'.baseline',baseline);
       await add('observation',{url:base,type:'content-baseline',classification:baseline.classification,statusCodes:baseline.statusCodes.map(String),sampleCount:baseline.sampleCount,stable:baseline.stable},'calibration',true);
       coverage.note('CONTENT_CALIBRATION','guarded-http',baseline.sampleCount>=3&&baseline.errors===0);
@@ -256,7 +267,7 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
           },plan.limits.ffufSeconds+2,0,covered));completed=covered();if(!completed)coverage.note('CONTENT_DISCOVERY','ffuf',false,{state:'PARTIAL'});}catch{throwIfScanAborted();}
         }else{
           await coverage.provider('CONTENT_DISCOVERY','bounded-crawler',async()=>{
-            for(const word of words){const url=new URL(word,base).toString();if(validResponse(url))continue;const page=await relay.request(url);if(page.error)throw new Error(page.error);}
+            for(const word of words){const url=new URL(word,base).toString();if(validResponse(url))continue;const page=await relay.request(url,'GET','content-discovery');if(page.error)throw new Error(page.error);}
           },()=>covered(),true);completed=covered();
         }
       }
@@ -265,7 +276,7 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
         let enriched=0;
         for(const directory of [...new Set(directories)].sort().slice(0,plan.limits.ffufDepth)){
           if(protections.get(host)?.blocked||budget.remaining<=words.length)break;
-          await assertLiveAsset();for(const word of words.slice(0,Math.max(2,Math.floor(words.length/2)))){const url=new URL(word,directory).toString();if(!assetAllowsUrl(asset,url)||!isSafeReadUrl(url)||validResponse(url))continue;await relay.request(url);}enriched++;
+          await assertLiveAsset();for(const word of words.slice(0,Math.max(2,Math.floor(words.length/2)))){const url=new URL(word,directory).toString();if(!assetAllowsUrl(asset,url)||!isSafeReadUrl(url)||validResponse(url))continue;await relay.request(url,'GET','content-discovery');}enriched++;
         }
         coverage.annotate(host+'.boundedDirectoryEnrichment',{observedDirectories:directories.length,enriched,limit:plan.limits.ffufDepth});
       }
@@ -276,7 +287,7 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
     await stage('Web / API mapping',async()=>{await eachWeb(async(host,data,relay)=>{
       const base=data.url!,queue=[base,...(asset.type==='API'?['openapi.json','swagger.json','api-docs','graphql','v1','v2'].map(p=>new URL(p,base.endsWith('/')?base:base+'/').toString()):[])],visited=new Set<string>();const pages:ProbeResult[]=[];
       while(queue.length&&visited.size<plan.limits.crawlPages){const url=queue.shift()!;if(visited.has(url)||!assetAllowsUrl(asset,url)||!isSafeReadUrl(url))continue;visited.add(url);
-        const page=data.pages.get(url)??await relay.request(url);if(page.error)continue;const baseline=baselines.get(host);if(url!==base&&baseline&&compareWithBaseline(page,baseline).equivalent)continue;pages.push(page);
+        const page=data.pages.get(url)??await relay.request(url,'GET','http-crawl');if(page.error)continue;const baseline=baselines.get(host);if(url!==base&&baseline&&compareWithBaseline(page,baseline).equivalent)continue;pages.push(page);
         const references=[...page.body.matchAll(/(?:href|src|action)\s*=\s*["']([^"'<>]{1,2048})|(?:fetch|url)\s*\(?\s*[:=]?\s*["']([^"'<>]{1,2048})/gi)].map(m=>m[1]??m[2]);
         if(/json/i.test(page.headers['content-type']??''))try{const spec=JSON.parse(page.body);if((spec.openapi||spec.swagger)&&spec.paths){references.push(...Object.keys(spec.paths).slice(0,100));for(const [path,methods]of Object.entries(spec.paths).slice(0,100)){for(const method of Object.keys(methods as object).filter(k=>/^(get|post|put|patch|delete|options|head)$/i.test(k))){await add('endpoint',{url:new URL(path,base).toString(),declaredMethod:method.toUpperCase(),authentication:'unknown',type:'api-specification'},'openapi');}}}}catch{}
         for(const ref of references)try{const found=new URL(ref,page.url).toString();await add('endpoint',{url:found,origin:page.url,relationship:'references',authentication:'unknown'},'crawler');if(assetAllowsUrl(asset,found)&&isSafeReadUrl(found)&&queue.length<100)queue.push(found);}catch{}
@@ -291,7 +302,9 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
       }
       if(new URL(base).protocol==='https:'){
         signal.throwIfAborted();await assertLiveAsset();await beforeScanNetwork();
-        try{await coverage.provider('TLS_MAPPING','native-tls',()=>new Promise<void>((resolve,reject)=>{
+        try{await coverage.provider('TLS_MAPPING','native-tls',async()=>{
+          const releaseTraffic = await acquireExecution({ tool: 'native-tls', url: base }, AbortSignal.any([signal, AbortSignal.timeout(5000)]));
+          try { await new Promise<void>((resolve,reject)=>{
           const socket=connect({host,port:Number(new URL(base).port||443),servername:host});let done=false;
           const release=currentScanControl()?.track(async()=>{socket.destroy();});
           const abort=()=>finish(signal.reason??new Error('CANCELLED: TLS observation interrupted'));
@@ -299,7 +312,8 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
           signal.addEventListener('abort',abort,{once:true});socket.setTimeout(3000,()=>finish(new Error('TIMEOUT: TLS observation')));
           socket.once('error',finish);socket.once('close',()=>finish(new Error('NETWORK_UNREACHABLE: TLS connection closed before evidence capture')));
           socket.once('secureConnect',()=>{const cert=socket.getPeerCertificate();void add('tls',{hostname:host,type:'tls-certificate',fingerprint:cert.fingerprint256??'unknown',validFrom:cert.valid_from??'unknown',validTo:cert.valid_to??'unknown'},'tls',true).then(()=>finish(),finish);});
-        }));}catch{throwIfScanAborted();}
+          }); } finally { await releaseTraffic(); }
+        });}catch{throwIfScanAborted();}
       }else coverage.note('TLS_MAPPING','native-tls',false,{state:'SKIPPED_NOT_APPLICABLE'});
     });
       releaseAuthReserve();
@@ -317,7 +331,7 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
     await stage('Nuclei Recon',()=>eachWeb(async(_host,data,relay)=>{
       await command('nuclei',['-u',relay.toRelay(data.url!)],async line=>{try{const r=JSON.parse(line);if(typeof r['matched-at']==='string')r['matched-at']=relay.mapUrl(r['matched-at']);const parsed=parseNuclei(JSON.stringify(r),RECON_TEMPLATE_IDS.slice(0,plan.limits.templates),RECON_TEMPLATE_VERSION);if(!parsed.length)throw new Error('PARSER_FAILURE: unapproved Nuclei structured result');await rows(parsed,'nuclei');}catch(e){throw new Error('PARSER_FAILURE: malformed Nuclei result: '+(e as Error).message);}},Math.min(90,plan.limits.ffufSeconds+15));
     }),!selected.length?'No validated HTTP service.':undefined);
-    await stage('Burp enrichment',async()=>{const {collectRunBurp}=await import('./burpCollection');const result=await collectRunBurp(scanRunId,signal);toolchain.burp={available:result.status==='AVAILABLE',version:result.version??'unknown',capable:result.status==='AVAILABLE',...(result.status!=='AVAILABLE'?{reason:'Authorized history collection unavailable'}:{})};await prisma.scanRun.update({where:{id:scanRunId},data:{toolVersions:toolchain as unknown as Prisma.InputJsonValue}});for(const item of result.observations)await add('observation',item,'burp',true);if(result.status!=='AVAILABLE')throw new Error('PARTIAL: Burp history unavailable; no active requests or provider started.');},!selected.length?'No validated web service for authorized Burp history correlation.':undefined);
+    await stage('Burp enrichment',async()=>{authorizeExecution(execution,{tool:'burp-history'});const {collectRunBurp}=await import('./burpCollection');const result=await collectRunBurp(scanRunId,signal);toolchain.burp={available:result.status==='AVAILABLE',version:result.version??'unknown',capable:result.status==='AVAILABLE',...(result.status!=='AVAILABLE'?{reason:'Authorized history collection unavailable'}:{})};await prisma.scanRun.update({where:{id:scanRunId},data:{toolVersions:toolchain as unknown as Prisma.InputJsonValue}});for(const item of result.observations)await add('observation',item,'burp',true);if(result.status!=='AVAILABLE')throw new Error('PARTIAL: Burp history unavailable; no active requests or provider started.');},!selected.length?'No validated web service for authorized Burp history correlation.':undefined);
     await stage('Normalization',async()=>{const all=await prisma.reconArtifact.findMany({where:{scanRunId},select:artifactSelect});const previous=await prisma.scanRun.findFirst({where:{scopeAssetId:asset.id,id:{not:scanRunId},status:'COMPLETED',outcome:'SUCCESS'},orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true}});
       const old=previous?await prisma.reconArtifact.findMany({where:{scanRunId:previous.id},select:artifactSelect}):[];
       const diff=reconDiff(all.map(artifactData),old.map(artifactData),Boolean(previous));await prisma.scanRun.update({where:{id:scanRunId},data:{artifactVersion:2,changeSet:{...diff,previousScanId:previous?.id??null} as unknown as Prisma.InputJsonValue}});

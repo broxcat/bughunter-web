@@ -3,7 +3,7 @@ import { commandStepResult, reconExecutionResult, type ReconStepResult, type Sca
 import { analyzeCorpus, persistableCorpus } from "@/server/recon/corpus";
 import { discoverCorpus, clearDiscoveryCorpus } from "./discovery";
 import { prisma } from "@/lib/prisma";
-import { currentTargetExecution } from "@/server/execution";
+import { acquireExecution, currentTargetExecution } from "@/server/execution";
 import { Resolver } from "node:dns/promises";
 import { logLine } from "./context";
 // Minimal recon port: run the core discovery tools in sequence against one host.
@@ -66,11 +66,12 @@ export async function runRecon(_host: string, scanRunId: string): Promise<ScanEx
   try {
     throwIfScanAborted();
     await beforeScanNetwork();
-    const resolver = new Resolver();
+    const resolver = new Resolver({ timeout: 2500, tries: 1 });
+    const traffic = await acquireExecution({ tool: 'native-dns', dnsHost: domain }, AbortSignal.timeout(5000));
     const pending = resolver.resolveAny(domain);
     const release = currentScanControl()?.track(async () => { resolver.cancel(); await pending.catch(() => {}); });
     let records;
-    try { records = await pending; } finally { release?.(); }
+    try { records = await pending; } finally { await traffic(); release?.(); }
     await recordUsefulScanWork();
     await logLine(scanRunId, `[dns] ${JSON.stringify(records)}`);
     await record({ step: "dns", state: "SUCCESS" });
@@ -85,8 +86,7 @@ export async function runRecon(_host: string, scanRunId: string): Promise<ScanEx
   // Live host probing remains anonymous.
   await command("httpx", ["-silent", "-u", url], 5 * MINUTE);
 
-  // TCP connect scan only: no service/version detection or HTTP probes.
-  await command("nmap", ["-sT", "-Pn", "-n", domain], 10 * MINUTE);
+  // Port discovery is available through the individually metered Scope Asset pipeline.
 
   // Historical URL crawling remains anonymous.
   await command(

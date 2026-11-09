@@ -101,6 +101,43 @@ d("API route authorization (integration)", () => {
     authMock.auth.mockResolvedValue({ user: { id: userId } });
   }, 60_000);
 
+  it('resolves a hunter identity and saves append-only execution policy versions', async () => {
+    const { PUT } = await import('@/app/api/settings/hunter-identity/route');
+    const { PATCH } = await import('@/app/api/programs/[id]/route');
+    const { loadTargetExecution } = await import('@/server/execution');
+    const user = await prisma.user.create({ data: { email: 'policy-' + Date.now() + '@test.local' } });
+    authMock.auth.mockResolvedValue({ user: { id: user.id } });
+    try {
+      const program = await prisma.bountyProgram.create({ data: { ownerId: user.id, companyName: 'Policy fixture', requiredUserAgent: '' } });
+      const scope = await prisma.scope.create({ data: { userId: user.id, hostPattern: 'app.example.test', status: 'APPROVED' } });
+      const target = await prisma.target.create({ data: { userId: user.id, programId: program.id, scopeId: scope.id, host: 'app.example.test', active: true } });
+      await expect(loadTargetExecution(target.id, 'RECON')).rejects.toThrow(/Settings.*Hunter identity/);
+      expect((await PUT(req('http://localhost/api/settings/hunter-identity', {
+        userAgent: 'Hunter/1', headers: [{ name: 'X-Bug-Bounty', value: 'hunter' }],
+      }, 'PUT'))).status).toBe(200);
+      expect((await loadTargetExecution(target.id, 'RECON')).requiredUserAgent).toBe('Hunter/1');
+      const policy = {
+        automationAllowed: true, requiredUserAgent: 'Program/1', requiredHeaders: [{ name: 'X-Bug-Bounty', value: 'program' }],
+        exclusions: ['https://app.example.test/admin/*'], requestsPerSecond: 2, maxConcurrency: 1, forbiddenCategories: ['BRUTE_FORCE'],
+        sourceSnapshot: { url: null, rules: '', unrepresentedRules: [] },
+      };
+      const update = (executionPolicy: typeof policy) => PATCH(
+        req('http://localhost/api/programs/' + program.id, { executionPolicy }, 'PATCH'), { params: Promise.resolve({ id: program.id }) },
+      );
+      expect((await update(policy)).status).toBe(200);
+      expect(await loadTargetExecution(target.id, 'RECON')).toMatchObject({
+        requiredUserAgent: 'Program/1', policy: { version: 1, headers: { 'x-bug-bounty': 'program' } },
+      });
+      expect((await update({ ...policy, automationAllowed: false })).status).toBe(200);
+      await expect(loadTargetExecution(target.id, 'RECON')).rejects.toThrow(/disabled/);
+      const versions = await prisma.programExecutionPolicy.findMany({ where: { programId: program.id }, orderBy: { version: 'asc' } });
+      expect(versions.map(row => row.version)).toEqual([1, 2]);
+      expect(versions[0].policy).toMatchObject({ automationAllowed: true });
+    } finally {
+      authMock.auth.mockResolvedValue({ user: { id: userId } });
+    }
+  });
+
   it("POST /api/scan-runs refuses VALIDATE without changing the database or queue", async () => {
     const { deliverScanJob } = await import("@/server/queue/scanQueue");
     const before = await prisma.scanRun.count();
@@ -380,7 +417,9 @@ d("API route authorization (integration)", () => {
     expect((await GET(req("http://localhost", {}), context)).status).toBe(404);
     authMock.auth.mockResolvedValueOnce({ user: { id: "another-user" } });
     expect((await PATCH(req("http://localhost", { requiredUserAgent: "stolen" }, "PATCH"), context)).status).toBe(404);
-    expect((await PATCH(req("http://localhost", { requiredUserAgent: "" }, "PATCH"), context)).status).toBe(400);
+    expect((await PATCH(req("http://localhost", { requiredUserAgent: "   " }, "PATCH"), context)).status).toBe(400);
+    expect((await PATCH(req("http://localhost", { requiredUserAgent: "" }, "PATCH"), context)).status).toBe(200);
+    expect((await prisma.bountyProgram.findUniqueOrThrow({ where: { id: p.id } })).requiredUserAgent).toBe("");
   });
 
   it("adds, edits and removes scope hosts while preserving all historical references", async () => {

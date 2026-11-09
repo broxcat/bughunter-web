@@ -43,7 +43,7 @@ describe("scan AbortSignal propagation", () => {
     let launched!: (value: Browser) => void;
     const spy = vi.spyOn(chromium, "launch").mockReturnValue(new Promise(resolve => { launched = resolve; }));
     try {
-      const startup = withScanControl(control, () => launchTargetBrowser({ headless: true }));
+      const startup = withScanControl(control, () => withTargetExecution(target(), () => launchTargetBrowser({ headless: true })));
       const rejected = expect(startup).rejects.toMatchObject({ reason: "USER_CANCELLED" });
       control.abort("USER_CANCELLED"); let confirmed = false;
       const cleanup = control.cleanup().then(result => { confirmed = result; });

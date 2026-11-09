@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { assertExecutionUrl, currentTargetExecution } from "@/server/execution";
+import { authorizeExecution } from '@/server/programExecutionPolicy';
 import { reconToolArguments } from '@/server/recon/toolArguments';
 
 export const TOOL_CONFIG = join(process.cwd(), "src/server/scanners/templates/config.yaml");
@@ -9,6 +10,11 @@ const HTTP_TOOLS = new Set(["httpx", "katana", "nuclei", "dalfox"]);
 /** The backend is the final writer of UA headers, even if a caller proposes one. */
 export function enforcedToolArgs(cmd: string, args: string[]): string[] {
   const ctx = currentTargetExecution();
+  const tool = cmd === 'gobuster' ? (args[0] === 'dns' ? 'gobuster-dns' : 'gobuster-dir') : cmd;
+  authorizeExecution(ctx, { tool });
+  if (ctx.policy && (cmd === 'nmap' || (HTTP_TOOLS.has(cmd) && !ctx.reconRelayOrigin))) {
+    throw new Error('Tool traffic cannot be metered through a guarded relay');
+  }
   if (ctx.requestGuard) throw new Error("External CLI request counts cannot be enforced inside a bounded Hunt");
   if (ctx.reconPlan) return reconToolArguments(cmd,args,{...ctx,reconPlan:ctx.reconPlan});
   if (cmd === 'gau') {

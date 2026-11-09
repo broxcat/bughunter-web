@@ -6,9 +6,8 @@ const PUBLIC_PATHS = ["/", "/login", "/register"];
 const PUBLIC_API_PREFIXES = ["/api/auth", "/api/register", "/api/health"];
 
 function isPublic(pathname: string): boolean {
-  // This one worker endpoint authenticates a time-bound, constant-time HMAC in
-  // its handler. No browser session or arbitrary internal prefix is accepted.
-  if (pathname === '/api/internal/recon-observations') return true;
+  // Internal routes verify their own scoped credentials.
+  if (pathname === '/api/internal/recon-observations' || pathname === '/api/internal/research-traffic') return true;
   if (PUBLIC_PATHS.includes(pathname)) return true;
   return PUBLIC_API_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),
