@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/Button";
 import {paginationInput} from '@/lib/pagination';
 import CollectionPager from '@/components/CollectionPager';
 import type {programCollection} from '@/server/programCollection';
-export default function TargetsPage() { return <Suspense fallback={<p role="status">Loading Targets…</p>}><TargetsCollection/></Suspense>; }
+export default function TargetsPage() { return <Suspense fallback={<p role="status">Loading targets…</p>}><TargetsCollection/></Suspense>; }
 function TargetsCollection() {
   const router = useRouter();
   const params=useSearchParams(), query=params.toString(), input=paginationInput(new URLSearchParams(query),false);
@@ -32,17 +32,17 @@ function TargetsCollection() {
     return()=>controller.abort();
   },[key,query,input.page,input.pageSize,input.q,router]);
   return <div className="space-y-6">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h1>Targets</h1><p className="mt-1 text-sm text-muted">Your program inventory.</p></div><Button onClick={() => setCreating(true)}>Create Target</Button></div>
-    <form action="/targets" className="flex flex-wrap gap-3"><label>Search Targets<input name="q" maxLength={200} defaultValue={input.q} key={input.q} className="rounded border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={input.pageSize}/><Button variant="secondary" type="submit">Search</Button></form>
-    {!data&&!error&&<p role="status">Loading Targets…</p>}
+    <div className="flex flex-wrap items-center justify-between gap-3"><h1>Targets</h1><Button onClick={() => setCreating(true)}>Create target</Button></div>
+    <form action="/targets" className="flex flex-wrap gap-3"><label>Search targets<input name="q" maxLength={200} defaultValue={input.q} key={input.q} className="rounded border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={input.pageSize}/><Button variant="secondary" type="submit">Search</Button></form>
+    {!data&&!error&&<p role="status">Loading targets…</p>}
     {deleted && <p role="status">Target deleted.</p>}{error && <p role="alert">{error}</p>}
-    {!!programs.length && <div className="ui-table-scroll" role="region" aria-label="Program inventory" tabIndex={0}><table className="ui-inventory ui-targets w-full text-left text-sm"><caption className="sr-only">Program inventory</caption><thead><tr>{['Target','Platform','Scope','Latest Recon',''].map(h=><th scope="col" key={h}>{h}</th>)}</tr></thead><tbody>{programs.map(p=><tr key={p.id}>
+    {!!programs.length && <div className="ui-table-scroll" role="region" aria-label="Program inventory" tabIndex={0}><table className="ui-inventory ui-targets w-full text-left text-sm"><caption className="sr-only">Program inventory</caption><thead><tr>{['Target','Platform','Scope','Latest recon',''].map(h=><th scope="col" key={h}>{h}</th>)}</tr></thead><tbody>{programs.map(p=><tr key={p.id}>
       <td data-label="Target"><span className="font-medium">{p.companyName}</span>{p.deletingAt&&<p role="status" className="text-xs text-muted">Deletion pending</p>}</td>
       <td data-label="Platform" className="text-muted">{platformLabel(p.platform)}</td><td data-label="Scope">{p._count.scopeAssets} assets</td><td data-label="Latest Recon">{reconOverview(p.reconRuns[0]??null).label}</td>
       <td data-label="Action"><Link className="font-medium text-brand" aria-label={`Open ${p.companyName}`} href={`/targets/${p.id}`}>Open</Link></td>
     </tr>)}</tbody></table></div>}
     {data&&<CollectionPager path="/targets" query={query} {...data}/>}
-    {data&&!programs.length&&!error&&<p className="text-sm text-muted">{input.q?'No targets match your search.':'No targets yet. Create a Target to define a program and its Scope.'}</p>}
+    {data&&!programs.length&&!error&&<p className="text-sm text-muted">{input.q?'No targets match your search.':'No targets yet. Create a target to define its scope.'}</p>}
     {creating&&<Dialog compact title="Create target" onClose={()=>setCreating(false)}><ProgramForm onCancel={()=>setCreating(false)} onSaved={id=>router.push(`/scopes?target=${id}`)}/></Dialog>}
   </div>;
 }
