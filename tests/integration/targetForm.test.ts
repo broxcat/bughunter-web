@@ -82,7 +82,7 @@ suite('reviewed target form with PostgreSQL', () => {
     const account = await prisma.targetCredential.findFirstOrThrow({ where: { target: { programId: id } } });
     expect(decryptSecret(account.passwordCipher!)).toBe('fixture-password');
     const accountResponse = await (await settings.GET(new Request('http://app.example.test'), params)).json();
-    expect(accountResponse.testAccounts).toEqual([{ id: account.id, label: 'Account A', purpose: 'ACCOUNT_A', asset: 'https://app.example.test/' }]);
+    expect(accountResponse).not.toHaveProperty('testAccounts');
     expect(JSON.stringify(accountResponse)).not.toContain('fixture-password');
     expect(JSON.stringify(accountResponse)).not.toContain(account.passwordCipher);
     expect(await prisma.targetReconRun.count({ where: { programId: id } })).toBe(0);

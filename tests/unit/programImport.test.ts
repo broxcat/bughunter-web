@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { detectProgram, previewProgram, readProgramPreview } from '@/server/programImport/preview';
+import { detectProgram, readProgramPreview } from '@/server/programImport/preview';
 import { platformReader } from '@/server/programImport/transport';
-import { encryptSecret } from '@/lib/crypto';
 import { policyDraftNeedsReview } from '@/lib/programExecutionPolicy';
 import h1 from '../fixtures/program-import/hackerone.json';
 import bc from '../fixtures/program-import/bugcrowd.json';
@@ -82,27 +81,6 @@ describe('read-only program import previews', () => {
     expect(preview.policy.requiredUserAgent).toBeNull();
   });
 
-  it('imports a HackerOne invitation with the owner token and isolates the cache', async () => {
-    vi.stubEnv('CREDENTIALS_ENCRYPTION_KEY', '1'.repeat(64));
-    mocks.eval.mockResolvedValue(0);
-    mocks.findUnique.mockImplementation(async ({ where }) => ({
-      credentialCipher: encryptSecret(JSON.stringify({ platform: 'HACKERONE', username: where.userId_platform.userId, token: 'fixture-token' })),
-    }));
-    const ownerHeader = 'Basic ' + Buffer.from('invited:fixture-token').toString('base64');
-    const fetch = vi.fn(async (url: URL, options: RequestInit) => {
-      if (new Headers(options.headers).get('Authorization') !== ownerHeader) return new Response(null, { status: 404 });
-      expect(url.origin).toBe('https://api.hackerone.com');
-      if (url.pathname === base) return Response.json({ data: { ...h1.program.data, attributes: { ...h1.program.data.attributes, state: 'private_mode' } } });
-      return Response.json(url.pathname.endsWith('structured_scopes') ? h1.scope : h1.rules);
-    });
-    vi.stubGlobal('fetch', fetch);
-    const input = { url: h1.url, visibility: 'private' as const };
-    await expect(previewProgram('invited', input)).resolves.toMatchObject({ name: 'Example' });
-    await expect(previewProgram('uninvited', input)).rejects.toMatchObject({ reason: 'manual' });
-    expect(mocks.findUnique.mock.calls.map(([query]) => query.where.userId_platform.userId)).toEqual(['invited', 'uninvited']);
-    expect(fetch).toHaveBeenCalledTimes(4);
-  });
-
   it('preserves YesWeHack prose exclusions and reward eligibility separately from scope-in', async () => {
     const read = fixtureReader({ '/programs/example-program': { ...ywh.program, non_qualifying_vulnerability: ['SQL injection', 'Reflected XSS on logout', ...ywh.program.non_qualifying_vulnerability] } });
     const preview = await readProgramPreview(ywh.url, read);
@@ -124,25 +102,11 @@ describe('read-only program import previews', () => {
       await expect(readProgramPreview(url, read)).rejects.toMatchObject({ reason: 'manual' });
     }
     await expect(readProgramPreview(h1.url, read, 'BUGCROWD')).rejects.toMatchObject({ reason: 'manual' });
-    await expect(previewProgram('hunter', { url: 'https://private.example.test/program', visibility: 'private' })).rejects.toMatchObject({ reason: 'manual' });
     expect(read).not.toHaveBeenCalled();
     expect(mocks.findUnique).not.toHaveBeenCalled();
     expect(mocks.eval).not.toHaveBeenCalled();
   });
 
-  it('coalesces concurrent previews, caches by owner and never writes platform results', async () => {
-    mocks.eval.mockResolvedValue(0);
-    const fetch = vi.fn(async () => Response.json(ywh.program));
-    vi.stubGlobal('fetch', fetch);
-    const input = { url: ywh.url };
-    const [first, second] = await Promise.all([previewProgram('cache-one', input), previewProgram('cache-one', input)]);
-    expect(first).toEqual(second);
-    await previewProgram('cache-one', input);
-    expect(fetch).toHaveBeenCalledTimes(1);
-    await previewProgram('cache-two', input);
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(mocks.findUnique).not.toHaveBeenCalled();
-  });
 });
 
 describe('platform request boundaries', () => {

@@ -5,134 +5,120 @@ import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { BOUNTY_PLATFORMS, VULNERABILITY_FAMILIES } from '@/lib/bountyProgram';
 import { platformLabel } from '@/lib/platformPresentation';
-import { executionPolicySchema, MISSING_HUNTER_UA } from '@/lib/programExecutionPolicy';
+import { executionPolicySchema, hasHunterTemplate, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME } from '@/lib/programExecutionPolicy';
+import { intakePreviewSchema, MAX_PROGRAM_SOURCE, splitNonQualifying, type IntakeInput } from '@/lib/programIntake';
 import { detectScopeAsset } from '@/lib/scopeAssets';
-import { scopeReviewChecks, suggestTestAccountHost, targetReviewSchema, type DocumentedAsset, type TargetReview } from '@/lib/targetReview';
+import { scopeReviewChecks, targetReviewSchema } from '@/lib/targetReview';
 import type { ProgramData } from '@/lib/targetFormData';
-import { captureCampaignSource, type CampaignSource } from '@/lib/campaignSource';
-import type { ProgramPreview } from '@/server/programImport/normalize';
+import { campaignSourceSchema, type CampaignSource } from '@/lib/campaignSource';
 import { Button } from '@/components/ui/Button';
 import { fieldClass, initialReview, lines, policyFields, readable, TargetScopeReview } from './TargetScopeReview';
 
 type Platform = (typeof BOUNTY_PLATFORMS)[number];
-type Import = { preview: ProgramPreview } | { message: string };
 const levels = ['Low', 'Medium', 'High', 'Critical'] as const;
-const accountRoles = ['A', 'B'] as const;
 const policyShape = executionPolicySchema.omit({ sourceSnapshot: true });
-const policyFieldHelp: Record<string, string> = {
-  requestsPerSecond: 'Enter a rate from 0.01 to 100 requests per second.',
-  maxConcurrency: 'Enter a whole number from 1 to 32 for maximum concurrent requests.',
-  requiredHeaders: 'Enter unique, non-reserved headers in Name: value format.',
-  requiredUserAgent: 'Enter a printable User-Agent up to 512 characters, or leave it blank to use your default.',
-};
 
-export default function TargetEditor({ program, hunterHasUserAgent, importProgram }: {
+export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUsername, hasAi }: {
   program?: ProgramData;
   hunterHasUserAgent: boolean;
-  importProgram?: (url: string, platform: Platform | '') => Promise<Import>;
+  hunterHasUsername: boolean;
+  hasAi: boolean;
 }) {
   const router = useRouter();
   const [url, setUrl] = useState(program?.programUrl ?? '');
   const [name, setName] = useState(program?.companyName ?? '');
   const [platform, setPlatform] = useState<Platform | ''>((program?.platform ?? '') as Platform | '');
+  const [markdown, setMarkdown] = useState('');
   const [importSource, setImportSource] = useState<CampaignSource>();
-  const [source, setSource] = useState(program?.executionPolicies?.[0]?.policy.sourceSnapshot.sourceDocument ?? program?.rulesOfEngagement ?? '');
+  const [sourceDocument, setSourceDocument] = useState<string>();
+  const [importedFrom, setImportedFrom] = useState<{ url: string; platform: Platform | '' }>();
   const [review, setReview] = useState(() => initialReview(program));
-  const [candidates, setCandidates] = useState<DocumentedAsset[]>([]);
-  const [nonQualifying, setNonQualifying] = useState<string[]>(program?.nonQualifying ?? []);
+  const stored = program?.executionPolicies?.[0]?.policy;
+  const [nonQualifying, setNonQualifying] = useState([
+    ...(program?.nonQualifying ?? []), ...(stored?.sourceSnapshot.nonQualifyingText ?? []),
+  ].join('\n'));
   const [qualifying, setQualifying] = useState<string[]>(program?.qualifying ?? []);
-  const [legacyExclusions, setLegacyExclusions] = useState(program?.outOfScope.join('\n') ?? '');
-  const [accountAssets, setAccountAssets] = useState({ A: '', B: '' });
-  const [accountLogins, setAccountLogins] = useState({ A: '', B: '' });
   const [importing, setImporting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [showSettings, setShowSettings] = useState(!hasAi);
   const busy = importing || saving;
 
-  async function loadPreview() {
-    if (!importProgram) return;
+  async function loadPreview(input: IntakeInput) {
     setImporting(true); setMessage(''); setError('');
     try {
-      const result = await importProgram(url.trim(), platform);
-      if ('message' in result) { setMessage(result.message); return; }
-      const { preview } = result;
-      const capturedSource = captureCampaignSource(preview);
-      setUrl(preview.url);
-      setName(preview.name);
-      setPlatform(preview.platform);
-      setSource(preview.policy.sourceSnapshot.rules);
-      setImportSource(capturedSource);
-      setNonQualifying(preview.nonQualifying);
-      setCandidates(preview.unrepresentedAssets);
-      const assetLabels = new Map([...preview.scopeIn, ...preview.scopeOut, ...preview.nonAutomatable, ...preview.unrepresentedAssets]
-        .map(asset => [asset.ref, asset.originalValue ?? asset.sourceType]));
-      setReview({
-        ...initialReview(),
-        scopeIn: preview.scopeIn.flatMap(asset => {
-          if (!asset.normalizedValue) return [];
-          const detected = detectScopeAsset(asset.normalizedValue);
-          return [{ value: detected.normalizedValue, type: /^(?:api)$/i.test(asset.sourceType) ? 'API' : detected.inferredType }];
-        }),
-        exclusions: preview.policy.exclusions.join('\n'),
-        userAgent: preview.policy.requiredUserAgent ?? '',
-        headers: (preview.policy.requiredHeaders ?? []).map(({ name, value }) => name + ': ' + value).join('\n'),
-        ...(preview.policy.requestsPerSecond != null ? { requests: String(preview.policy.requestsPerSecond) } : {}),
-        ...(preview.policy.maxConcurrency != null ? { concurrency: String(preview.policy.maxConcurrency) } : {}),
-        forbidden: preview.policy.forbiddenCategories ?? [],
-        documentedAssets: [...preview.nonAutomatable, ...preview.scopeOut.filter(asset => !preview.policy.exclusions.includes(asset.normalizedValue ?? ''))],
-        rules: preview.unrepresentedRules.map(rule => ({ ...rule, decision: null, assetLabel: rule.assetRef ? assetLabels.get(rule.assetRef) : undefined })),
+      const response = await fetch('/api/programs/import-preview', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
       });
-      setMessage('Import ready for review. Check the scope and resolve the program rules before enabling automation.');
-    } catch { setMessage('Import is unavailable. Enter the scope and rules manually.'); }
+      const result = await response.json();
+      if (!response.ok) {
+        if (result.settings) setShowSettings(true);
+        throw new Error(result.error ?? 'Program extraction is unavailable.');
+      }
+      const { data: preview } = intakePreviewSchema.safeParse(result.preview);
+      if (!preview) throw new Error('The extraction was invalid. Your form was kept as entered.');
+      const extractedUrl = preview.url ?? url;
+      const extractedPlatform = preview.platform ?? platform;
+      setUrl(extractedUrl);
+      setName(preview.name);
+      setPlatform(extractedPlatform);
+      setSourceDocument(preview.sourceDocument);
+      if (input.mode === 'url') setMarkdown('');
+      setImportSource(campaignSourceSchema.safeParse(result.source).data);
+      setImportedFrom({ url: extractedUrl.trim(), platform: extractedPlatform });
+      setNonQualifying(preview.nonQualifying.join('\n'));
+      setReview(previous => ({
+        scopeIn: preview.scopeIn, exclusions: preview.policy.exclusions.join('\n'), userAgent: preview.policy.requiredUserAgent ?? '',
+        policy: preview.policy, documentedAssets: [...new Map([...previous.documentedAssets, ...preview.documentedAssets].map(asset => [asset.ref, asset])).values()],
+        rules: [
+          ...previous.rules.filter(rule => !rule.origin),
+          ...preview.unresolved.map(text => ({ text, decision: null, origin: 'AI_INTAKE' as const })),
+        ],
+      }));
+      setMessage('Extraction ready for review.' + (preview.omitted.length ? ' Omitted assets without a verified in-scope entry: ' + preview.omitted.join(', ') + '.' : ''));
+    } catch (failure) { setError((failure as Error).message); }
     finally { setImporting(false); }
   }
 
   const policy = policyFields(review);
   const { scopeError, conflict } = scopeReviewChecks(review.scopeIn, policy.exclusions);
-  const accountSuggestions = {
-    A: suggestTestAccountHost(review.scopeIn, policy.exclusions, accountLogins.A),
-    B: suggestTestAccountHost(review.scopeIn, policy.exclusions, accountLogins.B),
-  };
-  const accountNeedsHost = Boolean(accountSuggestions.A || accountSuggestions.B);
   const policyResult = policyShape.safeParse(policy);
   const legacy = program?.legacyPolicyReview;
-  const legacyMismatch = legacy && legacyExclusions === program?.outOfScope.join('\n') &&
-    (legacy.unconvertible.length || legacy.exclusions.some(value => !policy.exclusions.some(exclusion => {
-      try { return detectScopeAsset(exclusion).normalizedValue === value; } catch { return false; }
-    })));
-  const issue = policyResult.error?.issues[0];
-  const policyIssue = issue ? policyFieldHelp[String(issue.path[0])] ?? issue.message
-    : review.pendingRule.trim() || review.rules.some(rule => !rule.decision) ? 'Resolve each unrepresented rule to enable automation.'
-    : !review.automation ? 'Automation is disabled. Enable it after reviewing the rules and scope.'
+  const legacyMismatch = Boolean(legacy && (legacy.unconvertible.length || legacy.exclusions.some(value => !policy.exclusions.some(exclusion => {
+    try { return detectScopeAsset(exclusion).normalizedValue === value; } catch { return false; }
+  }))));
+  const association = importedFrom ?? (stored?.sourceSnapshot.sourceDocument ? { url: program?.programUrl ?? '', platform: program?.platform ?? '' } : null);
+  const changedSource = Boolean(association && (association.url !== url.trim() || association.platform !== platform));
+  const unreviewedMarkdown = Boolean(markdown.trim() && markdown !== sourceDocument);
+  const unresolved = review.rules.filter(rule => !rule.decision).length;
+  const needsUsername = [policy.requiredUserAgent ?? '', ...policy.requiredHeaders.map(header => header.value)].some(hasHunterTemplate) && !hunterHasUsername;
+  const policyIssue = !policyResult.success ? (policyResult.error.issues[0]?.message ?? 'Invalid execution policy.')
+    : changedSource ? 'Extract the program rules again after changing its URL or platform.'
+    : unreviewedMarkdown ? 'Extract the pasted Markdown before running automation.'
+    : unresolved ? unresolved + (unresolved === 1 ? ' program rule could' : ' program rules could') + ' not be represented safely. Review the source before running automation.'
+    : !policy.automationAllowed ? 'The program policy does not allow automation.'
+    : needsUsername ? MISSING_HUNTER_USERNAME
     : !policy.requiredUserAgent && !hunterHasUserAgent ? MISSING_HUNTER_UA
-    : legacyMismatch ? 'Add matching structured exclusions or correct the legacy list below.' : '';
+    : legacyMismatch ? 'The current exclusions do not cover all retained legacy exclusions.' : '';
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || scopeError || conflict || accountNeedsHost || !policyResult.success) return;
+    if (busy || scopeError || conflict || !policyResult.success || markdown.length > MAX_PROGRAM_SOURCE) return;
     const form = new FormData(event.currentTarget);
     const field = (key: string) => String(form.get(key) ?? '').trim();
-    const testAccounts: TargetReview['testAccounts'] = [];
-    for (const role of accountRoles) {
-      const asset = field('asset-' + role);
-      const loginUrl = field('login-' + role);
-      const username = field('username-' + role);
-      const password = String(form.get('password-' + role) ?? '');
-      if (asset || loginUrl || username || password) testAccounts.push({ asset, loginUrl, username, password, purpose: role === 'A' ? 'ACCOUNT_A' : 'ACCOUNT_B' });
-    }
-    const pendingDocument = review.pendingDocument.trim();
-    const pendingRule = review.pendingRule.trim();
+    const excluded = splitNonQualifying(lines(nonQualifying));
     const checked = targetReviewSchema.safeParse({
-      scopeIn: review.scopeIn,
-      documentedAssets: [...review.documentedAssets, ...candidates,
-        ...(pendingDocument ? [{ ref: 'manual:' + pendingDocument, originalValue: pendingDocument, sourceType: 'Manual' }] : [])]
-        .map(({ ref, originalValue, sourceType, reason }: DocumentedAsset) => ({ ref, originalValue, sourceType, reason })),
-      rules: [...review.rules, ...(pendingRule ? [{ text: pendingRule, decision: null }] : [])],
-      policy, testAccounts, expectedAssets: program?.expectedAssets,
-      sourceDocument: !program && source ? source : undefined,
-      importSource: !program && importSource?.url === url.trim() && importSource.platform === platform ? importSource : undefined,
-      campaignInterval: program ? (field('campaignHours') ? Number(field('campaignHours')) * 60 : null) : undefined,
+      scopeIn: review.scopeIn, documentedAssets: review.documentedAssets,
+      rules: [...review.rules, ...(changedSource && !review.rules.some(rule => rule.origin === 'SOURCE_CHANGED')
+        ? [{ text: 'Program URL or platform changed. Extract the current rules before automation.', decision: null, origin: 'SOURCE_CHANGED' }] : []),
+      ...(unreviewedMarkdown ? [{ text: 'Pasted Markdown has not been extracted. Review the program rules before automation.', decision: null, origin: 'AI_INTAKE' }] : [])],
+      policy, expectedAssets: program?.expectedAssets,
+      sourceDocument: unreviewedMarkdown ? markdown : sourceDocument,
+      intakeVersion: !program || sourceDocument !== undefined || unreviewedMarkdown ? 1 : undefined,
+      nonQualifyingText: excluded.text,
+      importSource: !changedSource && !unreviewedMarkdown ? importSource : undefined,
+      campaignInterval: field('campaignHours') ? Number(field('campaignHours')) * 60 : null,
     });
     if (!checked.success) {
       setError(checked.error.issues.map(issue => issue.path.join('.') + ' — ' + issue.message).join(' '));
@@ -143,14 +129,12 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
       companyName: name.trim(), platform: platform || null, programUrl: url.trim() || null,
       rewardCurrency: field('rewardCurrency'),
       ...Object.fromEntries(levels.map(level => ['reward' + level, field('reward' + level) || null])),
-      qualifying, nonQualifying, targetReview: checked.data,
-      ...(!program ? { startCampaign: true } : {}),
-      ...(program ? {
+      qualifying, nonQualifying: excluded.families, targetReview: checked.data,
+      ...(!program ? { startCampaign: true } : {
         expectedUpdatedAt: program.updatedAt,
         expectedPolicyVersion: program.executionPolicies?.[0]?.version ?? 0,
         expectedLegacyScopeFingerprint: legacy?.scopeFingerprint,
-        ...(legacyExclusions !== program.outOfScope.join('\n') ? { outOfScope: lines(legacyExclusions) } : {}),
-      } : {}),
+      }),
     };
     try {
       const response = await fetch(program ? '/api/programs/' + program.id : '/api/programs', {
@@ -169,21 +153,25 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
     while (parent) { if (parent instanceof HTMLDetailsElement) parent.open = true; parent = parent.parentElement; }
   }}>
     <fieldset disabled={busy} className="space-y-5">
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="min-w-52 flex-1">Program URL<input type="url" className={fieldClass} value={url} onChange={event => {
-          setUrl(event.target.value);
-          setReview(previous => ({ ...previous, automation: false }));
-        }} placeholder="https://hackerone.com/program-name" /></label>
-        {importProgram && <Button variant="secondary" disabled={!url.trim()} onClick={loadPreview}>{importing ? 'Importing…' : 'Import'}</Button>}
-      </div>
-      {message && <p role="status" className="rounded border border-border p-3 text-sm">{message}</p>}
+      <section aria-label="Program source" className="space-y-3 rounded border border-border p-4">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="min-w-52 flex-1">Program URL<input type="url" className={fieldClass} value={url}
+            onChange={event => setUrl(event.target.value)} placeholder="https://hackerone.com/program-name" /></label>
+          <Button variant="secondary" disabled={!hasAi || !url.trim()} onClick={() => loadPreview({ mode: 'url', url: url.trim() })}>Extract from URL</Button>
+        </div>
+        <label className="block">Program Markdown<textarea className={fieldClass} rows={5}
+          value={markdown} onChange={event => setMarkdown(event.target.value)} placeholder="Paste the program scope and rules here" /></label>
+        <Button variant="secondary" disabled={!hasAi || !markdown.trim() || markdown.length > MAX_PROGRAM_SOURCE} onClick={() => loadPreview({ mode: 'markdown', markdown })}>Extract from Markdown</Button>
+        {markdown.length > MAX_PROGRAM_SOURCE && <p role="alert" className="text-sm text-danger">Program Markdown exceeds the 64,000-character extraction limit.</p>}
+        {showSettings && <p className="text-sm text-muted">Select an AI provider and model in <Link href="/settings" className="text-brand underline">Settings</Link> to extract the program, or fill in the form manually.</p>}
+        {hasAi && <p className="text-sm text-muted">Extraction sends the program text to the AI provider selected in Settings.</p>}
+        {importing && <p role="status" className="text-sm">Extracting program details…</p>}
+        {message && <p role="status" className="break-words text-sm">{message}</p>}
+      </section>
       <div className="grid gap-3 sm:grid-cols-2">
         <label>Name<input className={fieldClass} required maxLength={200} value={name} onChange={event => setName(event.target.value)} /></label>
-        <label>Platform<select aria-label="Platform" className={fieldClass} value={platform} onChange={event => {
-          setPlatform(event.target.value as Platform | '');
-          setReview(previous => ({ ...previous, automation: false }));
-          if (event.target.value === 'PRIVATE') setMessage('Manual entry. Add the authorized scope and program rules below.');
-        }}>
+        <label>Platform<select aria-label="Platform" className={fieldClass} value={platform}
+          onChange={event => setPlatform(event.target.value as Platform | '')}>
           <option value="">Choose platform</option>
           {BOUNTY_PLATFORMS.map(item => <option key={item} value={item}>{platformLabel(item)}</option>)}
         </select></label>
@@ -199,55 +187,28 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
           </div>;
         })}
       </section>}
-      <TargetScopeReview value={review} onChange={setReview} historical={program?.historicalDocumentedAssets} candidates={candidates} />
-      {legacy?.scopes.length ? <details className="ui-disclosure"><summary>Legacy Scope text</summary>
-        {legacy.scopes.map(scope => <div key={scope.id} className="mt-3 space-y-2">
-          <p className="font-medium">Scope {scope.id}</p>
-          {[scope.scopeDetails, scope.outOfScope, scope.rulesOfEngagement].map((text, index) => text && <p key={index} className="whitespace-pre-wrap break-words text-sm">{text}</p>)}
-        </div>)}
-      </details> : null}
-      {program?.outOfScope.length ? <details className="ui-disclosure" open={Boolean(legacyMismatch)}><summary>Legacy exclusions</summary>
-        <label className="mt-3 block">Legacy out-of-scope domains<textarea className={fieldClass} value={legacyExclusions} onChange={event => setLegacyExclusions(event.target.value)} /></label>
-        {legacy?.unconvertible.map(({ index, value, reason }) => <p key={index} className="text-sm text-danger">{value} — {reason}</p>)}
-      </details> : null}
-      <details className="ui-disclosure"><summary>Non-qualifying vulnerabilities{nonQualifying.length ? ' · ' + nonQualifying.map(readable).join(', ') : ''}</summary>
-        <div className="mt-3"><Families label="Vulnerability families excluded by the program" value={nonQualifying} change={setNonQualifying} /></div>
-      </details>
-      <details className="ui-disclosure"><summary>Test accounts <span className="text-muted">(optional)</span></summary>
-        <p className="my-3 text-sm text-muted">Two accounts on the same asset are recommended for access-control tests. Credentials are encrypted on save.</p>
-        {program?.testAccounts?.map(account => <p key={account.id} className="text-sm">{account.label} · {account.asset}</p>)}
-        {accountRoles.map(role => <fieldset key={role} className="my-3 grid gap-3 border-t border-border pt-3 sm:grid-cols-2">
-          <legend>Account {role}</legend>
-          <label>Asset<select name={'asset-' + role} className={fieldClass} value={accountAssets[role]} onChange={event =>
-            setAccountAssets({ ...accountAssets, [role]: event.target.value })}><option value="">Choose an exact in-scope asset</option>
-            {[...new Set(review.scopeIn.map(row => row.value).filter(accountAsset))].map(value => <option key={value}>{value}</option>)}
-          </select></label>
-          <label>Login URL<input name={'login-' + role} className={fieldClass} type="url" placeholder="https://app.example.com/login"
-            value={accountLogins[role]} onChange={event => setAccountLogins({ ...accountLogins, [role]: event.target.value })} /></label>
-          {accountSuggestions[role] && <div className="space-y-2 sm:col-span-2">
-            <p className="text-sm text-muted">The wildcard covers this login. Add its exact host to attach the test account.</p>
-            <Button size="sm" variant="secondary" onClick={() => {
-              const host = accountSuggestions[role]!;
-              setReview(current => ({ ...current, scopeIn: [...current.scopeIn, { value: host, type: 'WEB_APPLICATION' }] }));
-              setAccountAssets(current => ({ ...current, [role]: host }));
-            }}>Add {accountSuggestions[role]} to scope</Button>
-          </div>}
-          <label>Username<input name={'username-' + role} className={fieldClass} autoComplete="off" maxLength={512} /></label>
-          <label>Password<input name={'password-' + role} className={fieldClass} type="password" autoComplete="new-password" maxLength={512} /></label>
-        </fieldset>)}
-      </details>
-      {program && <section id="campaign-schedule" className="space-y-2 rounded border border-border p-4">
+      <TargetScopeReview value={review} onChange={setReview} />
+      <label className="block">Non-qualifying vulnerabilities<textarea className={fieldClass} rows={4} value={nonQualifying}
+        onChange={event => setNonQualifying(event.target.value)} />
+        <span className="text-sm text-muted">One web vulnerability per line.</span>
+      </label>
+      <section id="campaign-schedule" className="space-y-2 rounded border border-border p-4">
         <h2 className="font-semibold">Campaign schedule</h2>
-        <label className="block">Hours between follow-up cycles<input name="campaignHours" className={fieldClass} type="number" min="1" max="720" step="1" defaultValue={program.campaign?.intervalMinutes ? program.campaign.intervalMinutes / 60 : ''} /></label>
+        <label className="block">Hours between follow-up cycles<input name="campaignHours" className={fieldClass} type="number" min="1" max="720" step="1"
+          defaultValue={program?.campaign?.intervalMinutes ? program.campaign.intervalMinutes / 60 : ''} /></label>
         <p className="text-sm text-muted">Leave blank to disable scheduled cycles. A follow-up only tests new or modified assets.</p>
-      </section>}
+      </section>
       <details className="ui-disclosure"><summary>Advanced</summary>
         <div className="mt-3 grid gap-3 sm:grid-cols-5">
           {levels.map(level => <label key={level}>Reward {readable(level)}<input name={'reward' + level} inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" className={fieldClass} defaultValue={program?.['reward' + level as `reward${typeof level}`] ?? ''} /></label>)}
           <label>Currency<input name="rewardCurrency" className={fieldClass} required maxLength={3} pattern="[A-Z]{3}" defaultValue={program?.rewardCurrency ?? 'EUR'} /></label>
         </div>
-        {source && <details className="mt-3"><summary>Source rules</summary><p className="max-h-56 overflow-auto whitespace-pre-wrap break-words text-sm">{source}</p></details>}
-        <div className="mt-3"><Families label="Qualifying vulnerabilities" value={qualifying} change={setQualifying} /></div>
+        <fieldset className="mt-3"><legend className="font-medium">Qualifying vulnerabilities</legend>
+          <div className="grid grid-cols-2 gap-1">{VULNERABILITY_FAMILIES.map(family => <label key={family} className="text-sm">
+            <input type="checkbox" checked={qualifying.includes(family)} onChange={event =>
+              setQualifying(event.target.checked ? [...qualifying, family] : qualifying.filter(item => item !== family))} /> {readable(family)}
+          </label>)}</div>
+        </fieldset>
       </details>
       <section aria-label="Review checks" className="space-y-2 rounded border border-border p-4">
         <h2 className="font-semibold">Review checks</h2>
@@ -258,26 +219,12 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
       {error && <p role="alert" className="text-danger">{error}</p>}
       <div className="flex items-center justify-end gap-3">
         <Link href={program ? '/targets/' + program.id : '/targets'} className="text-sm text-muted">Cancel</Link>
-        <Button type="submit" disabled={busy || Boolean(scopeError || conflict) || accountNeedsHost || !policyResult.success}>{saving ? 'Saving…' : program ? 'Save' : 'Save and start'}</Button>
+        <Button type="submit" disabled={busy || Boolean(scopeError || conflict) || !policyResult.success || markdown.length > MAX_PROGRAM_SOURCE}>{saving ? 'Saving…' : program ? 'Save' : 'Save and start'}</Button>
       </div>
     </fieldset>
   </form>;
 }
 
-function accountAsset(value: string) {
-  try { const asset = detectScopeAsset(value); return asset.executable && asset.format !== 'WILDCARD_DOMAIN'; }
-  catch { return false; }
-}
-
 function Check({ label, issue }: { label: string; issue?: string }) {
   return <p className="text-sm"><strong>{label}</strong> · <span className={issue ? 'text-danger' : 'text-muted'}>{issue || 'Pass'}</span></p>;
-}
-
-function Families({ label, value, change }: { label: string; value: string[]; change: (value: string[]) => void }) {
-  return <fieldset><legend className="font-medium">{label}</legend>
-    <div className="grid grid-cols-2 gap-1">{VULNERABILITY_FAMILIES.map(family => <label key={family} className="text-sm">
-      <input type="checkbox" checked={value.includes(family)} onChange={event =>
-        change(event.target.checked ? [...value, family] : value.filter(item => item !== family))} /> {readable(family)}
-    </label>)}</div>
-  </fieldset>;
 }

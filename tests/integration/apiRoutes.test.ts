@@ -101,8 +101,7 @@ d("API route authorization (integration)", () => {
     authMock.auth.mockResolvedValue({ user: { id: userId } });
   }, 60_000);
 
-  it('resolves a hunter identity and saves append-only execution policy versions', async () => {
-    const { PUT } = await import('@/app/api/settings/hunter-identity/route');
+  it('resolves a default User-Agent and saves append-only execution policy versions', async () => {
     const { PATCH } = await import('@/app/api/programs/[id]/route');
     const { loadTargetExecution } = await import('@/server/execution');
     const user = await prisma.user.create({ data: { email: 'policy-' + Date.now() + '@test.local' } });
@@ -111,10 +110,9 @@ d("API route authorization (integration)", () => {
       const program = await prisma.bountyProgram.create({ data: { ownerId: user.id, companyName: 'Policy fixture', requiredUserAgent: '' } });
       const scope = await prisma.scope.create({ data: { userId: user.id, hostPattern: 'app.example.test', status: 'APPROVED' } });
       const target = await prisma.target.create({ data: { userId: user.id, programId: program.id, scopeId: scope.id, host: 'app.example.test', active: true } });
-      await expect(loadTargetExecution(target.id, 'RECON')).rejects.toThrow(/Settings.*Hunter identity/);
-      expect((await PUT(req('http://localhost/api/settings/hunter-identity', {
-        userAgent: 'Hunter/1', headers: [{ name: 'X-Bug-Bounty', value: 'hunter' }],
-      }, 'PUT'))).status).toBe(200);
+      vi.stubEnv('DEFAULT_USER_AGENT', '');
+      await expect(loadTargetExecution(target.id, 'RECON')).rejects.toThrow(/DEFAULT_USER_AGENT/);
+      vi.stubEnv('DEFAULT_USER_AGENT', 'Hunter/1');
       expect((await loadTargetExecution(target.id, 'RECON')).requiredUserAgent).toBe('Hunter/1');
       const policy = {
         automationAllowed: true, requiredUserAgent: 'Program/1', requiredHeaders: [{ name: 'X-Bug-Bounty', value: 'program' }],
@@ -129,11 +127,12 @@ d("API route authorization (integration)", () => {
         requiredUserAgent: 'Program/1', policy: { version: 1, headers: { 'x-bug-bounty': 'program' } },
       });
       expect((await update({ ...policy, automationAllowed: false })).status).toBe(200);
-      await expect(loadTargetExecution(target.id, 'RECON')).rejects.toThrow(/disabled/);
+      await expect(loadTargetExecution(target.id, 'RECON')).rejects.toThrow(/does not allow automation/);
       const versions = await prisma.programExecutionPolicy.findMany({ where: { programId: program.id }, orderBy: { version: 'asc' } });
       expect(versions.map(row => row.version)).toEqual([1, 2]);
       expect(versions[0].policy).toMatchObject({ automationAllowed: true });
     } finally {
+      vi.unstubAllEnvs();
       authMock.auth.mockResolvedValue({ user: { id: userId } });
     }
   });

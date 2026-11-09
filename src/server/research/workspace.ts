@@ -31,7 +31,7 @@ export const researchTargetSelect = {
 } satisfies Prisma.TargetSelect;
 type SelectedResearchTarget = Prisma.TargetGetPayload<{ select: typeof researchTargetSelect }>;
 type SelectedProgram = NonNullable<SelectedResearchTarget['program']>;
-type PolicyFields = 'owner' | 'programUrl' | 'executionPolicies' | 'targets';
+type PolicyFields = 'programUrl' | 'executionPolicies' | 'targets';
 export type ResearchTarget = Omit<SelectedResearchTarget, 'scopeAsset' | 'discoveredFromAsset' | 'consoleDeletingAt' | 'program'> &
   Partial<Pick<SelectedResearchTarget, 'scopeAsset' | 'discoveredFromAsset' | 'consoleDeletingAt'>> & {
     program: (Omit<SelectedProgram, PolicyFields> & Partial<Pick<SelectedProgram, PolicyFields>>) | null;

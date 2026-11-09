@@ -1,0 +1,88 @@
+{
+  "hackerone": {
+    "name": "Orion Security",
+    "platform": "HACKERONE",
+    "scopeIn": [
+      {
+        "value": "https://api.orion.example.test",
+        "type": "API"
+      },
+      {
+        "value": "app.orion.example.test",
+        "type": "WEB_APPLICATION"
+      }
+    ],
+    "scopeOut": [
+      "https://api.orion.example.test/admin/*"
+    ],
+    "nonQualifying": [
+      "Open redirect",
+      "Self-XSS without an impact on another user"
+    ],
+    "userAgent": {
+      "value": "OrionResearch/1.0",
+      "evidence": "Required User-Agent: OrionResearch/1.0"
+    },
+    "rateLimit": {
+      "requests": 5,
+      "seconds": 1,
+      "evidence": "Keep automated requests below 5 requests per second."
+    },
+    "maxConcurrency": {
+      "value": 2,
+      "evidence": "Use at most 2 concurrent requests."
+    },
+    "headers": [
+      {
+        "name": "X-Bug-Bounty",
+        "value": "HackerOne-<username>",
+        "evidence": "X-Bug-Bounty: HackerOne-<username>"
+      }
+    ],
+    "forbidden": [
+      {
+        "category": "BRUTE_FORCE",
+        "evidence": "Brute force is prohibited."
+      }
+    ],
+    "automationProhibition": null,
+    "unresolved": []
+  },
+  "yeswehack": {
+    "name": "Altair Security",
+    "platform": "YESWEHACK",
+    "scopeIn": [
+      {
+        "value": "app.altair.example.test",
+        "type": "WEB_APPLICATION"
+      },
+      {
+        "value": "*.edge.altair.example.test",
+        "type": "WILDCARD"
+      },
+      {
+        "value": "com.altair.mobile",
+        "type": "OTHER"
+      }
+    ],
+    "scopeOut": [
+      "wallet.altair.example.test"
+    ],
+    "nonQualifying": [
+      "Cross site scripting",
+      "Reports about a banner disclosing a software version alone"
+    ],
+    "userAgent": null,
+    "rateLimit": null,
+    "maxConcurrency": null,
+    "headers": [],
+    "forbidden": [
+      {
+        "category": "DENIAL_OF_SERVICE",
+        "evidence": "Denial of service is forbidden."
+      }
+    ],
+    "automationProhibition": "Refrain from using automated tools.",
+    "unresolved": []
+  }
+}

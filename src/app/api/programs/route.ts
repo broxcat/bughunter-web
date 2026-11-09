@@ -53,13 +53,13 @@ export async function POST(req: Request) {
         } });
         await storeTestAccounts(tx, created, targetReview, policy);
         if (startCampaign) {
-          const hunterIdentity = await tx.hunterIdentity.findUnique({ where: { userId: ownerId }, select: { userAgent: true, headers: true } });
-          const blocker = campaignPolicyBlocker({ ...created, owner: { hunterIdentity }, executionPolicies: [{ version: 1, policy }] }) ??
+          const blocker = campaignPolicyBlocker({ ...created, executionPolicies: [{ version: 1, policy }] }) ??
             (assets.length ? null : 'Add at least one active Scope Asset before Recon');
           const source = targetReview.importSource;
           const matchedSource = source?.url === created.programUrl && source?.platform === created.platform ? source : undefined;
           await tx.targetCampaign.create({ data: { programId: created.id, state: blocker ? 'BLOCKED' : 'READY', reason: blocker,
-            requestedAt: blocker ? null : new Date(), source: matchedSource, lastSyncAt: matchedSource ? new Date() : null } });
+            requestedAt: blocker ? null : new Date(), intervalMinutes: targetReview.campaignInterval ?? null,
+            source: matchedSource, lastSyncAt: matchedSource ? new Date() : null } });
         }
         return created;
       });

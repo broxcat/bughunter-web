@@ -4,7 +4,8 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
+import { createServer as createHttpServer } from 'node:http';
 import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { chromium } from 'playwright-chromium';
@@ -25,17 +26,20 @@ await new Promise(resolve => server.close(resolve));
 const origin = 'http://127.0.0.1:' + port;
 const p = new PrismaClient({ datasourceUrl: db });
 const output = process.env.TARGET_FORM_SCREENSHOTS;
-const fixtureUrl = 'https://hackerone.com/example-private';
+const fixtures = new URL('../fixtures/program-intake/', import.meta.url);
+const models = JSON.parse(await readFile(new URL('model.json', fixtures), 'utf8'));
+const documents = Object.fromEntries(await Promise.all(['hackerone', 'yeswehack'].map(async name =>
+  [name, await readFile(new URL(name + '.md', fixtures), 'utf8')])));
 const userAgent = 'ReviewFixture/1.0';
 const logs = [];
-let web, browser;
+let web, browser, ai;
 try {
   const password = randomUUID();
   const user = await p.user.create({ data: { email: randomUUID() + '@example.test', passwordHash: await bcrypt.hash(password, 10) } });
   const command = process.env.TARGET_FORM_DEV === '1' ? ['dev'] : ['start'];
   web = spawn(process.execPath, ['node_modules/next/dist/bin/next', ...command, '--hostname', '127.0.0.1', '--port', String(port)], {
     env: { ...process.env, DATABASE_URL: db, REDIS_URL: redis, AUTH_URL: origin, AUTH_SECRET: randomUUID(),
-      CREDENTIALS_ENCRYPTION_KEY: 'ab'.repeat(32), ALLOW_PUBLIC_REGISTRATION: 'false', TRUST_PROXY_HEADERS: 'false', LOG_LEVEL: 'silent' },
+      CREDENTIALS_ENCRYPTION_KEY: 'ab'.repeat(32), ALLOW_PUBLIC_REGISTRATION: 'false', TRUST_PROXY_HEADERS: 'false', LOG_LEVEL: 'silent', HUNTER_USERNAME: 'fixture-hunter', DEFAULT_USER_AGENT: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   for (const stream of [web.stdout, web.stderr]) stream.on('data', chunk => { logs.push(String(chunk)); if (logs.length > 25) logs.shift(); });
@@ -62,44 +66,78 @@ try {
   await page.waitForURL(origin + '/targets');
   await page.getByRole('link', { name: 'Create target', exact: true }).click();
 
-  const scopeIn = [{ ref: 'api', originalValue: 'https://api.example.test', normalizedValue: 'https://api.example.test/', sourceType: 'API' }];
-  const nonAutomatable = [{ ref: 'app', originalValue: 'com.example.mobile', sourceType: 'Android', reason: 'Unsupported asset for automated testing' }];
-  const unrepresentedRules = [{ text: 'Keep requests below three per second.' }];
-  await page.route('**/api/programs/import-preview', route => {
-    assert.equal(route.request().postDataJSON().url, fixtureUrl);
-    return route.fulfill({ json: { status: 'PREVIEW', preview: {
-      url: fixtureUrl, platform: 'HACKERONE', name: 'Example private program', scopeIn, scopeOut: [], nonAutomatable,
-      unrepresentedAssets: [], unrepresentedRules, sourceRules: unrepresentedRules, sourceGrants: ['https://api.example.test/'], nonQualifying: ['OPEN_REDIRECT'],
-      policy: { sourceSnapshot: { rules: unrepresentedRules[0].text }, exclusions: ['https://api.example.test/admin/*'], forbiddenCategories: [] },
-    } } });
+  await page.getByRole('link', { name: 'Settings', exact: true }).last().waitFor();
+  assert(await page.getByRole('button', { name: 'Extract from Markdown' }).isDisabled());
+
+  ai = createHttpServer(async (request, response) => {
+    try {
+      assert.equal(request.url, '/api/chat');
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const input = JSON.parse(Buffer.concat(chunks));
+      assert.equal(input.model, 'fixture-intake-model');
+      assert.match(input.messages[0].content, /untrusted program data/);
+      const { programDocument } = JSON.parse(input.messages[1].content);
+      const key = Object.keys(documents).find(key => documents[key] === programDocument);
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ message: { content: key ? JSON.stringify(models[key]) : '{"name":1}' } }));
+    } catch {
+      response.writeHead(500).end();
+    }
   });
-  await page.getByLabel('Program URL').fill(fixtureUrl);
-  await page.getByRole('button', { name: 'Import', exact: true }).click();
-  await page.getByRole('status').filter({ hasText: 'Import ready for review' }).waitFor();
-  await page.getByLabel('Name', { exact: true }).fill('Reviewed private fixture');
-  await page.getByLabel('Requests per second').fill('2');
-  await page.getByLabel('Required User-Agent').fill(userAgent);
-  await page.getByLabel('Converted above').check();
-  await page.getByLabel('Allow automation after review').check();
-  await capture('target-import-preview.png');
-  await page.getByRole('button', { name: 'Save and start', exact: true }).click();
-  await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
-  await page.getByRole('link', { name: 'View progress', exact: true }).waitFor();
-  const imported = await p.bountyProgram.findFirstOrThrow({ where: { ownerId: user.id, companyName: 'Reviewed private fixture' },
-    include: { scopeAssets: true, executionPolicies: true } });
-  assert.deepEqual(imported.nonQualifying, ['OPEN_REDIRECT']);
-  assert.equal(imported.scopeAssets.length, 1);
-  assert.equal(imported.scopeAssets[0].type, 'API');
-  assert.equal(imported.executionPolicies[0].policy.reviewState, 'OWNER_REVIEWED');
-  assert.equal(imported.executionPolicies[0].policy.sourceSnapshot.documentedAssets[0].originalValue, 'com.example.mobile');
-  const started = await p.targetReconRun.findFirstOrThrow({ where: { programId: imported.id } });
-  assert.equal(await p.scanJobOutbox.count({ where: { scanRun: { targetReconRunId: started.id } } }), 1);
-  await page.getByRole('button', { name: 'Pause campaign', exact: true }).click();
-  await page.getByRole('button', { name: 'Resume campaign', exact: true }).waitFor();
-  await p.targetReconRun.update({ where: { id: started.id }, data: { status: 'CANCELLED', finishedAt: new Date() } });
-  const anonymous = await browser.newContext();
-  assert.equal((await anonymous.request.get(origin + '/api/programs/' + imported.id)).status(), 401);
-  await anonymous.close();
+  await new Promise(resolve => ai.listen(0, '127.0.0.1', resolve));
+  await p.aiProviderConfig.create({ data: {
+    userId: user.id, provider: 'OLLAMA', model: 'fixture-intake-model', isActive: true,
+    baseUrl: 'http://127.0.0.1:' + ai.address().port,
+  } });
+  await page.reload();
+  await page.getByLabel('Program Markdown').waitFor();
+  await capture('target-form-empty.png');
+  await page.getByLabel('Name', { exact: true }).fill('Keep this on error');
+  await page.getByLabel('Program Markdown').fill('# Deliberately invalid fixture');
+  await page.getByRole('button', { name: 'Extract from Markdown' }).click();
+  await page.getByRole('alert').filter({ hasText: 'invalid program extraction' }).waitFor();
+  assert.equal(await page.getByLabel('Name', { exact: true }).inputValue(), 'Keep this on error');
+
+  for (const key of ['hackerone', 'yeswehack']) {
+    await page.goto(origin + '/targets/new');
+    await page.getByLabel('Program Markdown').fill(documents[key]);
+    await page.getByRole('button', { name: 'Extract from Markdown' }).click();
+    await page.getByRole('status').filter({ hasText: 'Extraction ready for review' }).waitFor();
+    assert.equal(await page.getByLabel('Name', { exact: true }).inputValue(), models[key].name);
+    assert.equal(await page.getByLabel('Platform', { exact: true }).inputValue(), models[key].platform);
+    assert.equal(await page.getByLabel('Asset 1', { exact: true }).inputValue(), models[key].scopeIn[0].value);
+    assert.equal(await page.getByLabel('Asset 1 type').inputValue(), models[key].scopeIn[0].type);
+    assert.equal(await page.getByRole('textbox', { name: /^Non-qualifying vulnerabilities/ }).inputValue(), models[key].nonQualifying.join('\n'));
+    assert.equal(await page.getByLabel('Required headers').count(), 0);
+    if (key === 'hackerone') {
+      await page.getByText(/5 req\/s · 2 concurrent · header x-bug-bounty · brute force forbidden/).waitFor();
+      await capture('target-form-from-markdown.png');
+    }
+    await page.getByRole('button', { name: 'Save and start', exact: true }).click();
+    await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
+    const saved = await p.bountyProgram.findFirstOrThrow({ where: { ownerId: user.id, companyName: models[key].name },
+      include: { scopeAssets: true, executionPolicies: true, campaign: true } });
+    assert.equal(saved.scopeAssets.length, 2);
+    const policy = saved.executionPolicies[0].policy;
+    assert.equal(policy.reviewState, 'OWNER_REVIEWED');
+    assert.equal(policy.sourceSnapshot.sourceDocument, documents[key]);
+    if (key === 'hackerone') {
+      assert.deepEqual(saved.nonQualifying, ['OPEN_REDIRECT']);
+      assert.deepEqual(policy.sourceSnapshot.nonQualifyingText, ['Self-XSS without an impact on another user']);
+      assert.equal(policy.requiredHeaders[0].value, 'HackerOne-<username>');
+      const started = await p.targetReconRun.findFirstOrThrow({ where: { programId: saved.id } });
+      assert.equal(await p.scanJobOutbox.count({ where: { scanRun: { targetReconRunId: started.id } } }), 2);
+      await page.getByRole('button', { name: 'Pause campaign', exact: true }).click();
+      await page.getByRole('button', { name: 'Resume campaign', exact: true }).waitFor();
+      await p.targetReconRun.update({ where: { id: started.id }, data: { status: 'CANCELLED', finishedAt: new Date() } });
+    } else {
+      assert.deepEqual(saved.nonQualifying, ['XSS']);
+      assert.equal(policy.sourceSnapshot.documentedAssets[0].originalValue, 'com.altair.mobile');
+      assert.equal(saved.campaign.state, 'BLOCKED');
+      assert.equal(await p.targetReconRun.count({ where: { programId: saved.id } }), 0);
+    }
+  }
 
   await page.goto(origin + '/targets/new');
   await page.getByLabel('Platform', { exact: true }).selectOption('PRIVATE');
@@ -109,36 +147,24 @@ try {
   await page.getByLabel(/^Out of scope/).fill('APP.example.test');
   assert(await page.getByRole('button', { name: 'Save and start', exact: true }).isDisabled());
   await page.getByLabel(/^Out of scope/).fill('admin.example.test');
-  await page.getByLabel('Add a rule').fill('Testing is permitted only in the published maintenance window.');
-  await page.getByRole('button', { name: 'Add rule', exact: true }).click();
-  await page.getByLabel('Required User-Agent').fill(userAgent);
-  await page.getByLabel('Allow automation after review').check();
-  await capture('target-manual-entry.png');
+  await page.getByText('Configure DEFAULT_USER_AGENT.', { exact: false }).waitFor();
   await page.getByRole('button', { name: 'Save and start', exact: true }).click();
   await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
-  await page.getByRole('status').filter({ hasText: '1 rule needs a decision.' }).waitFor();
   await page.getByRole('link', { name: 'Fix policy', exact: true }).click();
-  await page.getByRole('button', { name: 'Add asset', exact: true }).click();
-  await page.getByLabel('Asset 2', { exact: true }).fill('*.example.test');
-  await page.locator('summary').filter({ hasText: /^Test accounts/ }).click();
-  const account = page.getByRole('group', { name: 'Account A', exact: true });
-  await account.getByLabel('Login URL').fill('https://login.example.test/login');
-  await account.getByRole('button', { name: 'Add login.example.test to scope', exact: true }).click();
-  assert.equal(await page.getByLabel('Asset 3', { exact: true }).inputValue(), 'login.example.test');
-  assert.equal(await account.getByRole('combobox').inputValue(), 'login.example.test');
-  await account.getByLabel('Username').fill('fixture-user');
-  await account.getByLabel('Password').fill('fixture-password');
+  await page.getByLabel('Required User-Agent').fill(userAgent);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.waitForURL(/\/targets\/[^/?]+\?saved=1$/);
-  assert.equal(await p.targetCredential.count({ where: { target: { userId: user.id, host: 'login.example.test' } } }), 1);
+  const manual = await p.bountyProgram.findFirstOrThrow({ where: { ownerId: user.id, companyName: 'Manual review fixture' } });
+  await p.targetCampaign.update({ where: { programId: manual.id }, data: { state: 'PAUSED', requestedAt: null } });
   await verifyCampaignWorkflow({ page, context, origin, p, ownerId: user.id });
   assert.deepEqual(errors, []);
-  console.log('TARGET_CREATE_REVIEW: imported review, manual review, scope conflict and wildcard account host passed');
+  console.log('TARGET_CREATE_REVIEW: both Markdown fixtures, invalid extraction, manual review and scope conflict passed');
 } catch (error) {
   console.error(logs.join('').slice(-8000));
   throw error;
 } finally {
   await browser?.close();
+  if (ai?.listening) { ai.closeAllConnections(); await new Promise(resolve => ai.close(resolve)); }
   if (web && web.exitCode === null) {
     const exited = new Promise(resolve => web.once('exit', resolve));
     web.kill('SIGTERM');

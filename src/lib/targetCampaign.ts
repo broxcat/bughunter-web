@@ -1,4 +1,4 @@
-import { MISSING_HUNTER_UA, POLICY_REVIEW_ANCHOR } from './programExecutionPolicy';
+import { POLICY_REVIEW_ANCHOR } from './programExecutionPolicy';
 
 type Stage = 'Target' | 'Recon' | 'Research' | 'Findings';
 export type StageState = 'not started' | 'running' | 'done' | 'blocked' | 'needs you' | 'failed';
@@ -45,7 +45,7 @@ export function targetCampaign(program: {
     ? { stage: 'Target', state: 'blocked', detail: ruleCount ? ruleCount + (ruleCount === 1 ? ' rule needs' : ' rules need') + ' a decision.'
       : blocker ?? 'Add at least one active Scope Asset before Recon.',
       fix: ruleCount ? root + '/settings#policy-rule-' + (program.firstRule ?? 1)
-        : blocker === MISSING_HUNTER_UA ? '/settings#hunter-identity' : deletion ? root + '/settings' : settings }
+        : deletion ? root + '/settings' : settings }
     : { stage: 'Target', state: 'done', detail: program.assetCount + (program.assetCount === 1 ? ' asset in scope' : ' assets in scope') };
 
   let recon: StageView = { stage: 'Recon', state: 'not started' };

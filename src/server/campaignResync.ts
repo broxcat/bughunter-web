@@ -3,11 +3,13 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { matchesHost } from '@/lib/bountyProgram';
 import { assetAllowsHost, assetAllowsUrl, detectScopeAsset } from '@/lib/scopeAssets';
-import { campaignSourceSchema, captureCampaignSource, pendingScopeSchema, type CampaignSource } from '@/lib/campaignSource';
+import { campaignSourceSchema, pendingScopeSchema, type CampaignSource } from '@/lib/campaignSource';
 import { storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
 import { campaignPolicyBlocker } from './campaignOrchestrator';
 import { programPolicyInclude } from './programExecutionPolicy';
-import { detectProgram, previewProgram } from './programImport/preview';
+import { detectProgram } from './programImport/preview';
+import { publicProgramText } from './programImport/publicPage';
+import { campaignSourceFromIntake, extractProgram } from './programImport/intake';
 import { lockOwnedProgram, retireScopeAssetInTransaction, settleScopeAssetRetirement } from './scopeAssets';
 
 export const CAMPAIGN_SYNC_INTERVAL = 24 * 60 * 60 * 1000;
@@ -40,8 +42,7 @@ function overlaps(exclusion: string, asset: string) {
 /** The network fetch runs outside the row lock. Persist the claim first so
  * concurrent workers and restarts cannot exceed one resync per Target per day. */
 export async function resyncCampaign(ownerId: string, programId: string, now = new Date(),
-  fetchSource: (ownerId: string, reference: { url: string; platform: CampaignSource['platform'] }) => Promise<CampaignSource> =
-    async (owner, reference) => captureCampaignSource(await previewProgram(owner, reference))) {
+  fetchSource?: (ownerId: string, reference: { url: string; platform: CampaignSource['platform'] }) => Promise<CampaignSource>) {
   const claim = await prisma.$transaction(async tx => {
     await lockOwnedProgram(tx, ownerId, programId);
     const [row, program] = await Promise.all([
@@ -53,10 +54,26 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
     const detected = program.programUrl && program.platform ? detectProgram(program.programUrl) : null;
     await tx.targetCampaign.update({ where: { programId }, data: { lastSyncAt: now } });
     if (!detected || detected.reference.platform !== program.platform) return null;
-    return detected.reference;
+    const baseline = campaignSourceSchema.safeParse(row.source).data;
+    const policy = storedExecutionPolicySchema.safeParse(program.executionPolicies[0]?.policy).data;
+    if (!fetchSource && (!policy?.sourceSnapshot.intakeVersion || !baseline || baseline.url !== detected.reference.url)) return null;
+    return { ...detected.reference, baseline };
   });
   if (!claim) return;
-  const fresh = campaignSourceSchema.parse(await fetchSource(ownerId, claim));
+  let fresh: CampaignSource;
+  if (fetchSource) fresh = campaignSourceSchema.parse(await fetchSource(ownerId, { url: claim.url, platform: claim.platform }));
+  else {
+    const page = await publicProgramText(claim.url);
+    if (page.text === claim.baseline?.rules[0]?.text) return;
+    // A public page changed. If the selected model is unavailable, block
+    // rather than continuing under a potentially outdated rule snapshot.
+    try {
+      const preview = await extractProgram(ownerId, { mode: 'url', url: claim.url });
+      fresh = campaignSourceFromIntake(preview)!;
+    } catch {
+      fresh = { ...claim.baseline!, rules: [{ text: page.text }] };
+    }
+  }
   if (fresh.platform !== claim.platform || fresh.url !== claim.url) return;
   const retired = await prisma.$transaction(async tx => {
     await lockOwnedProgram(tx, ownerId, programId);
@@ -95,8 +112,8 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
       const marker = overflow ? 'Platform exclusions exceed the policy limit. Review the imported scope before enabling automation.'
         : 'Platform rules changed. Review the current rules before enabling automation.';
       const added = rulesChanged ? fresh.rules.filter(rule => !previousKeys.has(ruleKey(rule))) : [];
-      const decisions = rulesNeedReview ? [{ text: marker, decision: null },
-        ...added.filter(rule => !ruleDecisions.some(old => ruleKey(old) === ruleKey(rule) && !old.decision)).map(rule => ({ ...rule, decision: null })),
+      const decisions = rulesNeedReview ? [{ text: marker, decision: null, ...(policy.sourceSnapshot.intakeVersion ? { origin: 'PLATFORM_RESYNC' as const } : {}) },
+        ...added.filter(rule => !ruleDecisions.some(old => ruleKey(old) === ruleKey(rule) && !old.decision)).map(rule => ({ ...rule, decision: null, ...(policy.sourceSnapshot.intakeVersion ? { origin: 'PLATFORM_RESYNC' as const } : {}) })),
         ...ruleDecisions] : ruleDecisions;
       const nextPolicy = {
         ...policy,

@@ -4,16 +4,23 @@ License: AGPL-3.0-only ([LICENSE](LICENSE))
 
 **Post-v1 release status:** v1.1.0 acceptance is blocked by [Research workspace isolation #42](docs/research-workspace-isolation.md). No v1.1.0 version/tag/release or production upgrade has been prepared. See the [Milestone 8 acceptance record](docs/releases/v1.1.0-acceptance.md). The published v1.0.0 history below is unchanged.
 
-Bug bounty workflow: **Targets → Scope → Recon → Research Plan → Research → Findings → Report**.
+Bug bounty workflow: **Targets → Recon → Research → Findings → Report**.
 
 Research records explicit tested work through [Research Coverage](docs/research-coverage.md), with shared proof identities in the [minimal Evidence Vault](docs/evidence-vault.md). The [v1.0 release audit](docs/v1-release-audit.md) records the validated release gates and accepted tooling risk.
 
 Current assessments are **black-box only**. [Historical assessment metadata](docs/assessment-modes.md) remains readable. Authenticated runtime testing remains supported.
 
-A Target is a company or bug bounty program.
-Create it at `/targets` with a company name and an explicit **Required User-Agent**.
-Platform, program URL, rewards, scope hosts and vulnerability families are optional.
-Enter `BugHunter/1.0` explicitly when the program has no special User-Agent.
+Create a Target by pasting a supported public program URL or the program Markdown.
+Extraction sends the source to the default AI provider selected in Settings. Review
+the draft scope and execution policy before saving. Paste the Markdown if the
+program is private or its scope is absent from the public HTML. Manual entry is
+available without an AI provider.
+
+The program User-Agent takes precedence over `DEFAULT_USER_AGENT`. Configure
+`HUNTER_USERNAME` to resolve identification templates at execution. Existing
+stored policies and test accounts are retained. The migration removes stored
+platform tokens. Public-page resync starts after a successful URL extraction and
+save on the Target.
 
 Open the Target to configure explicitly authorized Scope Assets: domains, subdomains,
 URLs and wildcard rules. URL scope retains its origin and path boundary. Wildcards
@@ -151,12 +158,11 @@ one blocked draft to each program without a policy and keeps existing policy
 versions and historical records intact. Repeating it does not create duplicate
 versions.
 
-Use the **Policy review needed** link in Targets to inspect the imported
-sources. Supply the program's limits, translate any free-text restrictions
-that can be enforced, and leave remaining restrictions in the blocking rules
-field. The application keeps reading the original program exclusions and checks
-parity with the structured exclusions before enabling automation. Editing a
-linked Scope's free text requires another review.
+Use the **Policy review needed** link in Targets to review the policy checks.
+Re-extract current program rules when the source changes. The application keeps
+reading the original program exclusions and checks parity with the structured
+exclusions before enabling automation. Editing a linked Scope's free text
+requires another review.
 
 ## Run
 

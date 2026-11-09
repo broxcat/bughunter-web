@@ -24,6 +24,8 @@ export function reviewedPolicy(review: TargetReview, program: Pick<Program, 'pro
       ruleDecisions: review.rules,
       documentedAssets: review.documentedAssets,
       ...(review.sourceDocument !== undefined ? { sourceDocument: review.sourceDocument } : {}),
+      ...(review.intakeVersion ? { intakeVersion: review.intakeVersion } : {}),
+      ...(review.nonQualifyingText !== undefined ? { nonQualifyingText: review.nonQualifyingText } : {}),
       legacy: { scopes, outOfScope: program.outOfScope, programRules: program.rulesOfEngagement },
     },
   };

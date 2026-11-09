@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { requiredUserAgentSchema } from '@/lib/httpPolicy.mjs';
 import { isExcluded, matchesHost } from '@/lib/bountyProgram';
 import { assetAllowsHost, assetAllowsUrl, detectScopeAsset, type AssetBoundary } from '@/lib/scopeAssets';
-import { policyDraftNeedsReview, storedExecutionPolicySchema, hunterIdentitySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, type TestCategory } from '@/lib/programExecutionPolicy';
+import { policyDraftNeedsReview, storedExecutionPolicySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME, hasHunterTemplate, hasHunterUsername, replaceHunterTemplate, identificationHeadersSchema, type TestCategory } from '@/lib/programExecutionPolicy';
 
 import { captureLegacyScopes, legacyExclusionParity, legacyScopeFingerprint, legacyScopeTargets } from './legacyPolicySource';
 
@@ -13,7 +13,6 @@ export const currentPolicySelection = { orderBy: { version: 'desc' as const }, t
 export const programPolicyInclude = {
   executionPolicies: currentPolicySelection,
   targets: legacyScopeTargets,
-  owner: { select: { hunterIdentity: { select: { userAgent: true, headers: true } } } },
 };
 export type PolicyProgram = {
   ownerId?: string;
@@ -23,16 +22,20 @@ export type PolicyProgram = {
   rulesOfEngagement?: string | null;
   executionPolicies?: readonly { version: number; policy: unknown }[];
   targets?: readonly { scope: { id: string; userId: string; scopeDetails: string | null; outOfScope: string | null; rulesOfEngagement: string | null } }[];
-  owner?: { hunterIdentity: { userAgent: string | null; headers: unknown } | null };
 };
 type ScopeRules = { scopeDetails?: string | null; outOfScope?: string | null; rulesOfEngagement?: string | null };
 
 export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules) {
   const row = program.executionPolicies?.[0];
   const policy = row && storedExecutionPolicySchema.parse(row.policy);
-  const identity = program.owner?.hunterIdentity && hunterIdentitySchema.parse(program.owner.hunterIdentity);
-  const userAgent = (policy ? policy.requiredUserAgent : program.requiredUserAgent) || identity?.userAgent || '';
-  const headers = Object.fromEntries([...(identity?.headers ?? []), ...(policy ? policy.requiredHeaders : [])].map(({ name, value }) => [name, value]));
+  const rawUserAgent = (policy ? policy.requiredUserAgent : program.requiredUserAgent) || process.env.DEFAULT_USER_AGENT || '';
+  const username = process.env.HUNTER_USERNAME;
+  const rawHeaders = policy?.requiredHeaders ?? [];
+  const usernameMissing = [rawUserAgent, ...rawHeaders.map(header => header.value)].some(hasHunterTemplate) && !hasHunterUsername(username);
+  const resolve = (value: string) => usernameMissing ? '' : replaceHunterTemplate(value, username ?? '');
+  const userAgent = resolve(rawUserAgent);
+  const resolvedHeaders = rawHeaders.map(({ name, value }) => ({ name, value: resolve(value) }));
+  const headers = usernameMissing ? {} : Object.fromEntries(resolvedHeaders.map(({ name, value }) => [name, value]));
   const sourceMismatch = policy && (policy.sourceSnapshot.rules !== (program.rulesOfEngagement?.trim() ?? '') ||
     policy.sourceSnapshot.url !== (program.programUrl ?? null));
   const captured = policy?.sourceSnapshot.legacy;
@@ -48,7 +51,9 @@ export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules)
     (policy ? policy.sourceSnapshot.unrepresentedRules.length > 0 : Boolean(program.rulesOfEngagement?.trim()));
   const blocker = policyDraftNeedsReview(policy?.reviewState) ? 'Automation is blocked until you review and save the imported policy in Target settings.'
     : unrepresented ? 'Automation is blocked by unrepresented program or scope rules. Review the execution policy in Target settings.'
-    : policy && !policy.automationAllowed ? 'Automation is disabled in Target settings.'
+    : policy && !policy.automationAllowed ? 'The program policy does not allow automation.'
+    : usernameMissing ? MISSING_HUNTER_USERNAME
+    : !identificationHeadersSchema.safeParse(resolvedHeaders).success ? 'Resolved required headers are invalid. Check the program policy and HUNTER_USERNAME.'
     : !requiredUserAgentSchema.safeParse(userAgent).success || userAgent !== userAgent.trim() || /\\[rn]/.test(userAgent) ? MISSING_HUNTER_UA
     : null;
   const exclusions = (policy ? policy.exclusions : []).map(value => detectScopeAsset(value));
