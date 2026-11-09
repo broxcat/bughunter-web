@@ -66,7 +66,10 @@ try {
   }
   if (process.argv.includes('--simplification-browser')) await run(['tests/e2e/uiSimplification.mjs'], env, process.execPath);
   if (process.argv.includes('--post-v1-browser')) await run(['tests/e2e/postV1Reliability.mjs'], env, process.execPath);
-  if (process.argv.includes('--target-browser')) await run(['tests/e2e/targetAssetWorkflow.mjs'], env, process.execPath);
+  if (process.argv.includes('--target-browser')) {
+    await run(['tests/e2e/targetCreateReview.mjs'], env, process.execPath);
+    await run(['tests/e2e/targetAssetWorkflow.mjs'], env, process.execPath);
+  }
   if (process.argv.includes("--research-browser")) await run(["tests/e2e/researchWorkflow.mjs"], env, process.execPath);
   if (process.argv.includes("--auth-browser")) await run(["tests/e2e/authHardening.mjs"], env, process.execPath);
 } catch (error) {

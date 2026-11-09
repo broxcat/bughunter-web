@@ -6,10 +6,10 @@ import { createRedisConnection } from '@/server/queue/connection';
 import { ImportUnavailable, type Reader } from './types';
 
 const sources = {
-  HACKERONE: { api: 'https://api.hackerone.com', public: 'https://hackerone.com', interval: 1250 },
-  BUGCROWD: { api: 'https://hacker-api.bugcrowd.com', public: 'https://bugcrowd.com', interval: 1100 },
-  INTIGRITI: { api: 'https://api.intigriti.com', public: 'https://app.intigriti.com', interval: 600 },
-  YESWEHACK: { api: 'https://api.yeswehack.com', public: null, interval: 3000 },
+  HACKERONE: { api: 'https://api.hackerone.com', interval: 1250 },
+  BUGCROWD: { api: 'https://hacker-api.bugcrowd.com', interval: 1100 },
+  INTIGRITI: { api: 'https://api.intigriti.com', interval: 600 },
+  YESWEHACK: { api: 'https://api.yeswehack.com', interval: 3000 },
 } as const;
 
 const TAKE = `
@@ -63,16 +63,16 @@ export function platformReader(platform: ImportPlatform, credential?: PlatformCo
   });
   redis.removeAllListeners('error');
   redis.on('error', () => {}); // Never log upstream identity or Redis credentials.
-  const read: Reader = async (path, channel = 'api') => {
-    const origin = source[channel];
+  const read: Reader = async path => {
+    const origin = source.api;
     if (!origin || !/^\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*(?:\?[A-Za-z0-9%&=]+)?$/.test(path)) throw new ImportUnavailable('manual');
     const url = new URL(path, origin);
     if (url.origin !== origin || url.username || url.password || url.hash) throw new ImportUnavailable('manual');
-    const key = 'platform-import:' + platform + ':' + channel + ':' + (channel === 'api' ? apiIdentity : 'anonymous');
+    const key = 'platform-import:' + platform + ':' + apiIdentity;
     try {
       for (;;) {
         deadline.throwIfAborted();
-        const wait = Number(await redis.eval(TAKE, 1, key, channel === 'public' ? 3000 : source.interval));
+        const wait = Number(await redis.eval(TAKE, 1, key, source.interval));
         if (wait === 0) break;
         if (!Number.isFinite(wait) || wait < 1) throw new ImportUnavailable('temporarily_unavailable');
         if (wait > 3500) throw new ImportUnavailable('rate_limited', Math.ceil(wait / 1000));
@@ -82,9 +82,8 @@ export function platformReader(platform: ImportPlatform, credential?: PlatformCo
       if (error instanceof ImportUnavailable) throw error;
       throw new ImportUnavailable('temporarily_unavailable');
     }
-    const json = channel === 'api' || platform === 'INTIGRITI';
-    const headers: Record<string, string> = { Accept: json ? 'application/json' : 'text/html' };
-    if (channel === 'api' && authHeader) headers.Authorization = authHeader;
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (authHeader) headers.Authorization = authHeader;
     const response = await fetch(url, {
       method: 'GET', headers, redirect: 'manual', cache: 'no-store',
       signal: AbortSignal.any([deadline, AbortSignal.timeout(6500)]),
@@ -96,16 +95,16 @@ export function platformReader(platform: ImportPlatform, credential?: PlatformCo
         await redis.eval(COOLDOWN, 1, key, seconds * 1000);
         throw new ImportUnavailable('rate_limited', seconds);
       }
-      if ([401, 403].includes(response.status) && channel === 'api' && credential) throw new ImportUnavailable('connection_required');
+      if ([401, 403].includes(response.status) && credential) throw new ImportUnavailable('connection_required');
       throw new ImportUnavailable(response.status >= 500 ? 'temporarily_unavailable' : 'manual');
     }
     const type = response.headers.get('Content-Type') ?? '';
-    if (!(json ? /\bjson\b/i : /^text\/html\b/i).test(type)) {
+    if (!/\bjson\b/i.test(type)) {
       await response.body?.cancel().catch(() => {});
       throw new ImportUnavailable('manual');
     }
     const text = await body(response);
-    return json ? JSON.parse(text) : text;
+    return JSON.parse(text);
   };
   return { read, close: () => redis.disconnect() };
 }

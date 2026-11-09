@@ -39,7 +39,7 @@ export async function readProgramPreview(value: string, read: Reader, platform?:
 }
 
 export async function previewProgram(userId: string, input: { url: string; platform?: ImportPlatform; visibility?: 'public' | 'private' }) {
-  const detected = input.visibility === 'private' ? null : detectProgram(input.url, input.platform);
+  const detected = detectProgram(input.url, input.platform);
   if (!detected) throw new ImportUnavailable('manual');
   const { reference } = detected;
   const row = reference.platform === 'YESWEHACK' ? null : await prisma.platformConnection.findUnique({

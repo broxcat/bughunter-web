@@ -125,19 +125,24 @@ export async function replaceScopeAsset(userId:string,programId:string,assetId:s
 export async function ensureAssetExecution(userId: string, programId: string, assetId: string) {
   return prisma.$transaction(async tx => {
     const program = await lockOwnedProgram(tx, userId, programId);
-    const asset = await tx.scopeAsset.findFirst({ where: { id: assetId, programId, active: true }, include: { executionTarget: true } });
-    if (!asset) throw new ResearchError('Asset not found', 404);
-    const detected = detectScopeAsset(asset.normalizedValue);
-    if (!scopeAssetExecutable(asset)) throw new ResearchError('This format is documented but has no authorized Recon/Research executor yet', 422);
-    const host = detected.hostname ?? asset.normalizedValue;
-    if (asset.format !== 'WILDCARD_DOMAIN' && isExcluded(host, program.outOfScope)) throw new ResearchError('Asset is excluded by program policy', 403);
-    if (asset.executionTarget) return { asset, target: asset.executionTarget };
-    const scope = await tx.scope.create({ data: { userId, hostPattern: host, status: 'APPROVED', programName: program.companyName } });
-    // Dedicated execution identities avoid merging two URL/path assets on one host.
-    const target = await tx.target.create({ data: { userId, programId, scopeId: scope.id, scopeAssetId: assetId, host,
-      scheme: asset.format === 'URL' ? new URL(asset.normalizedValue).protocol.slice(0, -1) : 'https', contextOnly: false, active: false } });
-    return { asset, target };
+    return ensureAssetExecutionInTransaction(tx, userId, program, assetId);
   });
+}
+
+export async function ensureAssetExecutionInTransaction(tx: Prisma.TransactionClient, userId: string, program: Prisma.BountyProgramGetPayload<object>, assetId: string) {
+  const programId = program.id;
+  const asset = await tx.scopeAsset.findFirst({ where: { id: assetId, programId, active: true }, include: { executionTarget: true } });
+  if (!asset) throw new ResearchError('Asset not found', 404);
+  const detected = detectScopeAsset(asset.normalizedValue);
+  if (!scopeAssetExecutable(asset)) throw new ResearchError('This format is documented but has no authorized Recon/Research executor yet', 422);
+  const host = detected.hostname ?? asset.normalizedValue;
+  if (asset.format !== 'WILDCARD_DOMAIN' && isExcluded(host, program.outOfScope)) throw new ResearchError('Asset is excluded by program policy', 403);
+  if (asset.executionTarget) return { asset, target: asset.executionTarget };
+  const scope = await tx.scope.create({ data: { userId, hostPattern: host, status: 'APPROVED', programName: program.companyName } });
+  // Dedicated execution identities avoid merging two URL/path assets on one host.
+  const target = await tx.target.create({ data: { userId, programId, scopeId: scope.id, scopeAssetId: assetId, host,
+    scheme: asset.format === 'URL' ? new URL(asset.normalizedValue).protocol.slice(0, -1) : 'https', contextOnly: false, active: false } });
+  return { asset, target };
 }
 export function assetSnapshot(asset: { id: string; programId: string; normalizedValue: string; originalValue: string; format: string; formatSource?:string; type: string; assetValue: string }) {
   return { schemaVersion: 1, assetId: asset.id, programId: asset.programId, originalValue: asset.originalValue, normalizedValue: asset.normalizedValue, format: asset.format, formatSource:asset.formatSource??'AUTO', type: asset.type, assetValue: asset.assetValue };

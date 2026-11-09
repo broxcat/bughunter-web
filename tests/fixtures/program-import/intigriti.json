@@ -1,11 +1,5 @@
 {
   "url": "https://app.intigriti.com/programs/example/example-program/detail",
-  "visibility": {
-    "programId": "b77c14dc-3859-4c6b-bf34-6e7da195bced",
-    "companyHandle": "example",
-    "handle": "example-program",
-    "confidentialityLevel": 4
-  },
   "program": {
     "id": "b77c14dc-3859-4c6b-bf34-6e7da195bced",
     "handle": "example-program",

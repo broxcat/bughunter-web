@@ -41,18 +41,41 @@ try{
    const text=await page.locator('main').innerText();if(name==='recon'&&phase!=='before')verify(text.includes(asset.normalizedValue),'Recon inventory includes an asset or host');density.push({name,theme,width,words:text.split(/\s+/).length,controls:await page.locator('main :is(button,input,select,textarea,a):visible').count()});
    await page.screenshot({path:`${root}/${name}-${theme}-${width}.png`,fullPage:true});
   }
-  await page.goto(origin+'/targets');verify(await page.getByRole('navigation',{name:'Primary navigation'}).getByRole('link').allTextContents().then(v=>JSON.stringify(v)===JSON.stringify(['Targets','Findings','Settings'])),'primary navigation is reduced');await page.getByRole('button',{name:'Create target',exact:true}).click();await page.screenshot({path:`${root}/create-${theme}-${width}.png`,fullPage:true});
-  if(phase==='before')continue;
-  const dialog=page.getByRole('dialog',{name:'Create target',exact:true});await dialog.waitFor();verify(await dialog.getByRole('textbox').count()===2,'only name and optional URL text fields');verify(await dialog.getByRole('combobox').count()===1,'only platform selector');verify(await dialog.getByLabel('Name',{exact:true}).evaluate(e=>e===document.activeElement),'name focused');
-  await dialog.getByRole('button',{name:'Create target',exact:true}).focus();await page.keyboard.press('Enter');verify(await dialog.getByLabel('Name',{exact:true}).evaluate(e=>!e.validity.valid&&e===document.activeElement),'required validation focuses name');
-  await page.keyboard.type('Keyboard '+theme+' '+width);await page.keyboard.press('Tab');await page.keyboard.press('h');await page.keyboard.press('Tab');await page.keyboard.type('https://example.test/program');await page.keyboard.press('Tab');await page.keyboard.press('Tab');await page.keyboard.press('Enter');
-  await page.waitForURL(/\/scopes\?target=/);const createdId=new URL(page.url()).searchParams.get('target');verify(Boolean(createdId),'post-create Scope destination');const created=await p.bountyProgram.findUniqueOrThrow({where:{id:createdId}});verify(created.requiredUserAgent==='','no synthetic User-Agent is injected on creation');verify(await p.scopeAsset.count({where:{programId:createdId}})===0,'no authorization on creation');
-  await page.getByRole('button',{name:'Add asset',exact:true}).click();await page.getByLabel('Asset',{exact:true}).fill('new.example.test');await page.getByRole('button',{name:'Save asset',exact:true}).click();await page.getByRole('link',{name:'new.example.test',exact:true}).waitFor();verify(await p.scopeAsset.count({where:{programId:createdId,active:true}})===1,'Scope configured after creation');
+  await page.goto(origin+'/targets');
+  verify(await page.getByRole('navigation',{name:'Primary navigation'}).getByRole('link').allTextContents().then(v=>JSON.stringify(v)===JSON.stringify(['Targets','Findings','Settings'])),'primary navigation is reduced');
+  await page.getByRole(phase==='before'?'button':'link',{name:'Create target',exact:true}).click();
+  if(phase==='before'){await page.screenshot({path:root+'/create-'+theme+'-'+width+'.png',fullPage:true});continue;}
+  await page.getByRole('heading',{name:'Create target',exact:true}).waitFor();
+  verify(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'new target form fits the viewport');
+  await page.screenshot({path:root+'/create-'+theme+'-'+width+'.png',fullPage:true});
+  await page.getByRole('button',{name:'Save',exact:true}).click();
+  verify(await page.getByLabel('Name',{exact:true}).evaluate(e=>!e.validity.valid&&e===document.activeElement),'required validation focuses name');
+  await page.getByLabel('Name',{exact:true}).fill('Keyboard '+theme+' '+width);
+  await page.getByRole('button',{name:'Add asset',exact:true}).click();
+  await page.getByLabel('Asset 1',{exact:true}).fill('new.example.test');
+  await page.getByRole('button',{name:'Save',exact:true}).click();
+  await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
+  const createdId=new URL(page.url()).pathname.split('/').at(-1);
+  const created=await p.bountyProgram.findUniqueOrThrow({where:{id:createdId}});
+  verify(created.requiredUserAgent==='','no synthetic User-Agent is injected on creation');
+  verify(await p.scopeAsset.count({where:{programId:createdId,active:true}})===1,'scope is saved with the target');
  }
  if(phase!=='before'){
-  await page.goto(origin+'/targets');verify(await page.getByRole('navigation',{name:'Primary navigation'}).getByRole('link').allTextContents().then(v=>JSON.stringify(v)===JSON.stringify(['Targets','Findings','Settings'])),'primary navigation is reduced');await page.getByRole('button',{name:'Create target',exact:true}).click();await page.getByLabel('Name',{exact:true}).fill('Name only fixture');await page.keyboard.press('Enter');await page.waitForURL(/\/scopes\?target=/);const nameOnly=await p.bountyProgram.findUniqueOrThrow({where:{id:new URL(page.url()).searchParams.get('target')}});verify(nameOnly.platform===null&&nameOnly.programUrl===null,'platform and URL are optional');
-  await page.goto(origin+'/targets');const opener=page.getByRole('button',{name:'Create target',exact:true});await opener.click();await page.keyboard.press('Escape');verify(await opener.evaluate(e=>e===document.activeElement),'dialog restores opener');
-  await opener.click();await page.getByLabel('Name',{exact:true}).fill('API error fixture');await page.route('**/api/programs',route=>route.request().method()==='POST'?route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:'Fixture validation error'})}):route.continue());await page.getByRole('dialog').getByRole('button',{name:'Create target',exact:true}).click();await page.getByRole('alert').filter({hasText:'Fixture validation error'}).waitFor();await page.unroute('**/api/programs');await page.keyboard.press('Escape');checks++;
+  await page.goto(origin+'/targets');
+  await page.getByRole('link',{name:'Create target',exact:true}).click();
+  await page.getByLabel('Name',{exact:true}).fill('Name only fixture');
+  await page.getByRole('button',{name:'Save',exact:true}).click();
+  await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
+  const nameOnly=await p.bountyProgram.findUniqueOrThrow({where:{id:new URL(page.url()).pathname.split('/').at(-1)}});
+  verify(nameOnly.platform===null&&nameOnly.programUrl===null,'platform and URL are optional');
+  await page.goto(origin+'/targets/new');
+  await page.getByLabel('Name',{exact:true}).fill('API error fixture');
+  await page.route('**/api/programs',route=>route.request().method()==='POST'?route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:'Fixture validation error'})}):route.continue());
+  await page.getByRole('button',{name:'Save',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'Fixture validation error'}).waitFor();
+  await page.unroute('**/api/programs');
+  await page.getByRole('link',{name:'Cancel',exact:true}).click();
+  await page.waitForURL(origin+'/targets');checks++;
   await page.goto(origin+'/targets/'+program.id);verify(!(await page.locator('main').innerText()).includes('Scope assets'),'Target home does not duplicate Scope');
   await page.goto(origin+'/scopes?target='+program.id);await page.getByRole('button',{name:'View scope.md',exact:true}).click();await page.getByRole('dialog').getByLabel('Current Target scope document').waitFor();await page.keyboard.press('Escape');checks++;
   await page.goto(origin+'/recon/runs/'+parent.id);const raw=page.locator('details').filter({has:page.locator('summary',{hasText:'Raw execution output'})});verify(await raw.getAttribute('open')===null,'raw output collapsed');await raw.locator('summary').focus();await page.keyboard.press('Enter');await raw.getByText('Fixture raw output',{exact:false}).waitFor();checks++;

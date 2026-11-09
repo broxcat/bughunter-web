@@ -35,13 +35,13 @@ export async function auditProgramCollections({prisma,owner,origin,context,page}
  }finally{release();await context.unroute(pattern,intercept);}
  const contrast=(a,b)=>{const lum=s=>{const rgb=s.match(/[\d.]+/g).slice(0,3).map(Number).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};const x=lum(a),y=lum(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
  for(const theme of ['light','dark']){
-  await page.evaluate(t=>localStorage.setItem('theme',t),theme);await page.goto(origin+'/targets');await page.getByRole('status').filter({hasText:/^Page /}).waitFor();await page.getByRole('button',{name:'Create target',exact:true}).click();
-  const input=page.getByLabel('Name',{exact:true});await input.waitFor();
+  await page.evaluate(t=>localStorage.setItem('theme',t),theme);await page.goto(origin+'/targets');await page.getByRole('status').filter({hasText:/^Page /}).waitFor();await page.getByRole('link',{name:'Create target',exact:true}).click();
+  const input=page.getByLabel('Name',{exact:true});await input.waitFor();await input.focus();
   const colors=await input.evaluate(e=>{const s=getComputedStyle(e);return{fg:s.color,bg:s.backgroundColor,border:s.borderTopColor,ring:s.outlineColor};});
   assert(contrast(colors.fg,colors.bg)>=4.5,theme+' input text contrast');
   assert(contrast(colors.border,colors.bg)>=3,theme+' control boundary contrast: '+JSON.stringify(colors));
   assert(contrast(colors.ring,colors.bg)>=3,theme+' focus ring contrast');
-  const form=page.locator('form').filter({has:input}),submit=form.getByRole('button',{name:'Create target',exact:true});
+  const form=page.locator('form').filter({has:input}),submit=form.getByRole('button',{name:'Save',exact:true});
   const buttonColors=await submit.evaluate(e=>{const s=getComputedStyle(e);return{fg:s.color,bg:s.backgroundColor};});assert(contrast(buttonColors.fg,buttonColors.bg)>=4.5,theme+' button text contrast');
   await submit.click();
   assert.equal(await form.evaluate(e=>e.checkValidity()),false);assert(await input.evaluate(e=>e.required&&Boolean(e.validationMessage)));checks++;

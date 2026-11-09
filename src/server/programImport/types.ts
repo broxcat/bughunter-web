@@ -2,7 +2,7 @@
 import type { ImportPlatform } from '@/lib/platformConnections';
 import type { ProgramPreview, ProgramReference, RawAsset, Rule } from './normalize';
 
-export type Reader = (path: string, source?: 'api' | 'public') => Promise<unknown>;
+export type Reader = (path: string) => Promise<unknown>;
 export type ImportedProgram = { name: string; id: string; assets?: RawAsset[]; rules?: Rule[] };
 
 export interface ProgramImporter {
@@ -21,12 +21,6 @@ export class ImportUnavailable extends Error {
 }
 
 export const handlePattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
-export const publicProgram = (value: unknown): void => {
+export const requireAvailable = (value: unknown): void => {
   if (!value) throw new ImportUnavailable('manual');
 };
-
-export function decodeHtmlAttribute(value: string) {
-  return value.replace(/&(?:quot|amp|lt|gt|apos|#39);/g, entity => ({
-    '&quot;': '"', '&amp;': '&', '&lt;': '<', '&gt;': '>', '&apos;': "'", '&#39;': "'",
-  })[entity]!);
-}

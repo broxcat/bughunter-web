@@ -24,12 +24,17 @@ try {
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] }); const context = await browser.newContext(); page = await context.newPage();
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(origin + '/login'); await page.getByLabel('Email', { exact: true }).fill(user.email); await page.getByLabel('Password', { exact: true }).fill(password); await page.getByRole('button', { name: 'Sign in', exact: true }).click(); await page.waitForURL(origin + '/targets');
-  await page.getByRole('button', { name: 'Create target', exact: true }).click(); await page.getByLabel('Name', { exact: true }).fill('Asset workflow fixture'); await page.getByRole('dialog').getByRole('button', { name: 'Create target', exact: true }).click(); await page.waitForURL(/\/scopes\?target=/);
-  const id = new URL(page.url()).searchParams.get('target');
+  await page.getByRole('link', { name: 'Create target', exact: true }).click();
+  await page.getByLabel('Name', { exact: true }).fill('Asset workflow fixture');
+  await page.getByLabel('Required User-Agent').fill('AssetBrowser/1');
+  await page.getByLabel('Allow automation after review').check();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
+  const id = new URL(page.url()).pathname.split('/').at(-1);
   assert(!/White-box|Assessment mode/.test(await page.locator('body').innerText()));
   assert.equal((await p.bountyProgram.findUniqueOrThrow({where:{id}})).assessmentMode,'BLACK_BOX');
   await page.goto(origin+'/targets/'+id+'/settings');
-  await page.getByRole('button',{name:'Save Target',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Save',exact:true}).waitFor();
   assert(!/White-box|Assessment mode|Authorized sources/.test(await page.locator('body').innerText()));
   await page.goto(origin+'/scopes?target='+id);
 

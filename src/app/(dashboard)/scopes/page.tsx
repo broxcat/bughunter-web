@@ -6,7 +6,7 @@ import { assetTypeLabel,type AssetType,type AssetValue } from '@/lib/scopeAssets
 import CollectionPager from '@/components/CollectionPager';
 import { paginationInput } from '@/lib/pagination';
 import ProgramWorkflow from '@/components/ProgramWorkflow';
-import type {ProgramData} from '@/components/ProgramForm';
+import type {ProgramData} from '@/lib/targetFormData';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 type Program={id:string;companyName:string};
