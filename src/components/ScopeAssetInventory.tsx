@@ -6,42 +6,39 @@ import {useRouter,useSearchParams} from 'next/navigation';
 import Link from 'next/link';
 import {Suspense,useCallback,useEffect,useState} from 'react';
 import type {ProgramData} from '@/lib/targetFormData';
-import { POLICY_REVIEW_ANCHOR } from '@/lib/programExecutionPolicy';
 import {ASSET_FORMATS,ASSET_TYPES,ASSET_VALUES,assetTypeLabel,assetValueLabel,detectScopeAsset,type AssetType,type AssetValue} from '@/lib/scopeAssets';
 import {Button} from './ui/Button';
 import ScopeAssetActions,{ScopeAssetActionDialog,type ManagedScopeAsset,type ScopeActionResult} from './ScopeAssetActions';
 type Asset=ManagedScopeAsset&{formatSource:string;reconStatus:string;scanRuns:{id:string;_count:{artifacts:number}}[]};
-type ReconState={latest:{id:string;status:string;outcome:string|null}|null;needsRecon:boolean;researchReady:boolean;findingsConfirmed:number;researchStarted:number};
 const format=(value:string)=>({URL:'URL',WILDCARD_DOMAIN:'Wildcard',SUBDOMAIN:'Subdomain',DOMAIN:'Domain',HOSTNAME:'Hostname',IP:'IP',CIDR:'CIDR'}[value]??value);
 const label=(v:string)=>v.toLowerCase().replaceAll('_',' ').replace(/^./,c=>c.toUpperCase());
-export default function ProgramWorkflow(props:{program:Pick<ProgramData,'id'|'deletingAt'|'outOfScope'>;view?:'home'|'scope'}){return <Suspense fallback={<p role="status">Loading scope…</p>}><WorkflowCollection {...props}/></Suspense>;}
-function WorkflowCollection({program,view='home'}:{program:Pick<ProgramData,'id'|'deletingAt'|'outOfScope'>;view?:'home'|'scope'}) {
+export default function ScopeAssetInventory(props:{program:Pick<ProgramData,'id'|'deletingAt'|'outOfScope'>}){return <Suspense fallback={<p role="status">Loading scope…</p>}><ScopeAssetCollection {...props}/></Suspense>;}
+function ScopeAssetCollection({program}:{program:Pick<ProgramData,'id'|'deletingAt'|'outOfScope'>}) {
   const router=useRouter(),params=useSearchParams(),query=params.toString(),input=paginationInput(new URLSearchParams({page:params.get('assetPage')??'1',pageSize:params.get('pageSize')??'25'}),false);
   const [pages,setPages]=useState<{page:number;pages:number;total:number}|null>(null);
-  const [assets,setAssets]=useState<Asset[]>([]),[state,setState]=useState<ReconState>({latest:null,needsRecon:true,researchReady:false,findingsConfirmed:0,researchStarted:0}),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [assets,setAssets]=useState<Asset[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [notice,setNotice]=useState<ScopeActionResult|null>(null);
   const [formatChange,setFormatChange]=useState<{asset:Asset;format:string}|null>(null);
   const [adding,setAdding]=useState(false),[value,setValue]=useState(''),[type,setType]=useState<AssetType|''>(''),[importance,setImportance]=useState<AssetValue>('MEDIUM');
-  const path=view==='scope'?'/scopes':'/targets/'+program.id;
+  const path='/scopes';
   const refresh=useCallback(async(signal?:AbortSignal)=>{
-    const [a,b]=await Promise.all([fetch(`/api/programs/${program.id}/assets?page=${input.page}&pageSize=${input.pageSize}&active=1`,{cache:'no-store',signal}),fetch(`/api/programs/${program.id}/recon`,{cache:'no-store',signal})]);
-    if(!a.ok||!b.ok)throw new Error('Unable to load Target workflow');const [assets,state]=await Promise.all([a.json(),b.json()]);if(signal?.aborted)return;
+    const response=await fetch(`/api/programs/${program.id}/assets?page=${input.page}&pageSize=${input.pageSize}&active=1`,{cache:'no-store',signal});
+    if(!response.ok)throw new Error('Unable to load scope assets');const assets=await response.json();if(signal?.aborted)return;
     const q=new URLSearchParams(query);if(q.has('assetPage')&&q.get('assetPage')!==String(assets.page)){q.set('assetPage',String(assets.page));router.replace(path+'?'+q);return;}
-    setAssets(assets.items);setPages(assets);setState(state);setError('');
+    setAssets(assets.items);setPages(assets);setError('');
   },[program.id,input.page,input.pageSize,query,router,path]);
-  useEffect(()=>{const controller=new AbortController();const load=()=>{if(!controller.signal.aborted)void refresh(controller.signal).catch(e=>{if(!controller.signal.aborted)setError(e.message);});};load();const timer=setInterval(load,5000);return()=>{controller.abort();clearInterval(timer);};},[refresh]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.resolve().then(() => { if (!controller.signal.aborted) return refresh(controller.signal); })
+      .catch(error => { if (!controller.signal.aborted) setError(error.message); });
+    return () => controller.abort();
+  }, [refresh]);
   const act=async(url:string,method:string,body:unknown)=>{setBusy(true);setError('');setNotice(null);try{const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw new Error((await r.json()).error??'Action unavailable');await refresh();setNotice({message:'Changes saved.'});return true;}catch(e){setError((e as Error).message);return false;}finally{setBusy(false);}};
   const changed=async(result:ScopeActionResult)=>{setNotice(result);try{await refresh();}catch(e){setError((e as Error).message);}};
-  const recon=state.latest?label(state.latest.outcome??state.latest.status):'Not run';
   let preview:ReturnType<typeof detectScopeAsset>|undefined;try{preview=detectScopeAsset(value);}catch{}
   return <div className="space-y-6">
-    <nav aria-label="Target workflow"><ol className="target-workflow border-y border-border py-3">{[
-      ...(view==='scope'?[['Scope',pages?`${pages.total} assets`:'',`/scopes?target=${program.id}`]]:[]),['Recon',recon,`/recon?program=${program.id}`],['Research',state.researchStarted?'Started':state.researchReady?'Ready':'Pending',`/research?program=${program.id}`],['Findings',String(state.findingsConfirmed??0),`/targets/${program.id}/findings`],['Report','',`/targets/${program.id}/report`],
-    ].map(([name,status,href])=><li key={name}><Link aria-current={view==='scope'&&name==='Scope'?'page':undefined} className="block font-medium" href={href}>{name}</Link><p className="text-xs text-muted">{status}</p></li>)}</ol></nav>
     {notice&&<p role="status">{notice.message}{notice.replacementId&&<Link className="ml-2 text-brand underline" href={'/scopes/'+notice.replacementId}>Open replacement</Link>}</p>}
     {error&&<p role="alert">{error}</p>}
-    {view==='home'&&<section className="space-y-3 py-3"><Link className="ui-btn" data-variant="primary" href={pages?.total?`/recon?program=${program.id}`:`/targets/${program.id}/settings#${POLICY_REVIEW_ANCHOR}`}>{pages?.total?'Open recon':'Add scope'}</Link>{state.latest&&<Link className="ml-4 text-sm text-muted underline" href={`/recon/runs/${state.latest.id}`}>Latest recon run</Link>}</section>}
-    {view==='scope'&&<>
       <section className="space-y-4"><div className="flex flex-wrap items-center gap-3"><h2 className="mr-auto text-lg font-semibold">In scope</h2><Button size="sm" disabled={busy||!!program.deletingAt} onClick={()=>setAdding(!adding)}>{adding?'Cancel':'Add asset'}</Button></div>
         {adding&&<form className="scope-add grid gap-3 sm:grid-cols-2" onSubmit={e=>{e.preventDefault();void act(`/api/programs/${program.id}/assets`,'POST',{value,...(type?{type}:{}),assetValue:importance}).then(ok=>{if(ok){setAdding(false);setValue('');setType('');}});}}>
           <label className="block text-sm sm:col-span-2">Asset<input autoFocus className="mt-1 block w-full" value={value} onChange={e=>setValue(e.target.value)} placeholder="*.example.com or https://example.com/app" required maxLength={2048}/>{preview&&<span className="text-xs text-muted">{format(preview.format)} · {assetTypeLabel[preview.inferredType]}</span>}</label>
@@ -57,7 +54,6 @@ function WorkflowCollection({program,view='home'}:{program:Pick<ProgramData,'id'
       </section>
       <section className="space-y-3 border-t border-border pt-5"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">Out of scope</h2><Link className="text-sm text-muted underline" href={`/targets/${program.id}/settings#out-of-scope`}>Edit exclusions</Link></div>{program.outOfScope.length?<ul className="space-y-1 text-sm">{program.outOfScope.map(host=><li className="break-all" key={host}>{host}</li>)}</ul>:<p className="text-sm text-muted">No exclusions recorded.</p>}</section>
       <div className="flex flex-wrap items-center gap-4 border-t border-border pt-4"><CurrentTargetScope programId={program.id}/><Link className="text-sm text-muted underline" href={`/scopes?inventory=1&target=${program.id}`}>All assets and history</Link></div>
-    </>}
     {formatChange&&<ScopeAssetActionDialog asset={formatChange.asset} programId={program.id} mode="replace" initialFormat={formatChange.format} onClose={()=>setFormatChange(null)} onChanged={changed}/>}
   </div>;
 }

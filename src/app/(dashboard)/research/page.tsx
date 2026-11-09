@@ -5,18 +5,33 @@ import ResearchCoverage from '@/components/ResearchCoverage';
 import DeleteResourceButton from '@/components/DeleteResourceButton';
 import ResearchPlan from '@/components/ResearchPlan';
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { loadTargetCampaign } from '@/server/targetCampaign';
+import { CampaignState } from '@/components/TargetCampaignView';
 
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { assertResearchTarget, researchAuthorizationMatches, researchTargetSelect } from '@/server/research/workspace';
 import { ownedResearch } from '@/server/research/sessions';
-export default async function ResearchPage({searchParams}:{searchParams:Promise<{program?:string;page?:string;pageSize?:string;q?:string;historyPage?:string}>}) {
+export default async function ResearchPage({searchParams}:{searchParams:Promise<{program?:string;page?:string;pageSize?:string;q?:string;historyPage?:string;view?:string}>}) {
   const search=await searchParams, filter=search.program;
   const query=new URLSearchParams(Object.entries(search).filter((e):e is [string,string]=>typeof e[1]==='string'));
   const input=paginationInput(query,false);
   const historyInput=paginationInput(new URLSearchParams({page:search.historyPage??'1',pageSize:String(input.pageSize)}),false);
   const session=await auth();if(!session?.user?.id)return null;
   const userId=session.user.id;
+  if (filter && search.view === 'campaign') {
+    const campaign = await loadTargetCampaign(userId, filter);
+    if (!campaign) notFound();
+    const stage = campaign.view.stages[2];
+    return <div className="max-w-3xl space-y-5">
+      <Link href={'/targets/' + filter} className="text-sm text-brand">← {campaign.program.companyName}</Link>
+      <div className="flex flex-wrap items-center gap-3"><h1 className="text-2xl font-semibold">Research</h1><CampaignState state={stage.state} /></div>
+      {stage.detail && <p className="text-sm text-muted">{stage.detail}</p>}
+      <p>Choose an authorized workspace to review the Recon results and continue Research.</p>
+      <Link className="text-brand underline" href={'/research?program=' + filter + '&view=details'} prefetch={false}>View details</Link>
+    </div>;
+  }
   const result=await prisma.$transaction(async tx=>{
     const where={userId,...(filter?{programId:filter}:{}),OR:[{active:true},{scopeAsset:{active:true}}],program:{ownerId:userId},...(input.q?{host:{contains:input.q,mode:'insensitive' as const}}:{})};
     const bounds=paginationBounds(input,await tx.target.count({where}));
@@ -35,7 +50,7 @@ export default async function ResearchPage({searchParams}:{searchParams:Promise<
   const available=result.targets.filter(t=>{try{if(t.consoleDeletingAt)return true;assertResearchTarget(t,userId);return true;}catch{return false;}}),history=result.history;
   return <div className="space-y-6"><h1 className="text-2xl font-semibold">Research</h1>
     <p className="text-sm text-muted">Review coverage, then open a console.</p>
-    <form action="/research" className="flex flex-wrap gap-3"><label>Search hosts<input name="q" defaultValue={input.q} maxLength={200} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="program" value={filter??''}/><input type="hidden" name="pageSize" value={input.pageSize}/><button className="ui-btn" type="submit">Search</button></form>
+    <form action="/research" className="flex flex-wrap gap-3"><label>Search hosts<input name="q" defaultValue={input.q} maxLength={200} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="program" value={filter??''}/>{filter&&<input type="hidden" name="view" value="details"/>}<input type="hidden" name="pageSize" value={input.pageSize}/><button className="ui-btn" type="submit">Search</button></form>
     <CollectionPager path="/research" query={query.toString()} {...result.bounds} label="Research hosts pages" noun="owned host candidates"/>
 
     {!available.length && <p>No authorized consoles on this page. Configure an authorized asset in <Link href="/scopes" className="text-brand">Scope</Link>.</p>}

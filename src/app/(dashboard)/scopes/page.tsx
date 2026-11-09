@@ -5,7 +5,7 @@ import { Suspense,useEffect,useState } from 'react';
 import { assetTypeLabel,type AssetType,type AssetValue } from '@/lib/scopeAssets';
 import CollectionPager from '@/components/CollectionPager';
 import { paginationInput } from '@/lib/pagination';
-import ProgramWorkflow from '@/components/ProgramWorkflow';
+import ScopeAssetInventory from '@/components/ScopeAssetInventory';
 import type {ProgramData} from '@/lib/targetFormData';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -20,7 +20,7 @@ function ScopeCollection(){
 function TargetScope({id}:{id:string}){
   const [program,setProgram]=useState<ProgramData|null>(null),[error,setError]=useState('');
   useEffect(()=>{const c=new AbortController();fetch('/api/programs/'+id,{signal:c.signal}).then(async r=>{if(!r.ok)throw new Error('Scope unavailable');setProgram(await r.json());}).catch(e=>{if(!c.signal.aborted)setError(e.message);});return()=>c.abort();},[id]);
-  return <div className="space-y-5"><Link className="text-sm text-muted" href={'/targets/'+id}>← Target</Link><div className="flex flex-wrap items-center justify-between gap-3"><h1>Scope</h1><Link className="text-sm text-muted underline" href={'/targets/'+id+'/settings'}>Target settings</Link></div>{program&&<p className="text-sm font-medium">{program.companyName}</p>}{error&&<p role="alert">{error}</p>}{program?<ProgramWorkflow program={program} view="scope"/>:!error&&<p role="status">Loading scope…</p>}</div>;
+  return <div className="space-y-5"><Link className="text-sm text-muted" href={'/targets/'+id}>← Target</Link><div className="flex flex-wrap items-center justify-between gap-3"><h1>Scope</h1><Link className="text-sm text-muted underline" href={'/targets/'+id+'/settings'}>Target settings</Link></div>{program&&<p className="text-sm font-medium">{program.companyName}</p>}{error&&<p role="alert">{error}</p>}{program?<ScopeAssetInventory program={program}/>:!error&&<p role="status">Loading scope…</p>}</div>;
 }
 function ScopeInventory(){
   const router=useRouter(),params=useSearchParams(),query=params.toString(),target=params.get('target')??'';

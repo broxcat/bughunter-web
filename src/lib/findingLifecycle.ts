@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import { findingReviewStatus } from './evidenceReview';
 export const LIFECYCLE_STATES=['CANDIDATE','VALIDATING','VALIDATED','REJECTED','READY_TO_SUBMIT','SUBMITTED','TRIAGED','ACCEPTED','DUPLICATE','INFORMATIVE','NOT_APPLICABLE','RESOLVED','RETEST_REQUIRED','CLOSED'] as const;
 export type Lifecycle=typeof LIFECYCLE_STATES[number];
 export const RETEST_OUTCOMES=['FIX_CONFIRMED','STILL_REPRODUCIBLE','PARTIALLY_FIXED','CANNOT_RETEST'] as const;
@@ -13,4 +14,8 @@ const transitions:Record<Lifecycle,readonly Lifecycle[]>={
 export function lifecycleNext(current:Lifecycle|null):readonly Lifecycle[]{return current?transitions[current]:['CANDIDATE','VALIDATING','REJECTED'];}
 /** Historical confirmation remains exportable, with its lifecycle explicitly uncaptured. */
 export function lifecycleReportEligible(state:string|null|undefined){return state==null||['VALIDATED','READY_TO_SUBMIT','SUBMITTED','TRIAGED','ACCEPTED','RESOLVED','RETEST_REQUIRED','CLOSED'].includes(state);}
+export function findingAvailableForReport(finding: Parameters<typeof findingReviewStatus>[0] & { lifecycle?: string | null; lifecycleEvents?: readonly unknown[] }) {
+  return findingReviewStatus(finding) === 'CONFIRMED' && lifecycleReportEligible(finding.lifecycle) &&
+    (finding.lifecycle == null || Boolean(finding.lifecycleEvents?.length));
+}
 export type LifecycleView={state:Lifecycle|null;revision:number;submission:z.infer<typeof submissionSchema>|null;next:readonly Lifecycle[];events:Array<{id:string;revision:number;previous:Lifecycle|null;state:Lifecycle;reason:string;actorId:string;createdAt:string;validation:unknown;submission:unknown}>;retests:Array<{id:string;requestedBy:string;reason:string;createdAt:string;originalEvidenceIds:string[];result:null|{outcome:typeof RETEST_OUTCOMES[number];actorId:string;sessionReferenceId:string|null;performedAt:string;conclusion:string;evidenceIds:string[]}}>};
