@@ -6,13 +6,13 @@ import { describe, expect, it } from 'vitest';
 
 const worker = `
 const { acquireProgramTraffic, releaseProgramTraffic } = require('./src/server/programTraffic.ts');
-const { setTimeout } = require('node:timers/promises');
+const { setTimeout: delay } = require('node:timers/promises');
 process.send('ready');
 process.on('message', async ({ programId, limits, hold }) => {
   try {
     const lease = await acquireProgramTraffic(programId, limits, AbortSignal.timeout(5000));
     const start = Date.now();
-    await setTimeout(hold);
+    await delay(hold);
     const end = Date.now();
     await releaseProgramTraffic(programId, lease);
     process.send({ start, end }, () => process.exit(0));

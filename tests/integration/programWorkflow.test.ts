@@ -101,7 +101,7 @@ let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/progr
     release();await pending;expect(await p.target.count({where:{programId,active:true}})).toBe(2);
   });
   it('preserves legacy wildcard identities alongside asset-based Target Recon',async()=>{
-    await p.bountyProgram.update({where:{id:programId},data:{scopeRules:[]}});
+    await p.bountyProgram.update({where:{id:programId},data:{scopeRules:[],rulesOfEngagement:null}});
     const {mutateHost}=await import('@/server/programHosts');
     const wildcard=await mutateHost(userId,programId,'ADD',{host:'*.example.test'});
     expect((await p.bountyProgram.findUniqueOrThrow({where:{id:programId}})).scopeRules).toEqual(['*.example.test']);
@@ -194,6 +194,7 @@ let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/progr
     await Promise.all([remove(userId,programId),remove(userId,programId)]);expect(await p.bountyProgram.findUnique({where:{id:programId}})).toBeNull();
   });
   it('waits for a running worker to confirm resource cleanup before deleting scan rows',async()=>{
+    await p.bountyProgram.update({where:{id:programId},data:{rulesOfEngagement:null}});
     const c=await context(userId,programId),r=await p.scanRun.create({data:{targetId:c.id,type:'RECON'}});
     const {createScanProcessor}=await import('@/server/queue/processScan');
     const {currentScanControl}=await import('@/server/scanControl');

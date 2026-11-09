@@ -50,18 +50,12 @@ export function currentTargetExecution(): TargetExecution {
   if (!ctx) throw new Error("Missing authorized Target execution context");
   return ctx;
 }
-export function scanRejection(target: { userId: string; host: string; active: boolean; contextOnly?: boolean; discoverySource?: string | null; scopeAsset?: (AssetBoundary & { programId?: string }) | null; scope: { status: string; userId?: string; hostPattern?: string; scopeDetails?: string | null; outOfScope?: string | null; rulesOfEngagement?: string | null }; program: (PolicyProgram & { id?: string; ownerId: string; deletingAt?: Date | null; scopeRules?: string[] }) | null }, purpose: 'HOST' | 'RECON' = 'HOST', requirePolicy = true): string | null {
+function scanScopeRejection(target: { userId: string; host: string; active: boolean; contextOnly?: boolean; discoverySource?: string | null; scopeAsset?: (AssetBoundary & { programId?: string }) | null; scope: { status: string; userId?: string; hostPattern?: string; scopeDetails?: string | null; outOfScope?: string | null; rulesOfEngagement?: string | null }; program: (PolicyProgram & { id?: string; ownerId: string; deletingAt?: Date | null; scopeRules?: string[] }) | null }, purpose: 'HOST' | 'RECON'): string | null {
   if (target.program?.deletingAt) return 'Target deletion is in progress';
   if (target.scope.status !== "APPROVED") return "Target's scope is not APPROVED; refusing to scan";
   if (target.scope.userId && target.scope.userId !== target.userId) return 'Scope owner mismatch';
   if (!target.active && !target.contextOnly && !target.scopeAsset) return "Host has been removed from Scope";
   if (!target.program || target.program.ownerId !== target.userId) return "Add this host to a Target with a required User-Agent before scanning";
-  if (requirePolicy) {
-    try {
-      const { blocker } = resolveProgramPolicy(target.program, target.scope);
-      if (blocker) return blocker;
-    } catch { return 'Invalid program execution policy'; }
-  }
   if (target.scopeAsset) {
     if (!target.scopeAsset.active || !scopeAssetExecutable(target.scopeAsset)) return 'Scope asset is archived or unsupported';
     if (target.scopeAsset.programId !== target.program.id) return 'Asset program mismatch';
@@ -75,10 +69,18 @@ export function scanRejection(target: { userId: string; host: string; active: bo
   if (isExcluded(target.host, target.program.outOfScope)) return "Host is explicitly out of scope";
   return null;
 }
+export function scanRejection(target: Parameters<typeof scanScopeRejection>[0], purpose: 'HOST' | 'RECON' = 'HOST', requirePolicy = true) {
+  const rejection = scanScopeRejection(target, purpose);
+  if (rejection || !requirePolicy) return rejection;
+  try { return resolveProgramPolicy(target.program!, target.scope).blocker; }
+  catch { return 'Invalid program execution policy'; }
+}
+
 export async function loadTargetExecution(targetId: string, purpose: 'HOST' | 'RECON' = 'HOST', captured?: ReconPlan): Promise<TargetExecution> {
   const target = await prisma.target.findUnique({ where: { id: targetId }, include: { program: { include: programPolicyInclude }, scope: true, scopeAsset: true, discoveredFromAsset: true } });
   if (!target) throw new Error("Host not found");
-  if (captured && target.scopeAsset && (!target.scopeAsset.active || target.scopeAsset.normalizedValue !== captured.boundary.normalizedValue || target.scopeAsset.format !== captured.boundary.format)) throw new Error('Scope Asset authorization changed');
+  if (captured && target.scopeAsset && !target.scopeAsset.active) throw new Error('Scope Asset archived');
+  if (captured && target.scopeAsset && (target.scopeAsset.normalizedValue !== captured.boundary.normalizedValue || target.scopeAsset.format !== captured.boundary.format)) throw new Error('Scope Asset authorization changed');
   if(captured && target.scopeAsset?.id===captured.scopeAssetId) {
     target.scopeAsset={...target.scopeAsset,...captured.boundary,format:captured.format as NonNullable<typeof target.scopeAsset>['format'],type:captured.type as NonNullable<typeof target.scopeAsset>['type'],assetValue:captured.assetValue};
     target.host=captured.format==='URL'?new URL(captured.boundary.normalizedValue).hostname:captured.boundary.normalizedValue;
