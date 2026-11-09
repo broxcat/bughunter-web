@@ -57,7 +57,7 @@ const SEVERITY_TONE: Record<Severity, BadgeTone> = {
 
 const REVIEW_TONE: Record<ReviewState, BadgeTone> = { CANDIDATE: "candidate", EVIDENCE_REVIEW: "info", CONFIRMED: "passed", REJECTED: "killed", INCONCLUSIVE: "neutral" };
 
-export default function FindingsPage(props:{params:Promise<{id:string}>}){return <Suspense fallback={<p role="status">Loading Findings…</p>}><HostFindingCollection {...props}/></Suspense>;}
+export default function FindingsPage(props:{params:Promise<{id:string}>}){return <Suspense fallback={<p role="status">Loading findings…</p>}><HostFindingCollection {...props}/></Suspense>;}
 function HostFindingCollection({params}:{params:Promise<{id:string}>}){
   const { id } = use(params);
   const router=useRouter(),paramsQuery=useSearchParams(),query=paramsQuery.toString(),input=paginationInput(new URLSearchParams(query),false);
@@ -165,7 +165,7 @@ function HostFindingCollection({params}:{params:Promise<{id:string}>}){
               value={vulnClass}
               onChange={(e) => setVulnClass(e.target.value)}
               aria-label="Vulnerability family"
-            placeholder="Vuln class (e.g. IDOR)"
+            placeholder="Vulnerability class (for example IDOR)"
               className="min-w-0 flex-1 rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
             />
             <select
@@ -215,7 +215,7 @@ function HostFindingCollection({params}:{params:Promise<{id:string}>}){
       <div className="space-y-3">
         <h2 className="text-sm font-medium text-foreground">Findings</h2>
         {pages&&<CollectionPager path={'/targets/'+id+'/findings'} query={query} {...pages}/>}
-        <form action={'/targets/'+id+'/findings'} className="flex flex-wrap gap-3"><label>Search Findings<input name="q" defaultValue={input.q} key={input.q} maxLength={200} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={input.pageSize}/><Button type="submit">Search</Button></form>
+        <form action={'/targets/'+id+'/findings'} className="flex flex-wrap gap-3"><label>Search findings<input name="q" defaultValue={input.q} key={input.q} maxLength={200} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={input.pageSize}/><Button type="submit">Search</Button></form>
         {loading ? (
           <p className="text-sm text-muted">Loading…</p>
         ) : findings.length === 0 ? (
