@@ -386,6 +386,8 @@ npm run test:research
 docker compose exec -T -e BH_FINAL_STACK_SMOKE=1 web npm run test:research:final
 ```
 
+Run the full test suite on Linux or in WSL2. The Research sandbox tests use Linux filesystem, ownership, and process isolation primitives.
+
 Tests use disposable/local services. Real Burp GUI and remote Codex inference
 require operator setup and are never asserted from fixture/config checks alone.
 
