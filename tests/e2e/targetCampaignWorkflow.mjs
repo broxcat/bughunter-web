@@ -51,9 +51,16 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     await blockedRow.getByRole('link', { name: 'Open ' + blocked.companyName }).click();
     await primary('link', 'Fix policy').waitFor();
     await page.getByRole('status').filter({ hasText: '1 rule needs a decision.' }).waitFor();
+    const footer = page.getByRole('contentinfo');
+    assert(await footer.evaluate(node => Math.abs(node.getBoundingClientRect().bottom - window.innerHeight) <= 1),
+      'short pages place the footer at the bottom of the viewport');
     await capture('blocked');
     await primary('link', 'Fix policy').click();
     await page.waitForURL(path(blocked.id) + '/settings#policy-rule-1');
+    await page.getByLabel('Required User-Agent').waitFor();
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+    assert(await footer.evaluate(node => node.getBoundingClientRect().top >= document.querySelector('main').getBoundingClientRect().bottom - 1
+      && node.getBoundingClientRect().top >= window.innerHeight), 'long pages place the footer after the content');
 
     const readyResponse = await page.goto(path(ready.id));
     assert.match(await readyResponse.text(), /Start recon/);
