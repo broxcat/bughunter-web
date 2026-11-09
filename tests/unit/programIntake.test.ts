@@ -4,6 +4,7 @@ import { POST } from '@/app/api/programs/import-preview/route';
 import { LEGACY_LIMITS, MISSING_HUNTER_USERNAME } from '@/lib/programExecutionPolicy';
 import { splitNonQualifying } from '@/lib/programIntake';
 import { resolveProgramPolicy, authorizeExecution } from '@/server/programExecutionPolicy';
+import { BrainError } from '@/server/brain/client';
 import { INVALID_EXTRACTION, modelExtraction, normalizeIntake } from '@/server/programImport/intake';
 import models from '../fixtures/program-intake/model.json';
 
@@ -13,10 +14,13 @@ vi.mock('@/lib/rateLimit', () => ({ rateLimit: mocks.quota }));
 vi.mock('@/server/brain/config', () => ({
   resolveDefaultAiConfig: mocks.config, AiConfigurationError: class extends Error {},
 }));
-vi.mock('@/server/brain/client', () => ({ BrainClient: class {
-  constructor(config: unknown) { mocks.client(config); }
-  chat = mocks.chat;
-} }));
+vi.mock('@/server/brain/client', async importOriginal => ({
+  ...await importOriginal<typeof import('@/server/brain/client')>(),
+  BrainClient: class {
+    constructor(config: unknown) { mocks.client(config); }
+    chat = mocks.chat;
+  },
+}));
 
 const markdown = (name: string) => readFileSync(new URL('../fixtures/program-intake/' + name + '.md', import.meta.url), 'utf8');
 const request = (body: unknown, origin = 'https://bughunter.test') => new Request('https://bughunter.test/api/programs/import-preview', {
@@ -83,6 +87,44 @@ describe('Target intake', () => {
       expect(response.status).toBe(422);
       expect(await response.json()).toEqual({ error: INVALID_EXTRACTION });
     }
+  });
+
+  it('uses a compatible OpenRouter Gemini schema while retaining the local Zod array limits', async () => {
+    configured();
+    mocks.config.mockResolvedValue({ provider: 'OPENROUTER', model: 'google/gemini-3.6-flash', effectiveBaseUrl: 'https://openrouter.ai/api/v1' });
+    mocks.chat.mockImplementationOnce(async (_system, _user, { format }) => {
+      if (JSON.stringify(format).includes('"maxItems"')) {
+        throw new BrainError('Invalid schema', 'OPENROUTER', 400, 'STRUCTURED_OUTPUT_INVALID_SCHEMA');
+      }
+      return JSON.stringify(models.hackerone);
+    });
+    const input = { mode: 'markdown', markdown: markdown('hackerone') };
+    expect((await POST(request(input))).status).toBe(200);
+    expect(mocks.client).toHaveBeenCalledWith(expect.objectContaining({ provider: 'OPENROUTER', model: 'google/gemini-3.6-flash' }));
+    const [system, , options] = mocks.chat.mock.calls[0];
+    expect(system).toContain('"maxItems"');
+    expect(options.format).toMatchObject({ type: 'object', additionalProperties: false, required: expect.arrayContaining(['scopeIn']) });
+    expect(JSON.stringify(options.format)).not.toContain('"maxItems"');
+    mocks.chat.mockResolvedValueOnce(JSON.stringify({ ...models.hackerone, scopeIn: Array(1001).fill(models.hackerone.scopeIn[0]) }));
+    const invalid = await POST(request(input));
+    expect(invalid.status).toBe(422);
+    expect(await invalid.json()).toEqual({ error: INVALID_EXTRACTION });
+  });
+
+  it.each([
+    [400, 'STRUCTURED_OUTPUT_INVALID_SCHEMA', 'rejected the program extraction schema'],
+    [404, 'STRUCTURED_OUTPUT_UNSUPPORTED', 'supports structured output'],
+    [401, 'PROVIDER_HTTP_ERROR', 'Check the API key'],
+    [402, 'PROVIDER_HTTP_ERROR', 'billing or credit limit'],
+    [429, 'PROVIDER_HTTP_ERROR', 'rate limit was reached'],
+  ] as const)('explains upstream HTTP %s without exposing provider error data', async (status, code, message) => {
+    configured();
+    mocks.chat.mockRejectedValueOnce(new BrainError('SENSITIVE_PROVIDER_BODY', 'OPENROUTER', status, code));
+    const response = await POST(request({ mode: 'markdown', markdown: markdown('hackerone') }));
+    expect(response.status).toBe(502);
+    const body = await response.json();
+    expect(body.error).toContain(message);
+    expect(body.error).not.toContain('SENSITIVE_PROVIDER_BODY');
   });
 
   it('points to Settings when no provider is selected and blocks unauthorized or foreign requests', async () => {

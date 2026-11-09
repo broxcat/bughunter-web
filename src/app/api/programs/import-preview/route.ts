@@ -3,7 +3,7 @@ import { foreignOrigin } from '@/lib/requestOrigin';
 import { intakeInput } from '@/lib/programIntake';
 import { rateLimit } from '@/lib/rateLimit';
 import { AiConfigurationError } from '@/server/brain/config';
-import { campaignSourceFromIntake, extractProgram, INVALID_EXTRACTION, NO_AI } from '@/server/programImport/intake';
+import { campaignSourceFromIntake, extractProgram, IntakeProviderError, INVALID_EXTRACTION, NO_AI } from '@/server/programImport/intake';
 
 const headers = { 'Cache-Control': 'private, no-store' };
 
@@ -24,9 +24,9 @@ export async function POST(request: Request) {
     if (error instanceof AiConfigurationError || message === NO_AI) {
       return Response.json({ error: NO_AI, settings: true }, { status: 409, headers });
     }
+    if (error instanceof IntakeProviderError) return Response.json({ error: error.message }, { status: 502, headers });
     const safe = message === INVALID_EXTRACTION || message.startsWith('This public program page') ||
-      message.startsWith('This URL does not match') || message.startsWith('Public program downloads') ||
-      message.startsWith('The selected AI provider');
+      message.startsWith('This URL does not match') || message.startsWith('Public program downloads');
     return Response.json({ error: safe ? message : 'Program extraction failed. Fill in the form manually or try again.' }, { status: 422, headers });
   }
 }
