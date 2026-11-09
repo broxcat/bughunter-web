@@ -8,7 +8,7 @@ import { campaignAfterReview, campaignDueAt, campaignPolicyBlocker, cancelCampai
 import { pendingScopeSchema } from '@/lib/campaignSource';
 import { z } from 'zod';
 import { convertLegacyExclusions, legacyExclusionParity, legacyFreeText, legacyScopeFingerprint, readLegacyScopes } from '@/server/legacyPolicySource';
-import { executionPolicySchema, policyDraftNeedsReview, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
+import { executionPolicySchema, hasHunterUsername, policyDraftNeedsReview, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
 import { programUpdateSchema } from "@/lib/bountyProgram";
 import { deleteProgram } from '@/server/programDeletion';
 import { ResearchError } from '@/server/research/workspace';
@@ -17,7 +17,8 @@ import { foreignOrigin } from '@/lib/requestOrigin';
 import { targetReviewSchema } from '@/lib/targetReview';
 import { scopeEntriesForSettings, targetScopeVersion, reviewedPolicy as buildReviewedPolicy, storeTestAccounts, updateReviewedScope } from '@/server/targetReview';
 import { settleScopeAssetRetirement } from '@/server/scopeAssets';
-import { scopeAssetExecutable } from '@/lib/scopeAssets';
+import { resolveDefaultAiConfig } from '@/server/brain/config';
+import { requiredUserAgentSchema } from '@/lib/httpPolicy.mjs';
 
 type Params = { params: Promise<{ id: string }> };
 export async function GET(_req: Request, { params }: Params) {
@@ -26,12 +27,10 @@ export async function GET(_req: Request, { params }: Params) {
   const { id } = await params;
   const program = await prisma.bountyProgram.findFirst({ where: { id, ownerId: session.user.id }, include: { executionPolicies: currentPolicySelection, targets: { where: { active: true, contextOnly: false, userId: session.user.id }, orderBy: [{host:'asc'},{id:'asc'}] } } });
   if (!program) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  const [scopes, assets, identity, campaign] = await Promise.all([
+  const [scopes, assets, ai, campaign] = await Promise.all([
     readLegacyScopes(prisma, id, session.user.id),
-    prisma.scopeAsset.findMany({ where: { programId: id, active: true }, include: {
-      executionTarget: { select: { credentials: { where: { purpose: { in: ['ACCOUNT_A', 'ACCOUNT_B'] } }, select: { id: true, label: true, purpose: true } } } },
-    } }),
-    prisma.hunterIdentity.findUnique({ where: { userId: session.user.id }, select: { userAgent: true } }),
+    prisma.scopeAsset.findMany({ where: { programId: id, active: true } }),
+    resolveDefaultAiConfig(session.user.id, { includeApiKey: false }).catch(() => null),
     prisma.targetCampaign.findUnique({ where: { programId: id }, select: { intervalMinutes: true, pendingAssets: true } }),
   ]);
   const scopeFingerprint = legacyScopeFingerprint(scopes);
@@ -41,14 +40,10 @@ export async function GET(_req: Request, { params }: Params) {
     ...program,
     scopeIn: scopeEntriesForSettings(program, assets),
     expectedAssets: targetScopeVersion(assets),
-    hunterHasUserAgent: Boolean(identity?.userAgent),
+    hunterHasUserAgent: requiredUserAgentSchema.safeParse(process.env.DEFAULT_USER_AGENT).success,
+    hunterHasUsername: hasHunterUsername(process.env.HUNTER_USERNAME),
+    hasAi: Boolean(ai),
     campaign: campaign ? { intervalMinutes: campaign.intervalMinutes, pendingAssets: pendingScopeSchema.safeParse(campaign.pendingAssets).data ?? [] } : null,
-    historicalDocumentedAssets: assets.filter(asset => !scopeAssetExecutable(asset)).map(asset => ({
-      ref: asset.id, originalValue: asset.originalValue, sourceType: asset.type, reason: 'Historical scope asset without an executor',
-    })),
-    testAccounts: assets.flatMap(asset => (asset.executionTarget?.credentials ?? []).map(credential => ({
-      ...credential, asset: asset.normalizedValue,
-    }))),
     legacyPolicyReview: {
       scopes, scopeFingerprint, scopeChanged: scopeFingerprint !== legacyScopeFingerprint(reviewedScopes),
       ...convertLegacyExclusions(program.outOfScope),
@@ -125,7 +120,15 @@ export async function PATCH(req: Request, { params }: Params) {
           retired.push(...scope.retired);
           changes.scopeRules = scope.scopeRules;
           changes.requiredUserAgent = policy.requiredUserAgent ?? '';
-          const nextPolicy = buildReviewedPolicy({ ...targetReview, sourceDocument: previousPolicy?.sourceSnapshot.sourceDocument ?? targetReview.sourceDocument }, effective, scopes);
+          const previousSource = previousPolicy?.sourceSnapshot;
+          const documented = new Map((previousSource?.documentedAssets ?? []).map(asset => [asset.ref, asset]));
+          for (const asset of targetReview.documentedAssets) documented.set(asset.ref, asset);
+          const nextPolicy = buildReviewedPolicy({ ...targetReview, documentedAssets: [...documented.values()],
+            sourceDocument: targetReview.intakeVersion && targetReview.sourceDocument !== undefined
+              ? targetReview.sourceDocument : previousSource?.sourceDocument ?? targetReview.sourceDocument,
+            intakeVersion: targetReview.intakeVersion ?? previousSource?.intakeVersion,
+            nonQualifyingText: targetReview.nonQualifyingText ?? previousSource?.nonQualifyingText,
+          }, effective, scopes);
           await storeTestAccounts(tx, { ...program, ...effective }, targetReview, nextPolicy);
           reviewedPolicy = nextPolicy;
         } else reviewedPolicy = {
@@ -162,14 +165,18 @@ export async function PATCH(req: Request, { params }: Params) {
               .map(asset => asset.normalizedValue));
             const sourceChanged = current.programUrl !== saved.programUrl || current.platform !== saved.platform;
             const pending = pendingScopeSchema.safeParse(campaign.pendingAssets).data ?? [];
+            const imported = targetReview.importSource;
+            const matchedSource = imported?.url === saved.programUrl && imported?.platform === saved.platform ? imported : undefined;
             await tx.targetCampaign.update({ where: { programId: id }, data: {
               ...campaignAfterReview(campaign, blocker, interval),
-              ...(sourceChanged ? { source: Prisma.DbNull, pendingAssets: [] }
-                : { pendingAssets: pending.filter(asset => !reviewedAssets.has(asset.value)) }),
+              ...(matchedSource ? { source: matchedSource, lastSyncAt: new Date(), pendingAssets: [] }
+                : sourceChanged ? { source: Prisma.DbNull, pendingAssets: [] }
+                  : { pendingAssets: pending.filter(asset => !reviewedAssets.has(asset.value)) }),
             } });
           } else {
             await tx.targetCampaign.create({ data: { programId: id, intervalMinutes: interval,
-              state: blocker ? 'BLOCKED' : 'MONITORING', reason: blocker, nextCycleAt: blocker ? null : campaignDueAt(interval, new Date()) } });
+              state: blocker ? 'BLOCKED' : 'MONITORING', reason: blocker, nextCycleAt: blocker ? null : campaignDueAt(interval, new Date()),
+              source: targetReview.importSource?.url === saved.programUrl && targetReview.importSource?.platform === saved.platform ? targetReview.importSource : undefined } });
           }
         }
       }

@@ -1,36 +1,32 @@
-
 import { auth } from '@/lib/auth';
-import { IMPORT_PLATFORMS } from '@/lib/platformConnections';
 import { foreignOrigin } from '@/lib/requestOrigin';
-import { previewProgram } from '@/server/programImport/preview';
-import { ImportUnavailable } from '@/server/programImport/types';
-import { z } from 'zod';
+import { intakeInput } from '@/lib/programIntake';
+import { rateLimit } from '@/lib/rateLimit';
+import { AiConfigurationError } from '@/server/brain/config';
+import { campaignSourceFromIntake, extractProgram, INVALID_EXTRACTION, NO_AI } from '@/server/programImport/intake';
 
-const input = z.strictObject({
-  url: z.string().trim().min(1).max(2048),
-  platform: z.enum([...IMPORT_PLATFORMS, 'PRIVATE', 'OTHER']).optional(),
-  visibility: z.enum(['public', 'private']).optional(),
-});
-const privateHeaders = { 'Cache-Control': 'private, no-store' };
+const headers = { 'Cache-Control': 'private, no-store' };
 
 export async function POST(request: Request) {
-  const userId = (await auth())?.user?.id;
-  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-  if (foreignOrigin(request)) return Response.json({ error: 'Forbidden' }, { status: 403 });
-  const parsed = input.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return Response.json({ error: 'Invalid program URL or platform' }, { status: 400 });
-  const { platform, url, visibility } = parsed.data;
-  if (platform === 'PRIVATE' || platform === 'OTHER') return Response.json({ status: 'MANUAL', reason: 'manual' }, { headers: privateHeaders });
+  const ownerId = (await auth())?.user?.id;
+  if (!ownerId) return Response.json({ error: 'Unauthorized' }, { status: 401, headers });
+  if (foreignOrigin(request)) return Response.json({ error: 'Forbidden' }, { status: 403, headers });
+  const input = intakeInput.safeParse(await request.json().catch(() => null));
+  if (!input.success) return Response.json({ error: 'Enter a program URL or paste the complete program Markdown (up to 64,000 characters).' }, { status: 400, headers });
+  const quota = await rateLimit('rl:program-intake:' + ownerId, 8, 60);
+  if (quota.status !== 'ALLOWED') return Response.json({ error: 'Program extraction is temporarily unavailable. Try again or fill in the form manually.' },
+    { status: quota.status === 'BLOCKED' ? 429 : 503, headers });
   try {
-    return Response.json({ status: 'PREVIEW', preview: await previewProgram(userId, { url, platform, visibility }) }, { headers: privateHeaders });
+    const preview = await extractProgram(ownerId, input.data, request.signal);
+    return Response.json({ preview, source: campaignSourceFromIntake(preview) }, { headers });
   } catch (error) {
-    const reason = error instanceof ImportUnavailable ? error.reason : 'manual';
-    if (reason === 'rate_limited' && error instanceof ImportUnavailable) {
-      return Response.json({ status: 'MANUAL', reason }, { status: 429, headers: { ...privateHeaders, 'Retry-After': String(error.retryAfter ?? 60) } });
+    const message = error instanceof Error ? error.message : '';
+    if (error instanceof AiConfigurationError || message === NO_AI) {
+      return Response.json({ error: NO_AI, settings: true }, { status: 409, headers });
     }
-    return Response.json({ status: 'MANUAL', reason }, {
-      status: reason === 'temporarily_unavailable' ? 503 : 200,
-      headers: privateHeaders,
-    });
+    const safe = message === INVALID_EXTRACTION || message.startsWith('This public program page') ||
+      message.startsWith('This URL does not match') || message.startsWith('Public program downloads') ||
+      message.startsWith('The selected AI provider');
+    return Response.json({ error: safe ? message : 'Program extraction failed. Fill in the form manually or try again.' }, { status: 422, headers });
   }
 }

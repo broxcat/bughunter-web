@@ -6,6 +6,7 @@ export const reviewRule = z.strictObject({
   assetRef: z.string().max(4096).optional(),
   assetLabel: z.string().max(1024 * 1024).optional(),
   decision: z.enum(RULE_DECISIONS).nullable().default(null),
+  origin: z.enum(['AI_INTAKE', 'SOURCE_CHANGED', 'PLATFORM_RESYNC']).optional(),
 });
 export const documentedAsset = z.strictObject({
   ref: z.string().max(4096),

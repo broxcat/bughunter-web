@@ -1,7 +1,7 @@
 import type { z } from 'zod';
 import type { pendingScopeAssetSchema } from './campaignSource';
 import type { LegacyScopeText, StoredExecutionPolicy } from './programExecutionPolicy';
-import type { DocumentedAsset, ScopeEntry } from './targetReview';
+import type { ScopeEntry } from './targetReview';
 
 export interface ProgramData {
   id: string;
@@ -35,8 +35,8 @@ export interface ProgramData {
   };
   scopeIn?: ScopeEntry[];
   expectedAssets?: string;
-  historicalDocumentedAssets?: DocumentedAsset[];
   hunterHasUserAgent?: boolean;
+  hunterHasUsername?: boolean;
+  hasAi?: boolean;
   campaign?: { intervalMinutes: number | null; pendingAssets: z.infer<typeof pendingScopeAssetSchema>[] } | null;
-  testAccounts?: { id: string; label: string; purpose: string; asset: string }[];
 }

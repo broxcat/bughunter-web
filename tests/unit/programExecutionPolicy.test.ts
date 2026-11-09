@@ -1,5 +1,5 @@
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { executionPolicySchema, MISSING_HUNTER_UA, type ExecutionPolicyInput } from '@/lib/programExecutionPolicy';
 import { authorizeExecution, excludedByPolicy, resolveProgramPolicy } from '@/server/programExecutionPolicy';
 import { executionHeaders, withTargetExecution } from '@/server/execution';
@@ -15,8 +15,9 @@ const config: ExecutionPolicyInput = {
   sourceSnapshot: { url: null, rules: '', unrepresentedRules: [] },
 };
 const legacy = { requiredUserAgent: 'Legacy/1', outOfScope: [] };
-const hunter = { hunterIdentity: { userAgent: 'Hunter/1', headers: [{ name: 'x-bug-bounty', value: 'account' }, { name: 'x-hunter', value: 'alice' }] } };
-const resolve = (policy = config) => resolveProgramPolicy({ ...legacy, owner: hunter, executionPolicies: [{ version: 1, policy }] });
+const resolve = (policy = config) => resolveProgramPolicy({ ...legacy, executionPolicies: [{ version: 1, policy }] });
+beforeEach(() => vi.stubEnv('DEFAULT_USER_AGENT', 'Hunter/1'));
+afterEach(() => vi.unstubAllEnvs());
 
 describe('program execution policy', () => {
   it('denies an excluded URL prefix without excluding a sibling path', () => {
@@ -42,10 +43,11 @@ describe('program execution policy', () => {
     expect(() => authorizeExecution(ctx, { tool: 'httpx' })).not.toThrow();
   });
 
-  it('resolves the program, account and explicit missing-UA cases in order', () => {
+  it('resolves the program, environment default and explicit missing-UA cases in order', () => {
     expect(resolve({ ...config, requiredUserAgent: 'Program/1' }).userAgent).toBe('Program/1');
     expect(resolve().userAgent).toBe('Hunter/1');
     expect(resolveProgramPolicy(legacy).userAgent).toBe('Legacy/1');
+    vi.stubEnv('DEFAULT_USER_AGENT', '');
     expect(resolveProgramPolicy({ ...legacy, requiredUserAgent: '' }).blocker).toBe(MISSING_HUNTER_UA);
   });
 
@@ -53,7 +55,7 @@ describe('program execution policy', () => {
     const policy = resolve();
     const headers = withTargetExecution({ policy, targetId: 'target', host: 'example.com', requiredUserAgent: policy.userAgent, qualifying: [], nonQualifying: [] },
       () => executionHeaders({ 'X-Bug-Bounty': 'wrong', 'User-Agent': 'wrong' }));
-    expect(Object.fromEntries(headers)).toEqual({ 'user-agent': 'Hunter/1', 'x-bug-bounty': 'program', 'x-hunter': 'alice' });
+    expect(Object.fromEntries(headers)).toEqual({ 'user-agent': 'Hunter/1', 'x-bug-bounty': 'program' });
     expect(executionPolicySchema.safeParse({ ...config, requiredHeaders: [{ name: 'Host', value: 'other.example.com' }] }).success).toBe(false);
   });
 
@@ -63,6 +65,6 @@ describe('program execution policy', () => {
       resolve({ ...config, sourceSnapshot: { ...config.sourceSnapshot, unrepresentedRules: ['Special window'] } }),
       resolveProgramPolicy({ ...legacy, rulesOfEngagement: 'Changed', executionPolicies: [{ version: 1, policy: config }] }),
       resolveProgramPolicy({ ...legacy, rulesOfEngagement: 'Free text' }),
-    ]) expect(() => authorizeExecution({ host: 'example.com', policy }, { tool: 'browser' })).toThrow(/Automation/);
+    ]) expect(() => authorizeExecution({ host: 'example.com', policy }, { tool: 'browser' })).toThrow(/automation/i);
   });
 });

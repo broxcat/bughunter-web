@@ -5,6 +5,7 @@ import { matchesHost, normalizeFqdn } from './bountyProgram';
 
 import { campaignSourceSchema, campaignIntervalSchema } from './campaignSource';
 import { reviewRule, documentedAsset } from './targetReviewData';
+import { nonQualifyingTextSchema } from './programIntake';
 export { RULE_DECISIONS } from './targetReviewData';
 
 const scopeEntry = assetInputSchema.pick({ value: true }).extend({ type: z.enum(ASSET_TYPES) });
@@ -73,6 +74,8 @@ export const targetReviewSchema = z.strictObject({
   documentedAssets: z.array(documentedAsset).max(3000),
   rules: z.array(reviewRule).max(5000),
   sourceDocument: z.string().max(2 * 1024 * 1024).optional(),
+  intakeVersion: z.literal(1).optional(),
+  nonQualifyingText: nonQualifyingTextSchema.optional(),
   policy: executionPolicySchema.omit({ sourceSnapshot: true }),
   testAccounts: z.array(testAccount).max(2).default([]),
   expectedAssets: z.string().max(64).optional(),

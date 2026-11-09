@@ -74,6 +74,8 @@ export const storedExecutionPolicySchema = executionPolicySchema.extend({
     unrepresentedRules: z.array(z.string()),
     documentedAssets: z.array(documentedAsset).optional(),
     sourceDocument: z.string().optional(),
+    intakeVersion: z.literal(1).optional(),
+    nonQualifyingText: z.array(z.string()).optional(),
     ruleDecisions: z.array(reviewRule).optional(),
     legacy: z.strictObject({
       outOfScope: z.array(z.string()),
@@ -85,7 +87,14 @@ export const storedExecutionPolicySchema = executionPolicySchema.extend({
 export type StoredExecutionPolicy = z.infer<typeof storedExecutionPolicySchema>;
 export const LEGACY_LIMITS = { requestsPerSecond: 5, maxConcurrency: 2 };
 export const POLICY_REVIEW_ANCHOR = 'execution-policy';
-export const MISSING_HUNTER_UA = 'Recon requires a User-Agent. Set the program User-Agent in Target settings or your default under Settings → Hunter identity.';
+export const MISSING_HUNTER_UA = 'Recon requires a User-Agent. Set the program User-Agent in Target settings or configure DEFAULT_USER_AGENT.';
+export const MISSING_HUNTER_USERNAME = 'Program identification requires a hunter username. Configure HUNTER_USERNAME before automation can run.';
+
+const usernameTemplate = /(?:\$?\{\{?\s*(?:your[\s_-]*)?(?:hackerone[\s_-]*|hunter[\s_-]*)?user[\s_-]*name\s*\}\}?|\[\s*(?:your[\s_-]*)?(?:hackerone[\s_-]*|hunter[\s_-]*)?user[\s_-]*name(?:\s+here)?\s*\]|<\s*(?:your[\s_-]*)?(?:hackerone[\s_-]*|hunter[\s_-]*)?user[\s_-]*name\s*>|%(?:HUNTER_)?USERNAME%)/i;
+export const hasHunterTemplate = (value: string) => usernameTemplate.test(value);
+export const hasHunterUsername = (value?: string) => Boolean(value && /^[!-~]{1,128}$/.test(value) && !hasHunterTemplate(value));
+export const replaceHunterTemplate = (value: string, username: string) =>
+  value.replace(new RegExp(usernameTemplate.source, 'gi'), () => username);
 
 export function headersFromLines(text: string) {
   return text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
