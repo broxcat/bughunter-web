@@ -32,7 +32,7 @@ export default function ProgramForm({ initial, onSaved, onCancel }: { initial?: 
     const data = Object.fromEntries(new FormData(e.currentTarget));
     const body = initial ? { ...data, ...(initial?.updatedAt?{expectedUpdatedAt:initial.updatedAt}:{}), platform: data.platform || null, programUrl: data.programUrl || null,
       ...Object.fromEntries(["rewardLow", "rewardMedium", "rewardHigh", "rewardCritical"].map(k => [k, data[k] || null])),
-      outOfScope, qualifying, nonQualifying } : { companyName: data.companyName, platform: data.platform || null, programUrl: data.programUrl || null, requiredUserAgent: "BugHunter/1.0" };
+      outOfScope, qualifying, nonQualifying } : { companyName: data.companyName, platform: data.platform || null, programUrl: data.programUrl || null };
     try {
       const res = await fetch(initial ? `/api/programs/${initial.id}` : "/api/programs", { method: initial ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const json = await res.json(); if (!res.ok) throw new Error(json.error); onSaved(json.id);
@@ -55,7 +55,7 @@ export default function ProgramForm({ initial, onSaved, onCancel }: { initial?: 
     <details className="ui-disclosure" open><summary>Authorization policy</summary><div className="mt-4 space-y-5">
     <p className="text-sm text-muted">Manage authorized assets in Scope. Exclusions below take priority.</p>
     <label className="block">Rules of engagement<textarea name="rulesOfEngagement" maxLength={20000} rows={5} defaultValue={initial?.rulesOfEngagement ?? ''} className={inputClass} placeholder="Official program rules, technical restrictions, authorization conditions…" /></label>
-    <Hosts title="Out of Scope" value={outOfScope} onChange={setOutOfScope} />
+    <Hosts title="Out of scope" value={outOfScope} onChange={setOutOfScope} />
     </div></details>
     <details className="ui-disclosure"><summary>Vulnerability policy</summary><div className="mt-4 space-y-5">
     {families("Qualifying vulnerabilities", qualifying, setQualifying)}
@@ -63,10 +63,10 @@ export default function ProgramForm({ initial, onSaved, onCancel }: { initial?: 
     {families("Non-qualifying vulnerabilities", nonQualifying, setNonQualifying)}
     </div></details>
     <details className="ui-disclosure"><summary>Advanced</summary><div className="mt-4">
-    <label className="block">Required User-Agent *<input required name="requiredUserAgent" maxLength={512} placeholder="BugHunter/1.0" defaultValue={initial?.requiredUserAgent} className={inputClass} /><span className="text-sm text-muted">Used for future scans. Set the value required by the program before running Recon.</span></label>
+    <label className="block">Required User-Agent *<input required name="requiredUserAgent" maxLength={512} placeholder="Required by the program" defaultValue={initial?.requiredUserAgent} className={inputClass} /><span className="text-sm text-muted">Used for future scans. Set the value required by the program before running Recon.</span></label>
     </div></details>
     {error && <p role="alert" className="text-danger">{error}</p>}
-    {busy&&<p role="status">Saving Target settings…</p>}
-    <Button type="submit" disabled={busy}>{busy ? "Saving…" : initial ? "Save Target" : "Create Target"}</Button>
+    {busy&&<p role="status">Saving target settings…</p>}
+    <Button type="submit" disabled={busy}>{busy ? "Saving…" : initial ? "Save target" : "Create target"}</Button>
   </form>;
 }
