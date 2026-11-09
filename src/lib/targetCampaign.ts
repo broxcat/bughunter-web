@@ -10,17 +10,18 @@ export type CampaignFacts = {
   hasHandoff: boolean; handoffPending: boolean; scopeCurrent: boolean;
   reconTotal: number; reconFinished: number; reconRunning: number; standaloneTotal: number; standaloneRunning: number;
   researchCreating: number; researchReady: number; researchFailed: number;
+  automatedTotal?: number; automatedRunning?: number; automatedFinished?: number; automatedFailed?: number;
   findings: number; reviewedFindings: number; campaignState: string | null;
 };
-type CampaignStatus = { state: string; reason: string | null; retryAt: Date | null; nextCycleAt: Date | null; pendingCount: number; handoffRunId: string | null };
+type CampaignStatus = { state: string; reason: string | null; retryAt: Date | null; nextCycleAt: Date | null; pendingCount: number; handoffRunId: string | null; handoffReady?: boolean };
 
 export function campaignActivity(facts: CampaignFacts) {
   const recon = facts.runStatus === 'QUEUED' || facts.runStatus === 'RUNNING' || facts.handoffPending || facts.standaloneTotal > 0;
-  const campaign = facts.campaignState === 'RECON_RUNNING' || facts.campaignState === 'READY';
+  const campaign = ['READY', 'RECON_RUNNING', 'RESEARCH_PENDING', 'RESEARCH_RUNNING'].includes(facts.campaignState ?? '');
   return {
     active: recon || campaign || facts.researchCreating > 0,
     key: JSON.stringify([facts.runId, facts.runStatus, facts.reconTotal, facts.reconFinished, facts.reconRunning, facts.standaloneTotal,
-      facts.standaloneRunning, facts.handoffPending, facts.hasHandoff, facts.researchCreating, facts.researchReady, facts.campaignState]),
+      facts.standaloneRunning, facts.handoffPending, facts.hasHandoff, facts.researchCreating, facts.researchReady, facts.campaignState, facts.automatedRunning, facts.automatedFinished, facts.automatedTotal]),
   };
 }
 
@@ -54,12 +55,12 @@ export function targetCampaign(program: {
       : facts.standaloneTotal > 0 && !facts.reconTotal ? facts.standaloneTotal + (facts.standaloneTotal === 1 ? ' asset run active' : ' asset runs active')
       : (running ? '' : 'Queued · ') + facts.reconFinished + '/' + facts.reconTotal + ' assets finished';
     recon = { stage: 'Recon', state: running ? 'running' : facts.handoffPending ? 'done' : 'not started', detail };
-  } else if (campaign?.state === 'FAILED') {
+  } else if (campaign?.state === 'FAILED' && (!campaign.handoffRunId || campaign.handoffRunId !== facts.runId)) {
     recon = { stage: 'Recon', state: 'failed',
       detail: (campaign.reason ?? 'Recon failed.') + (campaign.retryAt ? ' Retry scheduled for ' + campaign.retryAt.toISOString().slice(0, 16).replace('T', ' ') + ' UTC.' : ''),
       fix: history };
   } else if (facts.runId && (facts.scopeCurrent || Boolean(campaign?.handoffRunId && campaign.handoffRunId === facts.runId))) {
-    if (facts.runStatus === 'COMPLETED' && ['SUCCESS', 'PARTIAL'].includes(facts.runOutcome ?? '') && facts.hasHandoff) {
+    if (facts.runStatus === 'COMPLETED' && ['SUCCESS', 'PARTIAL'].includes(facts.runOutcome ?? '') && (facts.hasHandoff || campaign?.handoffRunId === facts.runId)) {
       recon = { stage: 'Recon', state: 'done', ...(facts.runOutcome === 'PARTIAL' ? { detail: 'Partial coverage. See Recon history in Details.' } : {}) };
     } else {
       const detail = facts.runStatus === 'CANCELLED' ? 'The last Recon run was cancelled.'
@@ -71,8 +72,15 @@ export function targetCampaign(program: {
   } else if (facts.runId) recon.detail = 'Scope changed since the last run.';
 
   let research: StageView = { stage: 'Research', state: 'not started' };
-  if (facts.researchCreating) research = { stage: 'Research', state: 'running', detail: 'Preparing ' + facts.researchCreating + (facts.researchCreating === 1 ? ' workspace' : ' workspaces') };
-  else if (campaign?.state === 'RESEARCH_PENDING') research = { stage: 'Research', state: 'needs you', detail: 'Recon handoff ready. Open Research to continue.' };
+  if (campaign?.state === 'RESEARCH_PENDING') research = { stage: 'Research', state: 'not started', detail: 'Preparing automatic Research from this Recon run.' };
+  else if (campaign?.state === 'RESEARCH_RUNNING') research = { stage: 'Research',
+    state: facts.automatedRunning ? 'running' : 'not started',
+    detail: (facts.automatedRunning ? '' : 'Queued · ') + (facts.automatedFinished ?? 0) + '/' + (facts.automatedTotal ?? 0) + ' jobs finished' };
+  else if (campaign?.state === 'FAILED' && campaign.handoffRunId && campaign.handoffRunId === facts.runId) research = {
+    stage: 'Research', state: 'failed', detail: campaign.reason ?? 'Research failed.', fix: researchUrl };
+  else if (facts.automatedTotal) research = { stage: 'Research', state: 'done',
+    detail: (facts.automatedFinished ?? 0) + '/' + facts.automatedTotal + ' jobs finished. Open Research to review coverage.' };
+  else if (facts.researchCreating) research = { stage: 'Research', state: 'running', detail: 'Preparing ' + facts.researchCreating + (facts.researchCreating === 1 ? ' workspace' : ' workspaces') };
   else if (facts.researchReady) research = facts.findings
     ? { stage: 'Research', state: 'done', detail: 'Findings available for review.' }
     : { stage: 'Research', state: 'needs you', detail: facts.researchReady + (facts.researchReady === 1 ? ' workspace ready for manual Research' : ' workspaces ready for manual Research') };
@@ -97,11 +105,11 @@ export function targetCampaign(program: {
   } else if (busyRecon || campaign?.state === 'READY' || campaign?.state === 'RECON_RUNNING') {
     current = recon;
     action = { label: 'View progress', href: '#recon' };
-    next = running ? 'Wait for Recon to finish before opening Research.' : facts.handoffPending ? 'Wait for the Research handoff.' : 'Waiting for an available Recon slot.';
-  } else if (campaign?.state === 'RESEARCH_PENDING') {
+    next = running ? 'Research starts automatically when Recon finishes.' : facts.handoffPending ? 'Wait for the Research handoff.' : 'Waiting for an available Recon slot.';
+  } else if (campaign?.state === 'RESEARCH_PENDING' || campaign?.state === 'RESEARCH_RUNNING' || research.state === 'failed' && Boolean(facts.automatedFailed)) {
     current = research;
-    action = { label: 'Open research', command: 'handoff', destination: researchUrl };
-    next = 'Review the prepared Recon handoff in Research.';
+    action = { label: 'Open research', href: researchUrl };
+    next = research.state === 'failed' ? 'Review the interrupted or failed jobs.' : 'Review results as the automatic checks finish.';
   } else if (facts.findings) {
     current = findings;
     action = { label: 'View findings', href: root + '/findings' };

@@ -11,7 +11,7 @@ export async function maintainTargetCampaigns(now = new Date()) {
   const due = await prisma.targetCampaign.findMany({ where: {
     program: { deletingAt: null },
     OR: [
-      { state: 'RECON_RUNNING' },
+      { state: { in: ['RECON_RUNNING', 'RESEARCH_PENDING', 'RESEARCH_RUNNING'] } },
       { state: 'READY', requestedAt: { lte: now } },
       { state: 'MONITORING', nextCycleAt: { lte: now } },
       { state: 'FAILED', retryAt: { lte: now } },

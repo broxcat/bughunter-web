@@ -95,7 +95,15 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
       } }),
     ]);
     assert.equal((await campaign(ready.id, 'start')).status(), 202); // Idempotent wake-up for the test's completed worker fixture.
-    await primary('button', 'Open research').waitFor();
+    await primary('link', 'Open research').waitFor();
+    assert.equal((await campaign(ready.id, 'start')).status(), 202);
+    await page.getByText('Queued · 0/2 jobs finished', { exact: true }).waitFor();
+    await p.scanRun.updateMany({ where: { type: 'RESEARCH', researchHandoffId: run.id }, data: {
+      status: 'COMPLETED', outcome: 'PARTIAL', startedAt: new Date(), finishedAt: new Date(),
+      researchResults: { version: 1, note: 'No exact anonymous read-only request was observed in this Recon.', entries: [] },
+    } });
+    assert.equal((await campaign(ready.id, 'start')).status(), 202);
+    await page.getByText('2/2 jobs finished. Open Research to review coverage.', { exact: true }).waitFor();
     await page.getByText('1 discovered hosts', { exact: true }).waitFor();
     await page.getByText('1 active web apps', { exact: true }).waitFor();
     await p.targetCampaign.update({ where: { programId: ready.id }, data: { pendingAssets: ['docs','login','media'].map(name => ({ value: name + '.example.test', type: 'WEB_APPLICATION' })) } });
@@ -105,9 +113,12 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     const afterRun = requestPaths.length;
     await page.waitForTimeout(5600);
     assert.deepEqual(campaignRequests(afterRun), [], 'terminal Recon stops background requests');
-    await primary('button', 'Open research').click();
+    await primary('link', 'Open research').click();
     await page.waitForURL(origin + '/research?program=' + ready.id + '&view=campaign');
     await page.getByRole('heading', { name: 'Research', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Automatic checks' }).waitFor();
+    await page.getByText(/Partial coverage/).first().click();
+    await page.getByText('No exact anonymous read-only request was observed in this Recon.', { exact: true }).first().waitFor();
     const handoff = await context.request.get(origin + '/api/programs/' + ready.id + '/campaign/handoff');
     assert.match(await handoff.text(), /Controlled Research handoff fixture/);
     assert.equal(await page.getByRole('link', { name: /^Open console/ }).count(), 0);

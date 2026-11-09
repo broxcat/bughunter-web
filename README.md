@@ -4,7 +4,7 @@ License: AGPL-3.0-only ([LICENSE](LICENSE))
 
 **Post-v1 release status:** v1.1.0 acceptance is blocked by [Research workspace isolation #42](docs/research-workspace-isolation.md). No v1.1.0 version/tag/release or production upgrade has been prepared. See the [Milestone 8 acceptance record](docs/releases/v1.1.0-acceptance.md). The published v1.0.0 history below is unchanged.
 
-Bug bounty workflow: **Targets → Scope → Recon → Research Plan → Research → Findings → Report**.
+Bug bounty workflow: **Targets → Recon → Research → Findings → Report**. Target settings contain the Scope and execution policy. Campaigns generate a versioned Research plan from their Recon evidence and run bounded, authorized read-only checks on observed surfaces. Research shows the recorded observations and the objectives that still need manual work.
 
 Research records explicit tested work through [Research Coverage](docs/research-coverage.md), with shared proof identities in the [minimal Evidence Vault](docs/evidence-vault.md). The [v1.0 release audit](docs/v1-release-audit.md) records the validated release gates and accepted tooling risk.
 

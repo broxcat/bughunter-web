@@ -5,6 +5,7 @@ import { programPolicyBlocker, programPolicyInclude, type PolicyProgram } from '
 import { admitTargetRecon, lockCampaignCapacity, lockReconProgram } from './recon/targetRuns';
 import { lockOwnedProgram } from './scopeAssets';
 import { ResearchError } from './research/workspace';
+import { campaignResearchJobs, queueCampaignResearch } from './research/campaignJobs';
 
 const live = ['QUEUED', 'RUNNING'] as const;
 const attempts = 3;
@@ -25,7 +26,7 @@ export function campaignPolicyBlocker(program: PolicyProgram) {
 
 export async function cancelCampaignScans(tx: Prisma.TransactionClient, ownerId: string, programId: string, queuedOnly: boolean) {
   await tx.scanRun.updateMany({ where: {
-    target: { programId, userId: ownerId }, type: 'RECON', cancelRequestedAt: null,
+    target: { programId, userId: ownerId }, type: { in: ['RECON', 'RESEARCH'] }, cancelRequestedAt: null,
     status: { in: queuedOnly ? ['QUEUED'] : [...live] },
   }, data: { cancelRequestedAt: new Date() } });
 }
@@ -52,25 +53,23 @@ export async function changeCampaign(ownerId: string, programId: string, action:
       if (current.state === 'PAUSED') return;
       await cancelCampaignScans(tx, ownerId, programId, true);
       await update({ state: 'PAUSED', requestedAt: null, retryAt: null, nextCycleAt: null, reason: null,
-        continuing: current.state === 'RECON_RUNNING' || current.continuing });
+        continuing: ['RECON_RUNNING', 'RESEARCH_PENDING', 'RESEARCH_RUNNING'].includes(current.state) || current.continuing });
       return;
     }
     if (action === 'handoff') {
-      if (current.state === 'MONITORING') return;
-      if (current.state !== 'RESEARCH_PENDING') throw new ResearchError('Research handoff is not ready', 409);
-      const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude });
-      const blocker = campaignPolicyBlocker(program);
-      if (blocker) throw new ResearchError(blocker, 409);
-      await update({ state: 'MONITORING', nextCycleAt: campaignDueAt(current.intervalMinutes, now) });
+      // Compatibility for tabs opened before automated Research shipped.
       return;
     }
-    if (current.state === 'RECON_RUNNING' || (current.state === 'READY' && current.requestedAt)) return;
+    if (['RECON_RUNNING', 'RESEARCH_PENDING', 'RESEARCH_RUNNING'].includes(current.state) ||
+        (current.state === 'READY' && current.requestedAt)) return;
     if (current.state === 'PAUSED' && action !== 'resume') throw new ResearchError('Resume the paused campaign first', 409);
     const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude });
     const blocker = campaignPolicyBlocker(program);
     if (blocker) throw new ResearchError(blocker, 409);
     const continuing = action === 'resume' && current.continuing;
-    await update({ state: 'READY', requestedAt: now, retryAt: null, nextCycleAt: null, reason: null, continuing });
+    const resumeResearch = continuing && current.handoffRunId && current.handoffRunId === current.reconRunId;
+    await update({ state: resumeResearch ? 'RESEARCH_PENDING' : 'READY', requestedAt: resumeResearch ? null : now,
+      retryAt: null, nextCycleAt: null, reason: null, continuing });
   });
 }
 
@@ -98,7 +97,7 @@ export async function advanceCampaign(ownerId: string, programId: string, option
       return save({ state: 'BLOCKED', reason: blocker, requestedAt: null, retryAt: null, nextCycleAt: null, continuing: false });
     }
     const recon = row.reconRunId ? await tx.targetReconRun.findFirst({ where: { id: row.reconRunId, programId },
-      select: { id: true, status: true, outcome: true, finishedAt: true, scopeMarkdown: true, preflight: true } }) : null;
+      select: { id: true, status: true, outcome: true, preflight: true } }) : null;
     if (row.state === 'RECON_RUNNING') {
       if (recon && live.some(status => status === recon.status)) {
         const preflight = recon.preflight as Prisma.JsonObject | null;
@@ -108,20 +107,43 @@ export async function advanceCampaign(ownerId: string, programId: string, option
         return;
       }
       if (recon?.status === 'COMPLETED' && ['SUCCESS', 'PARTIAL'].includes(recon.outcome ?? '')) {
-        if (recon.scopeMarkdown) return save({ state: 'RESEARCH_PENDING', handoffRunId: recon.id, reason: null, continuing: false });
-        if (!recon.finishedAt || +now - +recon.finishedAt < 60_000) return;
+        return save({ state: 'RESEARCH_PENDING', handoffRunId: recon.id, reason: null, continuing: false });
       }
       return save({ state: 'FAILED', continuing: true, reason: recon?.status === 'CANCELLED'
-        ? 'Recon was cancelled.' : recon?.status === 'COMPLETED' ? 'Recon did not produce a Research handoff.' : 'Recon failed without usable results.',
+        ? 'Recon was cancelled.' : 'Recon failed without usable results.',
         retryAt: row.attempt < attempts ? new Date(+now + retryDelay(row.attempt)) : null });
+    }
+    if (row.state === 'RESEARCH_PENDING' || row.state === 'RESEARCH_RUNNING') {
+      const handoffId = row.handoffRunId;
+      if (!handoffId) return save({ state: 'FAILED', reason: 'The Research source Recon run is missing.', continuing: false });
+      if (row.state === 'RESEARCH_PENDING') {
+        const { jobs, queued } = await queueCampaignResearch(tx, programId, ownerId, handoffId);
+        // Pause may have requested cancellation before the dispatcher settled it.
+        if (!queued && jobs.some(job => job.status === 'QUEUED' && job.cancelRequestedAt)) return;
+        if (queued || jobs.length) return save({ state: 'RESEARCH_RUNNING', continuing: false, reason: null });
+        return save({ state: 'MONITORING', continuing: false, reason: 'No eligible Recon assets remain for Research.',
+          nextCycleAt: campaignDueAt(row.intervalMinutes, now) });
+      }
+      const jobs = await campaignResearchJobs(tx, programId, handoffId);
+      if (jobs.some(job => live.some(status => status === job.status))) return;
+      if (jobs.some(job => job.status === 'FAILED')) return save({ state: 'FAILED', continuing: false,
+        reason: 'A Research job failed or was interrupted. Open Research to review the results and execution history.' });
+      return save({ state: 'MONITORING', continuing: false, reason: null, nextCycleAt: campaignDueAt(row.intervalMinutes, now) });
     }
     const due = (row.state === 'READY' && row.requestedAt && row.requestedAt <= now)
       || (row.state === 'MONITORING' && row.nextCycleAt && row.nextCycleAt <= now)
       || (row.state === 'FAILED' && row.retryAt && row.retryAt <= now);
     if (!due || (recon && live.some(status => status === recon.status))) return;
     const alreadyActive = await tx.targetReconRun.findFirst({ where: { programId, status: { in: [...live] } }, select: { id: true } });
-    if (alreadyActive) return;
-    if (await tx.targetReconRun.count({ where: { campaignKey: { not: null }, status: { in: [...live] } } }) >= parallelLimit()) return;
+    if (alreadyActive || await tx.scanRun.findFirst({ where: { type: 'RESEARCH', status: { in: [...live] },
+      target: { programId, userId: ownerId } }, select: { id: true } })) return;
+    const activeCampaigns = await tx.targetCampaign.count({ where: { OR: [
+      { state: { in: ['RECON_RUNNING', 'RESEARCH_PENDING', 'RESEARCH_RUNNING'] } },
+      { program: { targets: { some: { scanRuns: { some: {
+        status: 'RUNNING', OR: [{ targetReconRun: { campaignKey: { not: null } } }, { type: 'RESEARCH' }],
+      } } } } } },
+    ] } });
+    if (activeCampaigns >= parallelLimit()) return;
     const cycle = row.continuing ? Math.max(1, row.cycle) : row.cycle + 1;
     const attempt = row.continuing ? row.attempt + 1 : 1;
     let parent;
@@ -135,7 +157,7 @@ export async function advanceCampaign(ownerId: string, programId: string, option
       return save({ state: 'BLOCKED', reason: error.message, requestedAt: null, nextCycleAt: null, retryAt: null });
     }
     if (!parent) {
-      if (row.continuing && recon?.status === 'COMPLETED' && recon.scopeMarkdown && row.handoffRunId !== recon.id) {
+      if (row.continuing && recon?.status === 'COMPLETED' && ['SUCCESS', 'PARTIAL'].includes(recon.outcome ?? '') && row.handoffRunId !== recon.id) {
         return save({ state: 'RESEARCH_PENDING', handoffRunId: recon.id, cycle, attempt, requestedAt: null, retryAt: null, continuing: false, reason: null });
       }
       return save({ state: 'MONITORING', cycle, attempt, requestedAt: null, retryAt: null, continuing: false,
@@ -149,7 +171,11 @@ export async function advanceCampaign(ownerId: string, programId: string, option
 export function campaignAfterReview(row: TargetCampaign, blocker: string | null, intervalMinutes: number | null, now = new Date()): Prisma.TargetCampaignUpdateInput {
   const common = { intervalMinutes };
   if (blocker && row.state !== 'PAUSED') return { ...common, state: 'BLOCKED', reason: blocker, requestedAt: null, retryAt: null, nextCycleAt: null };
-  if (row.state === 'BLOCKED') return { ...common, state: 'READY', reason: null, requestedAt: now, nextCycleAt: null };
+  if (row.state === 'BLOCKED') {
+    const resumeResearch = row.handoffRunId && row.handoffRunId === row.reconRunId;
+    return { ...common, state: resumeResearch ? 'RESEARCH_PENDING' : 'READY', reason: null,
+      requestedAt: resumeResearch ? null : now, nextCycleAt: null };
+  }
   if (row.state === 'MONITORING') return { ...common, nextCycleAt: campaignDueAt(intervalMinutes, now) };
   return common;
 }

@@ -8,6 +8,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { loadTargetCampaign } from '@/server/targetCampaign';
 import { CampaignState } from '@/components/TargetCampaignView';
+import CampaignLiveRefresh from '@/components/CampaignLiveRefresh';
+import AutomatedResearchResults from '@/components/AutomatedResearchResults';
 
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
@@ -28,9 +30,12 @@ export default async function ResearchPage({searchParams}:{searchParams:Promise<
       <Link href={'/targets/' + filter} className="text-sm text-brand">← {campaign.program.companyName}</Link>
       <div className="flex flex-wrap items-center gap-3"><h1 className="text-2xl font-semibold">Research</h1><CampaignState state={stage.state} /></div>
       {stage.detail && <p className="text-sm text-muted">{stage.detail}</p>}
-      <p>Choose an authorized workspace to review the Recon results and continue Research.</p>
+      <p>Research generates a plan from Recon and runs the authorized automatic checks. Open Details for manual investigation.</p>
+      {campaign.view.campaign?.handoffRunId && <AutomatedResearchResults ownerId={userId} programId={filter}
+        handoffId={campaign.view.campaign.handoffRunId} input={input} query={query.toString()} />}
+      {campaign.view.activity.active && <CampaignLiveRefresh activity={[{ id: filter, ...campaign.view.activity }]} />}
       <div className="flex flex-wrap gap-4">
-        {campaign.view.campaign?.handoffRunId && <a className="text-brand underline" href={'/api/programs/' + filter + '/campaign/handoff'}>Download prepared handoff</a>}
+        {campaign.view.campaign?.handoffReady && <a className="text-brand underline" href={'/api/programs/' + filter + '/campaign/handoff'}>Download prepared handoff</a>}
         <Link className="text-brand underline" href={'/research?program=' + filter + '&view=details'} prefetch={false}>View details</Link>
       </div>
     </div>;

@@ -55,7 +55,7 @@ export async function beginScanExecution(scanRunId: string, workerId: string): P
       await tx.scanRun.update({ where: { id: scanRunId }, data: { status: "CANCELLED", outcome: null, finishedAt: new Date(), error: null } });
       return null;
     }
-    if (run.targetReconRunId || run.scopeAssetId) {
+    if (run.type === 'RECON' && (run.targetReconRunId || run.scopeAssetId)) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('bughunter:recon:capacity',0))`;
       const program=run.targetReconRunId?await tx.targetReconRun.findUniqueOrThrow({where:{id:run.targetReconRunId},select:{programId:true}}):await tx.target.findUniqueOrThrow({where:{id:run.targetId},select:{programId:true}});
       if(!program.programId)throw new Error('Recon asset program missing');
