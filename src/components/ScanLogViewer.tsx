@@ -79,14 +79,14 @@ function ScanLogSession({ scanRunId, stages, cancelled, showReconSummary }: Scan
   return (
     <div className="flex flex-col overflow-hidden rounded-md border border-border bg-surface-2">
       <div className="flex items-center justify-between border-b border-border bg-surface px-4 py-2">
-        <span className="font-mono text-xs font-medium uppercase tracking-wide text-muted">
+        <span className="text-sm font-medium text-muted">
           {stages ? 'Recon Console' : 'Scan output'}
         </span>
         <div className="flex items-center gap-2"><Badge tone={presentation.tone} mono>{presentation.label}</Badge><ScanCancelButton scanRunId={scanRunId} status={status} requested={Boolean(cancelRequestedAt)} onRequested={setCancelRequestedAt} /></div>
       </div>
-      {stages&&<ol className="space-y-1 border-b border-border px-4 py-3 font-mono text-xs text-foreground">{stages.map(s=><li key={s.name} className="flex flex-wrap gap-x-3"><span className="min-w-48">{s.name}</span><span>{cancelled&&['PENDING','RUNNING','SKIPPED'].includes(s.state)?'Cancelled':s.state.toLowerCase().replaceAll('_',' ').replace(/^./,c=>c.toUpperCase())}</span>{s.reason&&['PARTIAL','BLOCKED','FAILED','SKIPPED','SKIPPED_UNSUPPORTED','SKIPPED_NOT_APPLICABLE','COMPLETED_WITH_FALLBACK','CANCELLED'].includes(s.state)&&<span className="basis-full text-muted">{s.reason}</span>}</li>)}</ol>}
+      {stages&&<ol className="space-y-1 border-b border-border px-4 py-3 text-sm text-foreground">{stages.map(s=><li key={s.name} className="flex flex-wrap gap-x-3"><span className="min-w-48">{s.name}</span><span>{cancelled&&['PENDING','RUNNING','SKIPPED'].includes(s.state)?'Cancelled':s.state.toLowerCase().replaceAll('_',' ').replace(/^./,c=>c.toUpperCase())}</span>{s.reason&&['PARTIAL','BLOCKED','FAILED','SKIPPED','SKIPPED_UNSUPPORTED','SKIPPED_NOT_APPLICABLE','COMPLETED_WITH_FALLBACK','CANCELLED'].includes(s.state)&&<span className="basis-full text-muted">{s.reason}</span>}</li>)}</ol>}
       {execution?.state === "INTERRUPTED" && <p role="status" className="px-4 py-2 text-sm text-muted">Exécution interrompue · relance automatique désactivée.</p>}
-      {showReconSummary && TERMINAL.has(status) && <ScanSummaryPanel scanRunId={scanRunId} />}
+      {showReconSummary && TERMINAL.has(status) && <details className="border-t border-border"><summary className="px-4 py-3 text-sm">Recon observations</summary><ScanSummaryPanel scanRunId={scanRunId} /></details>}
       <p className="px-4 py-1 text-xs text-muted">Displays the most recent 2,000 received log entries.</p>
       <details className="border-t border-border">
       <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-foreground">Raw scan output ({logs.length} received lines)</summary>

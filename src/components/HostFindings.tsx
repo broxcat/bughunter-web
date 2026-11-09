@@ -15,13 +15,14 @@ import {
 } from "@/components/FindingClassification";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
+
 
 type Severity = "INFO" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 type Confidence = "CANDIDATE" | "PROVEN";
 
 interface Finding {
   id: string;
+  updatedAt?: string;
   huntMetadata?: unknown;
   title: string;
   vulnClass: string | null;
@@ -148,7 +149,7 @@ function HostFindingCollection({params}:{params:Promise<{id:string}>}){
         </div>
       )}
 
-      <Card className="p-4">
+      <details className="ui-disclosure"><summary>Add a finding</summary><div className="mt-4">
         <form onSubmit={createFinding} className="grid gap-3">
           <h2 className="text-sm font-medium text-foreground">Add a finding</h2>
           <input
@@ -159,13 +160,13 @@ function HostFindingCollection({params}:{params:Promise<{id:string}>}){
             placeholder="Title"
             className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
           />
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <input
               value={vulnClass}
               onChange={(e) => setVulnClass(e.target.value)}
               aria-label="Vulnerability family"
             placeholder="Vuln class (e.g. IDOR)"
-              className="flex-1 rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
+              className="min-w-0 flex-1 rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-subtle"
             />
             <select
               aria-label="Finding severity"
@@ -209,7 +210,7 @@ function HostFindingCollection({params}:{params:Promise<{id:string}>}){
             </Button>
           </div>
         </form>
-      </Card>
+      </div></details>
 
       <div className="space-y-3">
         <h2 className="text-sm font-medium text-foreground">Findings</h2>
@@ -223,7 +224,9 @@ function HostFindingCollection({params}:{params:Promise<{id:string}>}){
           <ul className="space-y-2">
             {findings.map((f) => (
               <li key={f.id} id={`finding-${f.id}`}>
-                <Card className="p-4">
+                <details className="finding-detail border-b border-border py-4" open={paramsQuery.get('finding')===f.id}>
+                  <summary className="flex flex-wrap items-center gap-3"><span className="mr-auto font-medium">{f.title}</span><Badge tone={SEVERITY_TONE[f.severity]}>{f.severity}</Badge><Badge tone={REVIEW_TONE[findingReviewStatus(f)]}>{findingReviewStatus(f).toLowerCase().replaceAll('_',' ')}</Badge>{f.updatedAt&&<time className="text-xs text-muted" dateTime={f.updatedAt}>{new Date(f.updatedAt).toLocaleDateString()}</time>}<span className="text-xs text-muted">Details</span></summary>
+                  <div className="mt-5 space-y-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -290,7 +293,7 @@ function HostFindingCollection({params}:{params:Promise<{id:string}>}){
                     finding={f}
                     onSaved={load}
                   />
-                </Card>
+                  </div></details>
               </li>
             ))}
           </ul>

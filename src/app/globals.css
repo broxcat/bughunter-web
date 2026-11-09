@@ -281,3 +281,45 @@ select {
 @media (prefers-reduced-motion: reduce) {
   .ui-btn, .app-nav a { transition: none; }
 }
+
+/* Quiet workspace hierarchy; terminal surfaces keep their native styling. */
+@layer components {
+  .workspace-ui > div { min-width: 0; }
+  .workspace-ui .ui-card { box-shadow: none; }
+  .ui-disclosure { border-top: 1px solid var(--border); padding-block: 1rem; }
+  .workspace-ui summary, .ui-dialog summary { cursor: pointer; font-size: 0.875rem; font-weight: 500; }
+  .workspace-ui summary::marker, .ui-dialog summary::marker { color: var(--muted); }
+  .workspace-ui details > :not(summary) { min-width: 0; }
+  .workspace-ui th { background: transparent; font-size: 0.8125rem; font-weight: 500; }
+  .workspace-ui .ui-table-scroll { border: 0; border-block: 1px solid var(--border); border-radius: 0; }
+  .target-workflow { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 0.75rem; }
+  .target-workflow a[aria-current="page"] { color: var(--brand); }
+  .scope-add { padding-block: 1rem; border-block: 1px solid var(--border); }
+  .ui-dialog label > :is(input,select) { margin-top: 0.375rem; }
+  .finding-detail:target { scroll-margin-top: 8rem; }
+  .finding-detail summary { display: flex; }
+  .collection-pager { border: 0; color: var(--muted); font-size: 0.8125rem; }
+}
+@media (max-width: 639px) {
+  .target-workflow { gap: 0.5rem; font-size: 0.8125rem; }
+  .target-workflow p { font-size: 0.6875rem; }
+  .workspace-ui .ui-inventory { display: block; }
+  .workspace-ui .ui-inventory thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .workspace-ui .ui-inventory :is(tbody,tr) { display: block; }
+  .workspace-ui .ui-inventory tr { padding-block: 0.75rem; }
+  .workspace-ui .ui-inventory td { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: 0.25rem 0; max-width: 100%; }
+  .workspace-ui .ui-inventory td::before { content: attr(data-label); flex: 0 0 6rem; color: var(--muted); font-size: 0.75rem; }
+  .workspace-ui .ui-inventory td > * { min-width: 0; }
+}
+@media (max-width: 639px) {
+  .workspace-ui .ui-targets tr { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 0.125rem 1rem; }
+  .workspace-ui .ui-targets td { padding: 0; gap: 0.5rem; font-size: 0.75rem; }
+  .workspace-ui .ui-targets td::before { flex-basis: auto; }
+  .workspace-ui .ui-targets td[data-label="Target"] { grid-column: 1; grid-row: 1; font-size: 0.875rem; }
+  .workspace-ui .ui-targets td[data-label="Platform"] { grid-column: 1; grid-row: 2; }
+  .workspace-ui .ui-targets td:is([data-label="Target"],[data-label="Platform"]) { display: block; }
+  .workspace-ui .ui-targets td:is([data-label="Target"],[data-label="Platform"],[data-label="Action"])::before { display: none; }
+  .workspace-ui .ui-targets td[data-label="Action"] { grid-column: 2; grid-row: 1 / 3; align-self: center; justify-self: end; }
+  .workspace-ui .ui-targets td[data-label="Scope"] { grid-column: 1; grid-row: 3; justify-content: start; }
+  .workspace-ui .ui-targets td[data-label="Latest Recon"] { grid-column: 2; grid-row: 3; justify-content: end; }
+}

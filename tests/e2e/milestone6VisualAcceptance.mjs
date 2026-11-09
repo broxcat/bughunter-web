@@ -60,15 +60,16 @@ export async function auditMilestone6Interactions({prisma:p,owner,origin,page}){
  await p.aiProviderConfig.upsert({where:{userId_provider:{userId:owner.id,provider:'OLLAMA'}},create:{userId:owner.id,provider:'OLLAMA',model,baseUrl:'http://127.0.0.1:1',isActive:true},update:{model,baseUrl:'http://127.0.0.1:1',isActive:true}});
  for(const theme of ['light','dark'])for(const width of [1280,390]){
   await page.setViewportSize({width,height:900});await page.evaluate(v=>localStorage.setItem('theme',v),theme);
-  await page.goto(`${origin}/targets/${program.id}`);await page.getByRole('button',{name:'View scope.md',exact:true}).waitFor();
+  await page.goto(`${origin}/scopes?target=${program.id}`);await page.getByRole('button',{name:'View scope.md',exact:true}).waitFor();
   const skip=page.getByRole('link',{name:'Skip to content',exact:true});await skip.focus();await page.keyboard.press('Enter');
   assert(page.url().endsWith('#main-content'));verify(`${theme}/${width}: skip link targets main`);
   assert(await page.locator('#main-content').evaluate(e=>e===document.activeElement));
   const nav=page.getByRole('navigation',{name:'Primary navigation',exact:true});
-  assert.equal(await nav.locator('[aria-current="page"]').innerText(),'Targets');assert.equal(await nav.getByRole('link',{name:/Findings|Reports/}).count(),0);verify(`${theme}/${width}: active Target, no global Findings/Report inventions`);
+  assert.equal(await nav.locator('[aria-current="page"]').innerText(),'Scopes');assert.equal(await nav.getByRole('link',{name:/Findings|Reports/}).count(),0);verify(`${theme}/${width}: active Target, no global Findings/Report inventions`);
   const scroll=page.getByRole('region',{name:'Scope Assets table',exact:true});await scroll.focus();const before=await scroll.evaluate(e=>({left:e.scrollLeft,wide:e.scrollWidth>e.clientWidth}));
   if(before.wide){await page.keyboard.press('ArrowRight');await page.waitForFunction(()=>document.querySelector('[aria-label="Scope Assets table"]').scrollLeft>0);}
-  assert.equal(before.wide,width===390);verify(`${theme}/${width}: data table keyboard scrolling`);
+  assert.equal(before.wide,false);verify(`${theme}/${width}: data table keyboard scrolling`);
+  await page.locator('tbody summary').filter({hasText:/^Actions$/}).first().click();
   const retire=page.getByRole('button',{name:'Retire asset app.visual.test',exact:true});await retire.focus();await page.keyboard.press('Enter');const dialog=page.getByRole('dialog',{name:'Retire Scope asset',exact:true});await dialog.waitFor();
   assert(await dialog.evaluate(e=>e.contains(document.activeElement)));assert.equal(await dialog.getByRole('button',{name:'Confirm retirement',exact:true}).getAttribute('data-variant'),'danger');
   await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});assert(await retire.evaluate(e=>e===document.activeElement));
@@ -78,8 +79,8 @@ export async function auditMilestone6Interactions({prisma:p,owner,origin,page}){
   const name=page.getByLabel('Company / Program name *',{exact:true});await name.fill('');await page.getByRole('button',{name:'Save Target',exact:true}).click();
   assert(await name.evaluate(e=>!e.validity.valid&&e===document.activeElement));
   verify(`${theme}/${width}: native required-field errors remain keyboard accessible`);
-  await page.goto(origin+'/settings');await page.getByRole('heading',{name:'AI Provider Settings',exact:true}).waitFor();await page.getByLabel('Provider',{exact:true}).waitFor();
-  const configured=page.getByRole('group',{name:'Configured OLLAMA provider',exact:true});await configured.waitFor();assert((await configured.innerText()).includes(model));
+  await page.goto(origin+'/settings');await page.getByRole('heading',{name:'Settings',exact:true}).waitFor();await page.locator('summary').filter({hasText:/^Add or update a provider$/}).click();await page.getByLabel('Provider',{exact:true}).waitFor();
+  const configured=page.getByRole('group',{name:'Configured OLLAMA provider',exact:true});await configured.waitFor();await configured.locator('summary').filter({hasText:/^Details$/}).click();assert((await configured.innerText()).includes(model));
   await page.screenshot({path:`/tmp/bh-m6/screenshots/settings-${theme}-${width}.png`});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   const toggle=page.getByRole('button',{name:theme==='dark'?'Switch to light theme':'Switch to dark theme',exact:true});await toggle.focus();await page.keyboard.press('Enter');
@@ -104,7 +105,7 @@ export async function auditScopeUrlState({prisma:p,owner,origin,page}){
  const rows=Array.from({length:26},(_,i)=>({programId:program.id,originalValue:`asset${String(i).padStart(2,'0')}.url.test`,normalizedValue:`asset${String(i).padStart(2,'0')}.url.test`,format:'SUBDOMAIN',type:'WEB_APPLICATION'}));
  await p.scopeAsset.createMany({data:rows});
  const pager=page.getByRole('navigation',{name:'Scope management pages',exact:true});
- let release,markNavigation;const delayed=new Promise(resolve=>{release=resolve;}),navigation=new Promise(resolve=>{markNavigation=resolve;}),pending=new Set();const pattern=`**/targets/${program.id}?**`;
+ let release,markNavigation;const delayed=new Promise(resolve=>{release=resolve;}),navigation=new Promise(resolve=>{markNavigation=resolve;}),pending=new Set();const pattern=`**/scopes?target=${program.id}&**`;
  const handler=route=>{const work=(async()=>{const request=route.request(),url=new URL(request.url());if(request.headers()['rsc']==='1'&&url.searchParams.get('assetPage')==='1'){markNavigation();await delayed;}await route.continue();})();pending.add(work);return work.finally(()=>pending.delete(work));};
  await page.route(pattern,handler);
  try{
@@ -113,13 +114,13 @@ export async function auditScopeUrlState({prisma:p,owner,origin,page}){
   await page.route(assetPattern,holdAssets);
   try{
    const requested=page.waitForRequest(r=>new URL(r.url()).pathname===`/api/programs/${program.id}/assets`);
-   requested.catch(()=>{});await page.goto(`${origin}/targets/${program.id}?assetPage=2&pageSize=25`);await requested;
+   requested.catch(()=>{});await page.goto(`${origin}/scopes?target=${program.id}&assetPage=2&pageSize=25`);await requested;
    assert(await page.getByRole('status').filter({hasText:'Loading Scope Assets…'}).isVisible(),'initial Scope request must show loading');
    assert.equal(await page.getByText('Add an explicitly authorized Scope Asset to begin.',{exact:true}).count(),0,'pending data is not an empty collection');
   }finally{releaseAssets();await Promise.allSettled([...assetPending]);await page.unroute(assetPattern,holdAssets);}
   await pager.getByRole('status').filter({hasText:'Page 2 of 2 · 26'}).waitFor();
   const clamped=page.waitForResponse(async response=>{if(new URL(response.url()).pathname!==`/api/programs/${program.id}/assets`||!response.ok())return false;const body=await response.json();return body.page===1&&body.total===25;});
-  clamped.catch(()=>{});await page.getByRole('button',{name:'Retire asset '+rows[25].normalizedValue,exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Confirm retirement',exact:true}).click();await clamped;let timeout;try{await Promise.race([navigation,new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error('Canonical navigation was not requested within 30 seconds')),30000);})]);}finally{clearTimeout(timeout);}
+  clamped.catch(()=>{});await page.locator('tbody summary').filter({hasText:/^Actions$/}).first().click();await page.getByRole('button',{name:'Retire asset '+rows[25].normalizedValue,exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Confirm retirement',exact:true}).click();await clamped;let timeout;try{await Promise.race([navigation,new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error('Canonical navigation was not requested within 30 seconds')),30000);})]);}finally{clearTimeout(timeout);}
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   assert.equal(new URL(page.url()).searchParams.get('assetPage'),'2','URL is held before canonical navigation commits');
   assert((await pager.innerText()).includes('Page 2 of 2'),'do not publish a clamped counter while the old URL is still current');

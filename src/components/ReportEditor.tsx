@@ -1,4 +1,5 @@
 "use client";
+import {platformLabel} from '@/lib/platformPresentation';
 import {lifecycleReportEligible} from '@/lib/findingLifecycle';
 import EvidencePanel from '@/components/EvidencePanel';
 import { findingReviewStatus } from "@/lib/evidenceReview";
@@ -10,7 +11,7 @@ import {paginationInput} from '@/lib/pagination';
 import { Suspense,useEffect, useState } from "react";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
+
 
 type Platform =
   | "HACKERONE"
@@ -134,7 +135,7 @@ function ReportCollection({id,programMode=false}:{id:string;programMode?:boolean
         </div>
       )}
 
-      <Card className="p-4">
+      <details className="ui-disclosure" open={!reports.length}><summary>Generate report</summary><div className="mt-4">
         <form onSubmit={generate} className="grid gap-3">
           <input
             required
@@ -152,7 +153,7 @@ function ReportCollection({id,programMode=false}:{id:string;programMode?:boolean
           >
             {PLATFORMS.map((p) => (
               <option key={p} value={p}>
-                {p}
+                {platformLabel(p)}
               </option>
             ))}
           </select>
@@ -160,7 +161,7 @@ function ReportCollection({id,programMode=false}:{id:string;programMode?:boolean
           <div className="space-y-1">
             <p className="text-sm font-medium text-foreground">Confirmed findings · {Object.keys(selected).length} selected</p>
             {pages&&<CollectionPager path={'/targets/'+id+'/report'} query={query} {...pages.findings} pageKey="findingPage" label="Report finding pages" noun="Findings reviewed for eligibility"/>}
-            <p className="text-sm text-muted">Only eligible confirmed Findings on this page are shown. Selection is retained while paging; report creation validates eligibility again.</p>
+            <p className="text-sm text-muted">Selections are retained across pages. Eligibility is checked on generation.</p>
             {loading ? (
               <p className="text-sm text-muted">Loading…</p>
             ) : passed.length === 0 ? (
@@ -200,21 +201,22 @@ function ReportCollection({id,programMode=false}:{id:string;programMode?:boolean
             </Button>
           </div>
         </form>
-      </Card>
+      </div></details>
 
       {pages&&<CollectionPager path={'/targets/'+id+'/report'} query={query} {...pages.reports} pageKey="reportPage" label="Saved report pages"/>}
       {reports.length > 0 && <label className="block text-sm">Saved report<select aria-label="Saved report" className="mt-2 block w-full rounded border border-border bg-surface p-2" value={reportId} onChange={e => { setReportId(e.target.value); setMarkdown(reports.find(r => r.id === e.target.value)?.markdown ?? null); }}>{reports.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select></label>}
-      {reportId&&(reports.find(r=>r.id===reportId)?.evidenceTargetIds??[reports.find(r=>r.id===reportId)?.targetId??id]).map(targetId=><EvidencePanel key={reportId+targetId} targetId={targetId} reportId={reportId}/>)}
+      <details className="ui-disclosure"><summary>Evidence</summary><div className="mt-4">{reportId&&(reports.find(r=>r.id===reportId)?.evidenceTargetIds??[reports.find(r=>r.id===reportId)?.targetId??id]).map(targetId=><EvidencePanel key={reportId+targetId} targetId={targetId} reportId={reportId}/>)}
+      </div></details>
       {markdown !== null && (
         <div className="space-y-2">
           <h2 className="text-sm font-medium text-foreground">
-            Generated markdown
+            Report content
           </h2>
-          <Card className="overflow-x-auto bg-surface-3 p-4">
+          <section className="overflow-x-auto border-t border-border py-4">
             <pre className="whitespace-pre-wrap font-mono text-sm text-foreground">
               {markdown}
             </pre>
-          </Card>
+          </section>
         </div>
       )}
     </div>

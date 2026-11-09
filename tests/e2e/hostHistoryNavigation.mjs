@@ -6,7 +6,7 @@ export async function auditHostHistoryNavigation({prisma,owner,origin,page}){
   await page.setViewportSize({width,height:900});await page.evaluate(t=>localStorage.setItem('theme',t),theme);
   const path=origin+'/hosts/'+target.id,nav=page.getByRole('navigation',{name:'Host history pages',exact:true}),status=text=>nav.getByRole('status').filter({hasText:text});
   await page.goto(path+'?scanPage=1');await status('Page 1 of 3').waitFor();
-  await page.getByRole('link',{name:'← Scope',exact:true}).click();await page.waitForURL(origin+'/scopes?target='+program.id);await page.getByRole('heading',{name:'Scopes',exact:true}).waitFor();
+  await page.getByRole('link',{name:'← Scope',exact:true}).click();await page.waitForURL(origin+'/scopes?target='+program.id);await page.getByRole('heading',{name:/^Scopes?$/,exact:false}).waitFor();
   await page.goBack();await status('Page 1 of 3').waitFor();
   for(const n of [2,3]){await nav.getByRole('link',{name:'Next page',exact:true}).click();await status(`Page ${n} of 3`).waitFor();}
   await page.reload();await status('Page 3 of 3').waitFor();await nav.getByRole('link',{name:'Previous page',exact:true}).click();await status('Page 2 of 3').waitFor();

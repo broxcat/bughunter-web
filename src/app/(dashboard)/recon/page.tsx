@@ -1,8 +1,11 @@
+import {platformLabel} from '@/lib/platformPresentation';
 import Link from 'next/link';
+import TargetReconActions from '@/components/TargetReconActions';
 import { reconRunHistory } from '@/server/recon/runHistory';
 import { ResearchError } from '@/server/research/workspace';
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
 import {programCollection} from '@/server/programCollection';
 import {paginationInput} from '@/lib/pagination';
 import CollectionPager from '@/components/CollectionPager';
@@ -41,6 +44,7 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
       if (error instanceof ResearchError && error.status === 404) notFound();
       throw error;
     }
+    const liveRun=await prisma.targetReconRun.findFirst({where:{programId:history.program.id,program:{ownerId:session.user.id},status:{in:['QUEUED','RUNNING']}},select:{id:true}});
     return <div className="space-y-6">
       <nav aria-label="Recon navigation" className="flex flex-wrap gap-4 text-sm">
         <Link href="/recon" className="text-brand">Recon Targets</Link>
@@ -48,31 +52,32 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
       </nav>
       <div>
         <h1 className="text-2xl font-semibold">Recon history — {history.program.companyName}</h1>
-        <p className="text-muted">All retained runs, newest first. Historical evidence does not authorize future operations.</p>
+        <p className="text-muted">Recent runs, newest first.</p>
         {history.program.deletingAt && <p role="status">Target pending deletion.</p>}
       </div>
+      <TargetReconActions programId={history.program.id} running={Boolean(liveRun)} disabled={!!history.program.deletingAt}/>
       <CollectionPager path="/recon" query={query.toString()} {...history} label="Recon history pages" noun="runs"/>
-      {!history.items.length ? <p>No Recon runs recorded. Manage authorized assets and start Recon from the Target.</p> :
+      {!history.items.length ? <p>No Recon runs recorded. <Link className="text-brand" href={`/scopes?target=${history.program.id}`}>Configure Scope</Link> before starting.</p> :
         <div className="ui-table-scroll overflow-x-auto rounded border border-border" tabIndex={0} aria-label="Recon history table" role="region">
-          <table className="w-full min-w-[540px] text-left text-sm">
+          <table className="ui-inventory w-full text-left text-sm">
             <caption className="sr-only">Retained Recon runs ordered by date and unique run ID</caption>
             <thead><tr className="border-b border-border">
-              {['Run date (UTC)', 'Result', 'Recorded executions'].map(h => <th key={h} scope="col" className="p-3">{h}</th>)}
+              {['Last run (UTC)', 'State', 'Executions'].map(h => <th key={h} scope="col" className="p-3">{h}</th>)}
             </tr></thead>
             <tbody>{history.items.map(run => {
               const view = reconOverview(run);
               return <tr key={run.id} className="border-b border-border last:border-0">
-                <td className="p-3">
+                <td data-label="Last run" className="p-3">
                   <Link href={`/recon/runs/${run.id}?historyPage=${history.page}&historyPageSize=${history.pageSize}`} className="text-brand">
                     <time dateTime={run.createdAt.toISOString()}>{stamp(run.createdAt)}</time>
-                    <span className="block font-mono text-xs">{run.id}</span>
+
                   </Link>
                 </td>
-                <td className="p-3">
+                <td data-label="State" className="p-3">
                   <Badge tone={badgeTone[view.tone]}>{view.label}</Badge>
-                  {view.detail && <p className="mt-1 max-w-72 text-xs text-muted">{view.detail}</p>}
+
                 </td>
-                <td className="p-3">{run._count.scans}</td>
+                <td data-label="Executions" className="p-3">{run._count.scans}</td>
               </tr>;
             })}</tbody>
           </table>
@@ -82,63 +87,60 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
 
   const collection=await programCollection(session.user.id,paginationInput(query,false));
   const programs=collection.items;
+  // One representative Scope asset per visible program, with bounded
+  // relation reads. This is display context; execution rechecks current policy.
+  const assetRows=await prisma.bountyProgram.findMany({where:{id:{in:programs.map(p=>p.id)},ownerId:session.user.id},select:{id:true,scopeAssets:{where:{active:true},orderBy:[{assetValue:'asc'},{normalizedValue:'asc'},{id:'asc'}],take:1,select:{normalizedValue:true}}}});
+  const firstAsset=new Map(assetRows.map(p=>[p.id,p.scopeAssets[0]?.normalizedValue]));
 
   const rows = programs.map(program => ({
     ...program,
     assets: program._count.scopeAssets,
+    asset: firstAsset.get(program.id),
     run: program.reconRuns[0] ?? null,
     view: reconOverview(program.reconRuns[0] ?? null),
   }));
-  const running = rows.filter(row => row.view.tone === 'active').length;
-  const needsAttention = rows.filter(row => row.view.tone === 'danger' || row.view.tone === 'warning').length;
 
   return <div className="space-y-6">
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 className="text-2xl font-semibold">Recon</h1>
-        <p className="text-muted">What is authorized, what ran last, and what still needs attention.</p>
+        <p className="text-muted">Latest Recon by target.</p>
       </div>
-      <p className="text-sm text-muted" aria-live="polite">
-        On this page: {running} running · {needsAttention} need attention
-      </p>
+
     </div>
 
     <form action="/recon" className="flex flex-wrap gap-3"><label>Search Targets<input name="q" defaultValue={search.q??''} maxLength={200} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={collection.pageSize}/><button type="submit" className="ui-btn">Search</button></form>
     <CollectionPager path="/recon" query={query.toString()} {...collection}/>
     {!rows.length && <p>No matching Targets. <Link href="/targets" className="text-brand">Create a Target</Link> to authorize assets and start Recon.</p>}
 
-    {rows.length > 0 && <div className="ui-table-scroll overflow-x-auto rounded border border-border" tabIndex={0} role="region" aria-label="Targets with their authorized asset count and latest Recon result">
-      <table className="w-full min-w-[680px] text-left text-sm">
-        <caption className="sr-only">Targets with their authorized asset count and latest Recon result</caption>
+    {rows.length > 0 && <div className="ui-table-scroll overflow-x-auto rounded border border-border" tabIndex={0} role="region" aria-label="Targets and their latest Recon result">
+      <table className="ui-inventory w-full text-left text-sm">
+        <caption className="sr-only">Targets and their latest Recon result</caption>
         <thead>
           <tr className="border-b border-border">
-            {['Target', 'Authorized assets', 'Latest Recon', 'Last run', ''].map(heading => <th key={heading} scope="col" className="p-3 font-medium">{heading}</th>)}
+            {['Target', 'Asset / host', 'State', 'Last run', ''].map(heading => <th key={heading} scope="col" className="p-3 font-medium">{heading}</th>)}
           </tr>
         </thead>
         <tbody>
           {rows.map(row => <tr key={row.id} className="border-b border-border last:border-0">
-            <td className="p-3">
+            <td data-label="Target" className="p-3"><div>
               <Link className="font-medium text-brand" href={`/targets/${row.id}`}>{row.companyName}</Link>
-              <p className="text-xs text-muted">{row.platform ?? 'Private program'}{row.deletingAt ? ' · pending deletion' : ''}</p>
-            </td>
-            <td className="p-3">{row.assets}</td>
-            <td className="p-3">
+              <p className="text-xs text-muted">{platformLabel(row.platform)}{row.deletingAt ? ' · pending deletion' : ''}</p>
+            </div></td>
+            <td data-label="Asset / host" className="p-3"><div><span className="break-all font-mono text-xs">{row.asset??'No assets'}</span>{row.assets>1&&<p className="text-xs text-muted">+{row.assets-1} more</p>}</div></td>
+            <td data-label="State" className="p-3">
               <Badge tone={badgeTone[row.view.tone]}>{row.view.label}</Badge>
-              {row.view.detail && <p className="mt-1 max-w-72 text-xs text-muted">{row.view.detail}</p>}
+
             </td>
-            <td className="p-3 text-muted">{row.run ? <time dateTime={row.run.createdAt.toISOString()}>{stamp(row.run.createdAt)}</time> : '—'}</td>
-            <td className="p-3">
-              <div className="flex flex-wrap gap-3">
-                {row.run && <Link className="text-brand" href={`/recon/runs/${row.run.id}`} aria-label={`Open latest Recon run for ${row.companyName}`}>Latest run</Link>}
-                <Link className="text-brand" href={`/recon?program=${row.id}`} aria-label={`Open Recon history for ${row.companyName}`}>History</Link>
-                <Link className="text-muted" href={`/targets/${row.id}?tab=Recon`} aria-label={`Open Recon for ${row.companyName}`}>Target</Link>
-              </div>
+            <td data-label="Last run" className="p-3 text-muted">{row.run ? <time dateTime={row.run.createdAt.toISOString()}>{stamp(row.run.createdAt)}</time> : '—'}</td>
+            <td data-label="Action" className="p-3">
+              <Link className="font-medium text-brand" href={row.run?`/recon/runs/${row.run.id}`:`/recon?program=${row.id}`} aria-label={row.run?`Open latest Recon run for ${row.companyName}`:`Open Recon for ${row.companyName}`}>Open</Link>
             </td>
           </tr>)}
         </tbody>
       </table>
     </div>}
 
-    <p className="text-sm text-muted">Recon observations are evidence, not confirmed vulnerabilities. Missing coverage never proves safety.</p>
+
   </div>;
 }

@@ -12,17 +12,17 @@ export async function auditScopeResearchCollections({prisma,owner,origin,page}){
  const hunts=Array.from({length:51},(_,n)=>({id:program.id+'_hunt_'+String(n).padStart(3,'0'),targetId:targets[0].id,type:'HUNT',status:'COMPLETED',createdAt:new Date('2026-01-01')}));await prisma.scanRun.createMany({data:hunts});let checks=0;
  for(const theme of ['light','dark'])for(const width of [1280,390])for(const kind of ['scope','hosts','history','management','hunt']){
   await page.setViewportSize({width,height:900});await page.evaluate(t=>localStorage.setItem('theme',t),theme);
-  const path=kind==='scope'?'/scopes':kind==='management'?'/targets/'+management.id:kind==='hunt'?'/hunt':'/research',key=kind==='history'?'historyPage':kind==='management'?'assetPage':'page';
-  const query=new URLSearchParams({[kind==='scope'?'target':'program']:program.id,pageSize:'25'});
+  const path=kind==='scope'?'/scopes':kind==='management'?'/scopes':kind==='hunt'?'/hunt':'/research',key=kind==='history'?'historyPage':kind==='management'?'assetPage':'page';
+  const query=new URLSearchParams({[kind==='scope'||kind==='management'?'target':'program']:kind==='management'?management.id:program.id,pageSize:'25',...(kind==='scope'?{inventory:'1'}:{})});
   const nav=page.getByRole('navigation',{name:kind==='scope'?'Collection pages':kind==='hosts'?'Research hosts pages':kind==='management'?'Scope management pages':kind==='hunt'?'Hunt history pages':'Research history pages',exact:true});
   if(kind==='history')query.set(key,'1');
-  if(kind==='scope'){await page.goto(origin+'/scopes?target=missing-fixture');await nav.getByRole('status').filter({hasText:'Page 1 of 1 · 0'}).waitFor();assert.equal(await page.getByLabel('Filter Target',{exact:true}).inputValue(),'missing-fixture');assert.equal(await page.getByLabel('Filter Target',{exact:true}).locator('option:checked').innerText(),'Unavailable Target');}
+  if(kind==='scope'){await page.goto(origin+'/scopes?inventory=1&target=missing-fixture');await nav.getByRole('status').filter({hasText:'Page 1 of 1 · 0'}).waitFor();assert.equal(await page.getByLabel('Filter Target',{exact:true}).inputValue(),'missing-fixture');assert.equal(await page.getByLabel('Filter Target',{exact:true}).locator('option:checked').innerText(),'Unavailable Target');}
   await page.goto(origin+path+'?'+query);await nav.getByRole('status').filter({hasText:'Page 1 of 3'}).waitFor();
   for(const n of [2,3]){await nav.getByRole('link',{name:'Next page',exact:true}).click();await nav.getByRole('status').filter({hasText:`Page ${n} of 3`}).waitFor();}
   await page.reload();await nav.getByRole('status').filter({hasText:'Page 3 of 3'}).waitFor();
   await nav.getByRole('link',{name:'Previous page',exact:true}).click();await nav.getByRole('status').filter({hasText:'Page 2 of 3'}).waitFor();
   await page.goBack();await nav.getByRole('status').filter({hasText:'Page 3 of 3'}).waitFor();await page.goForward();await nav.getByRole('status').filter({hasText:'Page 2 of 3'}).waitFor();
-  assert.equal(new URL(page.url()).searchParams.get(kind==='scope'?'target':'program'),program.id);
+  assert.equal(new URL(page.url()).searchParams.get(kind==='scope'||kind==='management'?'target':'program'),kind==='management'?management.id:program.id);
   for(const v of ['invalid','999']){query.set(key,v);await page.goto(origin+path+'?'+query);await nav.getByRole('status').filter({hasText:v==='invalid'?'Page 1 of 3':'Page 3 of 3'}).waitFor();}
   // Disposable DB-only removal simulates another writer. Historical sessions
   // have no product delete operation; this is not a newly exposed capability.

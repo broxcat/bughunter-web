@@ -21,10 +21,7 @@ export async function auditAccessibility({prisma,owner,origin,context,page,progr
   await page.setViewportSize({width,height:900});await page.evaluate(t=>localStorage.setItem('theme',t),theme);
   const response=await page.goto(origin+path);assert(response.status()<400,`${pattern}: document ${response.status()}`);
   // Include asynchronously loaded populated Target controls, not just its SSR shell.
-  if(pattern==='/targets/[id]'){
-    const currentAsset=await prisma.scopeAsset.findFirst({where:{programId:program.id,active:true},orderBy:{id:'asc'}});
-    if(currentAsset)await page.getByRole('link',{name:currentAsset.normalizedValue,exact:true}).first().waitFor();
-  }
+  if(pattern==='/targets/[id]')await page.getByRole('navigation',{name:'Target workflow',exact:true}).waitFor();
   if(pattern==='/targets/[id]/findings')await page.getByText(candidate.title,{exact:true}).first().waitFor();
   if(pattern==='/targets/[id]/report'){const saved=page.getByRole('combobox',{name:'Saved report',exact:true});await saved.waitFor();assert(await saved.evaluate((e,id)=>Array.from(e.options).some(o=>o.value===id),report.id));}
   // Wait for hydrated client forms, without waiting on external services.

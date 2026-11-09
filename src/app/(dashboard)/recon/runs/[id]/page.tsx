@@ -6,7 +6,7 @@ import { redactObservationText } from '@/lib/observationSafety';
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { Badge } from '@/components/ui/Badge';
-import { Card } from '@/components/ui/Card';
+
 import { loadTargetReconRun } from '@/server/recon/runDetail';
 import { ResearchError } from '@/server/research/workspace';
 import { reconOverview, type ReconTone } from '@/lib/reconOverview';
@@ -63,27 +63,23 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
 
     <header className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold">Recon run</h1>
+        <h1 className="break-all text-2xl font-semibold">{run.scans.length===1?redactObservationText(run.scans[0].capturedHost??run.program.companyName):run.program.companyName} <span className="font-normal text-muted">/ Recon run</span></h1>
         <Badge tone={badgeTone[view.tone]}>{view.label}</Badge>
-        <Badge tone="neutral" mono>{run.status}</Badge>
+
         <a className="ml-auto text-sm text-brand" href={`/api/recon/runs/${run.id}/report`}>Download report (.md)</a>
       </div>
       {view.detail && <p className="text-sm text-muted">{view.detail}</p>}
       <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
         <div><dt className="text-subtle">Started</dt><dd>{stamp(run.startedAt ?? run.createdAt)}</dd></div>
         <div><dt className="text-subtle">Duration</dt><dd>{duration ?? 'Not recorded'}</dd></div>
-        <div><dt className="text-subtle">Asset executions recorded</dt><dd>{run.scans.length}</dd></div>
-        <div><dt className="text-subtle">Current Target User-Agent</dt><dd className="break-all font-mono text-xs">{redactObservationText(run.program.requiredUserAgent ?? 'Not recorded')}</dd></div>
-        <div><dt className="text-subtle">Assessment mode</dt><dd>{run.assessmentModeSnapshot?.toLowerCase().replaceAll('_', ' ') ?? 'Not captured'}</dd></div>
-        <div><dt className="text-subtle">Authenticated contexts</dt><dd>{contextCount > 0 ? `${contextCount} recorded` : 'None recorded'}</dd></div>
       </dl>
     </header>
 
-    <ReconReportView model={report} narrative={narrative} />
 
-    <h2 className="pt-2 text-xl font-semibold">Per-host execution detail</h2>
 
-    {!run.scans.length && <Card className="p-5"><h2 className="font-semibold">No host executions recorded</h2><p className="mt-2 text-sm text-muted">This run has no per-host execution data. The run status above remains authoritative; nothing is inferred.</p></Card>}
+    <h2 className="text-lg font-semibold">Recon timeline</h2>
+
+    {!run.scans.length && <section className="border-t border-border py-4"><h2 className="font-semibold">No host executions recorded</h2><p className="mt-2 text-sm text-muted">This run has no per-host execution data. The run status above remains authoritative; nothing is inferred.</p></section>}
 
     {run.scans.map(scan => {
       const scanView = reconOverview({ status: scan.status, outcome: scan.outcome });
@@ -91,11 +87,11 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
       const limitations = scan.reconSteps.filter(step => stepView(step.state).limitation);
       const observationsForRun = observations[scan.id] ?? [];
       const lines = redactLogLines(logs[scan.id] ?? []);
-      return <Card key={scan.id} className="space-y-5 p-5">
+      return <section key={scan.id} className="space-y-5 border-t border-border py-5">
         <div className="flex flex-wrap items-baseline gap-3">
           <h2 className="break-all font-mono text-lg font-semibold">{redactObservationText(scan.capturedHost ?? 'Host not captured')}</h2>
           <Badge tone={badgeTone[scanView.tone]}>{scanView.label}</Badge>
-          <Badge tone="neutral" mono>{scan.status}</Badge>
+
           <span className="text-sm text-muted">{scan._count.artifacts} observations</span>
           {scan.scopeAsset && <Link className="ml-auto text-sm text-brand" href={`/scopes/${scan.scopeAsset.id}`}>Host evidence →</Link>}
         </div>
@@ -103,7 +99,7 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
         <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
           <div><dt className="text-subtle">Started</dt><dd>{stamp(scan.startedAt ?? scan.createdAt)}</dd></div>
           <div><dt className="text-subtle">Duration</dt><dd>{elapsed(scan.startedAt, scan.finishedAt) ?? 'Not recorded'}</dd></div>
-          <div><dt className="text-subtle">User-Agent</dt><dd className="break-all font-mono text-xs">{redactObservationText(scan.requiredUserAgent ?? 'Not recorded')}</dd></div>
+
         </dl>
 
         <section aria-label={`Execution timeline for ${scan.scopeAsset?.normalizedValue ?? 'host'}`}>
@@ -119,12 +115,14 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
                 const attempts = providerAttempts(step.details);
                 return <li key={step.name} className="border-l-2 border-border pl-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span aria-hidden className={stepState.tone === 'danger' ? 'text-danger' : stepState.tone === 'warning' ? 'text-warning' : stepState.tone === 'success' ? 'text-success' : 'text-subtle'}>{stepState.symbol}</span>
+                    <span aria-hidden className={stepState.tone === 'danger' ? 'text-danger' : stepState.tone === 'warning' ? 'text-muted' : stepState.tone === 'success' ? 'text-muted' : 'text-subtle'}>{stepState.symbol}</span>
                     <span className="font-medium">{step.name}</span>
                     <Badge tone={badgeTone[stepState.tone]}>{stepState.label}</Badge>
                     {formatDuration(details?.durationMs) && <span className="text-xs text-muted">{formatDuration(details?.durationMs)}</span>}
                   </div>
                   {tools.length > 0 && <p className="mt-1 font-mono text-xs text-muted">Planned tools: {tools.join(' · ')}</p>}
+                  {step.reason && <p className="mt-1 text-sm text-muted">{redactObservationText(step.reason)}</p>}
+                  {(attempts.length>0||caps.length>0)&&<details className="mt-2 text-sm"><summary>Details</summary>
                   {attempts.length > 0 && <ul className="mt-2 space-y-1 text-sm">
                     {attempts.map((attempt, index) => <li key={index}>
                       <span className="font-mono">{attempt.provider}</span> · {stepView(attempt.state).label}
@@ -133,16 +131,16 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
                       {attempt.reason && <p className="text-muted">{attempt.reason}</p>}
                     </li>)}
                   </ul>}
-                  {step.reason && <p className="mt-1 text-sm text-muted">{redactObservationText(step.reason)}</p>}
                   {caps.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-muted">
                     {caps.map(cap => <li key={cap.capability}>{cap.capability.replaceAll('_', ' ').toLowerCase()} · {stepView(cap.state).label}</li>)}
                   </ul>}
+                  </details>}
                 </li>;
               })}
             </ol>}
         </section>
 
-        <section aria-label="Observations">
+        <details className="ui-disclosure"><summary>Observations</summary><section aria-label="Observations" className="mt-3">
           <h3 className="mb-2 font-semibold">Observations</h3>
           {observationsForRun.length
             ? <ul className="space-y-1 text-sm">
@@ -155,6 +153,7 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
           <p className="mt-2 text-xs text-muted">Observations are evidence, not confirmed vulnerabilities.</p>
         </section>
 
+        </details>
         {limitations.length > 0 && <section aria-label="Limitations">
           <h3 className="mb-2 font-semibold">Failures and limitations</h3>
           <ul className="space-y-1 text-sm">
@@ -162,16 +161,22 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
           </ul>
         </section>}
 
-        <details className="rounded border border-border p-3">
+        <details className="ui-disclosure">
           <summary className="cursor-pointer text-sm font-medium">Raw execution output ({lines.length}{lines.length >= rawLogLimit ? ` of the latest ${rawLogLimit}` : ''} lines)</summary>
           {lines.length
             ? <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-surface-2 p-3 font-mono text-xs leading-relaxed">{lines.map((line, index) => <span key={index} className="block"><span className="text-muted">[{line.stream}] </span>{line.text}</span>)}</pre>
             : <p className="mt-2 text-sm text-muted">No raw output was recorded. Open host evidence for the complete artifact set.</p>}
           {lines.length >= rawLogLimit && <p className="mt-2 text-xs text-muted">Only the most recent {rawLogLimit} lines are shown here. Stored logs are unchanged and remain available from the host page.</p>}
         </details>
-      </Card>;
+      </section>;
     })}
 
-    <p className="text-sm text-muted">Completed does not imply success. Missing coverage never proves safety.</p>
+    <details className="ui-disclosure"><summary>Technical details</summary><dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">        <div><dt className="text-subtle">Asset executions recorded</dt><dd>{run.scans.length}</dd></div>
+        <div><dt className="text-subtle">Current Target User-Agent</dt><dd className="break-all font-mono text-xs">{redactObservationText(run.program.requiredUserAgent ?? 'Not recorded')}</dd></div>
+        <div><dt className="text-subtle">Assessment mode</dt><dd>{run.assessmentModeSnapshot?.toLowerCase().replaceAll('_', ' ') ?? 'Not captured'}</dd></div>
+        <div><dt className="text-subtle">Authenticated contexts</dt><dd>{contextCount > 0 ? `${contextCount} recorded` : 'None recorded'}</dd></div>
+<div><dt className="text-muted">Run ID</dt><dd className="break-all font-mono text-xs">{run.id}</dd></div></dl></details>
+    <ReconReportView model={report} narrative={narrative}/>
+    <p className="text-xs text-muted">Missing coverage never proves safety.</p>
   </div>;
 }

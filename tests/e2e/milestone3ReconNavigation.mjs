@@ -9,8 +9,8 @@ export async function auditMilestone3Recon({ prisma: p, owner, origin, context, 
     await page.emulateMedia({ colorScheme: theme }); await page.setViewportSize({ width, height: 900 });
     const program = await p.bountyProgram.create({ data: { ownerId: owner.id, companyName: `M3 ${theme} ${width}`, requiredUserAgent: 'Current-M3-UA' } });
     const home = `${origin}/targets/${program.id}`, history = `${origin}/recon?program=${program.id}&pageSize=25`;
-    await page.goto(home); await page.getByText('No Recon runs recorded.', { exact: true }).waitFor();
-    const openHistory = page.getByRole('link', { name: 'Complete Recon history', exact: true }); await openHistory.focus(); await page.keyboard.press('Enter');
+    await page.goto(home); await page.getByText('Not run', { exact: true }).waitFor();
+    const openHistory = page.getByRole('navigation',{name:'Target workflow',exact:true}).getByRole('link', { name: 'Recon', exact: true }); await openHistory.focus(); await page.keyboard.press('Enter');
     await page.getByRole('heading', { name: 'Recon history — ' + program.companyName, exact: true }).waitFor();
     await page.getByText('No Recon runs recorded.', { exact: false }).waitFor(); checks++;
     const ids = Array.from({ length: 51 }, (_, i) => program.id + '_' + String(i).padStart(3, '0'));
@@ -18,17 +18,17 @@ export async function auditMilestone3Recon({ prisma: p, owner, origin, context, 
     await page.goto(history);
     const nav = page.getByRole('navigation', { name: 'Recon history pages', exact: true });
     await nav.getByRole('status').filter({ hasText: 'Page 1 of 3 · 51 runs' }).waitFor();
-    await page.getByRole('columnheader',{name:'Recorded executions',exact:true}).waitFor();
-    const runLinks = page.locator('tbody a'); assert.equal(await runLinks.count(), 25); assert((await runLinks.first().innerText()).includes(ids[50]));
+    await page.getByRole('columnheader',{name:'Executions',exact:true}).waitFor();
+    const runLinks = page.locator('tbody a'); assert.equal(await runLinks.count(), 25); assert((await runLinks.first().getAttribute('href')).includes(ids[50]));
     await nav.getByRole('link', { name: 'Next page', exact: true }).focus(); await page.keyboard.press('Enter');
     await nav.getByRole('status').filter({ hasText: 'Page 2 of 3' }).waitFor(); assert.equal(new URL(page.url()).searchParams.get('program'), program.id);
     await page.reload(); await nav.getByRole('status').filter({ hasText: 'Page 2 of 3' }).waitFor();
     await nav.getByRole('link', { name: 'Next page', exact: true }).click(); await nav.getByRole('status').filter({ hasText: 'Page 3 of 3' }).waitFor();
-    assert((await runLinks.first().innerText()).includes(ids[0]));
+    assert((await runLinks.first().getAttribute('href')).includes(ids[0]));
     await page.goBack(); await nav.getByRole('status').filter({ hasText: 'Page 2 of 3' }).waitFor();
     await page.goForward(); await nav.getByRole('status').filter({ hasText: 'Page 3 of 3' }).waitFor(); checks++;
     await runLinks.first().focus(); await page.keyboard.press('Enter');
-    await page.getByRole('heading', { name: 'Recon run', exact: true }).waitFor(); assert.equal(new URL(page.url()).pathname, '/recon/runs/' + ids[0]);
+    await page.getByRole('heading', { name: /Recon run$/, exact: false }).waitFor(); assert.equal(new URL(page.url()).pathname, '/recon/runs/' + ids[0]);
     await page.getByText('Result unknown', { exact: true }).first().waitFor();
     await page.getByRole('link', { name: 'Run history', exact: true }).click(); await nav.getByRole('status').filter({ hasText: 'Page 3 of 3' }).waitFor();
     await page.getByRole('link', { name: 'Back to ' + program.companyName, exact: true }).click(); await page.waitForURL(home);
@@ -60,6 +60,7 @@ export async function auditMilestone3Recon({ prisma: p, owner, origin, context, 
     await p.targetReconRun.update({ where: { id: runId }, data: { status: 'QUEUED' } });
     const scan = await p.scanRun.create({ data: { type: 'RECON', targetId: target.id, scopeAssetId: asset.id, targetReconRunId: runId, status: 'QUEUED', requiredUserAgent: 'Captured-M3-UA', scopeAssetSnapshot: { normalizedValue: 'captured.m3.fixture.test' }, reconPlan: { stages: [{ name: 'HTTP surface', tools: ['httpx', 'never-executed'] }] }, reconSteps: { create: { name: 'HTTP surface', position: 0, state: 'PENDING' } } } });
     await p.scanLog.create({ data: { scanRunId: scan.id, stream: 'STDOUT', line: 'Initial recorded output' } });
+    await page.goto(history+'&page=2');await page.getByRole('button',{name:'Cancel Recon',exact:true}).waitFor();checks++;
     const heartbeat = `**/api/programs/${program.id}/recon?runId=${runId}`;
     let polls = 0;
     const handler = async route => { polls++; if (polls === 1) return route.fulfill({ status: 503, contentType: 'application/json', body: '{}' }); return route.continue(); };
@@ -78,6 +79,7 @@ export async function auditMilestone3Recon({ prisma: p, owner, origin, context, 
     assert((await page.locator('body').innerText()).includes('Planned tools: httpx · never-executed')); checks++;
     // Report/observations and real provider attempts arrive independently of
     // the parent status. Refresh must show these even while it stays RUNNING.
+    await page.locator('summary').filter({hasText:/^Details$/}).evaluate(e=>{e.parentElement.open=true;});
     await summary.scrollIntoViewIfNeeded();
     const readingPosition = await summary.evaluate(el => el.getBoundingClientRect().top);
     await p.reconArtifact.create({ data: { scanRunId: scan.id, scopeAssetId: asset.id, kind: 'endpoint', canonicalKey: 'm3', value: { url: 'https://captured.m3.fixture.test/new-recorded-path', statusCode: 403 }, scopeState: 'IN_SCOPE', verification: 'OBSERVED', sources: [], firstSeenAt: new Date(), lastSeenAt: new Date() } });

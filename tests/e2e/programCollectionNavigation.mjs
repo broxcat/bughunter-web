@@ -23,7 +23,7 @@ export async function auditProgramCollections({prisma,owner,origin,context,page}
  const intercept=async route=>{if(route.request().method()!=='DELETE')return route.continue();await gate;return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Synthetic deletion blocked'})});};
  await context.route(pattern,intercept);
  try{
-  await page.goto(origin+'/targets/'+id);
+  await page.goto(origin+'/targets/'+id+'/settings');await page.locator('summary').filter({hasText:/^Delete Target$/}).click();
   const opener=page.getByRole('button',{name:'Delete Target',exact:true});await opener.click();
   const dialog=page.getByRole('dialog');await dialog.waitFor();
   for(let n=0;n<5;n++){await page.keyboard.press('Tab');assert(await page.evaluate(()=>document.querySelector('dialog')?.matches(':modal')&&(document.activeElement===document.body||Boolean(document.activeElement.closest('dialog')))),'Tab must not activate background controls');}
@@ -36,17 +36,17 @@ export async function auditProgramCollections({prisma,owner,origin,context,page}
  const contrast=(a,b)=>{const lum=s=>{const rgb=s.match(/[\d.]+/g).slice(0,3).map(Number).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};const x=lum(a),y=lum(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
  for(const theme of ['light','dark']){
   await page.evaluate(t=>localStorage.setItem('theme',t),theme);await page.goto(origin+'/targets');await page.getByRole('status').filter({hasText:/^Page /}).waitFor();await page.getByRole('button',{name:'Create Target',exact:true}).click();
-  const input=page.getByLabel('Company / Program name *',{exact:true});await input.waitFor();
+  const input=page.getByLabel('Name',{exact:true});await input.waitFor();
   const colors=await input.evaluate(e=>{const s=getComputedStyle(e);return{fg:s.color,bg:s.backgroundColor,border:s.borderTopColor,ring:s.outlineColor};});
   assert(contrast(colors.fg,colors.bg)>=4.5,theme+' input text contrast');
   assert(contrast(colors.border,colors.bg)>=3,theme+' control boundary contrast: '+JSON.stringify(colors));
   assert(contrast(colors.ring,colors.bg)>=3,theme+' focus ring contrast');
-  const form=page.locator('form').filter({has:input}),submit=form.getByRole('button',{name:'Create Target',exact:true});
+  const form=page.locator('form').filter({has:input}),submit=form.getByRole('button',{name:'Create target',exact:true});
   const buttonColors=await submit.evaluate(e=>{const s=getComputedStyle(e);return{fg:s.color,bg:s.backgroundColor};});assert(contrast(buttonColors.fg,buttonColors.bg)>=4.5,theme+' button text contrast');
   await submit.click();
   assert.equal(await form.evaluate(e=>e.checkValidity()),false);assert(await input.evaluate(e=>e.required&&Boolean(e.validationMessage)));checks++;
  }
  const retiring=await prisma.bountyProgram.create({data:{ownerId:owner.id,companyName:'Retiring collection fixture',requiredUserAgent:'Fixture/1',deletingAt:new Date()}});
- await page.goto(origin+'/targets?q=Retiring+collection+fixture');await page.getByRole('status').filter({hasText:'Deletion in progress'}).waitFor();await page.getByRole('link',{name:retiring.companyName,exact:true}).click();await page.getByRole('status').filter({hasText:'Target deletion is in progress'}).waitFor();checks++;
+ await page.goto(origin+'/targets?q=Retiring+collection+fixture');await page.getByRole('status').filter({hasText:'Deletion pending'}).waitFor();await page.getByRole('link',{name:'Open '+retiring.companyName,exact:true}).click();await page.getByRole('status').filter({hasText:'Target deletion is in progress'}).waitFor();checks++;
  console.log(`PROGRAM_COLLECTION_BROWSER: ${checks} passed, 0 failed, 0 skipped`);
 }

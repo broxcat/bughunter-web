@@ -13,7 +13,7 @@ export default function ReconReportView({ model,narrative }: { model: ReconRepor
   return <section aria-labelledby="recon-report-heading" className="recon-report space-y-6">
     <div className="space-y-1">
       <h2 id="recon-report-heading" className="text-xl font-semibold">Report</h2>
-      <p className="text-sm text-muted">Deterministic, generated from stored Recon evidence. It does not prove security, and missing observations are not evidence of absence.</p>
+      <p className="text-sm text-muted">Generated from stored Recon evidence.</p>
     </div>
 
     <section aria-label="Executive summary" className="space-y-2">
@@ -36,7 +36,7 @@ export default function ReconReportView({ model,narrative }: { model: ReconRepor
       </div>}
     </section>
 
-    <ReconRunNarrative narrative={narrative??{state:"DETERMINISTIC",highlights:[]}}/>
+
 
     <section aria-label="Scope and authorization" className="space-y-2">
       <h3 className="font-semibold">Scope and authorization</h3>
@@ -50,7 +50,56 @@ export default function ReconReportView({ model,narrative }: { model: ReconRepor
       </dl>
     </section>
 
-    <section aria-label="Methodology" className="space-y-2">
+    <section aria-label="Important observations" className="space-y-2"><h3 className="font-semibold">Important observations</h3><ul className="space-y-1 text-sm"><li>{web.responsiveHosts.length} responsive hosts · {web.endpoints.length} web endpoints · {model.network.length} port/service observations</li>{web.authSurfaces.length>0&&<li>Authentication surfaces: {web.authSurfaces.join(', ')}</li>}{web.apiSurfaces.length>0&&<li>API surfaces: {web.apiSurfaces.join(', ')}</li>}</ul></section>
+    <section aria-label="Ports and services" className="space-y-2">
+      <h3 className="font-semibold">Ports and services</h3>
+      {model.network.length
+        ? <div className="ui-table-scroll overflow-x-auto" tabIndex={0} role="region" aria-label="Observed network: Host, port and protocol"><table className="w-full min-w-[520px] text-left text-sm">
+            <thead><tr className="border-b border-border">{['Host', 'Port', 'Protocol', 'Service', 'Evidence'].map(heading => <th key={heading} scope="col" className="p-2">{heading}</th>)}</tr></thead>
+            <tbody>{model.network.map(row => <tr key={`${row.host}:${row.port}:${row.protocol??"unrecorded"}`} className="border-b border-border"><td className="break-all p-2 font-mono text-xs">{row.host}</td><td className="p-2">{row.port}</td><td className="p-2">{row.protocol ?? '—'}</td><td className="p-2">{(row.service ?? 'Not recorded') + ' · ' + (row.state??'state not recorded')}</td><td className="p-2 text-muted">{row.source}</td></tr>)}</tbody>
+          </table></div>
+        : <p className="text-sm text-muted">{model.evidenceTruncated ? 'No port/service observation included in the bounded report inventory; consult retained artifacts.' : model.portDiscoveryPerformed ? 'Port discovery ran but recorded no open service observation.' : 'No port discovery execution was recorded; network coverage remains unknown.'}</p>}
+    </section>
+
+    <section aria-label="Web surface" className="space-y-2">
+      <h3 className="font-semibold">Web surface</h3>
+      <dl className="grid gap-x-6 gap-y-1 text-sm">
+        <div><dt className="text-subtle">Responsive hosts</dt><dd className="break-all">{web.responsiveHosts.join(', ') || 'None recorded'}</dd></div>
+        <div><dt className="text-subtle">HTTP status codes</dt><dd>{web.statusCodes.join(', ') || 'None recorded'}</dd></div>
+        <div><dt className="text-subtle">Authentication signals (unverified)</dt><dd className="break-all">{web.authSurfaces.join(', ') || 'None recorded'}</dd></div>
+        <div><dt className="text-subtle">API signals (unverified)</dt><dd className="break-all">{web.apiSurfaces.join(', ') || 'None recorded'}</dd></div>
+        <div><dt className="text-subtle">Technologies</dt><dd>{web.technologies.length ? web.technologies.map(tech => `${tech.name}${tech.version ? ` ${tech.version}` : ' (version unconfirmed)'}`).join(', ') : 'None recorded'}</dd></div>
+      </dl>
+      {web.endpoints.length > 0 && <>
+        <ul className="space-y-0.5 text-sm">{web.endpoints.slice(0, 50).map(endpoint => <li key={endpoint.url} className="break-all font-mono text-xs">{endpoint.method ?? 'Method not recorded'} {endpoint.url}{endpoint.status ? ` · ${endpoint.status}` : ''}</li>)}</ul>
+        {web.endpoints.length > 50 && <p className="text-xs text-muted">First 50 of {web.endpoints.length} endpoints shown; the full inventory remains in the artifacts.</p>}
+      </>}
+      <p className="text-xs text-muted">Observed endpoints are evidence, not confirmed vulnerabilities.</p>
+    </section>
+
+    <section aria-label="Errors and limitations" className="space-y-2">
+      <h3 className="font-semibold">Errors and limitations</h3>
+      {model.limitations.length
+        ? <ul className="space-y-1 text-sm">{model.limitations.map(item => <li key={`${item.host}:${item.stage}`}><span className="font-medium">{item.host} · {item.stage}</span> · {item.label}{item.reason ? ` — ${item.reason}` : ''}</li>)}</ul>
+        : <p className="text-sm text-muted">No stage reported a failure, partial result, skip or cancellation.</p>}
+      <p className="text-xs text-muted">Unrecorded coverage is unknown; it is never reported as safe.</p>
+    </section>
+
+    <section aria-label="Changes since previous Recon" className="space-y-2">
+      <h3 className="font-semibold">Changes since previous Recon</h3>
+      {changes
+        ? <><p className="text-sm">{changes.new} new · {changes.changed} changed · {changes.notObserved} not observed · {changes.unchanged} unchanged</p><p className="text-sm text-muted">{changes.note}</p></>
+        : <p className="text-sm text-muted">No comparison data was recorded for this run.</p>}
+    </section>
+
+
+
+    <section aria-label="Research handoff" className="space-y-2">
+      <h3 className="font-semibold">Research handoff</h3>
+      <ul className="space-y-1 text-sm">{model.researchHandoff.map(item => <li key={item}>{item}</li>)}</ul>
+      <p className="text-xs text-muted">Priorities come from recorded evidence only. No Finding is created automatically.</p>
+    </section>
+    <details className="ui-disclosure"><summary>Technical details</summary><div className="mt-5 space-y-6">    <section aria-label="Methodology" className="space-y-2">
       <h3 className="font-semibold">Methodology</h3>
       {methodology.stages.length
         ? <div className="ui-table-scroll overflow-x-auto" tabIndex={0} role="region" aria-label="Recon methodology: Stage and planned tools"><table className="w-full min-w-[420px] text-left text-sm">
@@ -88,33 +137,7 @@ export default function ReconReportView({ model,narrative }: { model: ReconRepor
         : <p className="text-sm text-muted">No tool was recorded for this run.</p>}
     </section>
 
-    <ReconReportEvidence model={model}/>
 
-    <section aria-label="Ports and services" className="space-y-2">
-      <h3 className="font-semibold">Ports and services</h3>
-      {model.network.length
-        ? <div className="ui-table-scroll overflow-x-auto" tabIndex={0} role="region" aria-label="Observed network: Host, port and protocol"><table className="w-full min-w-[520px] text-left text-sm">
-            <thead><tr className="border-b border-border">{['Host', 'Port', 'Protocol', 'Service', 'Evidence'].map(heading => <th key={heading} scope="col" className="p-2">{heading}</th>)}</tr></thead>
-            <tbody>{model.network.map(row => <tr key={`${row.host}:${row.port}:${row.protocol??"unrecorded"}`} className="border-b border-border"><td className="break-all p-2 font-mono text-xs">{row.host}</td><td className="p-2">{row.port}</td><td className="p-2">{row.protocol ?? '—'}</td><td className="p-2">{(row.service ?? 'Not recorded') + ' · ' + (row.state??'state not recorded')}</td><td className="p-2 text-muted">{row.source}</td></tr>)}</tbody>
-          </table></div>
-        : <p className="text-sm text-muted">{model.evidenceTruncated ? 'No port/service observation included in the bounded report inventory; consult retained artifacts.' : model.portDiscoveryPerformed ? 'Port discovery ran but recorded no open service observation.' : 'No port discovery execution was recorded; network coverage remains unknown.'}</p>}
-    </section>
-
-    <section aria-label="Web surface" className="space-y-2">
-      <h3 className="font-semibold">Web surface</h3>
-      <dl className="grid gap-x-6 gap-y-1 text-sm">
-        <div><dt className="text-subtle">Responsive hosts</dt><dd className="break-all">{web.responsiveHosts.join(', ') || 'None recorded'}</dd></div>
-        <div><dt className="text-subtle">HTTP status codes</dt><dd>{web.statusCodes.join(', ') || 'None recorded'}</dd></div>
-        <div><dt className="text-subtle">Authentication signals (unverified)</dt><dd className="break-all">{web.authSurfaces.join(', ') || 'None recorded'}</dd></div>
-        <div><dt className="text-subtle">API signals (unverified)</dt><dd className="break-all">{web.apiSurfaces.join(', ') || 'None recorded'}</dd></div>
-        <div><dt className="text-subtle">Technologies</dt><dd>{web.technologies.length ? web.technologies.map(tech => `${tech.name}${tech.version ? ` ${tech.version}` : ' (version unconfirmed)'}`).join(', ') : 'None recorded'}</dd></div>
-      </dl>
-      {web.endpoints.length > 0 && <>
-        <ul className="space-y-0.5 text-sm">{web.endpoints.slice(0, 50).map(endpoint => <li key={endpoint.url} className="break-all font-mono text-xs">{endpoint.method ?? 'Method not recorded'} {endpoint.url}{endpoint.status ? ` · ${endpoint.status}` : ''}</li>)}</ul>
-        {web.endpoints.length > 50 && <p className="text-xs text-muted">First 50 of {web.endpoints.length} endpoints shown; the full inventory remains in the artifacts.</p>}
-      </>}
-      <p className="text-xs text-muted">Observed endpoints are evidence, not confirmed vulnerabilities.</p>
-    </section>
 
     <section aria-label="Authenticated Recon" className="space-y-2">
       <h3 className="font-semibold">Authenticated Recon</h3>
@@ -122,27 +145,7 @@ export default function ReconReportView({ model,narrative }: { model: ReconRepor
       {authenticated.contexts.length > 0 && <ul className="space-y-1 text-sm">{authenticated.contexts.map((context, index) => <li key={`${context.label}:${index}`}>{context.label} · {context.state} · {context.observations} usable observations</li>)}</ul>}
     </section>
 
-    <section aria-label="Errors and limitations" className="space-y-2">
-      <h3 className="font-semibold">Errors and limitations</h3>
-      {model.limitations.length
-        ? <ul className="space-y-1 text-sm">{model.limitations.map(item => <li key={`${item.host}:${item.stage}`}><span className="font-medium">{item.host} · {item.stage}</span> · {item.label}{item.reason ? ` — ${item.reason}` : ''}</li>)}</ul>
-        : <p className="text-sm text-muted">No stage reported a failure, partial result, skip or cancellation.</p>}
-      <p className="text-xs text-muted">Unrecorded coverage is unknown; it is never reported as safe.</p>
-    </section>
-
-    <section aria-label="Changes since previous Recon" className="space-y-2">
-      <h3 className="font-semibold">Changes since previous Recon</h3>
-      {changes
-        ? <><p className="text-sm">{changes.new} new · {changes.changed} changed · {changes.notObserved} not observed · {changes.unchanged} unchanged</p><p className="text-sm text-muted">{changes.note}</p></>
-        : <p className="text-sm text-muted">No comparison data was recorded for this run.</p>}
-    </section>
-
-    <ReportProvenance model={model}/>
-
-    <section aria-label="Research handoff" className="space-y-2">
-      <h3 className="font-semibold">Research handoff</h3>
-      <ul className="space-y-1 text-sm">{model.researchHandoff.map(item => <li key={item}>{item}</li>)}</ul>
-      <p className="text-xs text-muted">Priorities come from recorded evidence only. No Finding is created automatically.</p>
-    </section>
+<ReconReportEvidence model={model}/><ReportProvenance model={model}/></div></details>
+    <details className="ui-disclosure"><summary>Optional AI synthesis</summary><div className="mt-4"><ReconRunNarrative narrative={narrative??{state:'DETERMINISTIC',highlights:[]}}/></div></details>
   </section>;
 }

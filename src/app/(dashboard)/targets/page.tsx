@@ -1,9 +1,11 @@
 "use client";
+import {platformLabel} from '@/lib/platformPresentation';
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ProgramForm from "@/components/ProgramForm";
-import { Card } from "@/components/ui/Card";
+import { Dialog } from "@/components/ui/Dialog";
+import { reconOverview } from "@/lib/reconOverview";
 import { Button } from "@/components/ui/Button";
 import {paginationInput} from '@/lib/pagination';
 import CollectionPager from '@/components/CollectionPager';
@@ -29,13 +31,18 @@ function TargetsCollection() {
     }).catch(e=>{if(!controller.signal.aborted)setError(e.message);});
     return()=>controller.abort();
   },[key,query,input.page,input.pageSize,input.q,router]);
-  return <div className="space-y-6"><div className="flex items-center justify-between"><h1 className="text-2xl font-semibold">Targets</h1><Button onClick={() => setCreating(!creating)}>{creating ? "Cancel" : "Create Target"}</Button></div><p className="text-muted">Your bug bounty targets. Manage scope assets, Recon, Research and Findings from each Target.</p>
-    <form action="/targets" className="flex flex-wrap gap-3"><label>Search Targets<input name="q" maxLength={200} defaultValue={input.q} key={input.q} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={input.pageSize}/><Button variant="secondary" type="submit">Search</Button></form>
+  return <div className="space-y-6">
+    <div className="flex flex-wrap items-center justify-between gap-3"><div><h1>Targets</h1><p className="mt-1 text-sm text-muted">Your program inventory.</p></div><Button onClick={() => setCreating(true)}>Create Target</Button></div>
+    <form action="/targets" className="flex flex-wrap gap-3"><label>Search Targets<input name="q" maxLength={200} defaultValue={input.q} key={input.q} className="rounded border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={input.pageSize}/><Button variant="secondary" type="submit">Search</Button></form>
     {!data&&!error&&<p role="status">Loading Targets…</p>}
-    {data&&!creating&&<CollectionPager path="/targets" query={query} {...data}/>}
-    {deleted && <p role="status">Target permanently deleted and resources cleaned up.</p>}
-    {error && <p role="alert">{error}</p>}
-    {creating ? <Card className="p-6"><ProgramForm onSaved={id => router.push(`/targets/${id}`)} /></Card> : programs.map(p => <Card className="p-5" key={p.id}><Link className="text-xl font-semibold text-brand" href={`/targets/${p.id}`}>{p.companyName}</Link><Link className="ml-4 inline-block text-sm text-muted" href={`/targets/${p.id}/settings`}>Settings</Link><p className="mt-2 text-sm text-muted">{p.platform ?? "Private program"} · Scope — {p._count.scopeAssets} assets</p>{p.deletingAt&&<p role="status" className="text-sm text-muted">Deletion in progress — open this Target to review or retry cleanup.</p>}</Card>)}
-    {!creating && data && !programs.length && !error && <p>{input.q?'No Targets match this view. Clear the search.':'Create your first Target to add hosts and start Recon.'}</p>}
+    {deleted && <p role="status">Target deleted.</p>}{error && <p role="alert">{error}</p>}
+    {!!programs.length && <div className="ui-table-scroll" role="region" aria-label="Program inventory" tabIndex={0}><table className="ui-inventory ui-targets w-full text-left text-sm"><caption className="sr-only">Program inventory</caption><thead><tr>{['Target','Platform','Scope','Latest Recon',''].map(h=><th scope="col" key={h}>{h}</th>)}</tr></thead><tbody>{programs.map(p=><tr key={p.id}>
+      <td data-label="Target"><span className="font-medium">{p.companyName}</span>{p.deletingAt&&<p role="status" className="text-xs text-muted">Deletion pending</p>}</td>
+      <td data-label="Platform" className="text-muted">{platformLabel(p.platform)}</td><td data-label="Scope">{p._count.scopeAssets} assets</td><td data-label="Latest Recon">{reconOverview(p.reconRuns[0]??null).label}</td>
+      <td data-label="Action"><Link className="font-medium text-brand" aria-label={`Open ${p.companyName}`} href={`/targets/${p.id}`}>Open</Link></td>
+    </tr>)}</tbody></table></div>}
+    {data&&<CollectionPager path="/targets" query={query} {...data}/>}
+    {data&&!programs.length&&!error&&<p className="text-sm text-muted">{input.q?'No targets match your search.':'No targets yet. Create a Target to define a program and its Scope.'}</p>}
+    {creating&&<Dialog compact title="Create target" onClose={()=>setCreating(false)}><ProgramForm onCancel={()=>setCreating(false)} onSaved={id=>router.push(`/scopes?target=${id}`)}/></Dialog>}
   </div>;
 }

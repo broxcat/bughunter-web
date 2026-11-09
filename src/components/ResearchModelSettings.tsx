@@ -2,7 +2,6 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { Button } from './ui/Button';
-import { Card } from './ui/Card';
 
 type Routing = { fastProvider: string | null; fastModel: string | null; reviewProvider: string | null; reviewModel: string | null };
 const inputClass = 'block w-full rounded border border-border bg-surface p-2';
@@ -43,7 +42,7 @@ export default function ResearchModelSettings({ providers }: { providers: Array<
     } finally { setBusy(false); }
   }
 
-  return <Card className="space-y-3 p-5">
+  return <section className="max-w-2xl space-y-3">
     <h2 className="text-lg font-medium">Research model routing</h2>
     <p className="text-sm text-muted">Research selects a model from the appropriate profile automatically. Choose a lightweight model for planning and a stronger one for independent review.</p>
     <p className="text-sm">{embeddingsConfigured ? 'Semantic memory service configured.' : 'Configure RESEARCH_EMBEDDING_URL and RESEARCH_EMBEDDING_MODEL on the server to enable semantic memory.'}</p>
@@ -69,5 +68,5 @@ export default function ResearchModelSettings({ providers }: { providers: Array<
       })}
       <Button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save Research routing'}</Button>
     </form>}
-  </Card>;
+  </section>;
 }

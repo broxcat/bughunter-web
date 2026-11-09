@@ -12,7 +12,7 @@ export async function auditFindingReportCollections({prisma,owner,origin,context
   const key=kind==='saved'?'reportPage':kind==='compose'?'findingPage':'page',query=new URLSearchParams({pageSize:'25'});
   const label=kind==='compose'?'Report finding pages':kind==='saved'?'Saved report pages':'Collection pages';
   const nav=page.getByRole('navigation',{name:label,exact:true});
-  await page.goto(origin+path+'?'+query);await nav.getByRole('status').filter({hasText:'Page 1 of 3'}).waitFor();
+  await page.goto(origin+path+'?'+query);if(kind==='compose')await page.getByLabel('Saved report',{exact:true}).waitFor();if(kind==='compose')await page.locator('summary').filter({hasText:/^Generate report$/}).evaluate(e=>{e.parentElement.open=true;});await nav.getByRole('status').filter({hasText:'Page 1 of 3'}).waitFor();
   if(kind==='compose')await page.getByRole('checkbox',{name:/^Finding 50 /}).check();
   for(const n of [2,3]){await nav.getByRole('link',{name:'Next page',exact:true}).click();await nav.getByRole('status').filter({hasText:`Page ${n} of 3`}).waitFor();}
   if(kind==='compose'){
@@ -24,12 +24,12 @@ export async function auditFindingReportCollections({prisma,owner,origin,context
    try{await page.getByLabel('Report title',{exact:true}).fill('Two-page selection');await page.getByRole('button',{name:'Generate report',exact:true}).click();await page.getByRole('alert').filter({hasText:'Synthetic report rejection'}).waitFor();assert.deepEqual(new Set(submitted.findingIds),new Set([findings[50].id,findings[0].id]));}
    finally{await context.unroute(endpoint,intercept);}
   }
-  await page.reload();await nav.getByRole('status').filter({hasText:'Page 3 of 3'}).waitFor();
+  await page.reload();if(kind==='compose')await page.getByLabel('Saved report',{exact:true}).waitFor();if(kind==='compose')await page.locator('summary').filter({hasText:/^Generate report$/}).evaluate(e=>{e.parentElement.open=true;});await nav.getByRole('status').filter({hasText:'Page 3 of 3'}).waitFor();
   await nav.getByRole('link',{name:'Previous page',exact:true}).click();await nav.getByRole('status').filter({hasText:'Page 2 of 3'}).waitFor();
   await page.goBack();await nav.getByRole('status').filter({hasText:'Page 3 of 3'}).waitFor();await page.goForward();await nav.getByRole('status').filter({hasText:'Page 2 of 3'}).waitFor();
-  for(const v of ['invalid','999']){query.set(key,v);await page.goto(origin+path+'?'+query);await nav.getByRole('status').filter({hasText:v==='invalid'?'Page 1 of 3':'Page 3 of 3'}).waitFor();}
+  for(const v of ['invalid','999']){query.set(key,v);await page.goto(origin+path+'?'+query);if(kind==='compose')await page.getByLabel('Saved report',{exact:true}).waitFor();if(kind==='compose')await page.locator('summary').filter({hasText:/^Generate report$/}).evaluate(e=>{e.parentElement.open=true;});await nav.getByRole('status').filter({hasText:v==='invalid'?'Page 1 of 3':'Page 3 of 3'}).waitFor();}
   if(kind==='saved')await prisma.report.delete({where:{id:reports[0].id}});else await prisma.finding.delete({where:{id:findings[0].id}});
-  await page.reload();await nav.getByRole('status').filter({hasText:'Page 2 of 2'}).waitFor();
+  await page.reload();if(kind==='compose')await page.getByLabel('Saved report',{exact:true}).waitFor();if(kind==='compose')await page.locator('summary').filter({hasText:/^Generate report$/}).evaluate(e=>{e.parentElement.open=true;});await nav.getByRole('status').filter({hasText:'Page 2 of 2'}).waitFor();
   if(kind==='saved'){await prisma.report.create({data:reports[0]});await prisma.reportItem.create({data:{reportId:reports[0].id,findingId:findings[25].id}});}else await prisma.finding.create({data:findings[0]});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);checks++;
  }

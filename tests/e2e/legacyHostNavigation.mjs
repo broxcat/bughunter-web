@@ -16,7 +16,7 @@ export async function auditLegacyHostNavigation({prisma,owner,origin,page}){
   // The real adoption mutation removes the final legacy row from this collection.
   const card=page.getByRole('link',{name:rows[50].host+' — History',exact:true}).locator('..');
   await card.getByLabel('Target for '+rows[50].host,{exact:true}).selectOption(program.id);await card.getByRole('button',{name:'Add to Scope',exact:true}).click();
-  await page.waitForURL(origin+'/scopes?target='+program.id);await page.getByText('Previous hosts and scan history',{exact:true}).click();await status('Page 1 of 2 · 50').waitFor();
+  await page.waitForURL(origin+'/scopes?target='+program.id);await page.goto(origin+'/scopes');await page.getByText('Previous hosts and scan history',{exact:true}).click();await status('Page 1 of 2 · 50').waitFor();
   const adopted=await prisma.target.findUniqueOrThrow({where:{id:rows[50].id}});assert.equal(adopted.programId,program.id);assert.equal(adopted.scopeId,scope.id);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   // Restore only this disposable fixture between viewport/theme checks.

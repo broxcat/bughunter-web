@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
 import ResearchModelSettings from "@/components/ResearchModelSettings";
 
 // The 11 AiProvider enum values (kept in sync with prisma/schema.prisma).
@@ -125,15 +124,15 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">AI Provider Settings</h1>
+      <h1>Settings</h1>
+      <h2 className="text-lg font-semibold">AI providers</h2>
       <p className="mt-1 text-sm text-muted">
-        Configure the default AI provider for Recon reports and AI assistance. API keys are encrypted at
-        rest and never returned to the browser. Research stages use the profiles below.
+        Choose the default for optional AI assistance. Configure Research stage routing below.
       </p>
       {error && <p role="alert" className="text-sm text-brand">{error}</p>}
       {notice && <p role="status" className="text-sm"><Badge tone="proven">{notice}</Badge></p>}
 
-      <ResearchModelSettings providers={configs} />
+      <details className="ui-disclosure"><summary>Research model routing</summary><div className="mt-4"><ResearchModelSettings providers={configs} /></div></details>
 
       {/* Configured providers */}
       <section className="mt-8">
@@ -145,7 +144,7 @@ export default function SettingsPage() {
             No providers configured yet.
           </p>
         ) : (
-          <Card className="mt-3 divide-y divide-border">
+          <div className="mt-3 divide-y divide-border border-y border-border">
             {configs.map((c) => (
               <div
                 key={c.id}
@@ -155,17 +154,17 @@ export default function SettingsPage() {
               >
                 <div>
                   <span className="flex items-center gap-2">
-                    <span className="font-mono font-medium">{c.provider}</span>
+                    <span className="font-medium">{c.provider}</span>
                     {c.isActive && (
                       <Badge tone="proven" mono>
-                        DEFAULT
+                        Default
                       </Badge>
                     )}
                   </span>
-                  <div className="mt-1 break-all font-mono text-xs text-subtle">
+                  <details className="mt-2 break-all text-xs text-muted"><summary>Details</summary><p className="mt-2">
                     {c.model ? `model: ${c.model}` : "no model set"}
                     {c.baseUrl ? ` · ${c.baseUrl}` : ""}
-                  </div>
+                  </p></details>
                 </div>
                 <div className="text-right">
                   {KEYLESS.has(c.provider) ? (
@@ -179,14 +178,13 @@ export default function SettingsPage() {
                 </div>
               </div>
             ))}
-          </Card>
+          </div>
         )}
       </section>
 
       {/* Add / update form */}
-      <section className="mt-10">
-        <h2 className="text-lg font-medium">Add or update a provider</h2>
-        <Card className="mt-3 p-6">
+      <details className="ui-disclosure max-w-2xl"><summary>Add or update a provider</summary>
+        <div className="mt-5">
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
               <label
@@ -274,8 +272,8 @@ export default function SettingsPage() {
             </Button>
             <p className="text-xs text-muted">Save the configuration, then choose Set as default above. Saving alone keeps the current default.</p>
           </form>
-        </Card>
-      </section>
+        </div>
+      </details>
     </div>
   );
 }

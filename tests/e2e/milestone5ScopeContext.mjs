@@ -10,7 +10,7 @@ export async function auditMilestone5Scope({prisma:p,owner,origin,context,page,o
   const asset=await p.scopeAsset.create({data:{programId:program.id,originalValue:'app.m5.test',normalizedValue:'app.m5.test',format:'SUBDOMAIN',type:'WEB_APPLICATION'}});
   const target=await p.target.create({data:{userId:owner.id,programId:program.id,scopeId:scope.id,scopeAssetId:asset.id,host:'app.m5.test'}});
   const url=`${origin}/api/programs/${program.id}/scope.md`;
-  await page.goto(`${origin}/targets/${program.id}`);const view=page.getByRole('button',{name:'View scope.md',exact:true});await view.waitFor();
+  await page.goto(`${origin}/scopes?target=${program.id}`);const view=page.getByRole('button',{name:'View scope.md',exact:true});await view.waitFor();
   const initialPublications=await p.targetScopeContext.count({where:{programId:program.id}});check(`${theme}/${width}: Target render does not generate scope context`,()=>assert.equal(initialPublications,0));
   await view.focus();await page.keyboard.press('Enter');let dialog=page.getByRole('dialog',{name:'Current Target scope.md',exact:true}),document=dialog.getByLabel('Current Target scope document');await document.waitFor();
   let text=await document.innerText();check(`${theme}/${width}: keyboard view, current authority, no-Recon and secrets`,()=>{assert(text.includes('## Authorization'));assert(text.includes('app\\.m5\\.test'));assert(text.includes('NOT_STARTED'));assert(!text.includes('PRIVATE_M5_ACCESS'));assert(text.includes('M5\\-UA/1'));});

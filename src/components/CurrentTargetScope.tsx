@@ -14,8 +14,8 @@ export default function CurrentTargetScope({programId}:{programId:string}) {
     finally{if(request.current===id)setLoading(false);}
   }
   return <div className="flex flex-wrap items-center gap-3">
-    <Button size="sm" variant="secondary" onClick={()=>void view()}>View scope.md</Button>
-    <a className="text-sm text-brand" href={url}>Download scope.md</a>
+    <Button size="sm" variant="ghost" onClick={()=>void view()}>View scope.md</Button>
+    <a className="text-sm text-muted underline" href={url}>Download scope.md</a>
     {open&&<Dialog title="Current Target scope.md" onClose={()=>{request.current++;setOpen(false);}}>
       <p className="mb-4 text-sm text-muted">Current policy and Recon context. Existing Research authorization snapshots remain unchanged.</p>
       {loading&&<p role="status">Loading current Scope…</p>}
