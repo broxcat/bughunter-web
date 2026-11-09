@@ -1,5 +1,20 @@
 import { z } from 'zod';
 
+export const programSectionsSchema = z.strictObject({
+  description: z.string().max(64_000),
+  outOfScope: z.array(z.string().min(1).max(4096)).max(1000),
+  qualifying: z.array(z.string().min(1).max(4096)).max(1000),
+});
+export const rewardFieldsSchema = z.strictObject({
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  low: z.number().finite().nonnegative().nullable(),
+  medium: z.number().finite().nonnegative().nullable(),
+  high: z.number().finite().nonnegative().nullable(),
+  critical: z.number().finite().nonnegative().nullable(),
+});
+export type ProgramSections = z.infer<typeof programSectionsSchema>;
+export type ProgramRewards = z.infer<typeof rewardFieldsSchema>;
+
 export const RULE_DECISIONS = ['CONVERTED', 'NOT_RELEVANT'] as const;
 export const reviewRule = z.strictObject({
   text: z.string().min(1).max(1024 * 1024),

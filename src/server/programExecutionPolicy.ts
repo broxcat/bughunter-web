@@ -28,10 +28,14 @@ type ScopeRules = { scopeDetails?: string | null; outOfScope?: string | null; ru
 export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules) {
   const row = program.executionPolicies?.[0];
   const policy = row && storedExecutionPolicySchema.parse(row.policy);
-  const rawUserAgent = (policy ? policy.requiredUserAgent : program.requiredUserAgent) || process.env.DEFAULT_USER_AGENT || '';
+  const defaultUserAgent = process.env.DEFAULT_USER_AGENT || '';
+  const programUserAgent = (policy ? policy.requiredUserAgent : program.requiredUserAgent) || '';
+  const appendUserAgent = policy?.userAgentMode === 'APPEND' && Boolean(programUserAgent);
+  const rawUserAgent = appendUserAgent ? defaultUserAgent && defaultUserAgent + ' ' + programUserAgent
+    : programUserAgent || defaultUserAgent;
   const username = process.env.HUNTER_USERNAME;
   const rawHeaders = policy?.requiredHeaders ?? [];
-  const usernameMissing = [rawUserAgent, ...rawHeaders.map(header => header.value)].some(hasHunterTemplate) && !hasHunterUsername(username);
+  const usernameMissing = [rawUserAgent, programUserAgent, ...rawHeaders.map(header => header.value)].some(hasHunterTemplate) && !hasHunterUsername(username);
   const resolve = (value: string) => usernameMissing ? '' : replaceHunterTemplate(value, username ?? '');
   const userAgent = resolve(rawUserAgent);
   const resolvedHeaders = rawHeaders.map(({ name, value }) => ({ name, value: resolve(value) }));
@@ -53,6 +57,7 @@ export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules)
     : unrepresented ? 'Automation is blocked by unrepresented program or scope rules. Review the execution policy in Target settings.'
     : policy && !policy.automationAllowed ? 'The program policy does not allow automation.'
     : usernameMissing ? MISSING_HUNTER_USERNAME
+    : appendUserAgent && !requiredUserAgentSchema.safeParse(defaultUserAgent).success ? MISSING_HUNTER_UA
     : !identificationHeadersSchema.safeParse(resolvedHeaders).success ? 'Resolved required headers are invalid. Check the program policy and HUNTER_USERNAME.'
     : !requiredUserAgentSchema.safeParse(userAgent).success || userAgent !== userAgent.trim() || /\\[rn]/.test(userAgent) ? MISSING_HUNTER_UA
     : null;

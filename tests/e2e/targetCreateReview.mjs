@@ -68,6 +68,34 @@ try {
 
   await page.getByRole('link', { name: 'Settings', exact: true }).last().waitFor();
   assert(await page.getByRole('button', { name: 'Extract from Markdown' }).isDisabled());
+  const rawYesWeHack = [
+    'Bug bounty', 'Public', 'Submit report', 'Public fixture company',
+    'Reward', '€100 Low €250 Medium €800 High €2,000 Critical',
+    'Program description', 'Keep traffic below 3 requests per second.',
+    'Scopes', 'https://shop.example.test\tWeb application\tHigh',
+    'Out of scopes', 'https://shop.example.test/admin/*',
+    'Qualifying vulnerabilities', 'SQL Injection',
+    'Non-qualifying vulnerabilities', 'Open Redirect',
+    'Hunting requirements', 'User agent',
+    "Please append to your user-agent header the following value: ' Fixture-<your yeswehack pseudo> '.",
+  ].join('\n');
+  await page.getByLabel('Program Markdown').fill(rawYesWeHack);
+  await page.getByRole('button', { name: 'Extract from Markdown' }).click();
+  await page.getByRole('status').filter({ hasText: 'Extraction ready for review' }).waitFor();
+  assert.equal(await page.getByLabel('Name', { exact: true }).inputValue(), 'Public fixture company');
+  assert.equal(await page.getByLabel('Reward critical').inputValue(), '2000');
+  assert.equal(await page.getByLabel('Asset 1 value').inputValue(), 'HIGH');
+  assert.equal(await page.getByLabel('User-Agent suffix').inputValue(), 'Fixture-<your yeswehack pseudo>');
+  await page.getByRole('button', { name: 'Save and start', exact: true }).click();
+  await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
+  const rawTarget = await p.bountyProgram.findFirstOrThrow({ where: { ownerId: user.id, companyName: 'Public fixture company' },
+    include: { executionPolicies: true, scopeAssets: true, campaign: true } });
+  assert.equal(rawTarget.rewardCritical.toString(), '2000');
+  assert.equal(rawTarget.scopeAssets[0].assetValue, 'HIGH');
+  assert.equal(rawTarget.executionPolicies[0].policy.userAgentMode, 'APPEND');
+  assert.equal(rawTarget.executionPolicies[0].policy.sourceSnapshot.sourceDocument, rawYesWeHack);
+  assert.match(rawTarget.campaign.reason, /DEFAULT_USER_AGENT/);
+  await page.goto(origin + '/targets/new');
 
   ai = createHttpServer(async (request, response) => {
     try {
