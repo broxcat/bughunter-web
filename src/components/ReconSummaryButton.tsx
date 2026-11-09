@@ -36,7 +36,7 @@ export default function ReconSummaryButton({programId,assetId}:{programId:string
   const content=payload&&!reportV3&&!report?payload as ReconSummaryContent:null;
   return <>
     <Button size="sm" variant="secondary" onClick={()=>void show()}>Summary</Button>
-    {open&&<Dialog title={report||reportV3?'Reconnaissance & Attack Surface Assessment':'Recon Summary'} onClose={()=>setOpen(false)}>
+    {open&&<Dialog title={report||reportV3?'Reconnaissance & attack surface assessment':'Recon summary'} onClose={()=>setOpen(false)}>
       <div className="space-y-5">
         {error&&<p role="alert" className="text-danger">{error}</p>}
         {busy&&<p role="status">Loading…</p>}
