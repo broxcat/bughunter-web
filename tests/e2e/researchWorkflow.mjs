@@ -40,13 +40,13 @@ try {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click(); await page.waitForURL(origin + "/targets");
   // Create an actual Target through the form, with an explicitly authorized .test host.
-  await page.getByRole("button", { name: "Create Target", exact: true }).click();
+  await page.getByRole("button", { name: "Create target", exact: true }).click();
   await page.getByLabel("Company / Program name *", { exact: true }).fill("Research browser fixture");
   await page.getByRole("textbox", { name: /^Required User-Agent/ }).fill("BrowserResearch/1");
   await page.getByRole("button", { name: "+ Add host", exact: true }).first().click();
   await page.getByLabel("Scope FQDN 1", { exact: true }).fill("app.example.test");
   const created = page.waitForResponse(r => new URL(r.url()).pathname === "/api/programs" && r.request().method() === "POST");
-  await page.getByRole("button", { name: "Create Target", exact: true }).click();
+  await page.getByRole("button", { name: "Create target", exact: true }).click();
   const program = await (await created).json();
   await page.waitForURL(origin + `/targets/${program.id}`);
   const target = await prisma.target.findFirstOrThrow({ where: { programId: program.id } });
