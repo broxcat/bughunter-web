@@ -16,7 +16,7 @@ export interface ProgramData {
 }
 const inputClass = "mt-1 w-full rounded border border-border bg-surface p-2";
 function Hosts({ title, value, onChange }: { title: string; value: string[]; onChange: (v: string[]) => void }) {
-  return <fieldset id={title==='Out of Scope'?'out-of-scope':undefined} className="space-y-2"><legend className="font-semibold">{title}</legend>
+  return <fieldset id={title==='Out of scope'?'out-of-scope':undefined} className="space-y-2"><legend className="font-semibold">{title}</legend>
     {value.map((host, i) => <div className="flex gap-2" key={i}><input aria-label={`${title} FQDN ${i + 1}`} required placeholder="api.example.com" className={inputClass} value={host} onChange={e => onChange(value.map((v, n) => n === i ? e.target.value : v))} /><Button className="shrink-0" variant="ghost" onClick={() => onChange(value.filter((_, n) => n !== i))}>Remove</Button></div>)}
     <Button variant="secondary" onClick={() => onChange([...value, ""])}>+ Add host</Button>
   </fieldset>;
@@ -48,12 +48,12 @@ export default function ProgramForm({ initial, onSaved, onCancel }: { initial?: 
     <div className="flex justify-end gap-3 pt-2"><Button variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button><Button type="submit" disabled={busy}>{busy ? "Creating…" : "Create target"}</Button></div>
   </form>;
   return <form className="max-w-2xl space-y-6" onSubmit={submit} onInvalidCapture={e=>{let parent=e.target instanceof HTMLElement?e.target.parentElement:null;while(parent){if(parent instanceof HTMLDetailsElement)parent.open=true;parent=parent.parentElement;}}} aria-busy={busy}>
-    <label className="block">Company / Program name *<input autoFocus={!initial} required name="companyName" maxLength={200} defaultValue={initial?.companyName} className={inputClass} /></label>
+    <label className="block">Company / program name *<input autoFocus={!initial} required name="companyName" maxLength={200} defaultValue={initial?.companyName} className={inputClass} /></label>
     <label className="block">Platform<select aria-label="Platform" name="platform" defaultValue={initial?.platform ?? ""} className={inputClass}><option value="">Choose platform</option>{BOUNTY_PLATFORMS.map(p => <option key={p} value={p}>{platformLabel(p)}</option>)}</select></label>
     <label className="block">Program URL<input name="programUrl" type="url" defaultValue={initial?.programUrl ?? ""} className={inputClass} /></label>
     <details className="ui-disclosure"><summary>Rewards</summary><fieldset className="mt-4"><legend className="sr-only">Rewards</legend><div className="grid gap-3 sm:grid-cols-5">{(["Low", "Medium", "High", "Critical"] as const).map(level => <label key={level}>{level}<input name={`reward${level}`} inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" defaultValue={initial?.[`reward${level}`] ?? ""} className={inputClass} /></label>)}<label>Currency<input name="rewardCurrency" required pattern="[A-Z]{3}" maxLength={3} defaultValue={initial?.rewardCurrency ?? "EUR"} className={inputClass} /></label></div></fieldset></details>
     <details className="ui-disclosure" open><summary>Authorization policy</summary><div className="mt-4 space-y-5">
-    <p className="text-sm text-muted">Manage authorized assets in Scope. Exclusions below take priority.</p>
+    <p className="text-sm text-muted">Manage authorized assets in scope. Exclusions below take priority.</p>
     <label className="block">Rules of engagement<textarea name="rulesOfEngagement" maxLength={20000} rows={5} defaultValue={initial?.rulesOfEngagement ?? ''} className={inputClass} placeholder="Official program rules, technical restrictions, authorization conditions…" /></label>
     <Hosts title="Out of scope" value={outOfScope} onChange={setOutOfScope} />
     </div></details>
