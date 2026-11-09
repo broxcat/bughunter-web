@@ -172,7 +172,7 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
     })}
 
     <details className="ui-disclosure"><summary>Technical details</summary><dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">        <div><dt className="text-subtle">Asset executions recorded</dt><dd>{run.scans.length}</dd></div>
-        <div><dt className="text-subtle">Current Target User-Agent</dt><dd className="break-all font-mono text-xs">{redactObservationText(run.program.requiredUserAgent ?? 'Not recorded')}</dd></div>
+        <div><dt className="text-subtle">Current target User-Agent</dt><dd className="break-all font-mono text-xs">{redactObservationText(run.program.requiredUserAgent ?? 'Not recorded')}</dd></div>
         <div><dt className="text-subtle">Assessment mode</dt><dd>{run.assessmentModeSnapshot?.toLowerCase().replaceAll('_', ' ') ?? 'Not captured'}</dd></div>
         <div><dt className="text-subtle">Authenticated contexts</dt><dd>{contextCount > 0 ? `${contextCount} recorded` : 'None recorded'}</dd></div>
 <div><dt className="text-muted">Run ID</dt><dd className="break-all font-mono text-xs">{run.id}</dd></div></dl></details>
