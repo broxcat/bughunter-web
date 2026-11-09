@@ -7,7 +7,7 @@ import { BOUNTY_PLATFORMS, VULNERABILITY_FAMILIES } from '@/lib/bountyProgram';
 import { platformLabel } from '@/lib/platformPresentation';
 import { executionPolicySchema, MISSING_HUNTER_UA } from '@/lib/programExecutionPolicy';
 import { detectScopeAsset } from '@/lib/scopeAssets';
-import { scopeReviewChecks, targetReviewSchema, type DocumentedAsset, type TargetReview } from '@/lib/targetReview';
+import { scopeReviewChecks, suggestTestAccountHost, targetReviewSchema, type DocumentedAsset, type TargetReview } from '@/lib/targetReview';
 import type { ProgramData } from '@/lib/targetFormData';
 import type { ProgramPreview } from '@/server/programImport/normalize';
 import { Button } from '@/components/ui/Button';
@@ -16,6 +16,7 @@ import { fieldClass, initialReview, lines, policyFields, readable, TargetScopeRe
 type Platform = (typeof BOUNTY_PLATFORMS)[number];
 type Import = { preview: ProgramPreview } | { message: string };
 const levels = ['Low', 'Medium', 'High', 'Critical'] as const;
+const accountRoles = ['A', 'B'] as const;
 const policyShape = executionPolicySchema.omit({ sourceSnapshot: true });
 const policyFieldHelp: Record<string, string> = {
   requestsPerSecond: 'Enter a rate from 0.01 to 100 requests per second.',
@@ -39,6 +40,8 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
   const [nonQualifying, setNonQualifying] = useState<string[]>(program?.nonQualifying ?? []);
   const [qualifying, setQualifying] = useState<string[]>(program?.qualifying ?? []);
   const [legacyExclusions, setLegacyExclusions] = useState(program?.outOfScope.join('\n') ?? '');
+  const [accountAssets, setAccountAssets] = useState({ A: '', B: '' });
+  const [accountLogins, setAccountLogins] = useState({ A: '', B: '' });
   const [importing, setImporting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -83,6 +86,11 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
 
   const policy = policyFields(review);
   const { scopeError, conflict } = scopeReviewChecks(review.scopeIn, policy.exclusions);
+  const accountSuggestions = {
+    A: suggestTestAccountHost(review.scopeIn, policy.exclusions, accountLogins.A),
+    B: suggestTestAccountHost(review.scopeIn, policy.exclusions, accountLogins.B),
+  };
+  const accountNeedsHost = Boolean(accountSuggestions.A || accountSuggestions.B);
   const policyResult = policyShape.safeParse(policy);
   const legacy = program?.legacyPolicyReview;
   const legacyMismatch = legacy && legacyExclusions === program?.outOfScope.join('\n') &&
@@ -98,11 +106,11 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || scopeError || conflict || !policyResult.success) return;
+    if (busy || scopeError || conflict || accountNeedsHost || !policyResult.success) return;
     const form = new FormData(event.currentTarget);
     const field = (key: string) => String(form.get(key) ?? '').trim();
     const testAccounts: TargetReview['testAccounts'] = [];
-    for (const role of ['A', 'B'] as const) {
+    for (const role of accountRoles) {
       const asset = field('asset-' + role);
       const loginUrl = field('login-' + role);
       const username = field('username-' + role);
@@ -190,12 +198,22 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
       <details className="ui-disclosure"><summary>Test accounts <span className="text-muted">(optional)</span></summary>
         <p className="my-3 text-sm text-muted">Two accounts on the same asset are recommended for access-control tests. Credentials are encrypted on save.</p>
         {program?.testAccounts?.map(account => <p key={account.id} className="text-sm">{account.label} · {account.asset}</p>)}
-        {(['A', 'B'] as const).map(role => <fieldset key={role} className="my-3 grid gap-3 border-t border-border pt-3 sm:grid-cols-2">
+        {accountRoles.map(role => <fieldset key={role} className="my-3 grid gap-3 border-t border-border pt-3 sm:grid-cols-2">
           <legend>Account {role}</legend>
-          <label>Asset<select name={'asset-' + role} className={fieldClass}><option value="">Choose an exact in-scope asset</option>
+          <label>Asset<select name={'asset-' + role} className={fieldClass} value={accountAssets[role]} onChange={event =>
+            setAccountAssets({ ...accountAssets, [role]: event.target.value })}><option value="">Choose an exact in-scope asset</option>
             {[...new Set(review.scopeIn.map(row => row.value).filter(accountAsset))].map(value => <option key={value}>{value}</option>)}
           </select></label>
-          <label>Login URL<input name={'login-' + role} className={fieldClass} type="url" placeholder="https://app.example.com/login" /></label>
+          <label>Login URL<input name={'login-' + role} className={fieldClass} type="url" placeholder="https://app.example.com/login"
+            value={accountLogins[role]} onChange={event => setAccountLogins({ ...accountLogins, [role]: event.target.value })} /></label>
+          {accountSuggestions[role] && <div className="space-y-2 sm:col-span-2">
+            <p className="text-sm text-muted">The wildcard covers this login. Add its exact host to attach the test account.</p>
+            <Button size="sm" variant="secondary" onClick={() => {
+              const host = accountSuggestions[role]!;
+              setReview(current => ({ ...current, scopeIn: [...current.scopeIn, { value: host, type: 'WEB_APPLICATION' }] }));
+              setAccountAssets(current => ({ ...current, [role]: host }));
+            }}>Add {accountSuggestions[role]} to scope</Button>
+          </div>}
           <label>Username<input name={'username-' + role} className={fieldClass} autoComplete="off" maxLength={512} /></label>
           <label>Password<input name={'password-' + role} className={fieldClass} type="password" autoComplete="new-password" maxLength={512} /></label>
         </fieldset>)}
@@ -217,7 +235,7 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
       {error && <p role="alert" className="text-danger">{error}</p>}
       <div className="flex items-center justify-end gap-3">
         <Link href={program ? '/targets/' + program.id : '/targets'} className="text-sm text-muted">Cancel</Link>
-        <Button type="submit" disabled={busy || Boolean(scopeError || conflict) || !policyResult.success}>{saving ? 'Saving…' : 'Save'}</Button>
+        <Button type="submit" disabled={busy || Boolean(scopeError || conflict) || accountNeedsHost || !policyResult.success}>{saving ? 'Saving…' : 'Save'}</Button>
       </div>
     </fieldset>
   </form>;

@@ -1,6 +1,7 @@
 "use client";
 import EvidencePanel from './EvidencePanel';
 import FindingLifecycle from './FindingLifecycle';
+import { findingAvailableForReport } from '@/lib/findingLifecycle';
 
 import Link from "next/link";
 import {useRouter,useSearchParams} from 'next/navigation';
@@ -33,6 +34,8 @@ interface Finding {
   evidence: string | null;
   gateStatus: string;
   reviewStatus: ReviewState;
+  lifecycle?: string | null;
+  lifecycleEvents?: { id: string }[];
   reviewEvidence: { notes?: string } | null;
   killedReason: string | null;
   cwe: string | null;
@@ -286,6 +289,7 @@ function HostFindingCollection({params}:{params:Promise<{id:string}>}){
                     <p className="mt-2 text-xs text-muted">{f.killedReason}</p>
                   )}
 
+                  {findingAvailableForReport(f) && <Link className="text-brand underline" href={'/targets/' + id + '/report?finding=' + encodeURIComponent(f.id)}>Open report</Link>}
                   <FindingLifecycle findingId={f.id} onDone={()=>void load()}/><EvidencePanel targetId={id} link={{entity:'finding',id:f.id,role:'SUPPORTS'}}/><EvidenceReview key={`${f.id}-${f.reviewStatus}`} finding={f} onDone={load} />
 
                   <FindingClassification

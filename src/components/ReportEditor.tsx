@@ -1,8 +1,7 @@
 "use client";
 import {platformLabel} from '@/lib/platformPresentation';
-import {lifecycleReportEligible} from '@/lib/findingLifecycle';
+import { findingAvailableForReport } from '@/lib/findingLifecycle';
 import EvidencePanel from '@/components/EvidencePanel';
-import { findingReviewStatus } from "@/lib/evidenceReview";
 
 import Link from "next/link";
 import {useRouter,useSearchParams} from 'next/navigation';
@@ -41,8 +40,8 @@ const PLATFORMS: Platform[] = [
   "GENERIC",
 ];
 
-export default function ReportEditor(props:{id:string;programMode?:boolean}){return <Suspense fallback={<p role="status">Loading report…</p>}><ReportCollection {...props}/></Suspense>;}
-function ReportCollection({id,programMode=false}:{id:string;programMode?:boolean}) {
+export default function ReportEditor(props:{id:string;programMode?:boolean;initialFinding?:Finding}){return <Suspense fallback={<p role="status">Loading report…</p>}><ReportCollection {...props}/></Suspense>;}
+function ReportCollection({id,programMode=false,initialFinding}:{id:string;programMode?:boolean;initialFinding?:Finding}) {
   const router=useRouter(),params=useSearchParams(),query=params.toString();
   const findingInput=paginationInput(new URLSearchParams({page:params.get('findingPage')??'1',pageSize:params.get('pageSize')??'25'}),false);
   const reportInput=paginationInput(new URLSearchParams({page:params.get('reportPage')??'1',pageSize:params.get('pageSize')??'25'}),false);
@@ -57,7 +56,7 @@ function ReportCollection({id,programMode=false}:{id:string;programMode?:boolean
 
   const [title, setTitle] = useState("");
   const [platform, setPlatform] = useState<Platform>("HACKERONE");
-  const [selected, setSelected] = useState<Record<string, Finding>>({});
+  const [selected, setSelected] = useState<Record<string, Finding>>(() => initialFinding ? { [initialFinding.id]: initialFinding } : {});
   const [generating, setGenerating] = useState(false);
   const [markdown, setMarkdown] = useState<string | null>(null);
 
@@ -67,14 +66,15 @@ function ReportCollection({id,programMode=false}:{id:string;programMode?:boolean
     Promise.all([fetch(`/api/findings?${identity}&page=${findingInput.page}&pageSize=${findingInput.pageSize}`,{signal:controller.signal}),fetch(`/api/reports?${identity}&page=${reportInput.page}&pageSize=${reportInput.pageSize}`,{signal:controller.signal})]).then(async([fr,rr])=>{
       if(!fr.ok||!rr.ok)throw new Error('Unable to load findings and report history');
       const [findings,saved]=await Promise.all([fr.json(),rr.json()]);if(controller.signal.aborted)return;
-      setPassed(findings.items.filter((f:Finding)=>findingReviewStatus(f)==='CONFIRMED'&&lifecycleReportEligible(f.lifecycle)&&(f.lifecycle==null||Boolean(f.lifecycleEvents?.length))));
+      const eligible: Finding[] = findings.items.filter(findingAvailableForReport);
+      setPassed(initialFinding && !eligible.some(finding => finding.id === initialFinding.id) ? [initialFinding, ...eligible] : eligible);
       setReports(saved.items);setReportId(saved.items[0]?.id??'');setMarkdown(saved.items[0]?.markdown??null);setPages({findings,reports:saved});setError(null);
       const next=new URLSearchParams(query);let changed=false;
       for(const [key,page] of [['findingPage',findings.page],['reportPage',saved.page]] as const){if(next.has(key)&&next.get(key)!==String(page)){next.set(key,String(page));changed=true;}}
       if(changed)router.replace('/targets/'+id+'/report?'+next);
     }).catch(e=>{if(!controller.signal.aborted)setError(e.message);}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
     return () => controller.abort();
-  }, [id,programMode,query,findingInput.page,findingInput.pageSize,reportInput.page,reportInput.pageSize,router,revision]);
+  }, [id,programMode,query,findingInput.page,findingInput.pageSize,reportInput.page,reportInput.pageSize,router,revision,initialFinding]);
 
   async function generate(e: React.FormEvent) {
     e.preventDefault();
@@ -112,10 +112,10 @@ function ReportCollection({id,programMode=false}:{id:string;programMode?:boolean
     <div className="space-y-8">
       <div>
         <Link
-          href={programMode?`/targets/${id}`:`/hosts/${id}`}
+          href={initialFinding ? '/targets/' + (initialFinding.targetId ?? id) + '/findings?finding=' + encodeURIComponent(initialFinding.id) + '#finding-' + initialFinding.id : programMode ? '/targets/' + id : '/hosts/' + id}
           className="text-sm text-muted hover:text-foreground"
         >
-          ← Target
+          ← {initialFinding ? 'Finding' : 'Target'}
         </Link>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
           Report
@@ -135,7 +135,7 @@ function ReportCollection({id,programMode=false}:{id:string;programMode?:boolean
         </div>
       )}
 
-      <details className="ui-disclosure" open={!reports.length}><summary>Generate report</summary><div className="mt-4">
+      <details className="ui-disclosure" open={Boolean(initialFinding)||!reports.length}><summary>Generate report</summary><div className="mt-4">
         <form onSubmit={generate} className="grid gap-3">
           <input
             required

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { executionPolicySchema, structuredExclusionSchema } from './programExecutionPolicy';
 import { ASSET_TYPES, assetInputSchema, assetAllowsUrl, detectScopeAsset } from './scopeAssets';
+import { matchesHost, normalizeFqdn } from './bountyProgram';
 
 import { reviewRule, documentedAsset } from './targetReviewData';
 export { RULE_DECISIONS } from './targetReviewData';
@@ -37,6 +38,33 @@ export function scopeReviewChecks(scopeIn: ScopeEntry[], exclusions: string[]) {
     scopeError = 'Use one valid URL, domain, wildcard, IP or CIDR per exclusion.';
   }
   return { scopeError, conflict };
+}
+
+/** Suggest a host only when it is already covered by an explicit wildcard.
+ * The user still adds the exact identity before a credential can be stored. */
+export function suggestTestAccountHost(scopeIn: ScopeEntry[], exclusions: string[], loginUrl: string) {
+  const url = URL.parse(loginUrl.trim());
+  if (url?.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return null;
+  let host: string;
+  try { host = normalizeFqdn(url.hostname); } catch { return null; }
+  const scope = scopeIn.flatMap(asset => {
+    try { return [detectScopeAsset(asset.value)]; } catch { return []; }
+  });
+  if (!scope.some(asset => asset.format === 'WILDCARD_DOMAIN' && assetAllowsUrl(asset, loginUrl.trim())) ||
+      scope.some(asset => asset.format !== 'WILDCARD_DOMAIN' && asset.executable && assetAllowsUrl(asset, url.href))) return null;
+
+  for (const value of exclusions) {
+    if (!structuredExclusionSchema.safeParse(value).success) continue;
+    const asset = detectScopeAsset(value);
+    if (asset.format === 'CIDR' || asset.format === 'IP') return null;
+    if (asset.format === 'URL') {
+      const exclusion = new URL(asset.normalizedValue);
+      const prefix = exclusion.pathname.toLowerCase().replace(/\/\*$/, '/').replace(/\/$/, '');
+      if (exclusion.origin === url.origin && (!prefix || url.pathname.toLowerCase() === prefix ||
+          url.pathname.toLowerCase().startsWith(prefix + '/'))) return null;
+    } else if (matchesHost(host, asset.normalizedValue)) return null;
+  }
+  return host;
 }
 
 export const targetReviewSchema = z.strictObject({

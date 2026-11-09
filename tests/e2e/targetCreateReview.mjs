@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { chromium } from 'playwright-chromium';
 import bcrypt from 'bcryptjs';
+import { verifyCampaignWorkflow } from './targetCampaignWorkflow.mjs';
 
 const exec = promisify(execFile);
 const db = process.env.TEST_DATABASE_URL;
@@ -83,7 +84,7 @@ try {
   await capture('target-import-preview.png');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
-  await page.getByRole('status').filter({ hasText: 'Ready for Recon' }).waitFor();
+  await page.getByRole('button', { name: 'Start recon', exact: true }).waitFor();
   const imported = await p.bountyProgram.findFirstOrThrow({ where: { ownerId: user.id, companyName: 'Reviewed private fixture' },
     include: { scopeAssets: true, executionPolicies: true } });
   assert.deepEqual(imported.nonQualifying, ['OPEN_REDIRECT']);
@@ -112,8 +113,23 @@ try {
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
   await page.getByRole('status').filter({ hasText: 'Automation is blocked by unrepresented program or scope rules.' }).waitFor();
+  await page.getByRole('link', { name: 'Fix policy', exact: true }).click();
+  await page.getByRole('button', { name: 'Add asset', exact: true }).click();
+  await page.getByLabel('Asset 2', { exact: true }).fill('*.example.test');
+  await page.locator('summary').filter({ hasText: /^Test accounts/ }).click();
+  const account = page.getByRole('group', { name: 'Account A', exact: true });
+  await account.getByLabel('Login URL').fill('https://login.example.test/login');
+  await account.getByRole('button', { name: 'Add login.example.test to scope', exact: true }).click();
+  assert.equal(await page.getByLabel('Asset 3', { exact: true }).inputValue(), 'login.example.test');
+  assert.equal(await account.getByRole('combobox').inputValue(), 'login.example.test');
+  await account.getByLabel('Username').fill('fixture-user');
+  await account.getByLabel('Password').fill('fixture-password');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.waitForURL(/\/targets\/[^/?]+\?saved=1$/);
+  assert.equal(await p.targetCredential.count({ where: { target: { userId: user.id, host: 'login.example.test' } } }), 1);
+  await verifyCampaignWorkflow({ page, context, origin, p, ownerId: user.id });
   assert.deepEqual(errors, []);
-  console.log('TARGET_CREATE_REVIEW: imported review, manual review and scope conflict passed');
+  console.log('TARGET_CREATE_REVIEW: imported review, manual review, scope conflict and wildcard account host passed');
 } catch (error) {
   console.error(logs.join('').slice(-8000));
   throw error;
