@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { advanceCampaign, campaignPolicyBlocker } from '@/server/campaignOrchestrator';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
@@ -27,9 +29,10 @@ export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
-  const parsed = programCreateSchema.extend({ targetReview: targetReviewSchema.optional() }).safeParse(await req.json().catch(() => null));
+  const parsed = programCreateSchema.extend({ targetReview: targetReviewSchema.optional(), startCampaign: z.boolean().optional() }).safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });
-  const { scopeHosts, targetReview, ...data } = parsed.data;
+  const { scopeHosts, targetReview, startCampaign, ...data } = parsed.data;
+  if (startCampaign && !targetReview) return Response.json({ error: 'Review scope and policy before starting a campaign.' }, { status: 400 });
   data.scopeRules = [...new Set([...data.scopeRules, ...scopeHosts])];
   const ownerId = session.user.id;
   if (targetReview && (scopeHosts.length || data.scopeRules.length || data.outOfScope.length)) {
@@ -49,8 +52,18 @@ export async function POST(req: Request) {
           ...(assets.length ? { scopeAssets: { createMany: { data: assets } } } : {}),
         } });
         await storeTestAccounts(tx, created, targetReview, policy);
+        if (startCampaign) {
+          const hunterIdentity = await tx.hunterIdentity.findUnique({ where: { userId: ownerId }, select: { userAgent: true, headers: true } });
+          const blocker = campaignPolicyBlocker({ ...created, owner: { hunterIdentity }, executionPolicies: [{ version: 1, policy }] }) ??
+            (assets.length ? null : 'Add at least one active Scope Asset before Recon');
+          const source = targetReview.importSource;
+          const matchedSource = source?.url === created.programUrl && source?.platform === created.platform ? source : undefined;
+          await tx.targetCampaign.create({ data: { programId: created.id, state: blocker ? 'BLOCKED' : 'READY', reason: blocker,
+            requestedAt: blocker ? null : new Date(), source: matchedSource, lastSyncAt: matchedSource ? new Date() : null } });
+        }
         return created;
       });
+      if (startCampaign) await advanceCampaign(ownerId, program.id).catch(() => {});
       return NextResponse.json(program, { status: 201, headers: { 'Cache-Control': 'private, no-store' } });
     } catch (error) {
       return Response.json({ error: error instanceof ResearchError ? error.message : 'Target could not be saved. Try again.' },

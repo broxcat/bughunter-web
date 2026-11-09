@@ -121,7 +121,7 @@ export function TargetScopeReview({ value, onChange, historical = [], candidates
     </fieldset>
     <fieldset className="space-y-3"><legend className="font-semibold">Unrepresented rules</legend>
       {pending > 0 && <p className="text-sm text-danger">{pending} {pending === 1 ? 'rule needs' : 'rules need'} a decision. You can save now. Automation will stay blocked.</p>}
-      {value.rules.map((rule, index) => <div key={index} className="space-y-2 rounded border border-border p-3">
+      {value.rules.map((rule, index) => <div key={index} id={'policy-rule-' + (index + 1)} className="scroll-mt-24 space-y-2 rounded border border-border p-3">
         {rule.assetRef && <p className="break-all text-xs text-muted">Asset · {rule.assetLabel ?? rule.assetRef}</p>}
         <p className="max-h-56 overflow-auto whitespace-pre-wrap break-words text-sm">{rule.text}</p>
         <fieldset className="flex flex-wrap gap-3 text-sm"><legend className="sr-only">Decision for rule {index + 1}</legend>

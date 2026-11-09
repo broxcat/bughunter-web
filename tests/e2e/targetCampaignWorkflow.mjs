@@ -6,6 +6,7 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
   const path = id => origin + '/targets/' + id;
   const campaignRequests = start => requestPaths.slice(start).filter(value => value.includes('/api/programs') || value === new URL(page.url()).pathname);
   const requestPaths = [];
+  const campaign = async (id, action) => context.request.post(origin + '/api/programs/' + id + '/campaign', { data: { action } });
   const onRequest = request => {
     const url = new URL(request.url());
     if (url.pathname.includes('/api/programs') || url.searchParams.has('_rsc')) requestPaths.push(url.pathname);
@@ -19,6 +20,9 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     await page.screenshot({ path: join(directory, name + '.png'), fullPage: true, animations: 'disabled', style: 'nextjs-portal { display: none !important; }' });
   };
   const primary = (role, name) => page.locator('main header').getByRole(role, { name, exact: true });
+  const readyPolicy = { automationAllowed: true, requiredUserAgent: 'CampaignFixture/1', requiredHeaders: [], exclusions: [],
+    requestsPerSecond: 3, maxConcurrency: 2, forbiddenCategories: [], reviewState: 'OWNER_REVIEWED',
+    sourceSnapshot: { url: null, rules: '', unrepresentedRules: [] } };
   const blocked = await p.bountyProgram.create({ data: {
     ownerId, companyName: 'Orion — policy review', platform: 'HACKERONE', requiredUserAgent: 'CampaignFixture/1',
     scopeAssets: { create: { originalValue: 'app.example.test', normalizedValue: 'app.example.test', format: 'SUBDOMAIN', type: 'WEB_APPLICATION' } },
@@ -30,6 +34,7 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
   } });
   const ready = await p.bountyProgram.create({ data: {
     ownerId, companyName: 'Orion — web campaign', platform: 'HACKERONE', requiredUserAgent: 'CampaignFixture/1',
+    executionPolicies: { create: { version: 1, policy: readyPolicy } },
     scopeAssets: { create: ['app.example.test', 'api.example.test'].map((host, i) => ({
       originalValue: host, normalizedValue: host, format: 'SUBDOMAIN', type: i ? 'API' : 'WEB_APPLICATION',
     })) },
@@ -45,10 +50,10 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     assert.match(await readyRow.innerText(), /Recon[\s\S]*Not started/);
     await blockedRow.getByRole('link', { name: 'Open ' + blocked.companyName }).click();
     await primary('link', 'Fix policy').waitFor();
-    await page.getByRole('status').filter({ hasText: 'Automation is blocked by unrepresented program or scope rules.' }).waitFor();
+    await page.getByRole('status').filter({ hasText: '1 rule needs a decision.' }).waitFor();
     await capture('blocked');
     await primary('link', 'Fix policy').click();
-    await page.waitForURL(path(blocked.id) + '/settings#execution-policy');
+    await page.waitForURL(path(blocked.id) + '/settings#policy-rule-1');
 
     const readyResponse = await page.goto(path(ready.id));
     assert.match(await readyResponse.text(), /Start recon/);
@@ -57,11 +62,11 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     await page.waitForTimeout(5600);
     assert.deepEqual(campaignRequests(idleRequestCount), [], 'idle campaign makes no background API requests');
 
-    const start = page.waitForResponse(response => response.url() === origin + '/api/programs/' + ready.id + '/recon' && response.request().method() === 'POST');
+    const start = page.waitForResponse(response => response.url() === origin + '/api/programs/' + ready.id + '/campaign' && response.request().method() === 'POST');
     await primary('button', 'Start recon').click();
     assert.equal((await start).status(), 202);
     await primary('link', 'View progress').waitFor();
-    await page.getByText('0/2 assets finished', { exact: true }).waitFor();
+    await page.getByText('Queued · 0/2 assets finished', { exact: true }).waitFor();
     await primary('link', 'View progress').click();
     await page.waitForURL(path(ready.id) + '#recon');
 
@@ -70,24 +75,41 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     await p.$transaction([
       p.targetReconRun.update({ where: { id: run.id }, data: { status: 'RUNNING', startedAt: new Date() } }),
       p.scanRun.update({ where: { id: run.scans[0].id }, data: { status: 'COMPLETED', outcome: 'SUCCESS', finishedAt: new Date() } }),
+      p.scanRun.update({ where: { id: run.scans[1].id }, data: { status: 'RUNNING', startedAt: new Date() } }),
     ]);
     await page.getByText('1/2 assets finished', { exact: true }).waitFor();
     assert(requestPaths.includes('/api/programs/campaign-stream'), 'active run uses a campaign stream');
     await capture('recon-running');
 
+    const now = new Date();
+    await p.reconArtifact.createMany({ data: [
+      { kind: 'hostname', canonicalKey: 'fixture-host', value: { hostname: 'app.example.test' } },
+      { kind: 'endpoint', canonicalKey: 'fixture-app', value: { url: 'https://app.example.test/login', status: 200 } },
+    ].map(item => ({ ...item, scanRunId: run.scans[0].id, scopeAssetId: run.scans[0].scopeAssetId,
+      firstSeenAt: now, lastSeenAt: now, scopeState: 'IN_SCOPE', verification: 'OBSERVED', sources: [] })) });
     await p.$transaction([
+      p.scanRun.update({ where: { id: run.scans[0].id }, data: { changeSet: { new: ['fixture-app'], changed: [], notObserved: [] } } }),
       p.scanRun.update({ where: { id: run.scans[1].id }, data: { status: 'COMPLETED', outcome: 'SUCCESS', finishedAt: new Date() } }),
       p.targetReconRun.update({ where: { id: run.id }, data: {
         status: 'COMPLETED', outcome: 'SUCCESS', finishedAt: new Date(), scopeMarkdown: 'Controlled Research handoff fixture.',
       } }),
     ]);
-    await primary('link', 'Open research').waitFor();
+    assert.equal((await campaign(ready.id, 'start')).status(), 202); // Idempotent wake-up for the test's completed worker fixture.
+    await primary('button', 'Open research').waitFor();
+    await page.getByText('1 discovered hosts', { exact: true }).waitFor();
+    await page.getByText('1 active web apps', { exact: true }).waitFor();
+    await p.targetCampaign.update({ where: { programId: ready.id }, data: { pendingAssets: ['docs','login','media'].map(name => ({ value: name + '.example.test', type: 'WEB_APPLICATION' })) } });
+    await page.reload();
+    await page.getByRole('link', { name: '3 new assets to review', exact: true }).waitFor();
+    await capture('needs-you');
     const afterRun = requestPaths.length;
     await page.waitForTimeout(5600);
     assert.deepEqual(campaignRequests(afterRun), [], 'terminal Recon stops background requests');
-    await primary('link', 'Open research').click();
+    await primary('button', 'Open research').click();
     await page.waitForURL(origin + '/research?program=' + ready.id + '&view=campaign');
     await page.getByRole('heading', { name: 'Research', exact: true }).waitFor();
+    const handoff = await context.request.get(origin + '/api/programs/' + ready.id + '/campaign/handoff');
+    assert.match(await handoff.text(), /Controlled Research handoff fixture/);
     assert.equal(await page.getByRole('link', { name: /^Open console/ }).count(), 0);
     await page.getByRole('link', { name: 'View details', exact: true }).click();
     await page.waitForURL(origin + '/research?program=' + ready.id + '&view=details');

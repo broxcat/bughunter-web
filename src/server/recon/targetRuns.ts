@@ -1,7 +1,7 @@
 import { programPolicyBlocker, programPolicyInclude } from '../programExecutionPolicy';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { assetValueRank, detectScopeAsset } from '@/lib/scopeAssets';
+import { assetValueRank, detectScopeAsset, scopeAssetExecutable } from '@/lib/scopeAssets';
 import { isExcluded, matchesHost } from '@/lib/bountyProgram';
 import { buildReconPlan } from '@/lib/reconPlanner';
 import { assetSnapshot, backfillProgramAssets, lockOwnedProgram } from '../scopeAssets';
@@ -12,38 +12,70 @@ import { RATE_LIMIT_POLICIES } from '@/lib/abusePolicy';
 import { captureProgramAssessment } from '../assessment';
 import { captureAuthenticatedContexts } from '../authenticatedRecon';
 
-export async function startTargetRecon(userId:string,programId:string) {
-  const parent=await prisma.$transaction(async tx=>{
-    await tx.$queryRaw`SELECT id FROM "User" WHERE id=${userId} FOR UPDATE`;
-    await lockOwnedProgram(tx,userId,programId);
-    const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude });
-    const blocker = programPolicyBlocker(program);
-    if (blocker) throw new ResearchError(blocker, 409);
-    await backfillProgramAssets(tx,programId,userId);
-    const live=await tx.targetReconRun.findFirst({where:{programId,status:{in:['QUEUED','RUNNING']}},include:{scans:{select:{id:true}}}});if(live)return live;
-    const assets=(await tx.scopeAsset.findMany({where:{programId,active:true},include:{executionTarget:{include:{scope:true}}}})).sort((a,b)=>assetValueRank(a.assetValue)-assetValueRank(b.assetValue)||a.normalizedValue.localeCompare(b.normalizedValue));
-    if(!assets.length)throw new ResearchError('Add at least one active Scope Asset before Recon',400);
-    if(assets.length>1000)throw new ResearchError('Target asset limit exceeded',422);
-    const policy=RATE_LIMIT_POLICIES.scanUser;
-    if(await tx.targetReconRun.count({where:{program:{ownerId:userId},createdAt:{gt:new Date(Date.now()-policy.windowSec*1000)}}})>=policy.limit)throw new ResearchError('Target Recon quota reached; retry later',429);
-    if(await tx.scanRun.count({where:{scopeAssetId:{in:assets.map(a=>a.id)},status:{in:['QUEUED','RUNNING']}}}))throw new ResearchError('A previous asset Recon is still running; cancel or finish it first',409);
-    const previous=new Set((await tx.scanRun.groupBy({by:['scopeAssetId'],where:{scopeAssetId:{in:assets.map(a=>a.id)},type:'RECON',status:'COMPLETED'},_count:true})).map(r=>r.scopeAssetId));
-    const assessment=await captureProgramAssessment(tx,programId);
-    const parent=await tx.targetReconRun.create({data:{programId,assessmentModeSnapshot:assessment.assessmentMode,assessmentSourcesSnapshot:assessment.authorizedSources as unknown as Prisma.InputJsonValue,preflight:{version:2,database:'AVAILABLE',queue:'PENDING',storage:'DATABASE',assetIds:assets.map(a=>a.id)}}});
-    for(const [reconOrder,asset] of assets.entries()) {
-      let target=asset.executionTarget;
-      if(!target){const d=detectScopeAsset(asset.normalizedValue),host=d.hostname??asset.normalizedValue;
-        const scope=await tx.scope.create({data:{userId,hostPattern:host,status:'APPROVED',programName:program.companyName}});
-        target=await tx.target.create({data:{userId,programId,scopeId:scope.id,scopeAssetId:asset.id,host,scheme:asset.format==='URL'?new URL(asset.normalizedValue).protocol.slice(0,-1):'https',active:false},include:{scope:true}});
-      }
-      const host=asset.format==='URL'?new URL(asset.normalizedValue).hostname:asset.normalizedValue;
-      const authContexts=await captureAuthenticatedContexts(tx,target.id);
-      const plan=buildReconPlan(asset,{active:target.scope.status==='APPROVED'&&!(asset.format==='WILDCARD_DOMAIN'?program.outOfScope.some(rule=>matchesHost(host,rule)):isExcluded(host,program.outOfScope)),exclusions:program.outOfScope},{newSurface:!previous.has(asset.id),authenticatedContexts:authContexts.contexts.filter(context=>context.eligibility==='PLANNED').length});
-      const scan=await tx.scanRun.create({data:{targetId:target.id,scopeAssetId:asset.id,targetReconRunId:parent.id,reconOrder,scopeAssetSnapshot:assetSnapshot(asset),assessmentModeSnapshot:parent.assessmentModeSnapshot,assessmentSourcesSnapshot:parent.assessmentSourcesSnapshot as Prisma.InputJsonValue,authenticatedContextsSnapshot:authContexts as unknown as Prisma.InputJsonValue,reconPlan:plan as unknown as Prisma.InputJsonValue,type:'RECON',reconSteps:{create:plan.stages.map((s,position)=>({name:s.name,position,reason:s.reason}))}}});
-      await tx.scanJobOutbox.create({data:{scanRunId:scan.id}});
+export async function lockCampaignCapacity(tx: Prisma.TransactionClient) {
+  await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(65181, 6)`;
+}
+
+export async function lockReconProgram(tx: Prisma.TransactionClient, userId: string, programId: string) {
+  await tx.$queryRaw`SELECT id FROM "User" WHERE id=${userId} FOR UPDATE`;
+  await lockOwnedProgram(tx,userId,programId);
+}
+
+export async function admitTargetRecon(tx: Prisma.TransactionClient, userId: string, programId: string, campaignKey?: string) {
+  const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude });
+  const blocker = programPolicyBlocker(program);
+  if (blocker) throw new ResearchError(blocker, 409);
+  await backfillProgramAssets(tx,programId,userId);
+  const live=await tx.targetReconRun.findFirst({where:{programId,status:{in:['QUEUED','RUNNING']}},include:{scans:{select:{id:true}}}});if(live)return live;
+  let assets=(await tx.scopeAsset.findMany({where:{programId,active:true},include:{executionTarget:{include:{scope:true}}}})).sort((a,b)=>assetValueRank(a.assetValue)-assetValueRank(b.assetValue)||a.normalizedValue.localeCompare(b.normalizedValue));
+  if (campaignKey) assets = assets.filter(scopeAssetExecutable);
+  if(!assets.length)throw new ResearchError('Add at least one active Scope Asset before Recon',400);
+  if (campaignKey) {
+    const covered = await tx.$queryRaw<{ id: string }[]>`
+      SELECT DISTINCT a.id FROM "ScopeAsset" a JOIN "ScanRun" s ON s."scopeAssetId" = a.id
+      WHERE a."programId" = ${programId} AND a.active AND s.type = 'RECON'
+        AND s.status = 'COMPLETED' AND s.outcome IN ('SUCCESS','PARTIAL')
+        AND a."updatedAt" <= COALESCE(s."startedAt", s."createdAt")
+        AND s."scopeAssetSnapshot"->>'normalizedValue' = a."normalizedValue"
+        AND s."scopeAssetSnapshot"->>'format' = a.format::text
+        AND s."scopeAssetSnapshot"->>'type' = a.type::text
+        AND s."scopeAssetSnapshot"->>'assetValue' = a."assetValue"::text`;
+    const previous = new Set(covered.map(row => row.id));
+    assets = assets.filter(asset => !previous.has(asset.id));
+    if (!assets.length) return null;
+  }
+  if(assets.length>1000)throw new ResearchError('Target asset limit exceeded',422);
+  const policy=RATE_LIMIT_POLICIES.scanUser;
+  if(await tx.targetReconRun.count({where:{program:{ownerId:userId},createdAt:{gt:new Date(Date.now()-policy.windowSec*1000)}}})>=policy.limit)throw new ResearchError('Target Recon quota reached; retry later',429);
+  if(await tx.scanRun.count({where:{scopeAssetId:{in:assets.map(a=>a.id)},status:{in:['QUEUED','RUNNING']}}}))throw new ResearchError('A previous asset Recon is still running; cancel or finish it first',409);
+  const previous=new Set((await tx.scanRun.groupBy({by:['scopeAssetId'],where:{scopeAssetId:{in:assets.map(a=>a.id)},type:'RECON',status:'COMPLETED'},_count:true})).map(r=>r.scopeAssetId));
+  const assessment=await captureProgramAssessment(tx,programId);
+  const parent=await tx.targetReconRun.create({data:{programId,campaignKey,assessmentModeSnapshot:assessment.assessmentMode,assessmentSourcesSnapshot:assessment.authorizedSources as unknown as Prisma.InputJsonValue,preflight:{version:2,database:'AVAILABLE',queue:'PENDING',storage:'DATABASE',assetIds:assets.map(a=>a.id)}}});
+  for(const [reconOrder,asset] of assets.entries()) {
+    let target=asset.executionTarget;
+    if(!target){const d=detectScopeAsset(asset.normalizedValue),host=d.hostname??asset.normalizedValue;
+      const scope=await tx.scope.create({data:{userId,hostPattern:host,status:'APPROVED',programName:program.companyName}});
+      target=await tx.target.create({data:{userId,programId,scopeId:scope.id,scopeAssetId:asset.id,host,scheme:asset.format==='URL'?new URL(asset.normalizedValue).protocol.slice(0,-1):'https',active:false},include:{scope:true}});
     }
-    return tx.targetReconRun.findUniqueOrThrow({where:{id:parent.id},include:{scans:{select:{id:true}}}});
-  },{timeout:30000});
+    const host=asset.format==='URL'?new URL(asset.normalizedValue).hostname:asset.normalizedValue;
+    const authContexts=await captureAuthenticatedContexts(tx,target.id);
+    const plan=buildReconPlan(asset,{active:target.scope.status==='APPROVED'&&!(asset.format==='WILDCARD_DOMAIN'?program.outOfScope.some(rule=>matchesHost(host,rule)):isExcluded(host,program.outOfScope)),exclusions:program.outOfScope},{newSurface:!previous.has(asset.id),authenticatedContexts:authContexts.contexts.filter(context=>context.eligibility==='PLANNED').length});
+    const scan=await tx.scanRun.create({data:{targetId:target.id,scopeAssetId:asset.id,targetReconRunId:parent.id,reconOrder,scopeAssetSnapshot:assetSnapshot(asset),assessmentModeSnapshot:parent.assessmentModeSnapshot,assessmentSourcesSnapshot:parent.assessmentSourcesSnapshot as Prisma.InputJsonValue,authenticatedContextsSnapshot:authContexts as unknown as Prisma.InputJsonValue,reconPlan:plan as unknown as Prisma.InputJsonValue,type:'RECON',reconSteps:{create:plan.stages.map((s,position)=>({name:s.name,position,reason:s.reason}))}}});
+    await tx.scanJobOutbox.create({data:{scanRunId:scan.id}});
+  }
+  return tx.targetReconRun.findUniqueOrThrow({where:{id:parent.id},include:{scans:{select:{id:true}}}});
+}
+
+export async function startTargetRecon(userId: string, programId: string) {
+  const parent = await prisma.$transaction(async tx => {
+    await lockCampaignCapacity(tx);
+    await lockReconProgram(tx, userId, programId);
+    if (await tx.targetCampaign.findUnique({ where: { programId }, select: { programId: true } })) {
+      throw new ResearchError('Start Recon from the Target campaign.', 409);
+    }
+    return admitTargetRecon(tx, userId, programId);
+  }, { timeout: 30000 });
+  if (!parent) throw new ResearchError('No Recon assets to run', 400);
   // Outbox retries recover Redis outages without changing immutable membership.
   const published=[];for(const scan of parent.scans)published.push(await publishScanJob(scan.id));
   await prisma.targetReconRun.update({where:{id:parent.id},data:{preflight:{...(parent.preflight as Prisma.JsonObject??{}),queue:published.every(p=>p.dispatch==='PUBLISHED')?'AVAILABLE':'DEGRADED_OUTBOX_PENDING'}}});

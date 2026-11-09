@@ -59,6 +59,9 @@ export async function createScanRequest(userId: string, input: ScanRequest, key:
       if (target.programId) {
         const owned = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "BountyProgram" WHERE id=${target.programId} AND "ownerId"=${userId} AND "deletingAt" IS NULL FOR SHARE`;
         if (!owned.length) throw new ScanRequestNotFound();
+        if (await tx.targetCampaign.findUnique({ where: { programId: target.programId }, select: { programId: true } })) {
+          throw new ScanRequestConflict('Start Recon from the Target campaign.');
+        }
         await captureProgramAssessment(tx, target.programId);
       }
       const authenticated = await captureAuthenticatedContexts(tx,input.targetId);

@@ -9,6 +9,7 @@ import { executionPolicySchema, MISSING_HUNTER_UA } from '@/lib/programExecution
 import { detectScopeAsset } from '@/lib/scopeAssets';
 import { scopeReviewChecks, suggestTestAccountHost, targetReviewSchema, type DocumentedAsset, type TargetReview } from '@/lib/targetReview';
 import type { ProgramData } from '@/lib/targetFormData';
+import { captureCampaignSource, type CampaignSource } from '@/lib/campaignSource';
 import type { ProgramPreview } from '@/server/programImport/normalize';
 import { Button } from '@/components/ui/Button';
 import { fieldClass, initialReview, lines, policyFields, readable, TargetScopeReview } from './TargetScopeReview';
@@ -34,6 +35,7 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
   const [url, setUrl] = useState(program?.programUrl ?? '');
   const [name, setName] = useState(program?.companyName ?? '');
   const [platform, setPlatform] = useState<Platform | ''>((program?.platform ?? '') as Platform | '');
+  const [importSource, setImportSource] = useState<CampaignSource>();
   const [source, setSource] = useState(program?.executionPolicies?.[0]?.policy.sourceSnapshot.sourceDocument ?? program?.rulesOfEngagement ?? '');
   const [review, setReview] = useState(() => initialReview(program));
   const [candidates, setCandidates] = useState<DocumentedAsset[]>([]);
@@ -55,10 +57,12 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
       const result = await importProgram(url.trim(), platform);
       if ('message' in result) { setMessage(result.message); return; }
       const { preview } = result;
+      const capturedSource = captureCampaignSource(preview);
       setUrl(preview.url);
       setName(preview.name);
       setPlatform(preview.platform);
       setSource(preview.policy.sourceSnapshot.rules);
+      setImportSource(capturedSource);
       setNonQualifying(preview.nonQualifying);
       setCandidates(preview.unrepresentedAssets);
       const assetLabels = new Map([...preview.scopeIn, ...preview.scopeOut, ...preview.nonAutomatable, ...preview.unrepresentedAssets]
@@ -126,7 +130,9 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
         .map(({ ref, originalValue, sourceType, reason }: DocumentedAsset) => ({ ref, originalValue, sourceType, reason })),
       rules: [...review.rules, ...(pendingRule ? [{ text: pendingRule, decision: null }] : [])],
       policy, testAccounts, expectedAssets: program?.expectedAssets,
-      sourceDocument: source || undefined,
+      sourceDocument: !program && source ? source : undefined,
+      importSource: !program && importSource?.url === url.trim() && importSource.platform === platform ? importSource : undefined,
+      campaignInterval: program ? (field('campaignHours') ? Number(field('campaignHours')) * 60 : null) : undefined,
     });
     if (!checked.success) {
       setError(checked.error.issues.map(issue => issue.path.join('.') + ' — ' + issue.message).join(' '));
@@ -138,6 +144,7 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
       rewardCurrency: field('rewardCurrency'),
       ...Object.fromEntries(levels.map(level => ['reward' + level, field('reward' + level) || null])),
       qualifying, nonQualifying, targetReview: checked.data,
+      ...(!program ? { startCampaign: true } : {}),
       ...(program ? {
         expectedUpdatedAt: program.updatedAt,
         expectedPolicyVersion: program.executionPolicies?.[0]?.version ?? 0,
@@ -181,6 +188,17 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
           {BOUNTY_PLATFORMS.map(item => <option key={item} value={item}>{platformLabel(item)}</option>)}
         </select></label>
       </div>
+      {Boolean(program?.campaign?.pendingAssets.length) && <section id="scope-import-review" className="scroll-mt-24 space-y-2 rounded border border-border p-4">
+        <h2 className="font-semibold">New assets to review</h2>
+        <p className="text-sm text-muted">Add each authorized asset to the scope below, then save to confirm it.</p>
+        {program!.campaign!.pendingAssets.map(asset => {
+          const included = review.scopeIn.some(row => row.value === asset.value);
+          return <div key={asset.value} className="flex flex-wrap items-center gap-2"><span className="break-all">{asset.value}</span>
+            <Button size="sm" variant="secondary" disabled={included} onClick={() =>
+              setReview(current => ({ ...current, scopeIn: [...current.scopeIn, asset] }))}>{included ? 'Added to review' : 'Add to scope'}</Button>
+          </div>;
+        })}
+      </section>}
       <TargetScopeReview value={review} onChange={setReview} historical={program?.historicalDocumentedAssets} candidates={candidates} />
       {legacy?.scopes.length ? <details className="ui-disclosure"><summary>Legacy Scope text</summary>
         {legacy.scopes.map(scope => <div key={scope.id} className="mt-3 space-y-2">
@@ -218,6 +236,11 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
           <label>Password<input name={'password-' + role} className={fieldClass} type="password" autoComplete="new-password" maxLength={512} /></label>
         </fieldset>)}
       </details>
+      {program && <section id="campaign-schedule" className="space-y-2 rounded border border-border p-4">
+        <h2 className="font-semibold">Campaign schedule</h2>
+        <label className="block">Hours between follow-up cycles<input name="campaignHours" className={fieldClass} type="number" min="1" max="720" step="1" defaultValue={program.campaign?.intervalMinutes ? program.campaign.intervalMinutes / 60 : ''} /></label>
+        <p className="text-sm text-muted">Leave blank to disable scheduled cycles. A follow-up only tests new or modified assets.</p>
+      </section>}
       <details className="ui-disclosure"><summary>Advanced</summary>
         <div className="mt-3 grid gap-3 sm:grid-cols-5">
           {levels.map(level => <label key={level}>Reward {readable(level)}<input name={'reward' + level} inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" className={fieldClass} defaultValue={program?.['reward' + level as `reward${typeof level}`] ?? ''} /></label>)}
@@ -235,7 +258,7 @@ export default function TargetEditor({ program, hunterHasUserAgent, importProgra
       {error && <p role="alert" className="text-danger">{error}</p>}
       <div className="flex items-center justify-end gap-3">
         <Link href={program ? '/targets/' + program.id : '/targets'} className="text-sm text-muted">Cancel</Link>
-        <Button type="submit" disabled={busy || Boolean(scopeError || conflict) || accountNeedsHost || !policyResult.success}>{saving ? 'Saving…' : 'Save'}</Button>
+        <Button type="submit" disabled={busy || Boolean(scopeError || conflict) || accountNeedsHost || !policyResult.success}>{saving ? 'Saving…' : program ? 'Save' : 'Save and start'}</Button>
       </div>
     </fieldset>
   </form>;

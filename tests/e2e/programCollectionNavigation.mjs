@@ -41,7 +41,7 @@ export async function auditProgramCollections({prisma,owner,origin,context,page}
   assert(contrast(colors.fg,colors.bg)>=4.5,theme+' input text contrast');
   assert(contrast(colors.border,colors.bg)>=3,theme+' control boundary contrast: '+JSON.stringify(colors));
   assert(contrast(colors.ring,colors.bg)>=3,theme+' focus ring contrast');
-  const form=page.locator('form').filter({has:input}),submit=form.getByRole('button',{name:'Save',exact:true});
+  const form=page.locator('form').filter({has:input}),submit=form.getByRole('button',{name:'Save and start',exact:true});
   const buttonColors=await submit.evaluate(e=>{const s=getComputedStyle(e);return{fg:s.color,bg:s.backgroundColor};});assert(contrast(buttonColors.fg,buttonColors.bg)>=4.5,theme+' button text contrast');
   await submit.click();
   assert.equal(await form.evaluate(e=>e.checkValidity()),false);assert(await input.evaluate(e=>e.required&&Boolean(e.validationMessage)));checks++;

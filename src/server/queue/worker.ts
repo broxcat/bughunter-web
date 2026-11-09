@@ -11,6 +11,7 @@ import { RECON_CAPACITY } from '@/lib/reconPlanner';
 
 import { collectReconDoctor } from '../recon/toolchain';
 import { startReconSummaryWorker } from '../recon/summaries';
+import { startCampaignMaintenance } from '../campaignMaintenance';
 let summaries:ReturnType<typeof startReconSummaryWorker>|undefined;
 const workerId = workerIdentity();
 const processor = createScanProcessor(workerId);
@@ -21,6 +22,7 @@ const worker = new Worker<ScanJobData>(SCAN_QUEUE_NAME, (job, token, signal) => 
 });
 let dispatcher: ReturnType<typeof startScanDispatcher> | undefined;
 let maintenance: ReturnType<typeof startExecutionMaintenance> | undefined;
+let campaigns: ReturnType<typeof startCampaignMaintenance> | undefined;
 let closing = false;
 export const ready = (async () => {
   const doctor=await collectReconDoctor();
@@ -31,6 +33,7 @@ export const ready = (async () => {
   summaries=startReconSummaryWorker();
   dispatcher = startScanDispatcher();
   maintenance = startExecutionMaintenance();
+  campaigns = startCampaignMaintenance();
   void worker.run().catch(() => logger.error({ workerId, reason: "WORKER_RUN_FAILED" }, "worker stopped processing"));
 })();
 ready.catch(() => { logger.error({ workerId, reason: "WORKER_STARTUP_FAILED" }, "worker reconciliation failed at startup"); void shutdown(); });
@@ -49,7 +52,7 @@ async function shutdown() {
   await Promise.all([
     processor.shutdown(),
     summaries?.close(),
-    settlesWithin(Promise.all([dispatcher?.close(), maintenance?.close()]), 2000),
+    settlesWithin(Promise.all([dispatcher?.close(), maintenance?.close(), campaigns?.close()]), 2000),
   ]);
   await settlesWithin(worker.close(true), 2000);
   redis.disconnect();

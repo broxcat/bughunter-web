@@ -47,6 +47,7 @@ export function normalizeProgram(reference: ProgramReference, name: string, rawA
     if (family && !rule.assetRef) nonQualifying.add(family);
     else rules.push(rule);
   }
+  const policySourceRules = [...rules];
   const assets = rawAssets.map(raw => {
     const detected = boundary(raw.value);
     const exclusion = detected && detected.format !== 'HOSTNAME' && structuredExclusionSchema.safeParse(detected.normalizedValue).success
@@ -86,6 +87,16 @@ export function normalizeProgram(reference: ProgramReference, name: string, rawA
     } else scopeIn.push({ ...item, automatable: true });
   }
 
+  const sourceRules = sortedUnique([
+    ...policySourceRules,
+    ...rawAssets.flatMap(raw => {
+      const assetRef = raw.id ?? createHash('sha256').update(JSON.stringify([raw.type, raw.value])).digest('hex');
+      return raw.instruction?.trim() ? [{ text: raw.instruction, assetRef }] : [];
+    }),
+    ...assets.flatMap(({ raw, exclusion }) => raw.disposition === 'OUT' && !exclusion && raw.value ? [{ text: raw.value }] : []),
+  ].filter(rule => rule.text.trim()));
+  const sourceGrants = [...new Set(assets.flatMap(({ raw, detected }) => raw.disposition === 'IN' && raw.kind === 'WEB' &&
+    detected?.executable && !denied.has(detected.normalizedValue) ? [detected.normalizedValue] : []))].sort(order);
   const unrepresentedRules = sortedUnique(rules.filter(rule => rule.text.trim()));
   const policy = storedExecutionPolicySchema.parse({
     reviewState: 'IMPORT_DRAFT', automationAllowed: false, requiredUserAgent: null, requiredHeaders: [],
@@ -99,7 +110,7 @@ export function normalizeProgram(reference: ProgramReference, name: string, rawA
   return {
     ...reference, name, scopeIn: sortedUnique(scopeIn), scopeOut: sortedUnique(scopeOut),
     nonAutomatable: sortedUnique(nonAutomatable), unrepresentedAssets: sortedUnique(unrepresentedAssets),
-    unrepresentedRules, nonQualifying: [...nonQualifying].sort(order), policy,
+    sourceRules, sourceGrants, unrepresentedRules, nonQualifying: [...nonQualifying].sort(order), policy,
   };
 }
 
