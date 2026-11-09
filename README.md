@@ -10,11 +10,12 @@ Research records explicit tested work through [Research Coverage](docs/research-
 
 Current assessments are **black-box only**. [Historical assessment metadata](docs/assessment-modes.md) remains readable. Authenticated runtime testing remains supported.
 
-Create a Target by pasting a supported public program URL or the program Markdown.
-Extraction sends the source to the default AI provider selected in Settings. Review
-the draft scope and execution policy before saving. Paste the Markdown if the
-program is private or its scope is absent from the public HTML. Manual entry is
-available without an AI provider.
+Create a Target by pasting a supported public program URL or the program text.
+YesWeHack URLs and pasted YesWeHack text are parsed directly. Other supported
+programs use the default AI provider selected in Settings. Review the rewards,
+scope, vulnerability lists, and User-Agent before saving. Compound scopes that
+cannot be enforced are retained for reference. When YesWeHack asks to append a
+User-Agent suffix, it is added to `DEFAULT_USER_AGENT` at execution.
 
 The program User-Agent takes precedence over `DEFAULT_USER_AGENT`. Configure
 `HUNTER_USERNAME` to resolve identification templates at execution. Existing

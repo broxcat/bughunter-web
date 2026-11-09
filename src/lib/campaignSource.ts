@@ -14,6 +14,7 @@ export const campaignSourceSchema = z.strictObject({
   url: z.url().max(2048),
   platform: z.enum(IMPORT_PLATFORMS),
   grants: z.array(z.string().max(2048)).max(2000),
+  sourceDocument: z.string().max(64_000).optional(),
   assets: pendingScopeSchema,
   exclusions: z.array(structuredExclusionSchema).max(1000),
   forbiddenCategories: z.array(z.enum(TEST_CATEGORIES)).max(TEST_CATEGORIES.length),

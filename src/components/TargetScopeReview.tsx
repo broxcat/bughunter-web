@@ -1,8 +1,8 @@
 'use client';
 
 import { Button } from '@/components/ui/Button';
-import { ASSET_TYPES, assetTypeLabel, type AssetType } from '@/lib/scopeAssets';
-import { LEGACY_LIMITS, POLICY_REVIEW_ANCHOR } from '@/lib/programExecutionPolicy';
+import { ASSET_TYPES, ASSET_VALUES, assetTypeLabel, assetValueLabel, detectScopeAsset, type AssetType, type AssetValue } from '@/lib/scopeAssets';
+import { LEGACY_LIMITS, POLICY_REVIEW_ANCHOR, structuredExclusionSchema } from '@/lib/programExecutionPolicy';
 import { scopeReviewChecks, type DocumentedAsset, type ReviewRule, type ScopeEntry, type TargetReview } from '@/lib/targetReview';
 import type { ProgramData } from '@/lib/targetFormData';
 
@@ -26,15 +26,20 @@ export function initialReview(program?: ProgramData): ReviewFields {
     (policy?.sourceSnapshot.unrepresentedRules ?? []).map(text => ({ text, decision: null }));
   const added = (!policy || legacy?.scopeChanged ? legacy?.unrepresentedRules ?? [] : [])
     .filter(text => !existing.some(rule => rule.text === text)).map(text => ({ text, decision: null }));
+  const documentedExclusions = policy?.sourceSnapshot.programSections?.outOfScope ?? [];
+  const documentedValues = new Set(documentedExclusions.filter(isStructuredExclusion).map(value => detectScopeAsset(value).normalizedValue));
+  const exclusions = [...documentedExclusions, ...(policy?.exclusions ?? []).filter(value => !documentedValues.has(detectScopeAsset(value).normalizedValue)),
+    ...(legacy?.exclusions ?? [])];
   return {
     scopeIn: program?.scopeIn ?? [],
-    exclusions: [...new Set([...(policy?.exclusions ?? []), ...(legacy?.exclusions ?? [])])].join('\n'),
+    exclusions: [...new Set(exclusions)].join('\n'),
     documentedAssets: policy?.sourceSnapshot.documentedAssets ?? [],
     rules: [...existing, ...added],
     userAgent: (policy ? policy.requiredUserAgent : program?.requiredUserAgent) ?? '',
     policy: {
       automationAllowed: policy?.automationAllowed ?? true,
       requiredHeaders: policy?.requiredHeaders ?? [],
+      ...(policy?.userAgentMode ? { userAgentMode: policy.userAgentMode } : {}),
       requestsPerSecond: policy?.requestsPerSecond ?? LEGACY_LIMITS.requestsPerSecond,
       maxConcurrency: policy?.maxConcurrency ?? LEGACY_LIMITS.maxConcurrency,
       forbiddenCategories: policy?.forbiddenCategories ?? [],
@@ -42,13 +47,16 @@ export function initialReview(program?: ProgramData): ReviewFields {
   };
 }
 
-export function policyFields(value: ReviewFields): TargetReview['policy'] {
-  return { ...value.policy, exclusions: lines(value.exclusions), requiredUserAgent: value.userAgent.trim() || null };
+export const isStructuredExclusion = (value: string) => structuredExclusionSchema.safeParse(value).success && detectScopeAsset(value).format !== 'HOSTNAME';
+
+export function policyFields(value: ReviewFields, allowProse = false): TargetReview['policy'] {
+  const exclusions = lines(value.exclusions);
+  return { ...value.policy, exclusions: allowProse ? exclusions.filter(isStructuredExclusion) : exclusions, requiredUserAgent: value.userAgent.trim() || null };
 }
 
-export function TargetScopeReview({ value, onChange }: { value: ReviewFields; onChange: (value: ReviewFields) => void }) {
+export function TargetScopeReview({ value, onChange, allowProse }: { value: ReviewFields; onChange: (value: ReviewFields) => void; allowProse: boolean }) {
   const update = <K extends keyof ReviewFields>(key: K, next: ReviewFields[K]) => onChange({ ...value, [key]: next });
-  const { scopeError, conflict } = scopeReviewChecks(value.scopeIn, lines(value.exclusions));
+  const { scopeError, conflict } = scopeReviewChecks(value.scopeIn, policyFields(value, allowProse).exclusions);
   const policy = value.policy;
   const summary = [
     policy.requestsPerSecond + ' req/s', policy.maxConcurrency + ' concurrent',
@@ -67,21 +75,30 @@ export function TargetScopeReview({ value, onChange }: { value: ReviewFields; on
           onChange={event => update('scopeIn', value.scopeIn.map((row, i) => i === index ? { ...row, type: event.target.value as AssetType } : row))}>
           {ASSET_TYPES.filter(type => type !== 'OTHER' || asset.type === 'OTHER').map(type => <option key={type} value={type}>{assetTypeLabel[type]}</option>)}
         </select></label>
+        <label className="text-sm">Asset value<select className={fieldClass} aria-label={'Asset ' + (index + 1) + ' value'}
+          value={asset.assetValue ?? 'MEDIUM'} onChange={event => update('scopeIn',
+            value.scopeIn.map((row, i) => i === index ? { ...row, assetValue: event.target.value as AssetValue } : row))}>
+          {ASSET_VALUES.map(level => <option key={level} value={level}>{assetValueLabel[level]}</option>)}
+        </select></label>
         <Button variant="ghost" aria-label={'Remove asset ' + (index + 1)} onClick={() => update('scopeIn', value.scopeIn.filter((_, i) => i !== index))}>Remove</Button>
       </div>)}
       <Button variant="secondary" onClick={() => update('scopeIn', [...value.scopeIn, { value: '', type: 'WEB_APPLICATION' }])}>Add asset</Button>
       {scopeError && <p className="text-sm text-danger">{scopeError}</p>}
+      {allowProse && value.documentedAssets.length > 0 && <details open={value.scopeIn.length === 0} className="text-sm">
+        <summary>{value.documentedAssets.length} scope {value.documentedAssets.length === 1 ? 'entry' : 'entries'} kept for reference</summary>
+        <ul className="mt-2 space-y-1 text-muted">
+          {value.documentedAssets.map((asset, index) => <li key={asset.ref + index} className="break-words">
+            {asset.originalValue ?? asset.sourceType} · {asset.sourceType}
+          </li>)}
+        </ul>
+      </details>}
     </fieldset>
     <label id="out-of-scope" className="block font-semibold">Out of scope
       <textarea className={fieldClass + ' font-normal'} rows={3} placeholder="https://example.com/admin/*" value={value.exclusions}
         onChange={event => update('exclusions', event.target.value)} />
-      <span className="text-sm font-normal text-muted">One URL, domain, wildcard, IP or CIDR per line. Exclusions take precedence.</span>
+      <span className="text-sm font-normal text-muted">{allowProse ? 'Exact assets are enforced automatically. Other exclusions stay in the program record for review.' : 'One URL, domain, wildcard, IP or CIDR per line. Exclusions take precedence.'}</span>
     </label>
     {conflict && <p className="text-sm text-danger">{conflict}</p>}
-    <label className="block">Required User-Agent<input className={fieldClass} value={value.userAgent} maxLength={512}
-      onChange={event => update('userAgent', event.target.value)} />
-      <span className="text-sm text-muted">Leave blank to use DEFAULT_USER_AGENT.</span>
-    </label>
     <p className="text-sm text-muted" aria-label="Execution policy summary">{summary.join(' · ')}</p>
     {value.rules.map((rule, index) => !rule.decision && <span key={index} id={'policy-rule-' + (index + 1)} className="scroll-mt-24" />)}
   </section>;

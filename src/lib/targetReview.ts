@@ -1,14 +1,14 @@
 import { z } from 'zod';
 import { executionPolicySchema, structuredExclusionSchema } from './programExecutionPolicy';
-import { ASSET_TYPES, assetInputSchema, assetAllowsUrl, detectScopeAsset } from './scopeAssets';
+import { ASSET_TYPES, ASSET_VALUES, assetInputSchema, assetAllowsUrl, detectScopeAsset } from './scopeAssets';
 import { matchesHost, normalizeFqdn } from './bountyProgram';
 
 import { campaignSourceSchema, campaignIntervalSchema } from './campaignSource';
-import { reviewRule, documentedAsset } from './targetReviewData';
+import { reviewRule, documentedAsset, programSectionsSchema } from './targetReviewData';
 import { nonQualifyingTextSchema } from './programIntake';
 export { RULE_DECISIONS } from './targetReviewData';
 
-const scopeEntry = assetInputSchema.pick({ value: true }).extend({ type: z.enum(ASSET_TYPES) });
+const scopeEntry = assetInputSchema.pick({ value: true }).extend({ type: z.enum(ASSET_TYPES), assetValue: z.enum(ASSET_VALUES).optional() });
 const testAccount = z.strictObject({
   asset: z.string().min(1).max(2048),
   loginUrl: z.url().max(2048),
@@ -74,6 +74,7 @@ export const targetReviewSchema = z.strictObject({
   documentedAssets: z.array(documentedAsset).max(3000),
   rules: z.array(reviewRule).max(5000),
   sourceDocument: z.string().max(2 * 1024 * 1024).optional(),
+  programSections: programSectionsSchema.optional(),
   intakeVersion: z.literal(1).optional(),
   nonQualifyingText: nonQualifyingTextSchema.optional(),
   policy: executionPolicySchema.omit({ sourceSnapshot: true }),

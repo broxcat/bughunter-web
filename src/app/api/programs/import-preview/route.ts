@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     if (error instanceof AiConfigurationError || message === NO_AI) {
       return Response.json({ error: NO_AI, settings: true }, { status: 409, headers });
     }
-    const safe = message === INVALID_EXTRACTION || message.startsWith('This public program page') ||
+    const safe = message === INVALID_EXTRACTION || message.startsWith('The YesWeHack') || message.startsWith('This public program page') ||
       message.startsWith('This URL does not match') || message.startsWith('Public program downloads') ||
       message.startsWith('The selected AI provider');
     return Response.json({ error: safe ? message : 'Program extraction failed. Fill in the form manually or try again.' }, { status: 422, headers });

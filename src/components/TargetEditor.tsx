@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { BOUNTY_PLATFORMS, VULNERABILITY_FAMILIES } from '@/lib/bountyProgram';
+import { BOUNTY_PLATFORMS } from '@/lib/bountyProgram';
 import { platformLabel } from '@/lib/platformPresentation';
 import { executionPolicySchema, hasHunterTemplate, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME } from '@/lib/programExecutionPolicy';
 import { intakePreviewSchema, MAX_PROGRAM_SOURCE, splitNonQualifying, type IntakeInput } from '@/lib/programIntake';
@@ -12,7 +12,7 @@ import { scopeReviewChecks, targetReviewSchema } from '@/lib/targetReview';
 import type { ProgramData } from '@/lib/targetFormData';
 import { campaignSourceSchema, type CampaignSource } from '@/lib/campaignSource';
 import { Button } from '@/components/ui/Button';
-import { fieldClass, initialReview, lines, policyFields, readable, TargetScopeReview } from './TargetScopeReview';
+import { fieldClass, initialReview, isStructuredExclusion, lines, policyFields, readable, TargetScopeReview } from './TargetScopeReview';
 
 type Platform = (typeof BOUNTY_PLATFORMS)[number];
 const levels = ['Low', 'Medium', 'High', 'Critical'] as const;
@@ -37,7 +37,14 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
   const [nonQualifying, setNonQualifying] = useState([
     ...(program?.nonQualifying ?? []), ...(stored?.sourceSnapshot.nonQualifyingText ?? []),
   ].join('\n'));
-  const [qualifying, setQualifying] = useState<string[]>(program?.qualifying ?? []);
+  const sections = stored?.sourceSnapshot.programSections;
+  const [description, setDescription] = useState(sections?.description ?? program?.rulesOfEngagement ?? '');
+  const [reviewedDescription, setReviewedDescription] = useState(description);
+  const [qualifying, setQualifying] = useState((sections?.qualifying ?? program?.qualifying ?? []).join('\n'));
+  const [rewards, setRewards] = useState({
+    currency: program?.rewardCurrency ?? 'EUR', Low: program?.rewardLow ?? '', Medium: program?.rewardMedium ?? '',
+    High: program?.rewardHigh ?? '', Critical: program?.rewardCritical ?? '',
+  });
   const [importing, setImporting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -61,15 +68,25 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
       const extractedUrl = preview.url ?? url;
       const extractedPlatform = preview.platform ?? platform;
       setUrl(extractedUrl);
-      setName(preview.name);
+      if (preview.name) setName(preview.name);
       setPlatform(extractedPlatform);
       setSourceDocument(preview.sourceDocument);
       if (input.mode === 'url') setMarkdown('');
       setImportSource(campaignSourceSchema.safeParse(result.source).data);
       setImportedFrom({ url: extractedUrl.trim(), platform: extractedPlatform });
       setNonQualifying(preview.nonQualifying.join('\n'));
+      if (preview.programSections) {
+        setDescription(preview.programSections.description);
+        setReviewedDescription(preview.programSections.description);
+        setQualifying(preview.programSections.qualifying.join('\n'));
+      }
+      if (preview.rewards) {
+        const { currency, low, medium, high, critical } = preview.rewards;
+        const amount = (value: number | null) => value == null ? '' : String(value);
+        setRewards({ currency, Low: amount(low), Medium: amount(medium), High: amount(high), Critical: amount(critical) });
+      }
       setReview(previous => ({
-        scopeIn: preview.scopeIn, exclusions: preview.policy.exclusions.join('\n'), userAgent: preview.policy.requiredUserAgent ?? '',
+        scopeIn: preview.scopeIn, exclusions: (preview.programSections?.outOfScope ?? preview.policy.exclusions).join('\n'), userAgent: preview.policy.requiredUserAgent ?? '',
         policy: preview.policy, documentedAssets: [...new Map([...previous.documentedAssets, ...preview.documentedAssets].map(asset => [asset.ref, asset])).values()],
         rules: [
           ...previous.rules.filter(rule => !rule.origin),
@@ -81,7 +98,8 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
     finally { setImporting(false); }
   }
 
-  const policy = policyFields(review);
+  const allowProse = platform === 'YESWEHACK';
+  const policy = policyFields(review, allowProse);
   const { scopeError, conflict } = scopeReviewChecks(review.scopeIn, policy.exclusions);
   const policyResult = policyShape.safeParse(policy);
   const legacy = program?.legacyPolicyReview;
@@ -91,15 +109,20 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
   const association = importedFrom ?? (stored?.sourceSnapshot.sourceDocument ? { url: program?.programUrl ?? '', platform: program?.platform ?? '' } : null);
   const changedSource = Boolean(association && (association.url !== url.trim() || association.platform !== platform));
   const unreviewedMarkdown = Boolean(markdown.trim() && markdown !== sourceDocument);
-  const unresolved = review.rules.filter(rule => !rule.decision).length;
+  const descriptionEdited = description !== reviewedDescription;
+  const proseExclusions = allowProse ? lines(review.exclusions).filter(value => !isStructuredExclusion(value)) : [];
+  const rules = [...review.rules];
+  for (const text of proseExclusions) if (!rules.some(rule => rule.text === text)) rules.push({ text, decision: null, origin: 'AI_INTAKE' });
+  const unresolved = rules.filter(rule => !rule.decision).length;
   const needsUsername = [policy.requiredUserAgent ?? '', ...policy.requiredHeaders.map(header => header.value)].some(hasHunterTemplate) && !hunterHasUsername;
   const policyIssue = !policyResult.success ? (policyResult.error.issues[0]?.message ?? 'Invalid execution policy.')
     : changedSource ? 'Extract the program rules again after changing its URL or platform.'
     : unreviewedMarkdown ? 'Extract the pasted Markdown before running automation.'
+    : descriptionEdited ? 'The description has changed. Extract the current rules again before running automation.'
     : unresolved ? unresolved + (unresolved === 1 ? ' program rule could' : ' program rules could') + ' not be represented safely. Review the source before running automation.'
     : !policy.automationAllowed ? 'The program policy does not allow automation.'
     : needsUsername ? MISSING_HUNTER_USERNAME
-    : !policy.requiredUserAgent && !hunterHasUserAgent ? MISSING_HUNTER_UA
+    : (!policy.requiredUserAgent || policy.userAgentMode === 'APPEND') && !hunterHasUserAgent ? MISSING_HUNTER_UA
     : legacyMismatch ? 'The current exclusions do not cover all retained legacy exclusions.' : '';
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -110,15 +133,15 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
     const excluded = splitNonQualifying(lines(nonQualifying));
     const checked = targetReviewSchema.safeParse({
       scopeIn: review.scopeIn, documentedAssets: review.documentedAssets,
-      rules: [...review.rules, ...(changedSource && !review.rules.some(rule => rule.origin === 'SOURCE_CHANGED')
+      rules: [...rules, ...(descriptionEdited ? [{ text: 'Program description changed. Review the rules before automation.', decision: null, origin: 'AI_INTAKE' }] : []), ...(changedSource && !review.rules.some(rule => rule.origin === 'SOURCE_CHANGED')
         ? [{ text: 'Program URL or platform changed. Extract the current rules before automation.', decision: null, origin: 'SOURCE_CHANGED' }] : []),
       ...(unreviewedMarkdown ? [{ text: 'Pasted Markdown has not been extracted. Review the program rules before automation.', decision: null, origin: 'AI_INTAKE' }] : [])],
       policy, expectedAssets: program?.expectedAssets,
       sourceDocument: unreviewedMarkdown ? markdown : sourceDocument,
       intakeVersion: !program || sourceDocument !== undefined || unreviewedMarkdown ? 1 : undefined,
       nonQualifyingText: excluded.text,
+      programSections: { description, outOfScope: lines(review.exclusions), qualifying: lines(qualifying) },
       importSource: !changedSource && !unreviewedMarkdown ? importSource : undefined,
-      campaignInterval: field('campaignHours') ? Number(field('campaignHours')) * 60 : null,
     });
     if (!checked.success) {
       setError(checked.error.issues.map(issue => issue.path.join('.') + ' — ' + issue.message).join(' '));
@@ -129,7 +152,7 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
       companyName: name.trim(), platform: platform || null, programUrl: url.trim() || null,
       rewardCurrency: field('rewardCurrency'),
       ...Object.fromEntries(levels.map(level => ['reward' + level, field('reward' + level) || null])),
-      qualifying, nonQualifying: excluded.families, targetReview: checked.data,
+      qualifying: splitNonQualifying(lines(qualifying)).families, nonQualifying: excluded.families, targetReview: checked.data,
       ...(!program ? { startCampaign: true } : {
         expectedUpdatedAt: program.updatedAt,
         expectedPolicyVersion: program.executionPolicies?.[0]?.version ?? 0,
@@ -156,15 +179,15 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
       <section aria-label="Program source" className="space-y-3 rounded border border-border p-4">
         <div className="flex flex-wrap items-end gap-2">
           <label className="min-w-52 flex-1">Program URL<input type="url" className={fieldClass} value={url}
-            onChange={event => setUrl(event.target.value)} placeholder="https://hackerone.com/program-name" /></label>
-          <Button variant="secondary" disabled={!hasAi || !url.trim()} onClick={() => loadPreview({ mode: 'url', url: url.trim() })}>Extract from URL</Button>
+            onChange={event => setUrl(event.target.value)} placeholder="https://yeswehack.com/programs/program-name" /></label>
+          <Button variant="secondary" disabled={!url.trim()} onClick={() => loadPreview({ mode: 'url', url: url.trim() })}>Extract from URL</Button>
         </div>
-        <label className="block">Program Markdown<textarea className={fieldClass} rows={5}
+        <label className="block">Program Markdown or raw text<textarea className={fieldClass} rows={5}
           value={markdown} onChange={event => setMarkdown(event.target.value)} placeholder="Paste the program scope and rules here" /></label>
-        <Button variant="secondary" disabled={!hasAi || !markdown.trim() || markdown.length > MAX_PROGRAM_SOURCE} onClick={() => loadPreview({ mode: 'markdown', markdown })}>Extract from Markdown</Button>
+        <Button variant="secondary" disabled={!markdown.trim() || markdown.length > MAX_PROGRAM_SOURCE} onClick={() => loadPreview({ mode: 'markdown', markdown, platform: platform || undefined })}>Extract from Markdown</Button>
         {markdown.length > MAX_PROGRAM_SOURCE && <p role="alert" className="text-sm text-danger">Program Markdown exceeds the 64,000-character extraction limit.</p>}
-        {showSettings && <p className="text-sm text-muted">Select an AI provider and model in <Link href="/settings" className="text-brand underline">Settings</Link> to extract the program, or fill in the form manually.</p>}
-        {hasAi && <p className="text-sm text-muted">Extraction sends the program text to the AI provider selected in Settings.</p>}
+        {showSettings && <p className="text-sm text-muted">YesWeHack can be parsed directly. For other programs, choose an AI provider and model in <Link href="/settings" className="text-brand underline">Settings</Link> or enter the fields manually.</p>}
+        {hasAi && <p className="text-sm text-muted">YesWeHack is parsed directly. Other programs can use the AI provider selected in Settings.</p>}
         {importing && <p role="status" className="text-sm">Extracting program details…</p>}
         {message && <p role="status" className="break-words text-sm">{message}</p>}
       </section>
@@ -187,29 +210,30 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
           </div>;
         })}
       </section>}
-      <TargetScopeReview value={review} onChange={setReview} />
+      <fieldset className="grid gap-3 rounded border border-border p-4 sm:grid-cols-5">
+        <legend className="px-1 font-semibold">Reward</legend>
+        {levels.map(level => <label key={level}>Reward {readable(level)}<input name={'reward' + level}
+          inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" className={fieldClass} value={rewards[level]}
+          onChange={event => setRewards({ ...rewards, [level]: event.target.value })} /></label>)}
+        <label>Currency<input name="rewardCurrency" className={fieldClass} required maxLength={3} pattern="[A-Z]{3}"
+          value={rewards.currency} onChange={event => setRewards({ ...rewards, currency: event.target.value.toUpperCase() })} /></label>
+        {allowProse && <p className="text-sm text-muted sm:col-span-5">For tiered programs, each amount is the highest published reward for that severity.</p>}
+      </fieldset>
+      <label className="block">Program description<textarea className={fieldClass} rows={6} value={description}
+        onChange={event => setDescription(event.target.value)} /></label>
+      <TargetScopeReview value={review} onChange={setReview} allowProse={allowProse} />
+      <label className="block">Qualifying vulnerabilities<textarea className={fieldClass} rows={4} value={qualifying}
+        onChange={event => setQualifying(event.target.value)} /></label>
       <label className="block">Non-qualifying vulnerabilities<textarea className={fieldClass} rows={4} value={nonQualifying}
         onChange={event => setNonQualifying(event.target.value)} />
         <span className="text-sm text-muted">One web vulnerability per line.</span>
       </label>
-      <section id="campaign-schedule" className="space-y-2 rounded border border-border p-4">
-        <h2 className="font-semibold">Campaign schedule</h2>
-        <label className="block">Hours between follow-up cycles<input name="campaignHours" className={fieldClass} type="number" min="1" max="720" step="1"
-          defaultValue={program?.campaign?.intervalMinutes ? program.campaign.intervalMinutes / 60 : ''} /></label>
-        <p className="text-sm text-muted">Leave blank to disable scheduled cycles. A follow-up only tests new or modified assets.</p>
-      </section>
-      <details className="ui-disclosure"><summary>Advanced</summary>
-        <div className="mt-3 grid gap-3 sm:grid-cols-5">
-          {levels.map(level => <label key={level}>Reward {readable(level)}<input name={'reward' + level} inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" className={fieldClass} defaultValue={program?.['reward' + level as `reward${typeof level}`] ?? ''} /></label>)}
-          <label>Currency<input name="rewardCurrency" className={fieldClass} required maxLength={3} pattern="[A-Z]{3}" defaultValue={program?.rewardCurrency ?? 'EUR'} /></label>
-        </div>
-        <fieldset className="mt-3"><legend className="font-medium">Qualifying vulnerabilities</legend>
-          <div className="grid grid-cols-2 gap-1">{VULNERABILITY_FAMILIES.map(family => <label key={family} className="text-sm">
-            <input type="checkbox" checked={qualifying.includes(family)} onChange={event =>
-              setQualifying(event.target.checked ? [...qualifying, family] : qualifying.filter(item => item !== family))} /> {readable(family)}
-          </label>)}</div>
-        </fieldset>
-      </details>
+      <label className="block">{policy.userAgentMode === 'APPEND' ? 'User-Agent suffix' : 'Required User-Agent'}
+        <input className={fieldClass} value={review.userAgent} maxLength={512}
+          onChange={event => setReview(current => ({ ...current, userAgent: event.target.value }))} />
+        <span className="text-sm text-muted">{policy.userAgentMode === 'APPEND'
+          ? 'The suffix is appended to DEFAULT_USER_AGENT at execution.' : 'Leave blank to use DEFAULT_USER_AGENT.'}</span>
+      </label>
       <section aria-label="Review checks" className="space-y-2 rounded border border-border p-4">
         <h2 className="font-semibold">Review checks</h2>
         <Check label="Valid scope" issue={scopeError || (!review.scopeIn.length ? 'Add an authorized asset to make this target ready.' : '')} />

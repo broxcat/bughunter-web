@@ -116,22 +116,25 @@ describe('Target intake', () => {
     configured();
     const html = '<main><h1>Altair Security</h1><h2>In scope</h2><ul><li>app.altair.example.test</li><li>*.edge.altair.example.test</li>' +
       '<li>com.altair.mobile</li></ul><script>hidden-instruction.example.test</script><h2>Out of scope</h2><p>wallet.altair.example.test</p>' +
-      '<h2>Program rules</h2><p>Denial of service is forbidden.</p><p>Refrain from using automated tools.</p></main>';
+      '<h2>Program rules</h2><p>Denial of service is forbidden.</p><p>Refrain from using automated tools.</p>' +
+      '<h3>Qualifying vulnerabilities</h3><ul><li>SQL Injection</li></ul><h3>Non-qualifying vulnerabilities</h3><ul><li>XSS</li></ul></main>';
     const remote = vi.fn().mockResolvedValueOnce(new Response(html, { headers: { 'Content-Type': 'text/html' } }))
       .mockResolvedValueOnce(new Response('Login required', { status: 403 }));
     vi.stubGlobal('fetch', remote);
-    mocks.chat.mockResolvedValueOnce(JSON.stringify(models.yeswehack));
+    mocks.config.mockResolvedValue(null);
     const good = await POST(request({ mode: 'url', url: 'https://yeswehack.com/programs/altair-intake?next=http://127.0.0.1' }));
     expect(good.status).toBe(200);
-    expect((await good.json()).preview).toMatchObject({ url: 'https://yeswehack.com/programs/altair-intake', platform: 'YESWEHACK' });
+    const { preview } = await good.json();
+    expect(preview).toMatchObject({ url: 'https://yeswehack.com/programs/altair-intake', platform: 'YESWEHACK' });
+    expect(preview.sourceDocument).not.toContain('hidden-instruction');
     expect(remote).toHaveBeenCalledWith(new URL('https://yeswehack.com/programs/altair-intake'), expect.objectContaining({ credentials: 'omit', redirect: 'error' }));
-    expect(mocks.chat.mock.calls[0][1]).not.toContain('hidden-instruction');
     for (const url of ['https://yeswehack.com/programs/altair-invitation', 'https://yeswehack.com.attacker.test/programs/altair']) {
       const denied = await POST(request({ mode: 'url', url }));
       expect(denied.status).toBe(422);
       expect((await denied.json()).error).toContain('Paste the program Markdown');
     }
     expect(remote).toHaveBeenCalledTimes(2);
-    expect(mocks.chat).toHaveBeenCalledTimes(1);
+    expect(mocks.config).not.toHaveBeenCalled();
+    expect(mocks.chat).not.toHaveBeenCalled();
   });
 });

@@ -128,6 +128,7 @@ export async function PATCH(req: Request, { params }: Params) {
               ? targetReview.sourceDocument : previousSource?.sourceDocument ?? targetReview.sourceDocument,
             intakeVersion: targetReview.intakeVersion ?? previousSource?.intakeVersion,
             nonQualifyingText: targetReview.nonQualifyingText ?? previousSource?.nonQualifyingText,
+            programSections: targetReview.programSections ?? previousSource?.programSections,
           }, effective, scopes);
           await storeTestAccounts(tx, { ...program, ...effective }, targetReview, nextPolicy);
           reviewedPolicy = nextPolicy;

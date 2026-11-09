@@ -64,14 +64,13 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
   if (fetchSource) fresh = campaignSourceSchema.parse(await fetchSource(ownerId, { url: claim.url, platform: claim.platform }));
   else {
     const page = await publicProgramText(claim.url);
-    if (page.text === claim.baseline?.rules[0]?.text) return;
-    // A public page changed. If the selected model is unavailable, block
-    // rather than continuing under a potentially outdated rule snapshot.
+    if (page.text === (claim.baseline?.sourceDocument ?? claim.baseline?.rules[0]?.text)) return;
+    // A changed page whose rules cannot be read still requires review.
     try {
       const preview = await extractProgram(ownerId, { mode: 'url', url: claim.url });
       fresh = campaignSourceFromIntake(preview)!;
     } catch {
-      fresh = { ...claim.baseline!, rules: [{ text: page.text }] };
+      fresh = { ...claim.baseline!, sourceDocument: page.text, rules: [{ text: 'The public program changed and its rules could not be read safely.' }] };
     }
   }
   if (fresh.platform !== claim.platform || fresh.url !== claim.url) return;
@@ -121,7 +120,7 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
         forbiddenCategories: [...policy.forbiddenCategories, ...newCategories],
         sourceSnapshot: {
           ...policy.sourceSnapshot, ruleDecisions: decisions,
-          ...(rulesChanged ? { sourceDocument: fresh.rules.map(rule => rule.text).join('\n\n') } : {}),
+          ...(rulesChanged ? { sourceDocument: fresh.sourceDocument ?? fresh.rules.map(rule => rule.text).join('\n\n') } : {}),
           unrepresentedRules: rulesNeedReview ? [...new Set([...policy.sourceSnapshot.unrepresentedRules, marker, ...added.map(rule => rule.text)])]
             : policy.sourceSnapshot.unrepresentedRules,
         },

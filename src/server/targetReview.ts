@@ -24,6 +24,7 @@ export function reviewedPolicy(review: TargetReview, program: Pick<Program, 'pro
       ruleDecisions: review.rules,
       documentedAssets: review.documentedAssets,
       ...(review.sourceDocument !== undefined ? { sourceDocument: review.sourceDocument } : {}),
+      ...(review.programSections ? { programSections: review.programSections } : {}),
       ...(review.intakeVersion ? { intakeVersion: review.intakeVersion } : {}),
       ...(review.nonQualifyingText !== undefined ? { nonQualifyingText: review.nonQualifyingText } : {}),
       legacy: { scopes, outOfScope: program.outOfScope, programRules: program.rulesOfEngagement },
@@ -32,9 +33,9 @@ export function reviewedPolicy(review: TargetReview, program: Pick<Program, 'pro
 }
 
 export function reviewedAssetData(scopeIn: TargetReview['scopeIn']) {
-  return scopeIn.map(({ value, type }) => {
+  return scopeIn.map(({ value, type, assetValue }) => {
     const { format, normalizedValue } = detectScopeAsset(value);
-    return { originalValue: value, normalizedValue, format, type, typeSource: 'USER' };
+    return { originalValue: value, normalizedValue, format, type, typeSource: 'USER', ...(assetValue ? { assetValue } : {}) };
   });
 }
 
@@ -43,8 +44,8 @@ export function targetScopeVersion(assets: Asset[]) {
 }
 
 export function scopeEntriesForSettings(program: Pick<Program, 'scopeRules'>, assets: Asset[]) {
-  const scope = new Map(assets.filter(scopeAssetExecutable).sort(byValue).map(asset => [
-    asset.normalizedValue, { value: asset.normalizedValue, type: asset.type },
+  const scope = new Map<string, TargetReview['scopeIn'][number]>(assets.filter(scopeAssetExecutable).sort(byValue).map(asset => [
+    asset.normalizedValue, { value: asset.normalizedValue, type: asset.type, assetValue: asset.assetValue },
   ]));
   for (const value of program.scopeRules) {
     try {
@@ -77,8 +78,8 @@ export async function updateReviewedScope(tx: Prisma.TransactionClient, program:
     if (next.type === 'OTHER' && old?.type !== 'OTHER') throw new ResearchError('Use a web asset type or keep the asset for reference.', 400);
     if (!old) { additions.push({ ...next, programId: program.id }); continue; }
     if (!old.active && old.format !== next.format) throw new ResearchError('Scope value belongs to a retained identity with a different format.', 409);
-    if (!old.active || old.type !== next.type) {
-      await tx.scopeAsset.update({ where: { id: old.id }, data: { active: true, type: next.type, typeSource: 'USER',
+    if (!old.active || old.type !== next.type || next.assetValue && old.assetValue !== next.assetValue) {
+      await tx.scopeAsset.update({ where: { id: old.id }, data: { active: true, type: next.type, typeSource: 'USER', ...(next.assetValue ? { assetValue: next.assetValue } : {}),
         updatedAt: new Date(Math.max(Date.now(), old.updatedAt.getTime() + 1)) } });
     }
   }

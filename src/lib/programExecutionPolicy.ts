@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { requiredUserAgentSchema } from './httpPolicy.mjs';
 import { assetInputSchema, detectScopeAsset } from './scopeAssets';
-import { documentedAsset, reviewRule } from './targetReviewData';
+import { documentedAsset, programSectionsSchema, reviewRule } from './targetReviewData';
 
 export const TEST_CATEGORIES = [
   'PASSIVE_RECON', 'DNS_LOOKUP', 'PORT_SCAN', 'ACTIVE_SCANNING', 'CRAWLING',
@@ -49,6 +49,7 @@ const sourceSnapshotSchema = z.strictObject({
 export const executionPolicySchema = z.strictObject({
   automationAllowed: z.boolean(),
   requiredUserAgent: hunterIdentitySchema.shape.userAgent,
+  userAgentMode: z.literal('APPEND').optional(),
   requiredHeaders: identificationHeadersSchema,
   exclusions: z.array(structuredExclusionSchema).max(1000),
   requestsPerSecond: z.number().min(0.01).max(100),
@@ -74,6 +75,7 @@ export const storedExecutionPolicySchema = executionPolicySchema.extend({
     unrepresentedRules: z.array(z.string()),
     documentedAssets: z.array(documentedAsset).optional(),
     sourceDocument: z.string().optional(),
+    programSections: programSectionsSchema.optional(),
     intakeVersion: z.literal(1).optional(),
     nonQualifyingText: z.array(z.string()).optional(),
     ruleDecisions: z.array(reviewRule).optional(),
@@ -90,7 +92,7 @@ export const POLICY_REVIEW_ANCHOR = 'execution-policy';
 export const MISSING_HUNTER_UA = 'Recon requires a User-Agent. Set the program User-Agent in Target settings or configure DEFAULT_USER_AGENT.';
 export const MISSING_HUNTER_USERNAME = 'Program identification requires a hunter username. Configure HUNTER_USERNAME before automation can run.';
 
-const usernameTemplate = /(?:\$?\{\{?\s*(?:your[\s_-]*)?(?:hackerone[\s_-]*|hunter[\s_-]*)?user[\s_-]*name\s*\}\}?|\[\s*(?:your[\s_-]*)?(?:hackerone[\s_-]*|hunter[\s_-]*)?user[\s_-]*name(?:\s+here)?\s*\]|<\s*(?:your[\s_-]*)?(?:hackerone[\s_-]*|hunter[\s_-]*)?user[\s_-]*name\s*>|%(?:HUNTER_)?USERNAME%)/i;
+const usernameTemplate = /(?:\$?\{\{?\s*(?:your[\s_-]*)?(?:hackerone[\s_-]*|hunter[\s_-]*)?user[\s_-]*name\s*\}\}?|\[\s*(?:your[\s_-]*)?(?:hackerone[\s_-]*|hunter[\s_-]*)?user[\s_-]*name(?:\s+here)?\s*\]|<\s*(?:your[\s_-]*)?(?:hackerone[\s_-]*|hunter[\s_-]*)?user[\s_-]*name\s*>|%(?:HUNTER_)?USERNAME%|<\s*(?:your\s+)?yes\s*we\s*hack\s+(?:pseudo|username)\s*>|#\s*yes\s*we\s*hack\s*user\s*name\s*#)/i;
 export const hasHunterTemplate = (value: string) => usernameTemplate.test(value);
 export const hasHunterUsername = (value?: string) => Boolean(value && /^[!-~]{1,128}$/.test(value) && !hasHunterTemplate(value));
 export const replaceHunterTemplate = (value: string, username: string) =>

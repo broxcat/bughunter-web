@@ -2,6 +2,7 @@ import { parseDocument } from 'htmlparser2';
 import { MAX_PROGRAM_SOURCE } from '@/lib/programIntake';
 import { rateLimit } from '@/lib/rateLimit';
 import { detectProgram } from './preview';
+import { yesWeHackPageData, type YesWeHackFields } from './yesWeHack';
 
 export const PUBLIC_PAGE_UNAVAILABLE = 'This public program page is unavailable. Paste the program Markdown to continue.';
 const hosts = { HACKERONE: 'hackerone.com', BUGCROWD: 'bugcrowd.com', INTIGRITI: 'app.intigriti.com', YESWEHACK: 'yeswehack.com' };
@@ -10,7 +11,10 @@ const hidden = new Set(['script', 'style', 'nav', 'footer', 'aside', 'noscript',
 const block = new Set(['div', 'article', 'section', 'header', 'main', 'body', 'p', 'ul', 'ol', 'table', 'tbody', 'thead', 'blockquote']);
 
 export function htmlProgramText(html: string) {
-  const document = parseDocument(html);
+  return documentProgramText(parseDocument(html));
+}
+
+function documentProgramText(document: ReturnType<typeof parseDocument>) {
   const render = (node: ChildNode, inline = false): string => {
     if (node.type === 'text') return node.data.replace(/\s+/g, ' ');
     if (node.type !== 'tag' || hidden.has(node.name) || 'hidden' in node.attribs || node.attribs['aria-hidden'] === 'true') return '';
@@ -43,7 +47,7 @@ async function readBounded(response: Response) {
   }
 }
 
-const cache = new Map<string, { text: string; expiresAt: number }>();
+const cache = new Map<string, { text: string; yesWeHack?: YesWeHackFields | null; expiresAt: number }>();
 export async function publicProgramText(input: string, request = fetch, admit = rateLimit) {
   const detected = detectProgram(input);
   if (!detected) throw new Error('This URL does not match a supported program. Paste the program Markdown to continue.');
@@ -53,7 +57,7 @@ export async function publicProgramText(input: string, request = fetch, admit = 
     throw new Error(PUBLIC_PAGE_UNAVAILABLE);
   }
   const cached = cache.get(url.href);
-  if (cached && cached.expiresAt > Date.now()) return { reference, text: cached.text };
+  if (cached && cached.expiresAt > Date.now()) return { reference, text: cached.text, yesWeHack: cached.yesWeHack };
   if ((await admit('rl:public-program:' + reference.platform, 20, 60)).status !== 'ALLOWED') {
     throw new Error('Public program downloads are temporarily unavailable. Paste the program Markdown to continue.');
   }
@@ -64,11 +68,13 @@ export async function publicProgramText(input: string, request = fetch, admit = 
       await response.body?.cancel().catch(() => {});
       throw new Error(PUBLIC_PAGE_UNAVAILABLE);
     }
-    const text = htmlProgramText(await readBounded(response));
+    const document = parseDocument(await readBounded(response));
+    const text = documentProgramText(document);
+    const yesWeHack = reference.platform === 'YESWEHACK' ? yesWeHackPageData(document, reference.handle) : undefined;
     if (!text || text.length > MAX_PROGRAM_SOURCE) throw new Error(PUBLIC_PAGE_UNAVAILABLE);
     if (cache.size >= 64) cache.delete(cache.keys().next().value!);
-    cache.set(url.href, { text, expiresAt: Date.now() + 120_000 });
-    return { reference, text };
+    cache.set(url.href, { text, yesWeHack, expiresAt: Date.now() + 120_000 });
+    return { reference, text, yesWeHack };
   } catch {
     throw new Error(PUBLIC_PAGE_UNAVAILABLE);
   }
