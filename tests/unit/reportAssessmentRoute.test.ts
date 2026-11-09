@@ -12,7 +12,7 @@ describe('Report captured assessment provenance (mocked database, no lifecycle c
   it('uses the finding ScanRun snapshot and ignores a request-supplied current-mode override',async()=>{
     mocks.findings.mockResolvedValue([{...finding(),scanRun:{assessmentModeSnapshot:'BLACK_BOX'},researchPromotion:null}]);
     const response=await POST(request(['finding'],{assessmentMode:'WHITE_BOX'}));expect(response.status).toBe(201);
-    const saved=await response.json();expect(saved.markdown).toContain('Assessment mode: Black-box');expect(saved.markdown).not.toContain('Assessment mode: White-box');expect(saved.markdown).toContain('Recon ScanRun snapshot');
+    const saved=await response.json();expect(saved.markdown).toContain('Assessment mode: Black-box');expect(saved.markdown).not.toContain('Assessment mode: White-box');expect(saved.markdown).toContain('Recon scan run snapshot');
     expect(mocks.findings.mock.calls[0][0]).toMatchObject({where:{id:{in:['finding']},target:{userId:'owner'}},include:{scanRun:{select:{assessmentModeSnapshot:true}},researchPromotion:{select:{hypothesis:{select:{session:{select:{authorizationSnapshot:true}}}}}}}});
   });
   it('uses the real Research session declaration over the earlier Recon mode without exporting sources',async()=>{

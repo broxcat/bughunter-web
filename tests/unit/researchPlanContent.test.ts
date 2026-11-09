@@ -9,7 +9,7 @@ const render=(value=plan())=>renderToStaticMarkup(createElement(ResearchPlanCont
 
 describe('Research plan presentation',()=>{
   it('shows objectives, reasons, observed surfaces, evidence and existing rejected work',()=>{
-    const html=render();for(const value of ['Objective:','Why:','Method:','Observed surface','Evidence and provenance','ReconSurfaceObservation:observed','Previously tested boundary','Retained rejected hypothesis','Existing Findings','Visibility differences require manual validation'])expect(html).toContain(value);
+    const html=render();for(const value of ['Objective:','Why:','Method:','Observed surface','Evidence and provenance','ReconSurfaceObservation:observed','Previously tested boundary','Retained rejected hypothesis','Existing findings','Visibility differences require manual validation'])expect(html).toContain(value);
   });
   it('distinguishes source metadata and declared personas from analyzed or verified behavior',()=>{
     const html=render();expect(html).toContain('2 historical source references');expect(html).toContain('White-box mode is retired');expect(html).toContain('source content has not been analyzed');expect(html).toContain('operator-declared');expect(html).toContain('An objective is not a vulnerability or a completed test');
