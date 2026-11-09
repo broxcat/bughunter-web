@@ -29,7 +29,10 @@ export default async function ResearchPage({searchParams}:{searchParams:Promise<
       <div className="flex flex-wrap items-center gap-3"><h1 className="text-2xl font-semibold">Research</h1><CampaignState state={stage.state} /></div>
       {stage.detail && <p className="text-sm text-muted">{stage.detail}</p>}
       <p>Choose an authorized workspace to review the Recon results and continue Research.</p>
-      <Link className="text-brand underline" href={'/research?program=' + filter + '&view=details'} prefetch={false}>View details</Link>
+      <div className="flex flex-wrap gap-4">
+        {campaign.view.campaign?.handoffRunId && <a className="text-brand underline" href={'/api/programs/' + filter + '/campaign/handoff'}>Download prepared handoff</a>}
+        <Link className="text-brand underline" href={'/research?program=' + filter + '&view=details'} prefetch={false}>View details</Link>
+      </div>
     </div>;
   }
   const result=await prisma.$transaction(async tx=>{

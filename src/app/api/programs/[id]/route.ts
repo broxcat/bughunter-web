@@ -1,8 +1,11 @@
 import { isDeepStrictEqual } from 'node:util';
+import { Prisma } from '@prisma/client';
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { currentPolicySelection } from '@/server/programExecutionPolicy';
+import { currentPolicySelection, programPolicyInclude } from '@/server/programExecutionPolicy';
+import { campaignAfterReview, campaignDueAt, campaignPolicyBlocker, cancelCampaignScans } from '@/server/campaignOrchestrator';
+import { pendingScopeSchema } from '@/lib/campaignSource';
 import { z } from 'zod';
 import { convertLegacyExclusions, legacyExclusionParity, legacyFreeText, legacyScopeFingerprint, readLegacyScopes } from '@/server/legacyPolicySource';
 import { executionPolicySchema, policyDraftNeedsReview, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
@@ -23,12 +26,13 @@ export async function GET(_req: Request, { params }: Params) {
   const { id } = await params;
   const program = await prisma.bountyProgram.findFirst({ where: { id, ownerId: session.user.id }, include: { executionPolicies: currentPolicySelection, targets: { where: { active: true, contextOnly: false, userId: session.user.id }, orderBy: [{host:'asc'},{id:'asc'}] } } });
   if (!program) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  const [scopes, assets, identity] = await Promise.all([
+  const [scopes, assets, identity, campaign] = await Promise.all([
     readLegacyScopes(prisma, id, session.user.id),
     prisma.scopeAsset.findMany({ where: { programId: id, active: true }, include: {
       executionTarget: { select: { credentials: { where: { purpose: { in: ['ACCOUNT_A', 'ACCOUNT_B'] } }, select: { id: true, label: true, purpose: true } } } },
     } }),
     prisma.hunterIdentity.findUnique({ where: { userId: session.user.id }, select: { userAgent: true } }),
+    prisma.targetCampaign.findUnique({ where: { programId: id }, select: { intervalMinutes: true, pendingAssets: true } }),
   ]);
   const scopeFingerprint = legacyScopeFingerprint(scopes);
   const latest = storedExecutionPolicySchema.safeParse(program.executionPolicies[0]?.policy).data;
@@ -38,6 +42,7 @@ export async function GET(_req: Request, { params }: Params) {
     scopeIn: scopeEntriesForSettings(program, assets),
     expectedAssets: targetScopeVersion(assets),
     hunterHasUserAgent: Boolean(identity?.userAgent),
+    campaign: campaign ? { intervalMinutes: campaign.intervalMinutes, pendingAssets: pendingScopeSchema.safeParse(campaign.pendingAssets).data ?? [] } : null,
     historicalDocumentedAssets: assets.filter(asset => !scopeAssetExecutable(asset)).map(asset => ({
       ref: asset.id, originalValue: asset.originalValue, sourceType: asset.type, reason: 'Historical scope asset without an executor',
     })),
@@ -72,7 +77,7 @@ export async function PATCH(req: Request, { params }: Params) {
       if (!rows.length) return Response.json({ error: 'Target unavailable' }, { status: 409 });
       // The preflight read establishes existence only. Another policy writer can
       // commit before this lock is acquired; derive removals from the locked row.
-      const current = await tx.bountyProgram.findUniqueOrThrow({ where: { id }, select: { scopeRules: true, updatedAt: true, programUrl: true, rulesOfEngagement: true, outOfScope: true, executionPolicies: { ...currentPolicySelection, select: { version: true, policy: true } } } });
+      const current = await tx.bountyProgram.findUniqueOrThrow({ where: { id }, select: { scopeRules: true, updatedAt: true, programUrl: true, platform: true, rulesOfEngagement: true, outOfScope: true, executionPolicies: { ...currentPolicySelection, select: { version: true, policy: true } } } });
       if(parsed.data.expectedUpdatedAt&&current.updatedAt.toISOString()!==parsed.data.expectedUpdatedAt)return Response.json({error:'Target settings changed. Reload before saving.'},{status:409});
       const { executionPolicy, targetReview, expectedPolicyVersion, expectedLegacyScopeFingerprint, ...changes } = parsed.data;
       if (targetReview && (executionPolicy || changes.scopeRules || !changes.expectedUpdatedAt || expectedPolicyVersion === undefined)) {
@@ -120,7 +125,7 @@ export async function PATCH(req: Request, { params }: Params) {
           retired.push(...scope.retired);
           changes.scopeRules = scope.scopeRules;
           changes.requiredUserAgent = policy.requiredUserAgent ?? '';
-          const nextPolicy = buildReviewedPolicy(targetReview, effective, scopes);
+          const nextPolicy = buildReviewedPolicy({ ...targetReview, sourceDocument: previousPolicy?.sourceSnapshot.sourceDocument ?? targetReview.sourceDocument }, effective, scopes);
           await storeTestAccounts(tx, { ...program, ...effective }, targetReview, nextPolicy);
           reviewedPolicy = nextPolicy;
         } else reviewedPolicy = {
@@ -140,11 +145,35 @@ export async function PATCH(req: Request, { params }: Params) {
         if (await tx.scanRun.count({ where: { scopeAssetId: { in: assets.map(a => a.id) }, status: { in: ['QUEUED', 'RUNNING'] } } })) return Response.json({ error: 'Stop active Recon before removing its scope rules' }, { status: 409 });
         await tx.scopeAsset.updateMany({ where: { id: { in: assets.map(a => a.id) } }, data: { active: false } });
       }
-      return NextResponse.json(await tx.bountyProgram.update({ where: { id }, data: {
+      const saved = await tx.bountyProgram.update({ where: { id }, data: {
         ...changes,
         ...(reviewedPolicy && !isDeepStrictEqual(reviewedPolicy, current.executionPolicies[0]?.policy) ? { executionPolicies: { create: { version: (current.executionPolicies[0]?.version ?? 0) + 1, policy: reviewedPolicy } } } : {}),
         updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)),
-      } }));
+      } });
+      if (targetReview) {
+        const campaign = await tx.targetCampaign.findUnique({ where: { programId: id } });
+        const interval = targetReview.campaignInterval === undefined ? campaign?.intervalMinutes ?? null : targetReview.campaignInterval;
+        if (campaign || interval !== null) {
+          const policyProgram = await tx.bountyProgram.findUniqueOrThrow({ where: { id }, include: programPolicyInclude });
+          const blocker = campaignPolicyBlocker(policyProgram);
+          if (blocker) await cancelCampaignScans(tx, session.user.id!, id, false);
+          if (campaign) {
+            const reviewedAssets = new Set((await tx.scopeAsset.findMany({ where: { programId: id, active: true }, select: { normalizedValue: true } }))
+              .map(asset => asset.normalizedValue));
+            const sourceChanged = current.programUrl !== saved.programUrl || current.platform !== saved.platform;
+            const pending = pendingScopeSchema.safeParse(campaign.pendingAssets).data ?? [];
+            await tx.targetCampaign.update({ where: { programId: id }, data: {
+              ...campaignAfterReview(campaign, blocker, interval),
+              ...(sourceChanged ? { source: Prisma.DbNull, pendingAssets: [] }
+                : { pendingAssets: pending.filter(asset => !reviewedAssets.has(asset.value)) }),
+            } });
+          } else {
+            await tx.targetCampaign.create({ data: { programId: id, intervalMinutes: interval,
+              state: blocker ? 'BLOCKED' : 'MONITORING', reason: blocker, nextCycleAt: blocker ? null : campaignDueAt(interval, new Date()) } });
+          }
+        }
+      }
+      return NextResponse.json(saved);
     }, { timeout: 30000 });
     if (response.ok) {
       const cleanup = await Promise.allSettled(retired.map(assetId => settleScopeAssetRetirement(session.user.id!, assetId)));

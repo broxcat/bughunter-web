@@ -69,8 +69,8 @@ try {
     assert.equal(route.request().postDataJSON().url, fixtureUrl);
     return route.fulfill({ json: { status: 'PREVIEW', preview: {
       url: fixtureUrl, platform: 'HACKERONE', name: 'Example private program', scopeIn, scopeOut: [], nonAutomatable,
-      unrepresentedAssets: [], unrepresentedRules, nonQualifying: ['OPEN_REDIRECT'],
-      policy: { sourceSnapshot: { rules: unrepresentedRules[0].text }, exclusions: ['https://api.example.test/admin/*'] },
+      unrepresentedAssets: [], unrepresentedRules, sourceRules: unrepresentedRules, sourceGrants: ['https://api.example.test/'], nonQualifying: ['OPEN_REDIRECT'],
+      policy: { sourceSnapshot: { rules: unrepresentedRules[0].text }, exclusions: ['https://api.example.test/admin/*'], forbiddenCategories: [] },
     } } });
   });
   await page.getByLabel('Program URL').fill(fixtureUrl);
@@ -82,9 +82,9 @@ try {
   await page.getByLabel('Converted above').check();
   await page.getByLabel('Allow automation after review').check();
   await capture('target-import-preview.png');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save and start', exact: true }).click();
   await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
-  await page.getByRole('button', { name: 'Start recon', exact: true }).waitFor();
+  await page.getByRole('link', { name: 'View progress', exact: true }).waitFor();
   const imported = await p.bountyProgram.findFirstOrThrow({ where: { ownerId: user.id, companyName: 'Reviewed private fixture' },
     include: { scopeAssets: true, executionPolicies: true } });
   assert.deepEqual(imported.nonQualifying, ['OPEN_REDIRECT']);
@@ -92,7 +92,11 @@ try {
   assert.equal(imported.scopeAssets[0].type, 'API');
   assert.equal(imported.executionPolicies[0].policy.reviewState, 'OWNER_REVIEWED');
   assert.equal(imported.executionPolicies[0].policy.sourceSnapshot.documentedAssets[0].originalValue, 'com.example.mobile');
-  assert.equal(await p.targetReconRun.count({ where: { programId: imported.id } }), 0);
+  const started = await p.targetReconRun.findFirstOrThrow({ where: { programId: imported.id } });
+  assert.equal(await p.scanJobOutbox.count({ where: { scanRun: { targetReconRunId: started.id } } }), 1);
+  await page.getByRole('button', { name: 'Pause campaign', exact: true }).click();
+  await page.getByRole('button', { name: 'Resume campaign', exact: true }).waitFor();
+  await p.targetReconRun.update({ where: { id: started.id }, data: { status: 'CANCELLED', finishedAt: new Date() } });
   const anonymous = await browser.newContext();
   assert.equal((await anonymous.request.get(origin + '/api/programs/' + imported.id)).status(), 401);
   await anonymous.close();
@@ -103,16 +107,16 @@ try {
   await page.getByRole('button', { name: 'Add asset', exact: true }).click();
   await page.getByLabel('Asset 1', { exact: true }).fill('app.example.test');
   await page.getByLabel(/^Out of scope/).fill('APP.example.test');
-  assert(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled());
+  assert(await page.getByRole('button', { name: 'Save and start', exact: true }).isDisabled());
   await page.getByLabel(/^Out of scope/).fill('admin.example.test');
   await page.getByLabel('Add a rule').fill('Testing is permitted only in the published maintenance window.');
   await page.getByRole('button', { name: 'Add rule', exact: true }).click();
   await page.getByLabel('Required User-Agent').fill(userAgent);
   await page.getByLabel('Allow automation after review').check();
   await capture('target-manual-entry.png');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save and start', exact: true }).click();
   await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
-  await page.getByRole('status').filter({ hasText: 'Automation is blocked by unrepresented program or scope rules.' }).waitFor();
+  await page.getByRole('status').filter({ hasText: '1 rule needs a decision.' }).waitFor();
   await page.getByRole('link', { name: 'Fix policy', exact: true }).click();
   await page.getByRole('button', { name: 'Add asset', exact: true }).click();
   await page.getByLabel('Asset 2', { exact: true }).fill('*.example.test');

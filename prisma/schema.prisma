@@ -172,6 +172,7 @@ model TargetScopeContext {
 }
 
 model BountyProgram {
+  campaign TargetCampaign?
   executionPolicies ProgramExecutionPolicy[]
   currentScopeContext TargetScopeContext?
   researchPlans ResearchPlan[]
@@ -958,6 +959,7 @@ model ResearchReconDelivery {
 
 // Parent execution contains immutable child membership, not another scan engine.
 model TargetReconRun {
+  campaignKey String? @unique
   assessmentModeSnapshot AssessmentMode?
   assessmentSourcesSnapshot Json?
   reconSummaries ReconSummary[]
@@ -1447,4 +1449,39 @@ model PlatformConnection {
   user             User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, platform])
+}
+
+enum TargetCampaignStatus {
+  READY
+  RECON_RUNNING
+  RESEARCH_PENDING
+  MONITORING
+  PAUSED
+  BLOCKED
+  FAILED
+}
+
+model TargetCampaign {
+  programId       String               @id
+  program         BountyProgram        @relation(fields: [programId], references: [id], onDelete: Cascade)
+  state           TargetCampaignStatus @default(READY)
+  cycle           Int                  @default(0)
+  attempt         Int                  @default(0)
+  reconRunId      String?
+  handoffRunId    String?
+  requestedAt     DateTime?
+  nextCycleAt     DateTime?
+  retryAt         DateTime?
+  intervalMinutes Int?
+  lastSyncAt      DateTime?
+  source          Json?
+  pendingAssets   Json                 @default("[]")
+  reason          String?
+  continuing      Boolean              @default(false)
+  updatedAt       DateTime             @updatedAt
+
+  @@index([state, requestedAt])
+  @@index([nextCycleAt])
+  @@index([retryAt])
+  @@index([lastSyncAt])
 }

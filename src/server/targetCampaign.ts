@@ -1,7 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { campaignActivity, targetCampaign, type CampaignFacts } from '@/lib/targetCampaign';
-import { programPolicyBlocker, programPolicyInclude } from './programExecutionPolicy';
+import { programPolicyInclude } from './programExecutionPolicy';
+import { campaignPolicyBlocker } from './campaignOrchestrator';
+import { storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
+import { pendingScopeSchema } from '@/lib/campaignSource';
 
 type Database = Pick<Prisma.TransactionClient, '$queryRaw'>;
 
@@ -10,6 +13,7 @@ export const campaignProgramSelect = {
   id: true, ownerId: true, companyName: true, platform: true, deletingAt: true,
   requiredUserAgent: true, programUrl: true, outOfScope: true, rulesOfEngagement: true,
   _count: { select: { scopeAssets: { where: { active: true } } } },
+  campaign: { select: { state: true, reason: true, retryAt: true, nextCycleAt: true, pendingAssets: true, handoffRunId: true } },
 } satisfies Prisma.BountyProgramSelect;
 
 type CampaignProgram = Prisma.BountyProgramGetPayload<{ select: typeof campaignProgramSelect }>;
@@ -22,7 +26,9 @@ export async function campaignFacts(db: Database, ownerId: string, ids: string[]
   const scopeCurrent = liveOnly ? Prisma.sql`false` : Prisma.sql`
     r.id IS NOT NULL AND NOT EXISTS (
       SELECT 1 FROM "ScopeAsset" a WHERE a."programId" = p.id AND a.active AND NOT EXISTS (
-        SELECT 1 FROM "ScanRun" s WHERE s."targetReconRunId" = r.id AND s."scopeAssetId" = a.id
+        SELECT 1 FROM "ScanRun" s WHERE s."scopeAssetId" = a.id
+          AND (s."targetReconRunId" = r.id OR (r."campaignKey" IS NOT NULL AND s.status = 'COMPLETED' AND s.outcome IN ('SUCCESS','PARTIAL')
+            AND a."updatedAt" <= COALESCE(s."startedAt", s."createdAt")))
           AND s."scopeAssetSnapshot"->>'normalizedValue' = a."normalizedValue"
           AND s."scopeAssetSnapshot"->>'format' = a.format::text
           AND s."scopeAssetSnapshot"->>'type' = a.type::text
@@ -46,20 +52,23 @@ export async function campaignFacts(db: Database, ownerId: string, ids: string[]
         AND r."finishedAt" > NOW() - INTERVAL '12 seconds', false) AS "handoffPending",
       (${scopeCurrent}) AS "scopeCurrent",
       COALESCE(progress.total, 0) AS "reconTotal", COALESCE(progress.finished, 0) AS "reconFinished",
-      standalone.total AS "standaloneTotal",
+      COALESCE(progress.running, 0) AS "reconRunning",
+      standalone.total AS "standaloneTotal", standalone.running AS "standaloneRunning", c.state::text AS "campaignState",
       research.creating AS "researchCreating", research.ready AS "researchReady", research.failed AS "researchFailed",
       ${findingCounts}
     FROM "BountyProgram" p
+    LEFT JOIN "TargetCampaign" c ON c."programId" = p.id
     LEFT JOIN LATERAL (
-      SELECT id, status, outcome, "scopeMarkdown", "finishedAt" FROM "TargetReconRun"
+      SELECT id, status, outcome, "scopeMarkdown", "finishedAt", "campaignKey" FROM "TargetReconRun"
       WHERE "programId" = p.id ORDER BY "createdAt" DESC, id DESC LIMIT 1
     ) r ON true
     LEFT JOIN LATERAL (
-      SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE s.status NOT IN ('QUEUED','RUNNING'))::int AS finished
+      SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE s.status NOT IN ('QUEUED','RUNNING'))::int AS finished,
+        COUNT(*) FILTER (WHERE s.status = 'RUNNING')::int AS running
       FROM "ScanRun" s WHERE s."targetReconRunId" = r.id AND r.status IN ('QUEUED','RUNNING')
     ) progress ON true
     CROSS JOIN LATERAL (
-      SELECT COUNT(*)::int AS total
+      SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE s.status = 'RUNNING')::int AS running
       FROM "ScopeAsset" a JOIN "ScanRun" s ON s."scopeAssetId" = a.id
       WHERE a."programId" = p.id AND a.active AND s."targetReconRunId" IS NULL AND s.type = 'RECON' AND s.status IN ('QUEUED','RUNNING')
     ) standalone
@@ -80,8 +89,36 @@ export async function campaignFacts(db: Database, ownerId: string, ids: string[]
 }
 
 export function campaignView(program: CampaignProgram, facts: CampaignFacts) {
-  const policyBlocker = programPolicyBlocker(program);
-  return { policyBlocker, ...targetCampaign({ ...program, assetCount: program._count.scopeAssets, policyBlocker }, facts) };
+  const policyBlocker = campaignPolicyBlocker(program);
+  const source = storedExecutionPolicySchema.safeParse(program.executionPolicies[0]?.policy).data?.sourceSnapshot;
+  const undecidedRules = source?.unrepresentedRules.length ?? 0;
+  const firstRule = (source?.ruleDecisions?.findIndex(rule => !rule.decision) ?? 0) + 1;
+  const row = program.campaign;
+  const campaign = row ? { state: row.state, reason: row.reason, retryAt: row.retryAt, nextCycleAt: row.nextCycleAt,
+    handoffRunId: row.handoffRunId, pendingCount: pendingScopeSchema.safeParse(row.pendingAssets).data?.length ?? 0 } : null;
+  return { policyBlocker, ...targetCampaign({ ...program, campaign, assetCount: program._count.scopeAssets,
+    policyBlocker, undecidedRules, firstRule: Math.max(1, firstRule) }, facts) };
+}
+
+async function loadReconSummary(db: Database, runId: string) {
+  const [row] = await db.$queryRaw<{ hosts: number; webApps: number; added: number; changed: number; notObserved: number }[]>`
+    WITH scans AS (SELECT id, "changeSet" FROM "ScanRun" WHERE "targetReconRunId" = ${runId}),
+    observations AS (
+      SELECT a.kind, a.value, a.verification FROM "ReconArtifact" a JOIN scans s ON s.id = a."scanRunId"
+      WHERE a."scopeState" = 'IN_SCOPE' AND a.kind IN ('hostname','endpoint')
+    )
+    SELECT (
+      SELECT COUNT(DISTINCT value->>'hostname')::int FROM observations WHERE kind = 'hostname'
+    ) AS hosts, (
+      SELECT COUNT(DISTINCT substring(value->>'url' FROM '^https?://[^/?#]+'))::int FROM observations
+      WHERE kind = 'endpoint' AND verification = 'OBSERVED'
+    ) AS "webApps",
+    COALESCE(SUM(CASE WHEN jsonb_typeof("changeSet"->'new') = 'array' THEN jsonb_array_length("changeSet"->'new') ELSE 0 END), 0)::int AS added,
+    COALESCE(SUM(CASE WHEN jsonb_typeof("changeSet"->'changed') = 'array' THEN jsonb_array_length("changeSet"->'changed') ELSE 0 END), 0)::int AS changed,
+    COALESCE(SUM(CASE WHEN jsonb_typeof(COALESCE("changeSet"->'notObserved', "changeSet"->'removed')) = 'array'
+      THEN jsonb_array_length(COALESCE("changeSet"->'notObserved', "changeSet"->'removed')) ELSE 0 END), 0)::int AS "notObserved"
+    FROM scans`;
+  return row ?? null;
 }
 
 export function loadTargetCampaign(ownerId: string, id: string) {
@@ -89,7 +126,9 @@ export function loadTargetCampaign(ownerId: string, id: string) {
     const program = await tx.bountyProgram.findFirst({ where: { id, ownerId }, select: campaignProgramSelect });
     if (!program) return null;
     const facts = (await campaignFacts(tx, ownerId, [id])).get(id)!;
-    return { program, view: campaignView(program, facts) };
+    const view = campaignView(program, facts);
+    const summary = facts.runId && view.stages[1].state === 'done' ? await loadReconSummary(tx, facts.runId) : null;
+    return { program, view, summary };
   }, { isolationLevel: 'RepeatableRead' });
 }
 

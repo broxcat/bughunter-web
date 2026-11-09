@@ -3,6 +3,7 @@ import { executionPolicySchema, structuredExclusionSchema } from './programExecu
 import { ASSET_TYPES, assetInputSchema, assetAllowsUrl, detectScopeAsset } from './scopeAssets';
 import { matchesHost, normalizeFqdn } from './bountyProgram';
 
+import { campaignSourceSchema, campaignIntervalSchema } from './campaignSource';
 import { reviewRule, documentedAsset } from './targetReviewData';
 export { RULE_DECISIONS } from './targetReviewData';
 
@@ -75,6 +76,8 @@ export const targetReviewSchema = z.strictObject({
   policy: executionPolicySchema.omit({ sourceSnapshot: true }),
   testAccounts: z.array(testAccount).max(2).default([]),
   expectedAssets: z.string().max(64).optional(),
+  campaignInterval: campaignIntervalSchema.optional(),
+  importSource: campaignSourceSchema.optional(),
 }).superRefine((review, ctx) => {
   const { scopeError, conflict } = scopeReviewChecks(review.scopeIn, review.policy.exclusions);
   for (const message of [scopeError, conflict]) if (message) ctx.addIssue({ code: 'custom', path: ['scopeIn'], message });

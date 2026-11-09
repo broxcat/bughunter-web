@@ -22,7 +22,10 @@ suite('Target campaign read model and stream', () => {
       data: { email: 'campaign-' + label + '-' + crypto.randomUUID() + '@example.test' },
     })));
     [ownerId, otherId] = users.map(user => user.id);
-    const program = await prisma.bountyProgram.create({ data: { ownerId, companyName: 'Campaign read fixture', requiredUserAgent: 'Fixture/1' } });
+    const program = await prisma.bountyProgram.create({ data: { ownerId, companyName: 'Campaign read fixture', requiredUserAgent: 'Fixture/1',
+      executionPolicies: { create: { version: 1, policy: { reviewState: 'OWNER_REVIEWED', automationAllowed: true,
+        requiredUserAgent: 'Fixture/1', requiredHeaders: [], exclusions: [], requestsPerSecond: 1, maxConcurrency: 1,
+        forbiddenCategories: [], sourceSnapshot: { url: null, rules: '', unrepresentedRules: [] } } } } } });
     programId = program.id;
     const asset = await prisma.scopeAsset.create({ data: {
       programId, originalValue: 'app.example.test', normalizedValue: 'app.example.test', format: 'SUBDOMAIN', type: 'WEB_APPLICATION',
@@ -45,7 +48,7 @@ suite('Target campaign read model and stream', () => {
   it('uses stored scope snapshots and finding counts, without exposing another owner’s stream', async () => {
     const request = () => new Request('http://app.example.test/api/programs/campaign-stream?ids=' + programId);
     const initial = await load(ownerId, programId);
-    expect(initial?.view.action).toEqual({ label: 'Start recon', startRecon: true });
+    expect(initial?.view.action).toEqual({ label: 'Start recon', command: 'start' });
     expect(initial?.view.activity.active).toBe(false);
     expect(await load(otherId, programId)).toBeNull();
     auth.mockResolvedValue({ user: { id: otherId } });
@@ -78,7 +81,7 @@ suite('Target campaign read model and stream', () => {
     expect((await load(ownerId, programId))?.view.current.detail).toBe('Scope changed since the last run.');
     await prisma.finding.create({ data: { targetId, title: 'Manual review fixture' } });
     const withFinding = await load(ownerId, programId);
-    expect(withFinding?.view.current).toMatchObject({ stage: 'Findings', state: 'running', detail: '0/1 reviewed' });
+    expect(withFinding?.view.current).toMatchObject({ stage: 'Findings', state: 'needs you', detail: '0/1 reviewed' });
     expect(withFinding?.view.activity.active).toBe(false);
   });
 });
