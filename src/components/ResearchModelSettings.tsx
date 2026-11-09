@@ -66,7 +66,7 @@ export default function ResearchModelSettings({ providers }: { providers: Array<
           </label>
         </fieldset>;
       })}
-      <Button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save Research routing'}</Button>
+      <Button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save research routing'}</Button>
     </form>}
   </section>;
 }
