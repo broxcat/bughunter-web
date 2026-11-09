@@ -26,29 +26,57 @@ export const hunterIdentitySchema = z.strictObject({
 });
 export type HunterIdentity = z.infer<typeof hunterIdentitySchema>;
 
+export const structuredExclusionSchema = assetInputSchema.shape.value.refine(value => {
+  try {
+    const boundary = detectScopeAsset(value);
+    if (boundary.format !== 'URL') return true;
+    const path = new URL(boundary.normalizedValue).pathname;
+    return !/[%;]/.test(path) && !path.replace(/\/\*$/, '').includes('*');
+  } catch { return false; }
+}, 'Use a URL path prefix or a trailing /* wildcard');
+
+export const legacyScopeTextSchema = z.strictObject({
+  id: z.string(), scopeDetails: z.string().nullable(), outOfScope: z.string().nullable(),
+  rulesOfEngagement: z.string().nullable(),
+});
+export type LegacyScopeText = z.infer<typeof legacyScopeTextSchema>;
+const sourceSnapshotSchema = z.strictObject({
+  url: z.url().refine(value => /^https?:\/\//i.test(value)).nullable(),
+  rules: z.string().max(20000),
+  unrepresentedRules: z.array(z.string().trim().min(1).max(2000)).max(50),
+});
 export const executionPolicySchema = z.strictObject({
   automationAllowed: z.boolean(),
   requiredUserAgent: hunterIdentitySchema.shape.userAgent,
   requiredHeaders: identificationHeadersSchema,
-  exclusions: z.array(assetInputSchema.shape.value.refine(value => {
-    try {
-      const boundary = detectScopeAsset(value);
-      if (boundary.format !== 'URL') return true;
-      const path = new URL(boundary.normalizedValue).pathname;
-      return !/[%;]/.test(path) && !path.replace(/\/\*$/, '').includes('*');
-    } catch { return false; }
-  }, 'Use a URL path prefix or a trailing /* wildcard')).max(1000),
+  exclusions: z.array(structuredExclusionSchema).max(1000),
   requestsPerSecond: z.number().min(0.01).max(100),
   maxConcurrency: z.number().int().min(1).max(32),
   forbiddenCategories: z.array(z.enum(TEST_CATEGORIES)).max(TEST_CATEGORIES.length),
-  sourceSnapshot: z.strictObject({
-    url: z.url().refine(value => /^https?:\/\//i.test(value)).nullable(),
-    rules: z.string().max(20000),
-    unrepresentedRules: z.array(z.string().trim().min(1).max(2000)).max(50),
-  }),
+  sourceSnapshot: sourceSnapshotSchema,
 });
 export type ExecutionPolicyInput = z.infer<typeof executionPolicySchema>;
+
+// Only server writers can set review status and capture the legacy source.
+export const storedExecutionPolicySchema = executionPolicySchema.extend({
+  requestsPerSecond: executionPolicySchema.shape.requestsPerSecond.nullable(),
+  maxConcurrency: executionPolicySchema.shape.maxConcurrency.nullable(),
+  reviewState: z.enum(['BACKFILL_DRAFT', 'OWNER_REVIEWED']).optional(),
+  sourceSnapshot: sourceSnapshotSchema.extend({
+    // Historical data may predate input validation. Preserve it byte for byte.
+    url: z.string().nullable(),
+    rules: z.string(),
+    unrepresentedRules: z.array(z.string()),
+    legacy: z.strictObject({
+      outOfScope: z.array(z.string()),
+      scopes: z.array(legacyScopeTextSchema),
+      programRules: z.string().nullable(),
+    }).optional(),
+  }),
+}).refine(policy => policy.reviewState === 'BACKFILL_DRAFT' || (policy.requestsPerSecond !== null && policy.maxConcurrency !== null), 'Reviewed policies require request limits');
+export type StoredExecutionPolicy = z.infer<typeof storedExecutionPolicySchema>;
 export const LEGACY_LIMITS = { requestsPerSecond: 5, maxConcurrency: 2 };
+export const POLICY_REVIEW_ANCHOR = 'execution-policy';
 export const MISSING_HUNTER_UA = 'Recon requires a User-Agent. Set the program User-Agent in Target settings or your default under Settings → Hunter identity.';
 
 export function headersFromLines(text: string) {

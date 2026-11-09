@@ -1,12 +1,29 @@
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+
+import { auth } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { scanRejection } from '@/server/execution';
 import { programPolicyInclude, resolveProgramPolicy } from '@/server/programExecutionPolicy';
-import { scanRejection } from "@/server/execution";
+
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const programs = await prisma.bountyProgram.findMany({ where: { ownerId: session.user.id }, orderBy: [{companyName:'asc'},{id:'asc'}],
-    include: { ...programPolicyInclude, targets: { where: { userId: session.user.id, active: true }, orderBy: [{host:'asc'},{id:'asc'}], include: { scope: true, scanRuns: { where: { type: "RECON", status: "COMPLETED" }, orderBy: [{createdAt:'desc'},{id:'desc'}], take: 1, select: { id: true, createdAt: true } } } } } });
-  return Response.json(programs.map(p => ({ id: p.id, companyName: p.companyName, requiredUserAgent: resolveProgramPolicy(p).userAgent, qualifying: p.qualifying, nonQualifying: p.nonQualifying, scopeRules: p.scopeRules, deletingAt: p.deletingAt,
-    hosts: p.targets.filter(t => !scanRejection({ ...t, program: p }, 'RECON')).map(t => ({ id: t.id, host: t.host, latestRecon: t.scanRuns[0] ?? null })) })));
+  const userId = (await auth())?.user?.id;
+  if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  const [programs, targets] = await prisma.$transaction([
+    prisma.bountyProgram.findMany({ where: { ownerId: userId }, orderBy: [{ companyName: 'asc' }, { id: 'asc' }], include: programPolicyInclude }),
+    prisma.target.findMany({
+      where: { userId, active: true, program: { ownerId: userId } },
+      orderBy: [{ host: 'asc' }, { id: 'asc' }],
+      include: { scope: true, scanRuns: { where: { type: 'RECON', status: 'COMPLETED' }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, createdAt: true } } },
+    }),
+  ], { isolationLevel: 'RepeatableRead' });
+  const byProgram = Map.groupBy(targets, target => target.programId);
+  return Response.json(programs.map(program => {
+    const { id, companyName, qualifying, nonQualifying, scopeRules, deletingAt } = program;
+    let requiredUserAgent = '';
+    try { requiredUserAgent = resolveProgramPolicy(program).userAgent; } catch { /* An invalid policy cannot admit any hosts. */ }
+    return {
+      id, companyName, qualifying, nonQualifying, scopeRules, deletingAt, requiredUserAgent,
+      hosts: (byProgram.get(id) ?? []).filter(target => !scanRejection({ ...target, program }, 'RECON'))
+        .map(target => ({ id: target.id, host: target.host, latestRecon: target.scanRuns[0] ?? null })),
+    };
+  }));
 }

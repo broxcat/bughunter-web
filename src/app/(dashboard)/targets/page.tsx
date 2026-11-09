@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ProgramForm from "@/components/ProgramForm";
 import { Dialog } from "@/components/ui/Dialog";
+import { MISSING_HUNTER_UA, POLICY_REVIEW_ANCHOR } from '@/lib/programExecutionPolicy';
 import { reconOverview } from "@/lib/reconOverview";
 import { Button } from "@/components/ui/Button";
 import {paginationInput} from '@/lib/pagination';
@@ -37,7 +38,11 @@ function TargetsCollection() {
     {!data&&!error&&<p role="status">Loading targets…</p>}
     {deleted && <p role="status">Target deleted.</p>}{error && <p role="alert">{error}</p>}
     {!!programs.length && <div className="ui-table-scroll" role="region" aria-label="Program inventory" tabIndex={0}><table className="ui-inventory ui-targets w-full text-left text-sm"><caption className="sr-only">Program inventory</caption><thead><tr>{['Target','Platform','Scope','Latest recon',''].map(h=><th scope="col" key={h}>{h}</th>)}</tr></thead><tbody>{programs.map(p=><tr key={p.id}>
-      <td data-label="Target"><span className="font-medium">{p.companyName}</span>{p.deletingAt&&<p role="status" className="text-xs text-muted">Deletion pending</p>}</td>
+      <td data-label="Target"><span className="font-medium">{p.companyName}</span>
+        {p.policyBlocker && <Link className="ml-2 inline-block rounded border px-2 py-0.5 text-xs text-brand"
+          href={p.policyBlocker === MISSING_HUNTER_UA ? '/settings#hunter-identity' : '/targets/' + p.id + '/settings#' + POLICY_REVIEW_ANCHOR}>
+          Policy review needed
+        </Link>}{p.deletingAt&&<p role="status" className="text-xs text-muted">Deletion pending</p>}</td>
       <td data-label="Platform" className="text-muted">{platformLabel(p.platform)}</td><td data-label="Scope">{p._count.scopeAssets} assets</td><td data-label="Latest recon">{reconOverview(p.reconRuns[0]??null).label}</td>
       <td data-label="Action"><Link className="font-medium text-brand" aria-label={`Open ${p.companyName}`} href={`/targets/${p.id}`}>Open</Link></td>
     </tr>)}</tbody></table></div>}

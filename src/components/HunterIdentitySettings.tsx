@@ -37,7 +37,7 @@ export default function HunterIdentitySettings() {
     finally { setSaving(false); }
   }
 
-  return <section className="max-w-2xl space-y-3">
+  return <section id="hunter-identity" className="max-w-2xl space-y-3">
     <h2 className="text-lg font-semibold">Hunter identity</h2>
     <p className="text-sm text-muted">Program requirements take precedence. Use identification headers that you are willing to send to authorized targets.</p>
     {identity && <form className="space-y-3" onSubmit={submit}>

@@ -11,8 +11,8 @@ import { prisma } from "@/lib/prisma";
 
 function publicProgram<T extends PolicyProgram>(program: T | null) {
   if (!program) return null;
-  const { owner, executionPolicies, ...rest } = program;
-  void owner; void executionPolicies;
+  const { owner, executionPolicies, targets, ...rest } = program;
+  void owner; void executionPolicies; void targets;
   return rest;
 }
 

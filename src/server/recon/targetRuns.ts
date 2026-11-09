@@ -1,4 +1,4 @@
-import { programPolicyInclude, resolveProgramPolicy } from '../programExecutionPolicy';
+import { programPolicyBlocker, programPolicyInclude } from '../programExecutionPolicy';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { assetValueRank, detectScopeAsset } from '@/lib/scopeAssets';
@@ -17,7 +17,7 @@ export async function startTargetRecon(userId:string,programId:string) {
     await tx.$queryRaw`SELECT id FROM "User" WHERE id=${userId} FOR UPDATE`;
     await lockOwnedProgram(tx,userId,programId);
     const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude });
-    const blocker = resolveProgramPolicy(program).blocker;
+    const blocker = programPolicyBlocker(program);
     if (blocker) throw new ResearchError(blocker, 409);
     await backfillProgramAssets(tx,programId,userId);
     const live=await tx.targetReconRun.findFirst({where:{programId,status:{in:['QUEUED','RUNNING']}},include:{scans:{select:{id:true}}}});if(live)return live;

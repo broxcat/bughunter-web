@@ -1,47 +1,68 @@
 
 import { BlockList, isIP } from 'node:net';
+import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import { requiredUserAgentSchema } from '@/lib/httpPolicy.mjs';
 import { isExcluded, matchesHost } from '@/lib/bountyProgram';
 import { assetAllowsHost, assetAllowsUrl, detectScopeAsset, type AssetBoundary } from '@/lib/scopeAssets';
-import { executionPolicySchema, hunterIdentitySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, type TestCategory } from '@/lib/programExecutionPolicy';
+import { storedExecutionPolicySchema, hunterIdentitySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, type TestCategory } from '@/lib/programExecutionPolicy';
+
+import { captureLegacyScopes, legacyExclusionParity, legacyScopeFingerprint, legacyScopeTargets } from './legacyPolicySource';
 
 export const currentPolicySelection = { orderBy: { version: 'desc' as const }, take: 1 };
 export const programPolicyInclude = {
   executionPolicies: currentPolicySelection,
+  targets: legacyScopeTargets,
   owner: { select: { hunterIdentity: { select: { userAgent: true, headers: true } } } },
 };
 export type PolicyProgram = {
+  ownerId?: string;
   requiredUserAgent: string;
   outOfScope: readonly string[];
   programUrl?: string | null;
   rulesOfEngagement?: string | null;
   executionPolicies?: readonly { version: number; policy: unknown }[];
+  targets?: readonly { scope: { id: string; userId: string; scopeDetails: string | null; outOfScope: string | null; rulesOfEngagement: string | null } }[];
   owner?: { hunterIdentity: { userAgent: string | null; headers: unknown } | null };
 };
 type ScopeRules = { scopeDetails?: string | null; outOfScope?: string | null; rulesOfEngagement?: string | null };
 
 export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules) {
   const row = program.executionPolicies?.[0];
-  const policy = row && executionPolicySchema.parse(row.policy);
+  const policy = row && storedExecutionPolicySchema.parse(row.policy);
   const identity = program.owner?.hunterIdentity && hunterIdentitySchema.parse(program.owner.hunterIdentity);
   const userAgent = (policy ? policy.requiredUserAgent : program.requiredUserAgent) || identity?.userAgent || '';
   const headers = Object.fromEntries([...(identity?.headers ?? []), ...(policy ? policy.requiredHeaders : [])].map(({ name, value }) => [name, value]));
   const sourceMismatch = policy && (policy.sourceSnapshot.rules !== (program.rulesOfEngagement?.trim() ?? '') ||
     policy.sourceSnapshot.url !== (program.programUrl ?? null));
-  const unrepresented = sourceMismatch || (policy ? policy.sourceSnapshot.unrepresentedRules.length > 0 : Boolean(program.rulesOfEngagement?.trim())) ||
-    Boolean(scope?.scopeDetails?.trim() || scope?.outOfScope?.trim() || scope?.rulesOfEngagement?.trim());
-  const blocker = unrepresented ? 'Automation is blocked by unrepresented program or scope rules. Review the execution policy in Target settings.'
+  const captured = policy?.sourceSnapshot.legacy;
+  const scopes = program.targets && captureLegacyScopes(program.targets.map(target => target.scope), program.ownerId);
+  const hasScopeProse = scopes ? scopes.length > 0 : Boolean(scope?.scopeDetails?.trim() || scope?.outOfScope?.trim() || scope?.rulesOfEngagement?.trim());
+  const reviewedScope = Boolean(policy?.reviewState === 'OWNER_REVIEWED' && captured && scopes &&
+    legacyScopeFingerprint(captured.scopes) === legacyScopeFingerprint(scopes));
+  const legacyChanged = captured && (!isDeepStrictEqual(captured.outOfScope, program.outOfScope) ||
+    captured.programRules !== (program.rulesOfEngagement ?? null));
+  const parity = captured && policy?.automationAllowed ? legacyExclusionParity(program.outOfScope, policy.exclusions) : null;
+  const unrepresented = sourceMismatch || legacyChanged || (hasScopeProse && !reviewedScope) ||
+    Boolean(captured?.scopes.length && !reviewedScope) || Boolean(parity && (parity.missing.length || parity.unconvertible.length)) ||
+    (policy ? policy.sourceSnapshot.unrepresentedRules.length > 0 : Boolean(program.rulesOfEngagement?.trim()));
+  const blocker = policy?.reviewState === 'BACKFILL_DRAFT' ? 'Automation is blocked until you review and save the imported policy in Target settings.'
+    : unrepresented ? 'Automation is blocked by unrepresented program or scope rules. Review the execution policy in Target settings.'
     : policy && !policy.automationAllowed ? 'Automation is disabled in Target settings.'
     : !requiredUserAgentSchema.safeParse(userAgent).success || userAgent !== userAgent.trim() || /\\[rn]/.test(userAgent) ? MISSING_HUNTER_UA
     : null;
   const exclusions = (policy ? policy.exclusions : []).map(value => detectScopeAsset(value));
-  const limits = policy ? { requestsPerSecond: policy.requestsPerSecond, maxConcurrency: policy.maxConcurrency } : LEGACY_LIMITS;
+  const limits = { requestsPerSecond: policy?.requestsPerSecond ?? LEGACY_LIMITS.requestsPerSecond, maxConcurrency: policy?.maxConcurrency ?? LEGACY_LIMITS.maxConcurrency };
   const forbiddenCategories = policy ? policy.forbiddenCategories : [];
   const version = row?.version ?? 0;
   const fingerprint = createHash('sha256').update(JSON.stringify([version, blocker, headers, userAgent, program.outOfScope, exclusions, limits, forbiddenCategories])).digest('hex');
-  return { version, userAgent, headers, exclusions, legacyExclusions: program.outOfScope, limits, forbiddenCategories, blocker, fingerprint };
+  return { version, userAgent, headers, reviewedScope, exclusions, legacyExclusions: program.outOfScope, limits, forbiddenCategories, blocker, fingerprint };
 }
+export function programPolicyBlocker(program: PolicyProgram, scope?: ScopeRules) {
+  try { return resolveProgramPolicy(program, scope).blocker; }
+  catch { return 'Invalid program execution policy'; }
+}
+
 export type ResolvedProgramPolicy = ReturnType<typeof resolveProgramPolicy>;
 
 const allHttpTests: readonly TestCategory[] = [

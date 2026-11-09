@@ -7,7 +7,7 @@ import { isExcluded, matchesHost } from "@/lib/bountyProgram";
 import { assetAllowsHost, scopeAssetExecutable, type AssetBoundary } from '@/lib/scopeAssets';
 import type { ReconPlan } from '@/lib/reconPlanner';
 import { isSafeReadUrl } from '@/lib/observationSafety';
-import { authorizeExecution, programPolicyInclude, resolveProgramPolicy, type PolicyProgram, type ResolvedProgramPolicy } from './programExecutionPolicy';
+import { authorizeExecution, programPolicyBlocker, programPolicyInclude, resolveProgramPolicy, type PolicyProgram, type ResolvedProgramPolicy } from './programExecutionPolicy';
 import { acquireProgramTraffic, releaseProgramTraffic } from './programTraffic';
 
 export interface TargetRequestGuard {
@@ -72,8 +72,7 @@ function scanScopeRejection(target: { userId: string; host: string; active: bool
 export function scanRejection(target: Parameters<typeof scanScopeRejection>[0], purpose: 'HOST' | 'RECON' = 'HOST', requirePolicy = true) {
   const rejection = scanScopeRejection(target, purpose);
   if (rejection || !requirePolicy) return rejection;
-  try { return resolveProgramPolicy(target.program!, target.scope).blocker; }
-  catch { return 'Invalid program execution policy'; }
+  return programPolicyBlocker(target.program!, target.scope);
 }
 
 export async function loadTargetExecution(targetId: string, purpose: 'HOST' | 'RECON' = 'HOST', captured?: ReconPlan): Promise<TargetExecution> {
