@@ -10,7 +10,7 @@ export async function auditProgramCollections({prisma,owner,origin,context,page}
   await page.reload();await page.getByRole('status').filter({hasText:'Page 3 of 3'}).waitFor();
   await page.getByRole('link',{name:'Previous page',exact:true}).click();await page.getByRole('status').filter({hasText:'Page 2 of 3'}).waitFor();
   await page.goBack();await page.getByRole('status').filter({hasText:'Page 3 of 3'}).waitFor();await page.goForward();await page.getByRole('status').filter({hasText:'Page 2 of 3'}).waitFor();
-  await page.getByLabel('Search Targets',{exact:true}).fill('No matching pagination fixture');await page.getByRole('button',{name:'Search',exact:true}).click();await page.getByRole('status').filter({hasText:'Page 1 of 1 · 0 results'}).waitFor();assert.equal(new URL(page.url()).searchParams.has('page'),false);
+  await page.getByLabel('Search targets',{exact:true}).fill('No matching pagination fixture');await page.getByRole('button',{name:'Search',exact:true}).click();await page.getByRole('status').filter({hasText:'Page 1 of 1 · 0 results'}).waitFor();assert.equal(new URL(page.url()).searchParams.has('page'),false);
   for(const value of ['invalid','999']){await page.goto(origin+path+'?'+query+'&page='+value);await page.getByRole('status').filter({hasText:value==='invalid'?'Page 1 of 3':'Page 3 of 3'}).waitFor();}
   const deleted=await context.request.delete(origin+'/api/programs/'+prefix+'050');assert.equal(deleted.status(),200);await page.reload();await page.getByRole('status').filter({hasText:'Page 2 of 2 · 50 results'}).waitFor();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
