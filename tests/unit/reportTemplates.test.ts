@@ -35,7 +35,7 @@ const FULL: ReportFinding = {
 const EMPTY: ReportFinding = { title: "Bare finding", severity: "LOW" };
 
 function sectionOrder(md: string): number[] {
-  return ["#### Description", "#### Impact", "#### Proof of Concept", "#### Remediation"].map(
+  return ["#### Description", "#### Impact", "#### Proof of concept", "#### Remediation"].map(
     (h) => md.indexOf(h),
   );
 }
@@ -104,7 +104,7 @@ describe("report skeleton", () => {
       ],
     };
     const md = renderReport("INTIGRITI", { title: "T", findings: [ssrf] });
-    const poc = md.slice(md.indexOf("#### Proof of Concept"), md.indexOf("#### Remediation"));
+    const poc = md.slice(md.indexOf("#### Proof of concept"), md.indexOf("#### Remediation"));
     expect(poc).toContain("Affected location: `?url=`");
     expect(poc).toContain("Callback URL embedded in the url parameter.");
     expect(poc).toContain("GET from 203.0.113.7 at 2026-10-20T10:00:00.000Z");
@@ -112,13 +112,13 @@ describe("report skeleton", () => {
 
   it("keeps the per-platform heading and metadata specifics", () => {
     const md = (p: ReportPlatform) => renderReport(p, { title: "T", findings: [FULL] });
-    expect(md("HACKERONE")).toContain("HackerOne Report");
+    expect(md("HACKERONE")).toContain("HackerOne report");
     expect(md("HACKERONE")).toContain("**Weakness:** XSS");
     expect(md("BUGCROWD")).toContain("(HIGH)");
     expect(md("BUGCROWD")).toContain("VRT / Bug class: XSS");
-    expect(md("YESWEHACK")).toContain("YesWeHack Report");
+    expect(md("YESWEHACK")).toContain("YesWeHack report");
     expect(md("YESWEHACK")).toContain("**Bug type:** XSS");
-    expect(md("IMMUNEFI")).toContain("Immunefi Bug Report");
+    expect(md("IMMUNEFI")).toContain("Immunefi bug report");
   });
 
   it("handles an empty finding list", () => {
