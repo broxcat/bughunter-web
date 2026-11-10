@@ -207,4 +207,27 @@ suite('durable Target campaign', () => {
     expect((await policy()).policy).toMatchObject({ sourceSnapshot: { sourceDocument: 'Only test during an agreed window.' } });
     expect(await outbox(id)).toBe(3);
   });
+  it('resync preserves a decision for the same phrase but applies a new testing ban', async () => {
+    const phrase = 'No automated scanners';
+    const source: CampaignSource = { url: 'https://hackerone.com/decision-fixture', platform: 'HACKERONE', grants: [host('decision')],
+      assets: assets('decision'), exclusions: [], forbiddenCategories: [], nonQualifying: [], sourceDocument: phrase, rules: [{ text: phrase }], automationProhibition: phrase };
+    const id = await target(['decision'], { source });
+    const latest = await p.programExecutionPolicy.findFirstOrThrow({ where: { programId: id }, orderBy: { version: 'desc' } });
+    await p.programExecutionPolicy.create({ data: { programId: id, version: 2, policy: { ...latest.policy as object,
+      automationAllowed: true, automationProhibition: phrase,
+      automationDecisions: [{ phrase, decision: 'NOT_A_TESTING_BAN', userId: owner, decidedAt: new Date().toISOString() }] } } });
+    await advance(owner, id);
+    const before = await p.scanRun.count({ where: { target: { programId: id }, cancelRequestedAt: { not: null } } });
+    const now = new Date();
+    await sync(owner, id, now, async () => ({ ...source, sourceDocument: 'Updated introduction.\n' + phrase }));
+    expect(await p.scanRun.count({ where: { target: { programId: id }, cancelRequestedAt: { not: null } } })).toBe(before);
+    const different = 'Automation is prohibited.';
+    await sync(owner, id, new Date(+now + 86_400_000), async () => ({ ...source, automationProhibition: different,
+      sourceDocument: phrase + '\n' + different, rules: [{ text: phrase }, { text: different }] }));
+    const program = await p.bountyProgram.findUniqueOrThrow({ where: { id }, include: { executionPolicies: { orderBy: { version: 'desc' }, take: 1 } } });
+    const { resolveProgramPolicy } = await import('@/server/programExecutionPolicy');
+    expect(resolveProgramPolicy(program).blocker).toContain(different);
+    expect(await p.scanRun.count({ where: { target: { programId: id }, cancelRequestedAt: { not: null } } })).toBeGreaterThan(before);
+  });
+
 });

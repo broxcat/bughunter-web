@@ -1,12 +1,20 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { automationProhibitionPattern, automationSentenceSeparator, automationSourcePaths } from '../src/lib/automationProhibition.mjs';
+import { automationProhibitionPattern, automationSentenceSeparator, automationSourcePaths, automationReportingSubjectPattern } from '../src/lib/automationProhibition.mjs';
 const path = new URL('../prisma/migrations/20261110150000_target_cascade_and_active_policy/migration.sql', import.meta.url);
 export const generatedFunction = `-- BEGIN GENERATED AUTOMATION DETECTION (npm run policy:generate-detection)
+CREATE OR REPLACE FUNCTION program_is_reporting_restriction(source TEXT) RETURNS BOOLEAN
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $function$
+  SELECT coalesce(bool_and(btrim(sentence) ~* $pattern$${automationReportingSubjectPattern}$pattern$), false)
+  FROM regexp_split_to_table(coalesce(source, ''), $pattern$${automationSentenceSeparator}$pattern$) sentence
+  WHERE btrim(sentence) <> ''
+$function$;
+
 CREATE OR REPLACE FUNCTION program_automation_prohibition(source TEXT) RETURNS TEXT
 LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $function$
   SELECT btrim(sentence) FROM regexp_split_to_table(coalesce(source, ''), $pattern$${automationSentenceSeparator}$pattern$)
     WITH ORDINALITY AS parts(sentence, position)
   WHERE sentence ~* $pattern$${automationProhibitionPattern}$pattern$
+    AND sentence !~* $pattern$${automationReportingSubjectPattern}$pattern$
   ORDER BY position LIMIT 1
 $function$;
 

@@ -1,4 +1,4 @@
-import { findAutomationProhibition } from '@/lib/automationProhibition.mjs';
+import { findAutomationProhibition, isReportingRestriction, sameAutomationPhrase } from '@/lib/automationProhibition.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -103,7 +103,10 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
     const rulesChanged = sameSource ? !isDeepStrictEqual(sameSource.rules.map(ruleKey), fresh.rules.map(ruleKey))
       : fresh.rules.some(rule => !existingDocument.includes(rule.text));
     const newFamilies = fresh.nonQualifying.filter(family => !program.nonQualifying.includes(family));
-    const automationProhibition = fresh.automationProhibition ?? findAutomationProhibition([fresh.sourceDocument, ...fresh.rules.map(rule => rule.text)].filter(Boolean).join('\n'));
+    const ignoredPhrases = policy.automationDecisions?.map(decision => decision.phrase) ?? [];
+    const preferred = fresh.automationProhibition;
+    const automationProhibition = (preferred && !isReportingRestriction(preferred) && !ignoredPhrases.some(phrase => sameAutomationPhrase(phrase, preferred)) ? preferred : null)
+      ?? findAutomationProhibition(fresh.sourceDocument ?? fresh.rules.map(rule => rule.text).join('\n'), ignoredPhrases);
     const automationDenied = automationProhibition !== null;
     if (automationDenied || removed.length || newExclusions.length || newCategories.length || rulesChanged || newFamilies.length) {
       const nextPolicy = {

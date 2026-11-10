@@ -96,7 +96,19 @@ try {
       policy: { ...policy, automationAllowed: false, automationProhibition: phrase, sourceSnapshot: { url: null, rules: phrase, unrepresentedRules: [] } } } });
     await page.goto(origin + '/targets/' + denied.program.id);
     await page.getByText('The program policy does not allow automation. Program rule: ' + phrase, { exact: true }).waitFor();
-    console.log('TARGET_DELETION_BROWSER: non-JSON error, /targets redirect, offline console, dead RUNNING worker active scan cleanup and French program evidence on the dashboard passed');
+    const decisionResponse = page.waitForResponse(r => r.url().endsWith('/automation-decision') && r.request().method() === 'POST');
+    await page.getByRole('button', { name: 'Not a testing ban', exact: true }).click();
+    assert.equal((await decisionResponse).status(), 200);
+    await page.getByText('The program policy does not allow automation. Program rule: ' + phrase, { exact: true }).waitFor({ state: 'detached' });
+    assert.equal(await page.getByRole('button', { name: 'Not a testing ban', exact: true }).count(), 0);
+    const dismissed = await p.programExecutionPolicy.findFirstOrThrow({ where: { programId: denied.program.id }, orderBy: { version: 'desc' } });
+    assert.equal(dismissed.version, 3); assert.equal(dismissed.policy.automationDecisions[0].phrase, phrase);
+    assert.equal(dismissed.policy.automationAllowed, true);
+    await p.bountyProgram.update({ where: { id: denied.program.id }, data: { rulesOfEngagement: "Don't use automated tools" } });
+    await page.reload();
+    await page.getByText("The program policy does not allow automation. Program rule: Don't use automated tools", { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Not a testing ban', exact: true }).waitFor();
+    console.log('TARGET_DELETION_BROWSER: non-JSON error, /targets redirect, offline console, dead RUNNING worker active scan cleanup French evidence, one-click phrase decision and reblocking after changed rules passed');
   }
 } catch (error) { console.error(logs.slice(-25).join('')); throw error; }
 finally {

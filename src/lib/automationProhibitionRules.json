@@ -33,5 +33,34 @@
     "$.legacy.scopes[*].rulesOfEngagement",
     "$.legacy.scopes[*].scopeDetails",
     "$.legacy.scopes[*].outOfScope"
+  ],
+  "reportSubjects": [
+    "reports?",
+    "submissions?",
+    "findings?",
+    "results?",
+    "outputs?",
+    "rapports?",
+    "soumissions?",
+    "r[eé]sultats?"
+  ],
+  "reportDeterminers": [
+    "the",
+    "any",
+    "all",
+    "these",
+    "those",
+    "only",
+    "les?",
+    "des?",
+    "ces",
+    "tous",
+    "toutes",
+    "seuls?",
+    "seules?",
+    "nos",
+    "vos",
+    "un",
+    "une"
   ]
 }
