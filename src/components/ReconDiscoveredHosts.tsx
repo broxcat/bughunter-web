@@ -8,7 +8,7 @@ type Candidate = { host: string; responsive: boolean };
 
 export default function ReconDiscoveredHosts({ programId, candidates }: { programId: string; candidates: Candidate[] }) {
   const router = useRouter();
-  const [selected, setSelected] = useState(() => new Set(candidates.map(candidate => candidate.host)));
+  const [selected, setSelected] = useState(() => new Set<string>());
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
