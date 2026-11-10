@@ -1,11 +1,8 @@
 // Authenticated browser acceptance against disposable PostgreSQL/Redis only.
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { randomUUID, generateKeyPairSync } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { PrismaClient } from '@prisma/client';
 import { chromium } from 'playwright-chromium';
 import bcrypt from 'bcryptjs';
@@ -13,15 +10,11 @@ const db = process.env.TEST_DATABASE_URL;
 assert(db && process.env.TEST_EXECUTION_REDIS_URL, 'Disposable TEST_DATABASE_URL and TEST_EXECUTION_REDIS_URL required');
 const url = new URL(db); url.searchParams.set('schema', 'deletion_browser_' + randomUUID().replaceAll('-', ''));
 const databaseUrl = url.href;
-const root = await mkdtemp(join(tmpdir(), 'deletion-browser-'));
 const portServer = createServer(); await new Promise(resolve => portServer.listen(0, '127.0.0.1', resolve));
 const port = portServer.address().port; await new Promise(resolve => portServer.close(resolve));
 const origin = 'http://127.0.0.1:' + port;
 const env = { ...process.env, DATABASE_URL: databaseUrl, REDIS_URL: process.env.TEST_EXECUTION_REDIS_URL,
-  AUTH_URL: origin, AUTH_SECRET: randomUUID(), LOG_LEVEL: 'silent', CREDENTIALS_ENCRYPTION_KEY: 'ab'.repeat(32),
-  RESEARCH_CONSOLE_ROOT: join(root, 'consoles'), RESEARCH_WORKSPACE_ROOT: join(root, 'workspaces'),
-  RESEARCH_TERMINAL_CONTROL_URL: 'http://127.0.0.1:1', RESEARCH_TERMINAL_PRIVATE_KEY_FILE: join(root, 'private.pem') };
-await writeFile(env.RESEARCH_TERMINAL_PRIVATE_KEY_FILE, generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+  AUTH_URL: origin, AUTH_SECRET: randomUUID(), LOG_LEVEL: 'silent', CREDENTIALS_ENCRYPTION_KEY: 'ab'.repeat(32) };
 const appDir = process.env.TARGET_DELETION_APP_DIR ?? process.cwd();
 const baseline = process.env.DELETION_BASELINE === '1';
 execFileSync('npx', ['prisma', 'migrate', 'deploy'], { cwd: appDir, env, stdio: 'pipe' });
@@ -48,7 +41,7 @@ try {
       reconScanRunId: scan.id, targetHost: target.host, programName: label, status: 'READY', scopeMarkdown: 'Controlled fixture' } });
     return { program, target, scan };
   }
-  const dead = await fixture('Offline console and dead worker');
+  const dead = await fixture('Historical Research and dead worker');
   await p.scanExecutionAttempt.create({ data: { scanRunId: dead.scan.id, workerId: 'dead-browser-fixture', state: 'RUNNING' } });
   web = spawn(process.execPath, ['node_modules/next/dist/bin/next', process.env.TARGET_DELETION_DEV === '1' ? 'dev' : 'start', '--hostname', '127.0.0.1', '--port', String(port)], { cwd: appDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
   for (const stream of [web.stdout, web.stderr]) stream.on('data', chunk => logs.push(String(chunk)));
@@ -108,12 +101,11 @@ try {
     await page.reload();
     await page.getByText("The program policy does not allow automation. Program rule: Don't use automated tools", { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Not a testing ban', exact: true }).waitFor();
-    console.log('TARGET_DELETION_BROWSER: non-JSON error, /targets redirect, offline console, dead RUNNING worker active scan cleanup French evidence, one-click phrase decision and reblocking after changed rules passed');
+    console.log('TARGET_DELETION_BROWSER: non-JSON error, /targets redirect, historical Research session, dead RUNNING worker active scan cleanup French evidence, one-click phrase decision and reblocking after changed rules passed');
   }
 } catch (error) { console.error(logs.slice(-25).join('')); throw error; }
 finally {
   await browser?.close(); web?.kill('SIGTERM'); worker?.kill('SIGTERM');
   if (web && web.exitCode === null) await new Promise(resolve => { web.once('exit', resolve); setTimeout(() => { web.kill('SIGKILL'); resolve(); }, 5000).unref(); });
   await p.$executeRawUnsafe(`DROP SCHEMA "${url.searchParams.get('schema')}" CASCADE`); await p.$disconnect();
-  await rm(root, { recursive: true, force: true });
 }
