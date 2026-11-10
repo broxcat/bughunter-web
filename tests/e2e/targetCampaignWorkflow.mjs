@@ -84,6 +84,7 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     const now = new Date();
     await p.reconArtifact.createMany({ data: [
       { kind: 'hostname', canonicalKey: 'fixture-host', value: { hostname: 'app.example.test' } },
+      { kind: 'hostname', canonicalKey: 'fixture-discovered-host', value: { hostname: 'new.example.test' } },
       { kind: 'endpoint', canonicalKey: 'fixture-app', value: { url: 'https://app.example.test/login', status: 200 } },
     ].map(item => ({ ...item, scanRunId: run.scans[0].id, scopeAssetId: run.scans[0].scopeAssetId,
       firstSeenAt: now, lastSeenAt: now, scopeState: 'IN_SCOPE', verification: 'OBSERVED', sources: [] })) });
@@ -95,8 +96,16 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
       } }),
     ]);
     assert.equal((await campaign(ready.id, 'start')).status(), 202); // Idempotent wake-up for the test's completed worker fixture.
+    await page.goto(origin + '/recon/runs/' + run.id);
+    await page.getByRole('heading', { name: 'Discovered hosts', exact: true }).waitFor();
+    const discovered = page.getByText('new.example.test', { exact: true });
+    await discovered.waitFor();
+    await page.getByRole('button', { name: 'Add selected to scope (1)', exact: true }).click();
+    await page.getByRole('status').filter({ hasText: '1 discovered host added to target scope.' }).waitFor();
+    assert.equal(await p.scopeAsset.count({ where: { programId: ready.id, normalizedValue: 'new.example.test', active: true } }), 1);
+    await page.goto(path(ready.id));
     await primary('button', 'Open research').waitFor();
-    await page.getByText('1 discovered hosts', { exact: true }).waitFor();
+    await page.getByText('2 discovered hosts', { exact: true }).waitFor();
     await page.getByText('1 active web apps', { exact: true }).waitFor();
     await p.targetCampaign.update({ where: { programId: ready.id }, data: { pendingAssets: ['docs','login','media'].map(name => ({ value: name + '.example.test', type: 'WEB_APPLICATION' })) } });
     await page.reload();
