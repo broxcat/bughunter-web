@@ -5,7 +5,7 @@ import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { BOUNTY_PLATFORMS } from '@/lib/bountyProgram';
 import { platformLabel } from '@/lib/platformPresentation';
-import { executionPolicySchema, hasHunterTemplate, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME } from '@/lib/programExecutionPolicy';
+import { executionPolicySchema } from '@/lib/programExecutionPolicy';
 import { intakePreviewSchema, MAX_PROGRAM_SOURCE, splitNonQualifying, type IntakeInput } from '@/lib/programIntake';
 import { detectScopeAsset } from '@/lib/scopeAssets';
 import { scopeReviewChecks, targetReviewSchema } from '@/lib/targetReview';
@@ -113,17 +113,6 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
   const proseExclusions = allowProse ? lines(review.exclusions).filter(value => !isStructuredExclusion(value)) : [];
   const rules = [...review.rules];
   for (const text of proseExclusions) if (!rules.some(rule => rule.text === text)) rules.push({ text, decision: null, origin: 'AI_INTAKE' });
-  const unresolved = rules.flatMap((rule, index) => rule.decision ? [] : [{ ...rule, number: index + 1 }]);
-  const needsUsername = [policy.requiredUserAgent ?? '', ...policy.requiredHeaders.map(header => header.value)].some(hasHunterTemplate) && !hunterHasUsername;
-  const policyIssue = !policyResult.success ? (policyResult.error.issues[0]?.message ?? 'Invalid execution policy.')
-    : changedSource ? 'Extract the program rules again after changing its URL or platform.'
-    : unreviewedMarkdown ? 'Extract the pasted Markdown before running automation.'
-    : descriptionEdited ? 'The description has changed. Extract the current rules again before running automation.'
-    : unresolved.length ? unresolved.length + (unresolved.length === 1 ? ' program rule needs review.' : ' program rules need review.') + ' Automation is blocked.'
-    : !policy.automationAllowed ? 'The program policy does not allow automation.'
-    : needsUsername ? MISSING_HUNTER_USERNAME
-    : (!policy.requiredUserAgent || policy.userAgentMode === 'APPEND') && !hunterHasUserAgent ? MISSING_HUNTER_UA
-    : legacyMismatch ? 'The current exclusions do not cover all retained legacy exclusions.' : '';
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -238,12 +227,6 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
         <h2 className="font-semibold">Review checks</h2>
         <Check label="Valid scope" issue={scopeError || (!review.scopeIn.length ? 'Add an authorized asset to make this target ready.' : '')} />
         <Check label="No in/out conflict" issue={conflict} />
-        <Check label="Execution policy applicable" issue={policyIssue} />
-        {unresolved.length > 0 && <ul aria-label="Program rules needing review" className="list-disc space-y-2 pl-5 text-sm">
-          {unresolved.map(rule => <li key={rule.number} id={'policy-rule-' + rule.number} className="scroll-mt-24 whitespace-pre-wrap break-words">
-            {rule.text}
-          </li>)}
-        </ul>}
       </section>
       {error && <p role="alert" className="text-danger">{error}</p>}
       <div className="flex items-center justify-end gap-3">
