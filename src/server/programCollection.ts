@@ -1,9 +1,11 @@
 import { prisma } from '@/lib/prisma';
 import { campaignFacts, campaignProgramSelect, campaignView } from './targetCampaign';
 import { paginationBounds, type PageRequest } from '@/lib/pagination';
+import { recoverStaleProgramDeletions } from './programDeletion';
 
 /** Repeatable read keeps count, page rows and campaign state in one snapshot. */
-export function programCollection(ownerId: string, input: PageRequest, unpaged = false) {
+export async function programCollection(ownerId: string, input: PageRequest, unpaged = false) {
+  await recoverStaleProgramDeletions(ownerId);
   return prisma.$transaction(async tx => {
     const where = { ownerId, ...(input.q ? { companyName: { contains: input.q, mode: 'insensitive' as const } } : {}) };
     const bounds = paginationBounds(input, await tx.bountyProgram.count({ where }));
