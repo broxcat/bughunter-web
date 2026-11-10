@@ -38,7 +38,7 @@ export default async function ResearchPage({searchParams}:{searchParams:Promise<
         researchSessions:{where:{consoleTargetId:{not:null}},select:{id:true,status:true},orderBy:[{createdAt:'desc'},{id:'desc'}],take:1},
         scanRuns:{where:{type:'RECON'},orderBy:[{createdAt:'desc'},{id:'desc'}],take:1,select:{status:true,outcome:true}},
       },
-      orderBy:[{program:{companyName:'asc'}},{host:'asc'},{id:'asc'}],
+      orderBy:[{host:'asc'},{id:'asc'}],
     });
     const history=await tx.researchSession.findMany({
       where:{...ownedResearch(userId),consoleTargetId:null,...(filter?{target:{...ownedResearch(userId).target,programId:filter}}:{})},
