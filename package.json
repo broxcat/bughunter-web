@@ -23,19 +23,12 @@
     "prisma:migrate:dev": "prisma migrate dev",
     "test:queue": "node tests/queue/runInfrastructure.mjs",
     "test:auth": "node tests/queue/runInfrastructure.mjs --auth-browser",
-    "test:research": "node tests/research/runInfrastructure.mjs && npm run test:research:console",
-    "test:research:final": "node --import tsx tests/e2e/researchFinal.mjs",
-    "test:research:mcp-rebuild": "node tests/research/mcpRebuild.mjs",
-    "test:research:recon": "tsx tests/research/reconDelivery.mts",
-    "test:research:console": "node --import tsx tests/research/runConsole.mjs",
     "recon:doctor": "tsx scripts/recon/doctor.mts",
     "test:recon:toolchain": "node tests/recon/runToolchain.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
     "@prisma/client": "^6.19.3",
-    "@xterm/addon-fit": "0.11.0",
-    "@xterm/xterm": "6.0.0",
     "bcryptjs": "^3.0.3",
     "bullmq": "^6.3.18",
     "htmlparser2": "^10.0.0",
@@ -49,7 +42,6 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "1.32.2",
     "@tailwindcss/turbopack": "^4",
     "@types/bcryptjs": "^3.0.0",
     "@types/node": "^24.19.2",
@@ -62,8 +54,7 @@
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5",
-    "vitest": "^5.0.5",
-    "ws": "8.22.0"
+    "vitest": "^5.0.5"
   },
   "overrides": {
     "@prisma/config@6.19.3": {

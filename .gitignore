@@ -54,12 +54,6 @@ next-env.d.ts
 
 /data/research/
 
-# Runner-only locked MCP dependencies
-docker/research/validator/node_modules/
-
-# Dedicated terminal signing keys / optional SSH public-key configuration
+# Retired Research console data, kept ignored until removed from the host
 data/research-terminal/
 data/research-ssh/
-
-# Research broker Python bytecode
-docker/research/broker/__pycache__/

@@ -52,31 +52,10 @@ services:
       TAILSCALE_BUGHUNTER_AUTHKEY: ""
       # Auth.js must use the browser-visible origin, not a container hostname.
       AUTH_URL: "${AUTH_URL:?Set AUTH_URL to the public origin used in your browser}"
-      RESEARCH_WORKSPACE_ROOT: /research-workspaces
-      RESEARCH_WORKSPACE_GID: "${RESEARCH_WORKSPACE_GID:-1000}"
-      RESEARCH_WORKSPACE_UID: "${RESEARCH_WORKSPACE_UID:-1000}"
-      RESEARCH_CONSOLE_ROOT: /research-target-workspaces
-      RESEARCH_EMBEDDING_URL: "${RESEARCH_EMBEDDING_URL:-}"
-      RESEARCH_EMBEDDING_MODEL: "${RESEARCH_EMBEDDING_MODEL:-}"
-      RESEARCH_TERMINAL_PRIVATE_KEY_FILE: /run/research-terminal/private.pem
-    volumes:
-      - research-workspaces:/research-workspaces
-      - type: bind
-        source: ${RESEARCH_HOST_ROOT:-/home/brokcat/bughunter-research}
-        target: /research-target-workspaces
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ./data/research-terminal/private.pem
-        target: /run/research-terminal/private.pem
-        read_only: true
-        bind:
-          create_host_path: false
     networks:
       default:
         gw_priority: 1
       tailscale_frontend:
-      research_terminal:
     depends_on:
       db:
         condition: service_healthy
@@ -94,28 +73,9 @@ services:
     env_file: .env
     environment:
       TAILSCALE_BUGHUNTER_AUTHKEY: ""
-      RESEARCH_WORKSPACE_ROOT: /research-workspaces
-      RESEARCH_WORKSPACE_GID: "${RESEARCH_WORKSPACE_GID:-1000}"
-      RESEARCH_WORKSPACE_UID: "${RESEARCH_WORKSPACE_UID:-1000}"
-      RESEARCH_CONSOLE_ROOT: /research-target-workspaces
-      RESEARCH_TERMINAL_PRIVATE_KEY_FILE: /run/research-terminal/private.pem
-    volumes:
-      - research-workspaces:/research-workspaces
-      - type: bind
-        source: ${RESEARCH_HOST_ROOT:-/home/brokcat/bughunter-research}
-        target: /research-target-workspaces
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ./data/research-terminal/private.pem
-        target: /run/research-terminal/private.pem
-        read_only: true
-        bind:
-          create_host_path: false
     networks:
       default:
         gw_priority: 1
-      research_terminal:
     depends_on:
       db:
         condition: service_healthy
@@ -161,102 +121,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Permanent per-target PTY/tmux/Codex environment. No application env_file.
-  research-console:
-    init: true
-    build:
-      context: .
-      dockerfile: docker/research/Dockerfile
-      args:
-        RESEARCH_WORKSPACE_UID: "${RESEARCH_WORKSPACE_UID:-1000}"
-        RESEARCH_WORKSPACE_GID: "${RESEARCH_WORKSPACE_GID:-1000}"
-    image: bughunter-research
-    environment:
-      RESEARCH_TERMINAL_ORIGIN: "${AUTH_URL:?Set AUTH_URL to the browser origin}"
-      RESEARCH_TERMINAL_PUBLIC_KEY_FILE: /run/research-terminal/public.pem
-      BURP_SERVICE_HOST: "${BURP_SERVICE_HOST-burp-private}"
-      BURP_MCP_HOST: "${BURP_MCP_HOST:-127.0.0.1}"
-      BURP_MCP_PORT: "${BURP_MCP_PORT:-9876}"
-      BURP_PROXY_HOST: "${BURP_PROXY_HOST:-127.0.0.1}"
-      BURP_PROXY_PORT: "${BURP_PROXY_PORT:-8080}"
-    expose: ["7681"]
-    ports:
-      - "127.0.0.1:${RESEARCH_SSH_PORT:-2222}:22"
-    networks: [research_egress, research_terminal, burp_link]
-    volumes:
-      - type: bind
-        source: ${RESEARCH_HOST_ROOT:-/home/brokcat/bughunter-research}
-        target: /workspaces
-        bind:
-          create_host_path: false
-      - research-host-keys:/etc/ssh/host-keys
-      - research-identities:/var/lib/bughunter-identities
-      - research-private-homes:/var/lib/bughunter-homes
-      - type: bind
-        source: ./data/research-ssh
-        target: /run/research-keys
-        read_only: true
-      - type: bind
-        source: ./data/research-terminal/public.pem
-        target: /run/research-terminal/public.pem
-        read_only: true
-        bind:
-          create_host_path: false
-    security_opt: ["no-new-privileges:true"]
-    cap_drop: [ALL]
-    # sshd/setpriv alone authenticate and drop to researcher; Codex/Node are non-root.
-    cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID, SYS_CHROOT, FOWNER, KILL, SETPCAP]
-    pids_limit: 512
-    mem_limit: 3g
-    shm_size: 1g
-    restart: unless-stopped
-
-  # Optional existing Community instance with independent network lifetime.
-  # Private forwarding ports are reachable only through burp_link; no host ports.
-  # Existing external Burp + SSH bridge remains supported without this profile.
-  burp:
-    profiles: [burp]
-    build:
-      context: .
-      dockerfile: docker/burp/Dockerfile
-    image: bughunter-burp
-    networks:
-      research_egress: {}
-      burp_link:
-        aliases: [burp-private]
-    environment:
-      BURP_PRIVATE_FORWARD: "yes"
-      BURP_ACCEPT_TERMS: "${BURP_ACCEPT_TERMS:-no}"
-    volumes:
-      - burp-home:/home/burp
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    pids_limit: 256
-    mem_limit: 2g
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import socket; from pathlib import Path; assert Path('/tmp/bughunter-burp-ready').exists(); socket.create_connection(('127.0.0.1',9876),2).close()"]
-      interval: 15s
-      start_period: 90s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-
-  # Same-origin cookie stripping before the isolated terminal. No secrets or host ports.
-  research-terminal-proxy:
-    build:
-      context: .
-      dockerfile: docker/research-terminal-proxy/Dockerfile
-    image: bughunter-research-terminal-proxy
-    networks: [research_terminal]
-    expose: ["8080"]
-    read_only: true
-    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    pids_limit: 32
-    mem_limit: 64m
-    restart: unless-stopped
-
   # Explicit profile for this project identity. Only Serve's HTTPS listener is exposed
   # inside the tailnet. No host ports, subnet routing, Funnel or egress proxy.
   tailscale-bughunter:
@@ -277,7 +141,6 @@ services:
       - ./docker/tailscale:/etc/bughunter-tailscale:ro
     networks:
       - tailscale_frontend
-      - research_terminal
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -290,14 +153,6 @@ services:
     restart: unless-stopped
 
 networks:
-  # Only ingress sidecar + console; web/worker/db/redis do not join this network.
-  research_terminal:
-    driver: bridge
-    internal: true
-  burp_link:
-    internal: true
-  research_egress:
-    driver: bridge
   # Keep the original default network and its egress for Recon/Ollama.
   # The frontend also needs internet egress for Tailscale control/DERP.
   tailscale_frontend:
@@ -307,10 +162,3 @@ volumes:
   pgdata:
   redisdata:
   tailscale-bughunter-state:
-  research-workspaces:
-  research-codex:
-  research-claude:
-  research-host-keys:
-  research-identities:
-  research-private-homes:
-  burp-home:
