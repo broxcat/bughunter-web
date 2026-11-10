@@ -22,7 +22,7 @@ export default function TargetCampaignView({ program, view, notice, summary }: {
     <header className="space-y-4 rounded-lg border border-border bg-surface p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div><p className="text-sm text-muted">{platformLabel(platform)}</p><h1 className="mt-1 break-words text-2xl font-semibold">{companyName}</h1></div>
-        <Link href={'/targets/' + id + '/details'} prefetch={false} className="text-sm text-brand underline">View details</Link>
+        <div className="flex items-center gap-3"><Link href={'/targets/' + id + '/details'} prefetch={false} className="text-sm text-brand underline">View details</Link><Link href={'/targets/' + id + '/settings#delete-target'} prefetch={false} className="text-sm text-danger underline">Delete target</Link></div>
       </div>
       <div className="flex flex-wrap items-center gap-2" aria-label="Current campaign stage">
         <span className="font-medium">{view.current.stage}</span><CampaignState state={view.current.state} />
