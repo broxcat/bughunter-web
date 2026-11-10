@@ -23,7 +23,7 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
   const readyPolicy = { automationAllowed: true, requiredUserAgent: 'CampaignFixture/1', requiredHeaders: [], exclusions: [],
     requestsPerSecond: 3, maxConcurrency: 2, forbiddenCategories: [], reviewState: 'OWNER_REVIEWED',
     sourceSnapshot: { url: null, rules: '', unrepresentedRules: [] } };
-  const blocked = await p.bountyProgram.create({ data: {
+  const unrepresented = await p.bountyProgram.create({ data: {
     ownerId, companyName: 'Orion — policy review', platform: 'HACKERONE', requiredUserAgent: 'CampaignFixture/1',
     scopeAssets: { create: { originalValue: 'app.example.test', normalizedValue: 'app.example.test', format: 'SUBDOMAIN', type: 'WEB_APPLICATION' } },
     executionPolicies: { create: { version: 1, policy: {
@@ -44,19 +44,29 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     // The initial list and campaign markup arrive on the document response.
     const response = await page.goto(origin + '/targets');
     assert.match(await response.text(), /Orion/);
-    const blockedRow = page.getByRole('row').filter({ hasText: blocked.companyName });
+    const unrepresentedRow = page.getByRole('row').filter({ hasText: unrepresented.companyName });
     const readyRow = page.getByRole('row').filter({ hasText: ready.companyName });
-    assert.match(await blockedRow.innerText(), /Policy review needed[\s\S]*Target[\s\S]*Blocked/);
+    assert.doesNotMatch(await unrepresentedRow.innerText(), /Policy review needed|Blocked/);
+    assert.match(await unrepresentedRow.innerText(), /Recon[\s\S]*Not started/);
     assert.match(await readyRow.innerText(), /Recon[\s\S]*Not started/);
-    await blockedRow.getByRole('link', { name: 'Open ' + blocked.companyName }).click();
-    await primary('link', 'Fix policy').waitFor();
-    await page.getByRole('status').filter({ hasText: '1 rule needs a decision.' }).waitFor();
-    await capture('blocked');
-    await primary('link', 'Fix policy').click();
-    await page.waitForURL(path(blocked.id) + '/settings#policy-rule-1');
-    const anchoredRule = page.locator('#policy-rule-1');
-    await anchoredRule.waitFor();
-    assert.equal(await anchoredRule.innerText(), 'Testing is permitted only during an approved window.');
+    await unrepresentedRow.getByRole('link', { name: 'Open ' + unrepresented.companyName }).click();
+    await primary('button', 'Start recon').waitFor();
+
+    const deletable = await p.bountyProgram.create({ data: {
+      ownerId, companyName: 'Orion — deletable blocked target', platform: 'HACKERONE', requiredUserAgent: 'CampaignFixture/1',
+      scopeAssets: { create: { originalValue: 'delete.example.test', normalizedValue: 'delete.example.test', format: 'SUBDOMAIN', type: 'WEB_APPLICATION' } },
+      campaign: { create: { state: 'BLOCKED', reason: 'Synthetic blocked state for deletion coverage.' } },
+    } });
+    await page.goto(path(deletable.id));
+    await page.getByRole('link', { name: 'Delete target', exact: true }).click();
+    await page.waitForURL(path(deletable.id) + '/settings#delete-target');
+    const deleteButton = page.getByRole('button', { name: 'Delete target', exact: true });
+    await deleteButton.waitFor();
+    await deleteButton.click();
+    const deleteDialog = page.getByRole('dialog');
+    await deleteDialog.getByRole('button', { name: 'Confirm deletion', exact: true }).click();
+    await page.waitForURL(origin + '/targets?deleted=1');
+    assert.equal(await p.bountyProgram.count({ where: { id: deletable.id } }), 0);
 
     const readyResponse = await page.goto(path(ready.id));
     assert.match(await readyResponse.text(), /Start recon/);
@@ -130,7 +140,7 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     await page.getByRole('link', { name: 'Open report', exact: true }).click();
     await page.waitForURL(path(ready.id) + '/report?finding=' + finding.id);
     await page.getByText('Confirmed findings · 1 selected', { exact: true }).waitFor();
-    const wrongProgram = await context.request.get(path(blocked.id) + '/report?finding=' + finding.id);
+    const wrongProgram = await context.request.get(path(unrepresented.id) + '/report?finding=' + finding.id);
     const wrongProgramHtml = await wrongProgram.text();
     assert.match(wrongProgramHtml, /This page could not be found|NEXT_HTTP_ERROR_FALLBACK;404/);
     assert(!wrongProgramHtml.includes(finding.title));
@@ -144,6 +154,6 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     const idleList = requestPaths.length;
     await page.waitForTimeout(5600);
     assert.deepEqual(campaignRequests(idleList), [], 'idle Targets list makes no background API requests');
-    console.log('TARGET_CAMPAIGN: blocked, ready, active progress, Research, Findings, Report and idle network passed');
+    console.log('TARGET_CAMPAIGN: dormant policy, blocked deletion, ready, active progress, Research, Findings, Report and idle network passed');
   } finally { page.off('request', onRequest); }
 }
