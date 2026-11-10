@@ -12,7 +12,7 @@ import { executionPolicySchema, hasHunterUsername, storedExecutionPolicySchema }
 import { programUpdateSchema } from "@/lib/bountyProgram";
 import { deleteProgram } from '@/server/programDeletion';
 import { ResearchError } from '@/server/research/workspace';
-import { targetIdentity } from '@/lib/research/terminal';
+import { targetIdentity } from '@/lib/research/identity';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { targetReviewSchema } from '@/lib/targetReview';
 import { scopeEntriesForSettings, targetScopeVersion, reviewedPolicy as buildReviewedPolicy, storeTestAccounts, updateReviewedScope } from '@/server/targetReview';

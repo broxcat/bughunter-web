@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma';
-import { targetIdentity } from '@/lib/research/terminal';
+import { targetIdentity } from '@/lib/research/identity';
 import { ResearchError } from './research/workspace';
 
 /** Keep existing ScanRun/ResearchSession FKs and worker/PTY infrastructure.

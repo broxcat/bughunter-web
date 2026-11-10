@@ -1,7 +1,7 @@
 import { auth } from '@/lib/auth';
 import { ensureProgramContext } from '@/server/programContext';
 import { ResearchError } from '@/server/research/workspace';
-import { targetIdentity } from '@/lib/research/terminal';
+import { targetIdentity } from '@/lib/research/identity';
 import { foreignOrigin } from '@/lib/requestOrigin';
 export async function POST(_req: Request, { params }: { params: Promise<{id:string}> }) {
   const session = await auth();

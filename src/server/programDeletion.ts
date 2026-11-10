@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { logger } from '@/lib/logger';
-import { targetIdentity } from '@/lib/research/terminal';
+import { targetIdentity } from '@/lib/research/identity';
 
 /** Deletion owns SQL only. Workers observe vanished runs and the collector owns
  * external resources, including consoles that are currently unreachable. */

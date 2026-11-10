@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import { foreignOrigin } from '@/lib/requestOrigin';
-import { targetIdentity } from '@/lib/research/terminal';
+import { targetIdentity } from '@/lib/research/identity';
 import { dismissAutomationBan } from '@/server/automationDecisions';
 import { assetError } from '@/server/scopeAssets';
 const input = z.strictObject({ phrase: z.string().min(1).max(64000), expectedPolicyVersion: z.number().int().nonnegative() });
