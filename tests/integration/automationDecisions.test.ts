@@ -84,6 +84,15 @@ describe.skipIf(!db)('owner decision for one exact automation phrase', () => {
     expect(next.executionPolicies[0].policy).toMatchObject({ automationDecisions: (saved.executionPolicies[0].policy as { automationDecisions: unknown }).automationDecisions });
     expect(resolve(next).blocker).toBeNull();
   });
+  it('creates a first policy version for a legacy Target without a stored policy', async () => {
+    const program = await fixture();
+    await p.programExecutionPolicy.deleteMany({ where: { programId: program.id } });
+    expect((await load(userId, program.id))!.view.automationBlock).toEqual({ phrase: first, version: 0 });
+    expect((await request(program.id, first, 0)).status).toBe(200);
+    const saved = await policyProgram(program.id);
+    expect(saved.executionPolicies[0]).toMatchObject({ version: 1, policy: { automationAllowed: true, automationDecisions: [{ phrase: first }] } });
+    expect(resolve(saved).blocker).toBeNull();
+  });
   it('requires authentication, ownership and a same-origin browser request', async () => {
     const program = await fixture();
     auth.mockResolvedValueOnce(null); expect((await request(program.id)).status).toBe(401);

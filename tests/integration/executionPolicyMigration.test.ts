@@ -1,4 +1,4 @@
-import { automationDenials, automationNonDenials, modelOnlyDenial } from '../fixtures/automationProhibition';
+import { automationDenials, automationNonDenials, modelOnlyDenial, reportRestrictions } from '../fixtures/automationProhibition';
 import { findAutomationProhibition } from '@/lib/automationProhibition.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -28,6 +28,22 @@ describe.skipIf(!db)('draft policy activation migration', () => {
     const snapshot = { ruleDecisions: [{ text: automationDenials[0] }], sourceDocument: modelOnlyDenial };
     const [result] = await p.$queryRaw<{ evidence: string | null }[]>`SELECT program_automation_prohibition(program_automation_source('', ${JSON.stringify(snapshot)}::jsonb)) AS evidence`;
     expect(result.evidence).toBe(automationDenials[0]);
+  });
+  it('reclassifies a stored reporting-only AI quote and still detects another testing ban', async () => {
+    const owner = await p.user.create({ data: { email: randomUUID() + '@example.test' } });
+    const inputs = [reportRestrictions[0], reportRestrictions[0] + '\n' + automationDenials[0]];
+    const ids: string[] = [];
+    for (const rules of inputs) {
+      const program = await p.bountyProgram.create({ data: { ownerId: owner.id, companyName: 'Reporting quote migration', requiredUserAgent: 'Fixture/1',
+        executionPolicies: { create: { version: 1, policy: { reviewState: 'IMPORT_DRAFT', automationAllowed: false, automationProhibition: reportRestrictions[0],
+          requiredUserAgent: 'Fixture/1', requiredHeaders: [], exclusions: [], requestsPerSecond: 2, maxConcurrency: 1, forbiddenCategories: [],
+          sourceSnapshot: { url: null, rules, unrepresentedRules: [] } } } } } });
+      ids.push(program.id);
+    }
+    const sql = (await readFile('prisma/migrations/20261110150000_target_cascade_and_active_policy/migration.sql', 'utf8')).split('-- Append a new active version')[1];
+    for (const statement of ('-- Append a new active version' + sql).split(';').map(s => s.trim()).filter(Boolean)) await p.$executeRawUnsafe(statement);
+    expect(await p.programExecutionPolicy.findUniqueOrThrow({ where: { programId_version: { programId: ids[0], version: 2 } } })).toMatchObject({ policy: { automationAllowed: true, automationProhibition: null } });
+    expect(await p.programExecutionPolicy.findUniqueOrThrow({ where: { programId_version: { programId: ids[1], version: 2 } } })).toMatchObject({ policy: { automationAllowed: false, automationProhibition: automationDenials[0] } });
   });
   it('appends active versions, preserves explicit bans and history, and releases review campaigns once', async () => {
     const owner = await p.user.create({ data: { email: randomUUID() + '@example.test' } });
