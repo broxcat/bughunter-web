@@ -10,6 +10,10 @@ export const TEST_CATEGORIES = [
 ] as const;
 export type TestCategory = typeof TEST_CATEGORIES[number];
 
+// Temporarily keep persisted policy data dormant. Scope boundaries and explicit
+// exclusions remain authoritative, but policy review/category/rate gates do not.
+export const EXECUTION_POLICY_ENFORCEMENT = false;
+
 const forbiddenHeaders = new Set([
   'host', 'user-agent', 'content-length', 'transfer-encoding', 'connection', 'upgrade',
   'keep-alive', 'te', 'trailer', 'expect', 'cookie', 'authorization', 'forwarded',
