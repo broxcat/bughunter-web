@@ -40,7 +40,7 @@ describe.skipIf(!db)('draft policy activation migration', () => {
           sourceSnapshot: { url: null, rules, unrepresentedRules: [] } } } } } });
       ids.push(program.id);
     }
-    const sql = (await readFile('prisma/migrations/20261110150000_target_cascade_and_active_policy/migration.sql', 'utf8')).split('-- Append a new active version')[1];
+    const sql = (await readFile('prisma/migrations/20261112003000_target_cascade_and_active_policy/migration.sql', 'utf8')).split('-- Append a new active version')[1];
     for (const statement of ('-- Append a new active version' + sql).split(';').map(s => s.trim()).filter(Boolean)) await p.$executeRawUnsafe(statement);
     expect(await p.programExecutionPolicy.findUniqueOrThrow({ where: { programId_version: { programId: ids[0], version: 2 } } })).toMatchObject({ policy: { automationAllowed: true, automationProhibition: null } });
     expect(await p.programExecutionPolicy.findUniqueOrThrow({ where: { programId_version: { programId: ids[1], version: 2 } } })).toMatchObject({ policy: { automationAllowed: false, automationProhibition: automationDenials[0] } });
@@ -65,7 +65,7 @@ describe.skipIf(!db)('draft policy activation migration', () => {
         campaign: { create: { state: 'BLOCKED', reason: 'Platform rules need review.' } } } });
       ids.push(program.id);
     }
-    const sql = (await readFile('prisma/migrations/20261110150000_target_cascade_and_active_policy/migration.sql', 'utf8')).split('-- Append a new active version')[1];
+    const sql = (await readFile('prisma/migrations/20261112003000_target_cascade_and_active_policy/migration.sql', 'utf8')).split('-- Append a new active version')[1];
     // Prisma's raw prepared statements accept one statement at a time.
     const statements = ('-- Append a new active version' + sql).split(';').map(s => s.trim()).filter(Boolean);
     for (const statement of statements) await p.$executeRawUnsafe(statement);

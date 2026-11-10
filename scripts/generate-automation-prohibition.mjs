@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { automationProhibitionPattern, automationSentenceSeparator, automationSourcePaths, automationReportingSubjectPattern } from '../src/lib/automationProhibition.mjs';
-const path = new URL('../prisma/migrations/20261110150000_target_cascade_and_active_policy/migration.sql', import.meta.url);
+const path = new URL('../prisma/migrations/20261112003000_target_cascade_and_active_policy/migration.sql', import.meta.url);
 export const generatedFunction = `-- BEGIN GENERATED AUTOMATION DETECTION (npm run policy:generate-detection)
 CREATE OR REPLACE FUNCTION program_is_reporting_restriction(source TEXT) RETURNS BOOLEAN
 LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $function$
