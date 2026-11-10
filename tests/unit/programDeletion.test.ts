@@ -15,6 +15,7 @@ const m = vi.hoisted(() => ({
   deleteReport: vi.fn(),
   deleteScope: vi.fn(),
   tombstone: vi.fn(),
+  release: vi.fn(),
   fail: false,
 }));
 vi.mock("@/server/research/workspaceCleanup", () => ({
@@ -31,6 +32,7 @@ vi.mock("@/lib/prisma", () => {
     $queryRaw: vi.fn(async () => (m.exists ? [{ id: "program" }] : [])),
     bountyProgram: {
       update: m.tombstone,
+      updateMany: m.release,
       findFirst: vi.fn(async () => ({ id: "program", state: "BLOCKED" })),
       delete: vi.fn(async () => {
         m.exists = false;
@@ -62,13 +64,14 @@ vi.mock("@/lib/prisma", () => {
     },
   };
 });
-import { deleteProgram } from "@/server/programDeletion";
+import { deleteProgram, recoverStaleProgramDeletions } from "@/server/programDeletion";
 describe("Target deletion without Research runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     m.exists = true;
     m.sessions = [];
     m.remove.mockResolvedValue(undefined);
+    m.release.mockResolvedValue({ count: 1 });
     vi.stubGlobal(
       "fetch",
       vi.fn(() => {
@@ -100,7 +103,7 @@ describe("Target deletion without Research runtime", () => {
     });
     expect(fetch).not.toHaveBeenCalled();
   });
-  it("resumes a deletion interrupted after its tombstone", async () => {
+  it("releases the tombstone when deletion is interrupted, then retries cleanly", async () => {
     m.sessions = [
       {
         id: "old",
@@ -114,9 +117,25 @@ describe("Target deletion without Research runtime", () => {
       "interrupted",
     );
     expect(m.exists).toBe(true);
+    expect(m.release).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: "program", ownerId: "owner" }),
+      data: { deletingAt: null },
+    }));
     await deleteProgram("owner", "program");
     expect(m.exists).toBe(false);
     expect(m.tombstone).toHaveBeenCalledTimes(2);
+  });
+  it("recovers an abandoned deletion marker", async () => {
+    const now = new Date("2026-11-10T12:00:00.000Z");
+    await recoverStaleProgramDeletions("owner", "program", now);
+    expect(m.release).toHaveBeenCalledWith({
+      where: {
+        ownerId: "owner",
+        id: "program",
+        deletingAt: { lt: new Date("2026-11-10T11:55:00.000Z") },
+      },
+      data: { deletingAt: null },
+    });
   });
   it("keeps shared scopes and reports belonging to other Targets", async () => {
     await deleteProgram("owner", "program");
