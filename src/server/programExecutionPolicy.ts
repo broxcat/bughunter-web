@@ -1,10 +1,11 @@
+import { automationSourceText, findAutomationProhibition } from '@/lib/automationProhibition.mjs';
 
 import { BlockList, isIP } from 'node:net';
 import { createHash } from 'node:crypto';
 import { requiredUserAgentSchema } from '@/lib/httpPolicy.mjs';
 import { isExcluded, matchesHost } from '@/lib/bountyProgram';
 import { assetAllowsHost, assetAllowsUrl, detectScopeAsset, type AssetBoundary } from '@/lib/scopeAssets';
-import { explicitlyForbidsAutomation, storedExecutionPolicySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME, hasHunterTemplate, hasHunterUsername, replaceHunterTemplate, identificationHeadersSchema, type TestCategory } from '@/lib/programExecutionPolicy';
+import { storedExecutionPolicySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME, hasHunterTemplate, hasHunterUsername, replaceHunterTemplate, identificationHeadersSchema, type TestCategory } from '@/lib/programExecutionPolicy';
 
 
 export const currentPolicySelection = { orderBy: { version: 'desc' as const }, take: 1 };
@@ -36,7 +37,9 @@ export function resolveProgramPolicy(program: PolicyProgram) {
   const userAgent = resolve(rawUserAgent);
   const resolvedHeaders = rawHeaders.map(({ name, value }) => ({ name, value: resolve(value) }));
   const headers = usernameMissing ? {} : Object.fromEntries(resolvedHeaders.map(({ name, value }) => [name, value]));
-  const blocker = (policy ? !policy.automationAllowed : explicitlyForbidsAutomation(program.rulesOfEngagement ?? '')) ? 'The program policy does not allow automation.'
+  const automationProhibition = policy?.automationProhibition ?? findAutomationProhibition(automationSourceText(program.rulesOfEngagement, policy?.sourceSnapshot));
+  const automationBlocked = policy ? !policy.automationAllowed : automationProhibition !== null;
+  const blocker = automationBlocked ? 'The program policy does not allow automation.' + (automationProhibition ? ' Program rule: ' + automationProhibition : '')
     : usernameMissing ? MISSING_HUNTER_USERNAME
     : appendUserAgent && !requiredUserAgentSchema.safeParse(defaultUserAgent).success ? MISSING_HUNTER_UA
     : !identificationHeadersSchema.safeParse(resolvedHeaders).success ? 'Resolved required headers are invalid. Check the program policy and HUNTER_USERNAME.'
