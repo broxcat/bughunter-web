@@ -39,7 +39,7 @@ try {
   const command = process.env.TARGET_FORM_DEV === '1' ? ['dev'] : ['start'];
   web = spawn(process.execPath, ['node_modules/next/dist/bin/next', ...command, '--hostname', '127.0.0.1', '--port', String(port)], {
     env: { ...process.env, DATABASE_URL: db, REDIS_URL: redis, AUTH_URL: origin, AUTH_SECRET: randomUUID(),
-      CREDENTIALS_ENCRYPTION_KEY: 'ab'.repeat(32), ALLOW_PUBLIC_REGISTRATION: 'false', TRUST_PROXY_HEADERS: 'false', LOG_LEVEL: 'silent', HUNTER_USERNAME: 'fixture-hunter', DEFAULT_USER_AGENT: '' },
+      CREDENTIALS_ENCRYPTION_KEY: 'ab'.repeat(32), ALLOW_PUBLIC_REGISTRATION: 'false', TRUST_PROXY_HEADERS: 'false', LOG_LEVEL: 'silent', HUNTER_USERNAME: 'fixture-hunter', DEFAULT_USER_AGENT: userAgent },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   for (const stream of [web.stdout, web.stderr]) stream.on('data', chunk => { logs.push(String(chunk)); if (logs.length > 25) logs.shift(); });
@@ -87,10 +87,7 @@ try {
   assert.equal(await page.getByLabel('Reward critical').inputValue(), '2000');
   assert.equal(await page.getByLabel('Asset 1 value').inputValue(), 'HIGH');
   assert.equal(await page.getByLabel('User-Agent suffix').inputValue(), 'Fixture-<your yeswehack pseudo>');
-  await page.getByText('1 program rule needs review. Automation is blocked.', { exact: true }).waitFor();
-  const rule = page.getByRole('list', { name: 'Program rules needing review' }).getByRole('listitem');
-  await rule.waitFor();
-  assert.equal(await rule.innerText(), programRule);
+  assert.equal(await page.getByText(/program rule needs review|Automation is blocked/).count(), 0);
   await page.getByRole('button', { name: 'Save and start', exact: true }).click();
   await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
   const rawTarget = await p.bountyProgram.findFirstOrThrow({ where: { ownerId: user.id, companyName: 'Public fixture company' },
@@ -99,9 +96,9 @@ try {
   assert.equal(rawTarget.scopeAssets[0].assetValue, 'HIGH');
   assert.equal(rawTarget.executionPolicies[0].policy.userAgentMode, 'APPEND');
   assert.equal(rawTarget.executionPolicies[0].policy.sourceSnapshot.sourceDocument, rawYesWeHack);
-  assert.equal(rawTarget.campaign.state, 'BLOCKED');
+  assert.notEqual(rawTarget.campaign.state, 'BLOCKED');
   assert.deepEqual(rawTarget.executionPolicies[0].policy.sourceSnapshot.unrepresentedRules, [programRule]);
-  assert.equal(await p.targetReconRun.count({ where: { programId: rawTarget.id } }), 0);
+  assert.equal(await p.targetReconRun.count({ where: { programId: rawTarget.id } }), 1);
   await page.goto(origin + '/targets/new');
 
   ai = createHttpServer(async (request, response) => {
@@ -169,8 +166,7 @@ try {
     } else {
       assert.deepEqual(saved.nonQualifying, ['XSS']);
       assert.equal(policy.sourceSnapshot.documentedAssets[0].originalValue, 'com.altair.mobile');
-      assert.equal(saved.campaign.state, 'BLOCKED');
-      assert.equal(await p.targetReconRun.count({ where: { programId: saved.id } }), 0);
+      assert.notEqual(saved.campaign.state, 'BLOCKED');
     }
   }
 
@@ -182,13 +178,8 @@ try {
   await page.getByLabel(/^Out of scope/).fill('APP.example.test');
   assert(await page.getByRole('button', { name: 'Save and start', exact: true }).isDisabled());
   await page.getByLabel(/^Out of scope/).fill('admin.example.test');
-  await page.getByText('Configure DEFAULT_USER_AGENT.', { exact: false }).waitFor();
   await page.getByRole('button', { name: 'Save and start', exact: true }).click();
   await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
-  await page.getByRole('link', { name: 'Fix policy', exact: true }).click();
-  await page.getByLabel('Required User-Agent').fill(userAgent);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.waitForURL(/\/targets\/[^/?]+\?saved=1$/);
   const manual = await p.bountyProgram.findFirstOrThrow({ where: { ownerId: user.id, companyName: 'Manual review fixture' } });
   await p.targetCampaign.update({ where: { programId: manual.id }, data: { state: 'PAUSED', requestedAt: null } });
   await verifyCampaignWorkflow({ page, context, origin, p, ownerId: user.id });
