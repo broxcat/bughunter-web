@@ -10,6 +10,11 @@ export const TEST_CATEGORIES = [
 ] as const;
 export type TestCategory = typeof TEST_CATEGORIES[number];
 
+// Program execution policy enforcement is intentionally disabled for now.
+// Structured scope exclusions remain enforced independently so disabling policy
+// never expands the authorized request boundary.
+export const EXECUTION_POLICY_ENFORCEMENT = false;
+
 const forbiddenHeaders = new Set([
   'host', 'user-agent', 'content-length', 'transfer-encoding', 'connection', 'upgrade',
   'keep-alive', 'te', 'trailer', 'expect', 'cookie', 'authorization', 'forwarded',

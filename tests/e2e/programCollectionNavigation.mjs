@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 export async function auditProgramCollections({prisma,owner,origin,context,page}) {
  const prefix=owner.id+'_page_',name='Pagination fixture',data=Array.from({length:51},(_,n)=>({id:prefix+String(n).padStart(3,'0'),ownerId:owner.id,companyName:name,requiredUserAgent:'Fixture/1'}));
  await prisma.bountyProgram.createMany({data});let checks=0;
- for(const path of ['/targets','/recon'])for(const theme of ['light','dark'])for(const width of [1280,390]){
+ for(const path of ['/recon'])for(const theme of ['light','dark'])for(const width of [1280,390]){
   await page.setViewportSize({width,height:900});await page.evaluate(t=>localStorage.setItem('theme',t),theme);
   const query='q='+encodeURIComponent(name)+'&pageSize=25';
   await page.goto(origin+path+'?'+query);await page.getByRole('status').filter({hasText:'Page 1 of 3'}).waitFor();
@@ -15,6 +15,15 @@ export async function auditProgramCollections({prisma,owner,origin,context,page}
   const deleted=await context.request.delete(origin+'/api/programs/'+prefix+'050');assert.equal(deleted.status(),200);await page.reload();await page.getByRole('status').filter({hasText:'Page 2 of 2 · 50 results'}).waitFor();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await prisma.bountyProgram.create({data:data[50]});checks++;
+ }
+ for(const theme of ['light','dark'])for(const width of [1280,390]){
+  await page.setViewportSize({width,height:900});await page.evaluate(t=>localStorage.setItem('theme',t),theme);
+  await page.goto(origin+'/targets');
+  assert.equal(await page.getByLabel('Search targets',{exact:true}).count(),0);
+  assert.equal(await page.getByRole('navigation',{name:'Collection pages',exact:true}).count(),0);
+  assert.equal(await page.getByText(name,{exact:true}).count(),51);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  checks++;
  }
  // Real modal semantics with a paused, synthetic deletion response. No deletion
  // or console/provider stop is sent while exercising keyboard behavior.
@@ -35,7 +44,7 @@ export async function auditProgramCollections({prisma,owner,origin,context,page}
  }finally{release();await context.unroute(pattern,intercept);}
  const contrast=(a,b)=>{const lum=s=>{const rgb=s.match(/[\d.]+/g).slice(0,3).map(Number).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};const x=lum(a),y=lum(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
  for(const theme of ['light','dark']){
-  await page.evaluate(t=>localStorage.setItem('theme',t),theme);await page.goto(origin+'/targets');await page.getByRole('status').filter({hasText:/^Page /}).waitFor();await page.getByRole('link',{name:'Create target',exact:true}).click();
+  await page.evaluate(t=>localStorage.setItem('theme',t),theme);await page.goto(origin+'/targets');await page.getByRole('link',{name:'Create target',exact:true}).click();
   const input=page.getByLabel('Name',{exact:true});await input.waitFor();await input.focus();
   const colors=await input.evaluate(e=>{const s=getComputedStyle(e);return{fg:s.color,bg:s.backgroundColor,border:s.borderTopColor,ring:s.outlineColor};});
   assert(contrast(colors.fg,colors.bg)>=4.5,theme+' input text contrast');

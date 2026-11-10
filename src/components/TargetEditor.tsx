@@ -5,9 +5,8 @@ import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { BOUNTY_PLATFORMS } from '@/lib/bountyProgram';
 import { platformLabel } from '@/lib/platformPresentation';
-import { executionPolicySchema, hasHunterTemplate, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME } from '@/lib/programExecutionPolicy';
+import { executionPolicySchema } from '@/lib/programExecutionPolicy';
 import { intakePreviewSchema, MAX_PROGRAM_SOURCE, splitNonQualifying, type IntakeInput } from '@/lib/programIntake';
-import { detectScopeAsset } from '@/lib/scopeAssets';
 import { scopeReviewChecks, targetReviewSchema } from '@/lib/targetReview';
 import type { ProgramData } from '@/lib/targetFormData';
 import { campaignSourceSchema, type CampaignSource } from '@/lib/campaignSource';
@@ -18,10 +17,8 @@ type Platform = (typeof BOUNTY_PLATFORMS)[number];
 const levels = ['Low', 'Medium', 'High', 'Critical'] as const;
 const policyShape = executionPolicySchema.omit({ sourceSnapshot: true });
 
-export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUsername, hasAi }: {
+export default function TargetEditor({ program, hasAi }: {
   program?: ProgramData;
-  hunterHasUserAgent: boolean;
-  hunterHasUsername: boolean;
   hasAi: boolean;
 }) {
   const router = useRouter();
@@ -103,9 +100,6 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
   const { scopeError, conflict } = scopeReviewChecks(review.scopeIn, policy.exclusions);
   const policyResult = policyShape.safeParse(policy);
   const legacy = program?.legacyPolicyReview;
-  const legacyMismatch = Boolean(legacy && (legacy.unconvertible.length || legacy.exclusions.some(value => !policy.exclusions.some(exclusion => {
-    try { return detectScopeAsset(exclusion).normalizedValue === value; } catch { return false; }
-  }))));
   const association = importedFrom ?? (stored?.sourceSnapshot.sourceDocument ? { url: program?.programUrl ?? '', platform: program?.platform ?? '' } : null);
   const changedSource = Boolean(association && (association.url !== url.trim() || association.platform !== platform));
   const unreviewedMarkdown = Boolean(markdown.trim() && markdown !== sourceDocument);
@@ -113,17 +107,6 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
   const proseExclusions = allowProse ? lines(review.exclusions).filter(value => !isStructuredExclusion(value)) : [];
   const rules = [...review.rules];
   for (const text of proseExclusions) if (!rules.some(rule => rule.text === text)) rules.push({ text, decision: null, origin: 'AI_INTAKE' });
-  const unresolved = rules.filter(rule => !rule.decision).length;
-  const needsUsername = [policy.requiredUserAgent ?? '', ...policy.requiredHeaders.map(header => header.value)].some(hasHunterTemplate) && !hunterHasUsername;
-  const policyIssue = !policyResult.success ? (policyResult.error.issues[0]?.message ?? 'Invalid execution policy.')
-    : changedSource ? 'Extract the program rules again after changing its URL or platform.'
-    : unreviewedMarkdown ? 'Extract the pasted Markdown before running automation.'
-    : descriptionEdited ? 'The description has changed. Extract the current rules again before running automation.'
-    : unresolved ? unresolved + (unresolved === 1 ? ' program rule could' : ' program rules could') + ' not be represented safely. Review the source before running automation.'
-    : !policy.automationAllowed ? 'The program policy does not allow automation.'
-    : needsUsername ? MISSING_HUNTER_USERNAME
-    : (!policy.requiredUserAgent || policy.userAgentMode === 'APPEND') && !hunterHasUserAgent ? MISSING_HUNTER_UA
-    : legacyMismatch ? 'The current exclusions do not cover all retained legacy exclusions.' : '';
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -238,7 +221,6 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
         <h2 className="font-semibold">Review checks</h2>
         <Check label="Valid scope" issue={scopeError || (!review.scopeIn.length ? 'Add an authorized asset to make this target ready.' : '')} />
         <Check label="No in/out conflict" issue={conflict} />
-        <Check label="Execution policy applicable" issue={policyIssue} />
       </section>
       {error && <p role="alert" className="text-danger">{error}</p>}
       <div className="flex items-center justify-end gap-3">

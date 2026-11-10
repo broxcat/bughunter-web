@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { requiredUserAgentSchema } from '@/lib/httpPolicy.mjs';
 import { isExcluded, matchesHost } from '@/lib/bountyProgram';
 import { assetAllowsHost, assetAllowsUrl, detectScopeAsset, type AssetBoundary } from '@/lib/scopeAssets';
-import { policyDraftNeedsReview, storedExecutionPolicySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME, hasHunterTemplate, hasHunterUsername, replaceHunterTemplate, identificationHeadersSchema, type TestCategory } from '@/lib/programExecutionPolicy';
+import { EXECUTION_POLICY_ENFORCEMENT, policyDraftNeedsReview, storedExecutionPolicySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME, hasHunterTemplate, hasHunterUsername, replaceHunterTemplate, identificationHeadersSchema, type TestCategory } from '@/lib/programExecutionPolicy';
 
 import { captureLegacyScopes, legacyExclusionParity, legacyScopeFingerprint, legacyScopeTargets } from './legacyPolicySource';
 
@@ -34,7 +34,7 @@ export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules)
   const rawUserAgent = appendUserAgent ? defaultUserAgent && defaultUserAgent + ' ' + programUserAgent
     : programUserAgent || defaultUserAgent;
   const username = process.env.HUNTER_USERNAME;
-  const rawHeaders = policy?.requiredHeaders ?? [];
+  const rawHeaders = EXECUTION_POLICY_ENFORCEMENT ? policy?.requiredHeaders ?? [] : [];
   const usernameMissing = [rawUserAgent, programUserAgent, ...rawHeaders.map(header => header.value)].some(hasHunterTemplate) && !hasHunterUsername(username);
   const resolve = (value: string) => usernameMissing ? '' : replaceHunterTemplate(value, username ?? '');
   const userAgent = resolve(rawUserAgent);
@@ -53,17 +53,19 @@ export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules)
   const unrepresented = sourceMismatch || legacyChanged || (hasScopeProse && !reviewedScope) ||
     Boolean(captured?.scopes.length && !reviewedScope) || Boolean(parity && (parity.missing.length || parity.unconvertible.length)) ||
     (policy ? policy.sourceSnapshot.unrepresentedRules.length > 0 : Boolean(program.rulesOfEngagement?.trim()));
-  const blocker = policyDraftNeedsReview(policy?.reviewState) ? 'Automation is blocked until you review and save the imported policy in Target settings.'
-    : unrepresented ? 'Automation is blocked by unrepresented program or scope rules. Review the execution policy in Target settings.'
-    : policy && !policy.automationAllowed ? 'The program policy does not allow automation.'
+  const blocker = EXECUTION_POLICY_ENFORCEMENT && policyDraftNeedsReview(policy?.reviewState) ? 'Automation is blocked until you review and save the imported policy in Target settings.'
+    : EXECUTION_POLICY_ENFORCEMENT && unrepresented ? 'Automation is blocked by unrepresented program or scope rules. Review the execution policy in Target settings.'
+    : EXECUTION_POLICY_ENFORCEMENT && policy && !policy.automationAllowed ? 'The program policy does not allow automation.'
     : usernameMissing ? MISSING_HUNTER_USERNAME
     : appendUserAgent && !requiredUserAgentSchema.safeParse(defaultUserAgent).success ? MISSING_HUNTER_UA
-    : !identificationHeadersSchema.safeParse(resolvedHeaders).success ? 'Resolved required headers are invalid. Check the program policy and HUNTER_USERNAME.'
+    : EXECUTION_POLICY_ENFORCEMENT && !identificationHeadersSchema.safeParse(resolvedHeaders).success ? 'Resolved required headers are invalid. Check the program policy and HUNTER_USERNAME.'
     : !requiredUserAgentSchema.safeParse(userAgent).success || userAgent !== userAgent.trim() || /\\[rn]/.test(userAgent) ? MISSING_HUNTER_UA
     : null;
   const exclusions = (policy ? policy.exclusions : []).map(value => detectScopeAsset(value));
-  const limits = { requestsPerSecond: policy?.requestsPerSecond ?? LEGACY_LIMITS.requestsPerSecond, maxConcurrency: policy?.maxConcurrency ?? LEGACY_LIMITS.maxConcurrency };
-  const forbiddenCategories = policy ? policy.forbiddenCategories : [];
+  const limits = EXECUTION_POLICY_ENFORCEMENT
+    ? { requestsPerSecond: policy?.requestsPerSecond ?? LEGACY_LIMITS.requestsPerSecond, maxConcurrency: policy?.maxConcurrency ?? LEGACY_LIMITS.maxConcurrency }
+    : LEGACY_LIMITS;
+  const forbiddenCategories = EXECUTION_POLICY_ENFORCEMENT && policy ? policy.forbiddenCategories : [];
   const version = row?.version ?? 0;
   const fingerprint = createHash('sha256').update(JSON.stringify([version, blocker, headers, userAgent, program.outOfScope, exclusions, limits, forbiddenCategories])).digest('hex');
   return { version, userAgent, headers, reviewedScope, exclusions, legacyExclusions: program.outOfScope, limits, forbiddenCategories, blocker, fingerprint };
@@ -135,7 +137,7 @@ export function authorizeExecution(ctx: ExecutionBoundary, activity: { tool?: st
   const { tool, url, dnsHost } = activity;
   const policy = ctx.policy;
   if (policy?.blocker) throw new Error(policy.blocker);
-  if (tool !== undefined) {
+  if (EXECUTION_POLICY_ENFORCEMENT && tool !== undefined) {
     const categories = Object.hasOwn(toolCategories, tool) ? toolCategories[tool] : undefined;
     if (!categories) throw new Error('Unclassified execution tool');
     if (categories.some(category => policy?.forbiddenCategories.includes(category))) throw new Error('Test category forbidden by the program');

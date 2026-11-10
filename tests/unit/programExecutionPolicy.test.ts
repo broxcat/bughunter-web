@@ -1,6 +1,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { executionPolicySchema, MISSING_HUNTER_UA, type ExecutionPolicyInput } from '@/lib/programExecutionPolicy';
+import { executionPolicySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, type ExecutionPolicyInput } from '@/lib/programExecutionPolicy';
 import { authorizeExecution, excludedByPolicy, resolveProgramPolicy } from '@/server/programExecutionPolicy';
 import { executionHeaders, withTargetExecution } from '@/server/execution';
 
@@ -34,13 +34,13 @@ describe('program execution policy', () => {
     expect(excludedByPolicy(resolve({ ...config, exclusions: ['*.private.example.com'] }), 'private.example.com')).toBe(false);
   });
 
-  it('blocks forbidden and unknown tools before execution', () => {
+  it('does not gate tools by the dormant execution policy', () => {
     const ctx = { host: 'example.com', policy: resolve() };
-    for (const tool of ['ffuf', 'nuclei', 'gobuster-dns', 'content-discovery', 'research-http', 'research-browser']) {
-      expect(() => authorizeExecution(ctx, { tool })).toThrow('Test category forbidden');
+    for (const tool of ['ffuf', 'nuclei', 'gobuster-dns', 'content-discovery', 'research-http', 'research-browser', 'unmapped-tool']) {
+      expect(() => authorizeExecution(ctx, { tool })).not.toThrow();
     }
-    for (const tool of ['unmapped-tool', 'constructor']) expect(() => authorizeExecution(ctx, { tool })).toThrow('Unclassified');
-    expect(() => authorizeExecution(ctx, { tool: 'httpx' })).not.toThrow();
+    expect(ctx.policy.limits).toEqual(LEGACY_LIMITS);
+    expect(ctx.policy.forbiddenCategories).toEqual([]);
   });
 
   it('resolves the program, environment default and explicit missing-UA cases in order', () => {
@@ -51,20 +51,20 @@ describe('program execution policy', () => {
     expect(resolveProgramPolicy({ ...legacy, requiredUserAgent: '' }).blocker).toBe(MISSING_HUNTER_UA);
   });
 
-  it('enforces case-insensitive required headers after user-supplied headers', () => {
+  it('keeps identification User-Agent but does not apply dormant policy headers', () => {
     const policy = resolve();
     const headers = withTargetExecution({ policy, targetId: 'target', host: 'example.com', requiredUserAgent: policy.userAgent, qualifying: [], nonQualifying: [] },
-      () => executionHeaders({ 'X-Bug-Bounty': 'wrong', 'User-Agent': 'wrong' }));
-    expect(Object.fromEntries(headers)).toEqual({ 'user-agent': 'Hunter/1', 'x-bug-bounty': 'program' });
+      () => executionHeaders({ 'X-Bug-Bounty': 'caller', 'User-Agent': 'wrong' }));
+    expect(Object.fromEntries(headers)).toEqual({ 'user-agent': 'Hunter/1', 'x-bug-bounty': 'caller' });
     expect(executionPolicySchema.safeParse({ ...config, requiredHeaders: [{ name: 'Host', value: 'other.example.com' }] }).success).toBe(false);
   });
 
-  it('denies disabled, unrepresented and stale rules', () => {
+  it('does not block automation on dormant policy review state or free text', () => {
     for (const policy of [
       resolve({ ...config, automationAllowed: false }),
       resolve({ ...config, sourceSnapshot: { ...config.sourceSnapshot, unrepresentedRules: ['Special window'] } }),
       resolveProgramPolicy({ ...legacy, rulesOfEngagement: 'Changed', executionPolicies: [{ version: 1, policy: config }] }),
       resolveProgramPolicy({ ...legacy, rulesOfEngagement: 'Free text' }),
-    ]) expect(() => authorizeExecution({ host: 'example.com', policy }, { tool: 'browser' })).toThrow(/automation/i);
+    ]) expect(() => authorizeExecution({ host: 'example.com', policy }, { tool: 'browser' })).not.toThrow();
   });
 });
