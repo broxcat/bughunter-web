@@ -1,4 +1,5 @@
 import { auth } from "@/lib/auth";
+import { foreignOrigin } from "@/lib/requestOrigin";
 import { z } from "zod";
 import { ensureTargetConsole } from "@/server/research/consoleWorkspace";
 import { ResearchError } from "@/server/research/workspace";
@@ -10,8 +11,7 @@ const input = z.strictObject({
 export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const origin = req.headers.get("origin");
-  if (origin && origin !== new URL(process.env.AUTH_URL!).origin) return Response.json({ error: "Forbidden" }, { status: 403 });
+  if (foreignOrigin(req)) return Response.json({ error: "Forbidden" }, { status: 403 });
 
   const parsed = input.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Select between 1 and 20 hosts." }, { status: 400 });
