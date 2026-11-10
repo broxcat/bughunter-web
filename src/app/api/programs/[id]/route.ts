@@ -201,5 +201,5 @@ export async function DELETE(_req: Request, { params }: Params) {
   const { id } = await params;
   if (!targetIdentity.safeParse(id).success) return Response.json({ error: 'Invalid target' }, { status: 400 });
   try { await deleteProgram(session.user.id, id); return Response.json({ deleted: true }); }
-  catch (e) { return Response.json({ error: e instanceof ResearchError ? e.message : 'Deletion incomplete; target remains blocked. Retry deletion.' }, { status: e instanceof ResearchError ? e.status : 503 }); }
+  catch (e) { return Response.json({ error: e instanceof ResearchError ? e.message : 'Deletion incomplete. The Target remains available; retry deletion when ready.' }, { status: e instanceof ResearchError ? e.status : 503 }); }
 }
