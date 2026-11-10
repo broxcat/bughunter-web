@@ -100,6 +100,7 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     await page.getByRole('heading', { name: 'Discovered hosts', exact: true }).waitFor();
     const discovered = page.getByText('new.example.test', { exact: true });
     await discovered.waitFor();
+    await page.getByRole('checkbox', { name: /new\.example\.test/ }).check();
     await page.getByRole('button', { name: 'Add selected to scope (1)', exact: true }).click();
     await page.getByRole('status').filter({ hasText: '1 discovered host added to target scope.' }).waitFor();
     assert.equal(await p.scopeAsset.count({ where: { programId: ready.id, normalizedValue: 'new.example.test', active: true } }), 1);
