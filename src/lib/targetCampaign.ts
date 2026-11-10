@@ -25,7 +25,7 @@ export function campaignActivity(facts: CampaignFacts) {
 
 export function targetCampaign(program: {
   id: string; deletingAt: Date | null; assetCount: number; policyBlocker: string | null;
-  firstRule?: number; undecidedRules?: number; campaign?: CampaignStatus | null;
+  campaign?: CampaignStatus | null;
 }, facts: CampaignFacts) {
   const root = '/targets/' + program.id;
   const settings = root + '/settings';
@@ -39,10 +39,8 @@ export function targetCampaign(program: {
   const deletion = program.deletingAt ? 'Target deletion is in progress. Retry Delete target to finish cleanup.' : null;
   const blocker = deletion ?? program.policyBlocker;
   const scopeMissing = !program.assetCount;
-  const ruleCount = !deletion ? program.undecidedRules ?? 0 : 0;
   const target: StageView = blocker || scopeMissing
-    ? { stage: 'Target', state: 'blocked', detail: ruleCount ? ruleCount + (ruleCount === 1 ? ' rule needs' : ' rules need') + ' a decision.'
-      : blocker ?? 'Add at least one active Scope Asset before Recon.',
+    ? { stage: 'Target', state: 'blocked', detail: blocker ?? 'Add at least one active Scope Asset before Recon.',
       fix: deletion ? root + '/settings#delete-target' : settings }
     : { stage: 'Target', state: 'done', detail: program.assetCount + (program.assetCount === 1 ? ' asset in scope' : ' assets in scope') };
 
