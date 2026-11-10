@@ -1,5 +1,5 @@
 import {auth} from '@/lib/auth';
-import {targetIdentity} from '@/lib/research/terminal';
+import {targetIdentity} from '@/lib/research/identity';
 import {researchPlanDetails} from '@/server/research/plans';
 import {ResearchError} from '@/server/research/workspace';
 const json=(value:unknown,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'private, no-store'}});

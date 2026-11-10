@@ -20,7 +20,7 @@ function ScopeAssetCollection({program}:{program:Pick<ProgramData,'id'|'deleting
   const [notice,setNotice]=useState<ScopeActionResult|null>(null);
   const [formatChange,setFormatChange]=useState<{asset:Asset;format:string}|null>(null);
   const [adding,setAdding]=useState(false),[value,setValue]=useState(''),[type,setType]=useState<AssetType|''>(''),[importance,setImportance]=useState<AssetValue>('MEDIUM');
-  const path='/scopes';
+  const path='/targets/'+program.id+'/settings';
   const refresh=useCallback(async(signal?:AbortSignal)=>{
     const response=await fetch(`/api/programs/${program.id}/assets?page=${input.page}&pageSize=${input.pageSize}&active=1`,{cache:'no-store',signal});
     if(!response.ok)throw new Error('Unable to load scope assets');const assets=await response.json();if(signal?.aborted)return;
@@ -37,7 +37,7 @@ function ScopeAssetCollection({program}:{program:Pick<ProgramData,'id'|'deleting
   const changed=async(result:ScopeActionResult)=>{setNotice(result);try{await refresh();}catch(e){setError((e as Error).message);}};
   let preview:ReturnType<typeof detectScopeAsset>|undefined;try{preview=detectScopeAsset(value);}catch{}
   return <div className="space-y-6">
-    {notice&&<p role="status">{notice.message}{notice.replacementId&&<Link className="ml-2 text-brand underline" href={'/scopes/'+notice.replacementId}>Open replacement</Link>}</p>}
+    {notice&&<p role="status">{notice.message}{notice.replacementId&&<Link className="ml-2 text-brand underline" href={'/targets/'+program.id+'/assets/'+notice.replacementId}>Open replacement</Link>}</p>}
     {error&&<p role="alert">{error}</p>}
       <section className="space-y-4"><div className="flex flex-wrap items-center gap-3"><h2 className="mr-auto text-lg font-semibold">In scope</h2><Button size="sm" disabled={busy||!!program.deletingAt} onClick={()=>setAdding(!adding)}>{adding?'Cancel':'Add asset'}</Button></div>
         {adding&&<form className="scope-add grid gap-3 sm:grid-cols-2" onSubmit={e=>{e.preventDefault();void act(`/api/programs/${program.id}/assets`,'POST',{value,...(type?{type}:{}),assetValue:importance}).then(ok=>{if(ok){setAdding(false);setValue('');setType('');}});}}>
@@ -45,7 +45,7 @@ function ScopeAssetCollection({program}:{program:Pick<ProgramData,'id'|'deleting
           <details className="ui-disclosure sm:col-span-2"><summary>Advanced</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="text-sm">Type<select aria-label="New asset type" className="mt-1 block w-full" value={type} onChange={e=>setType(e.target.value as AssetType|'')}><option value="">Suggested</option>{ASSET_TYPES.map(t=><option key={t} value={t}>{assetTypeLabel[t]}</option>)}</select></label><label className="text-sm">Asset value<select aria-label="New asset value" className="mt-1 block w-full" value={importance} onChange={e=>setImportance(e.target.value as AssetValue)}>{ASSET_VALUES.map(v=><option key={v} value={v}>{assetValueLabel[v]}</option>)}</select></label></div></details><div><Button size="sm" type="submit" disabled={busy||!preview}>Save asset</Button></div>
         </form>}
         {assets.length>0&&<div className="ui-table-scroll" tabIndex={0} role="region" aria-label="Scope assets table"><table className="ui-inventory w-full text-left text-sm"><caption className="sr-only">Authorized scope assets</caption><thead><tr>{['Asset','Format / type','Status','Actions'].map(n=><th scope="col" key={n}>{n}</th>)}</tr></thead><tbody>{assets.map(a=><tr key={a.id}>
-          <td data-label="Asset"><Link className="break-all font-medium text-brand" href={`/scopes/${a.id}`}>{a.normalizedValue}</Link></td>
+          <td data-label="Asset"><Link className="break-all font-medium text-brand" href={`/targets/${program.id}/assets/${a.id}`}>{a.normalizedValue}</Link></td>
           <td data-label="Format / type"><div><span>{format(a.format)}</span><p className="text-xs text-muted">{assetTypeLabel[a.type]}</p></div></td><td data-label="Status">Active</td>
           <td data-label="Actions"><details><summary>Actions</summary><ScopeAssetActions asset={a} programId={program.id} onChanged={changed}/><details className="mt-3"><summary>Advanced</summary><div className="mt-2 space-y-2"><label className="block">Format<select aria-label={`Format ${a.normalizedValue}`} value={a.format} disabled={busy} className="block w-full" onChange={e=>setFormatChange({asset:a,format:e.target.value})}>{ASSET_FORMATS.map(f=><option key={f} value={f}>{format(f)}</option>)}</select></label>{a.formatSource==='MANUAL'&&<button className="text-xs text-muted underline" onClick={()=>setFormatChange({asset:a,format:'AUTO'})}>Reset to detected</button>}<label className="block">Type<select aria-label={`Type ${a.normalizedValue}`} value={a.type} disabled={busy} className="block w-full" onChange={e=>void act(`/api/programs/${program.id}/assets/${a.id}`,'PATCH',{type:e.target.value,expectedUpdatedAt:a.updatedAt})}>{ASSET_TYPES.map(t=><option key={t} value={t}>{assetTypeLabel[t]}</option>)}</select></label><label className="block">Asset value<select aria-label={`Value ${a.normalizedValue}`} value={a.assetValue} disabled={busy} className="block w-full" onChange={e=>void act(`/api/programs/${program.id}/assets/${a.id}`,'PATCH',{assetValue:e.target.value,expectedUpdatedAt:a.updatedAt})}>{ASSET_VALUES.map(v=><option key={v} value={v}>{assetValueLabel[v]}</option>)}</select></label><p className="text-xs text-muted">Recon: {label(a.reconStatus)} · {a.scanRuns[0]?._count.artifacts??0} observations</p></div></details></details></td>
         </tr>)}</tbody></table></div>}
@@ -53,7 +53,7 @@ function ScopeAssetCollection({program}:{program:Pick<ProgramData,'id'|'deleting
         {pages&&<CollectionPager path={path} query={query} {...pages} pageKey="assetPage" label="Scope management pages" noun="active assets"/>}
       </section>
       <section className="space-y-3 border-t border-border pt-5"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">Out of scope</h2><Link className="text-sm text-muted underline" href={`/targets/${program.id}/settings#out-of-scope`}>Edit exclusions</Link></div>{program.outOfScope.length?<ul className="space-y-1 text-sm">{program.outOfScope.map(host=><li className="break-all" key={host}>{host}</li>)}</ul>:<p className="text-sm text-muted">No exclusions recorded.</p>}</section>
-      <div className="flex flex-wrap items-center gap-4 border-t border-border pt-4"><CurrentTargetScope programId={program.id}/><Link className="text-sm text-muted underline" href={`/scopes?inventory=1&target=${program.id}`}>All assets and history</Link></div>
+      <div className="flex flex-wrap items-center gap-4 border-t border-border pt-4"><CurrentTargetScope programId={program.id}/><Link className="text-sm text-muted underline" href={`/targets/${program.id}/settings`}>All assets and history</Link></div>
     {formatChange&&<ScopeAssetActionDialog asset={formatChange.asset} programId={program.id} mode="replace" initialFormat={formatChange.format} onClose={()=>setFormatChange(null)} onChanged={changed}/>}
   </div>;
 }

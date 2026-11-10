@@ -1,7 +1,7 @@
 
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { targetIdentity } from '@/lib/research/terminal';
+import { targetIdentity } from '@/lib/research/identity';
 import { assertLiveExecution, loadTargetExecution } from '@/server/execution';
 import { authorizeExecution } from '@/server/programExecutionPolicy';
 import { acquireProgramTraffic, releaseProgramTraffic } from '@/server/programTraffic';

@@ -74,7 +74,7 @@ Queued/running scans have no outcome. Historical scans retain `outcome = null`
 and are displayed with an unknown historical result, without inferring success.
 
 Only `RECON` can be started as a scan. `HUNT` is retired (HTTP 410);
-Codex Research uses separate ResearchSession records. `VALIDATE` has no implemented scan engine:
+Historical Research uses separate ResearchSession records. `VALIDATE` has no implemented scan engine:
 the API rejects it before creating a run/job; legacy queued jobs become
 `FAILED` / `UNSUPPORTED`. Human finding evidence review is unchanged.
 Deploy the additive Prisma migration before restarting the web app and worker.
@@ -172,7 +172,7 @@ Next.js 16 / React 19, Prisma 6 / PostgreSQL, BullMQ / Redis, Auth.js, Tailwind 
 ```sh
 cp .env.example .env
 # Fill AUTH_URL, AUTH_SECRET, CREDENTIALS_ENCRYPTION_KEY and database/Redis settings.
-# Run the Research console setup helper below before first Compose startup.
+# No Research runtime setup is required.
 docker compose up --build -d
 docker compose exec web npx prisma migrate deploy
 ```
@@ -332,78 +332,16 @@ or host list APIs. Findings undergo an evidence review before they
 can be included in reports.
 
 
-## Research harness
+## Manual Research
 
-Configure model profiles in **AI Provider Settings → Research model routing**. The application selects the planning model for mapping and test preparation, and the review model for validation and impact tracing. Configure a trusted Ollama embedding endpoint with `RESEARCH_EMBEDDING_URL` and `RESEARCH_EMBEDDING_MODEL`; see the [Research harness guide](docs/RESEARCH-HYPOTHESES.md#research-harness).
+Target → Recon → manual Research → Findings → Report.
 
-## Research: Codex and Claude
+Open a Target to manage scope and follow its four workflow cards. Recon discoveries
+never extend authorization. Select discovered hosts explicitly to add them to scope;
+excluded hosts must first be reviewed in Target settings.
 
-**Recon → per-target Codex console → hypotheses/tests/controls → human Finding draft → Evidence Review → Report.**
+Research displays current scope, Recon surfaces and manual Finding entry points.
+No Codex/Claude console, SSH, terminal proxy or signing key is required.
+Historical sessions and evidence remain available under `/research/history/[id]`.
 
-`/research` lists authorized concrete hosts. Open `/research/<Target.id>` for a
-full-screen xterm.js Codex TUI, attached to one persistent tmux session and
-`/workspaces/research_<Target.id>`. Refresh keeps the same session. The host root
-is static operator configuration, e.g. `/home/brokcat/bughunter-research`:
-
-```sh
-node scripts/setup-research-console.mjs --root /home/brokcat/bughunter-research
-# Set RESEARCH_HOST_ROOT and RESEARCH_WORKSPACE_UID/GID in .env.
-docker compose build
-docker compose up -d db redis
-docker compose run --rm --no-deps web npx prisma migrate deploy
-docker compose up -d
-```
-
-Codex and Claude use the same scope, plan, Coverage and Evidence boundaries, with
-separate native CLI authentication. Authenticated Claude context inference is
-recorded in the release audit; Findings still require human promotion and review.
-
-The dedicated research-console receives no app env_file, Auth.js/DB/Redis/AI keys,
-Docker socket or host home. Web signs short-lived Ed25519 terminal tickets; the
-console holds only the public key. A minimal ingress proxy strips browser cookies
-and Authorization; the terminal verifies dedicated tickets only. Tailscale provides same-origin WSS ingress;
-no terminal port is published. Optional SSH remains host-loopback only. Codex
-**0.165.0** is pinned and launches with verified **--yolo**. Operator login persists
-independently in the Codex volume; no BugHunter provider key is copied.
-
-[Burp MCP](docs/BURP-MCP-RESEARCH.md) uses the official PortSwigger 1.3.0 extension
-externally and a pinned official STDIO proxy behind an exact-host/port/UA policy
-gateway. Playwright MCP **0.0.83** uses the loopback Burp proxy. Both are configured
-per project automatically. Burp offline does not prevent terminal startup.
-Four pinned, unchanged skills are installed; their internal confirmation gates
-remain intact. Details: [CODEX-RESEARCH.md](docs/CODEX-RESEARCH.md).
-
-The clean workspace has scope.md, recon/, requests/, scripts/ and findings/;
-historical source metadata remains read-only. Scope never expands through discovery. Notes/captures belong
-to the configured local operator UID/GID; critical inputs remain read-only.
-[Hypothesis JSON v2](docs/RESEARCH-HYPOTHESES.md) remains an optional manual sync
-feature under findings/. Research confirmation does not confirm a Finding:
-explicit human promotion creates only CANDIDATE/UNVALIDATED, followed by existing
-Evidence Review and separately requested Report creation. Manual Findings work
-independently. No scanner/Hunt engine is reintroduced.
-
-Old UUID ResearchSession records/workspaces/ZIPs remain historical, with details
-at `/research/history/<sessionId>` and redirecting old bookmarks. Old Hunt runs
-remain read-only at `/hunt`; new HUNT requests return 410.
-
-```sh
-npm run test:queue -- --research-browser
-npm run test:research
-# Actual locally configured final image, synthetic smoke only:
-docker compose exec -T -e BH_FINAL_STACK_SMOKE=1 web npm run test:research:final
-```
-
-Run the full test suite on Linux or in WSL2. The Research sandbox tests use Linux filesystem, ownership, and process isolation primitives.
-
-Tests use disposable/local services. Real Burp GUI and remote Codex inference
-require operator setup and are never asserted from fixture/config checks alone.
-
-Adaptive Target-wide Recon, structured artifacts, compact Scope → Recon → Research → Findings UI and deployment: [Target Recon playbooks](docs/target-recon-playbooks.md).
-
-Recon comparison: [durable history and diffs](docs/recon-history.md). Absence does not prove removal; new discoveries never extend authorization.
-
-[Finding lifecycle and Retest](docs/finding-lifecycle.md) preserve human validation, submission history and original/new proof.
-
-The footer reads its build version from `package.json`, the authoritative version source. Full local workflow checks include `node tests/e2e/runResearchCoverageWorkflow.mjs`, `node tests/e2e/runResearchPlanWorkflow.mjs` and `node tests/e2e/runBlackboxUx.mjs` after building. Their databases, queues, accounts and evidence are disposable fixtures. Real Codex context acceptance is separately opt-in: `BH_REAL_CODEX_COVERAGE=1 npx tsx tests/research/coverageRealCodex.mts`.
-
-Release evidence and known limitations: [Black-box v1 release audit](docs/v1-release-audit.md). See [v1.0.0 release notes and upgrade instructions](docs/releases/v1.0.0.md).
+See [deployment and retained archives](docs/manual-workflow.md).

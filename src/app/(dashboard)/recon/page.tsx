@@ -8,7 +8,6 @@ import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import {programCollection} from '@/server/programCollection';
 import {paginationInput} from '@/lib/pagination';
-import CollectionPager from '@/components/CollectionPager';
 import { Badge } from '@/components/ui/Badge';
 import { reconOverview, type ReconTone } from '@/lib/reconOverview';
 
@@ -39,7 +38,7 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
   if (program) {
     let history: Awaited<ReturnType<typeof reconRunHistory>>;
     try {
-      history = await reconRunHistory(session.user.id, program, paginationInput(query, false));
+      history = await reconRunHistory(session.user.id, program, paginationInput(query, false), true);
     } catch (error) {
       if (error instanceof ResearchError && error.status === 404) notFound();
       throw error;
@@ -56,8 +55,7 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
         {history.program.deletingAt && <p role="status">Target pending deletion.</p>}
       </div>
       <TargetReconActions programId={history.program.id} running={Boolean(liveRun)} disabled={!!history.program.deletingAt}/>
-      <CollectionPager path="/recon" query={query.toString()} {...history} label="Recon history pages" noun="runs"/>
-      {!history.items.length ? <p>No Recon runs recorded. <Link className="text-brand" href={`/scopes?target=${history.program.id}`}>Configure scope</Link> before starting.</p> :
+      {!history.items.length ? <p>No Recon runs recorded. <Link className="text-brand" href={`/targets/${history.program.id}/settings`}>Configure scope</Link> before starting.</p> :
         <div className="ui-table-scroll overflow-x-auto rounded border border-border" tabIndex={0} aria-label="Recon history table" role="region">
           <table className="ui-inventory w-full text-left text-sm">
             <caption className="sr-only">Retained Recon runs ordered by date and unique run ID</caption>
@@ -85,7 +83,7 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
     </div>;
   }
 
-  const collection=await programCollection(session.user.id,paginationInput(query,false));
+  const collection=await programCollection(session.user.id,{...paginationInput(query,false),q:''}, true);
   const programs=collection.items;
   // One representative Scope asset per visible program, with bounded
   // relation reads. This is display context; execution rechecks current policy.
@@ -109,8 +107,6 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
 
     </div>
 
-    <form action="/recon" className="flex flex-wrap gap-3"><label>Search targets<input name="q" defaultValue={search.q??''} maxLength={200} className="ml-2 rounded border border-border bg-surface p-2"/></label><input type="hidden" name="pageSize" value={collection.pageSize}/><button type="submit" className="ui-btn">Search</button></form>
-    <CollectionPager path="/recon" query={query.toString()} {...collection}/>
     {!rows.length && <p>No matching targets. <Link href="/targets" className="text-brand">Create a target</Link> to authorize assets and start Recon.</p>}
 
     {rows.length > 0 && <div className="ui-table-scroll overflow-x-auto rounded border border-border" tabIndex={0} role="region" aria-label="Targets and their latest Recon result">
@@ -134,7 +130,7 @@ export default async function ReconPage({ searchParams }: { searchParams: Promis
             </td>
             <td data-label="Last run" className="p-3 text-muted">{row.run ? <time dateTime={row.run.createdAt.toISOString()}>{stamp(row.run.createdAt)}</time> : '—'}</td>
             <td data-label="Action" className="p-3">
-              <Link className="font-medium text-brand" href={row.run?`/recon/runs/${row.run.id}`:`/recon?program=${row.id}`} aria-label={row.run?`Open latest recon run for ${row.companyName}`:`Open recon for ${row.companyName}`}>Open</Link>
+              <Link className="font-medium text-brand" href={`/recon?program=${row.id}`} aria-label={row.run?`Open recon history for ${row.companyName}`:`Open recon for ${row.companyName}`}>History</Link>
             </td>
           </tr>)}
         </tbody>

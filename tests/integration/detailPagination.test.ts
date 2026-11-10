@@ -4,10 +4,10 @@ import {execFileSync} from 'node:child_process';
 const mocks=vi.hoisted(()=>({auth:vi.fn()}));vi.mock('@/lib/auth',()=>({auth:mocks.auth}));
 const db=process.env.TEST_DATABASE_URL,schema='detailpages_'+randomUUID().replaceAll('-','');
 if(db){const u=new URL(db);u.searchParams.set('schema',schema);process.env.DATABASE_URL=u.toString();}
-let p:typeof import('@/lib/prisma').prisma,userId:string,targetId:string,assetId:string,runId:string,sessionId:string;
+let p:typeof import('@/lib/prisma').prisma,userId:string,targetId:string,assetId:string,runId:string;
 (db?describe:describe.skip)('Artifact and immutable snapshot detail pages',()=>{
  beforeAll(async()=>{execFileSync('npx',['prisma','migrate','deploy'],{env:process.env,stdio:'pipe'});({prisma:p}=await import('@/lib/prisma'));},30000);
- beforeEach(async()=>{userId=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;mocks.auth.mockResolvedValue({user:{id:userId}});const program=await p.bountyProgram.create({data:{ownerId:userId,companyName:'Detail fixture',requiredUserAgent:'Fixture/1'}}),scope=await p.scope.create({data:{userId,hostPattern:'fixture.test',status:'APPROVED'}});assetId=(await p.scopeAsset.create({data:{programId:program.id,originalValue:'fixture.test',normalizedValue:'fixture.test',format:'DOMAIN',type:'WEB_APPLICATION'}})).id;targetId=(await p.target.create({data:{userId,programId:program.id,scopeId:scope.id,scopeAssetId:assetId,host:'fixture.test'}})).id;runId=(await p.scanRun.create({data:{targetId,scopeAssetId:assetId,type:'RECON',status:'COMPLETED'}})).id;sessionId=(await p.researchSession.create({data:{userId,targetId,consoleTargetId:targetId,workspaceId:randomUUID(),status:'ARCHIVED',targetHost:'fixture.test',programName:'Fixture',scopeMarkdown:'# Historical fixture'}})).id;});
+ beforeEach(async()=>{userId=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;mocks.auth.mockResolvedValue({user:{id:userId}});const program=await p.bountyProgram.create({data:{ownerId:userId,companyName:'Detail fixture',requiredUserAgent:'Fixture/1'}}),scope=await p.scope.create({data:{userId,hostPattern:'fixture.test',status:'APPROVED'}});assetId=(await p.scopeAsset.create({data:{programId:program.id,originalValue:'fixture.test',normalizedValue:'fixture.test',format:'DOMAIN',type:'WEB_APPLICATION'}})).id;targetId=(await p.target.create({data:{userId,programId:program.id,scopeId:scope.id,scopeAssetId:assetId,host:'fixture.test'}})).id;runId=(await p.scanRun.create({data:{targetId,scopeAssetId:assetId,type:'RECON',status:'COMPLETED'}})).id;await p.researchSession.create({data:{userId,targetId,consoleTargetId:targetId,workspaceId:randomUUID(),status:'ARCHIVED',targetHost:'fixture.test',programName:'Fixture',scopeMarkdown:'# Historical fixture'}});});
  afterAll(async()=>{if(p){await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);await p.$disconnect();}});
  const artifact=async(query:string)=>{const {GET}=await import('@/app/api/scope-assets/[id]/artifacts/route');return GET(new Request(`http://app.example.test/api/scope-assets/${assetId}/artifacts?run=${runId}&${query}`),{params:Promise.resolve({id:assetId})});};
  it.each([0,1,25,51])('bounds host scan history over %i rows without transferring all Finding bodies',async count=>{
@@ -23,16 +23,6 @@ let p:typeof import('@/lib/prisma').prisma,userId:string,targetId:string,assetId
   for(const page of [0,1,2,999]){const data=await(await artifact('page='+page)).json(),last=Math.max(0,Math.ceil(count/100)-1),actual=Math.min(page,last);expect(data).toMatchObject({total:count,page:actual});expect(data.rows).toHaveLength(Math.min(100,Math.max(0,count-actual*100)));}
   expect(await(await artifact('page=999&kind=technology')).json()).toMatchObject({total:0,page:0,rows:[]});
   for(const page of ['-1','invalid','1.5','10001'])expect((await artifact('page='+page)).status).toBe(400);
- });
- it.each([0,1,25,51])('clamps snapshot windows over %i immutable entries',async count=>{
-  const snapshot=await p.researchReconSnapshot.create({data:{sessionId,sourceFingerprint:randomUUID(),contentSha256:'a'.repeat(64),summarySha256:'b'.repeat(64),summary:{},context:{assets:Array.from({length:count},(_,n)=>({id:'asset-'+n})),endpoints:[],technologies:[],observations:[],sources:[]}}});
-  const {reconSnapshotDetails}=await import('@/server/research/reconSnapshots');
-  for(const page of [0,1,2,999]){const actual=Math.min(page,Math.max(0,Math.ceil(count/25)-1)),data=await reconSnapshotDetails(userId,targetId,snapshot.id,'assets',page);expect(data).toMatchObject({total:count,page:actual});expect(data.items).toHaveLength(Math.min(25,Math.max(0,count-actual*25)));}
-  await expect(reconSnapshotDetails('foreign-owner',targetId,snapshot.id,'assets',0)).rejects.toMatchObject({status:404});
- });
- it('distinguishes an incomplete historical snapshot collection from an observed empty collection',async()=>{
-  const snapshot=await p.researchReconSnapshot.create({data:{sessionId,sourceFingerprint:randomUUID(),contentSha256:'a'.repeat(64),summarySha256:'b'.repeat(64),summary:{},context:{}}});
-  const {reconSnapshotDetails}=await import('@/server/research/reconSnapshots');expect(await reconSnapshotDetails(userId,targetId,snapshot.id,'assets',0)).toMatchObject({items:[],unavailable:true,total:0,page:0});
  });
 
  it('discloses recent windows without denying a known older owned run',async()=>{

@@ -1,4 +1,3 @@
-import {readRunNarrative} from '@/server/recon/runNarrative';
 import Link from 'next/link';
 import ReconRunRefresh from '@/components/ReconRunRefresh';
 import { paginationInput } from '@/lib/pagination';
@@ -13,7 +12,9 @@ import { reconOverview, type ReconTone } from '@/lib/reconOverview';
 import { authContextCount, capabilityRows, providerAttempts, elapsed, formatDuration, groupObservationKinds, redactLogLines, stageTools, stepView, type StepTone } from '@/lib/reconTimeline';
 import { buildReconReportModel } from '@/lib/reconReportModel';
 import { loadReconReportFacts } from '@/server/recon/reportFacts';
-import ReconReportView from '@/components/ReconReportView';
+import ReconDecision from '@/components/ReconDecision';
+import DiscoveredHosts from '@/components/DiscoveredHosts';
+import { discoveredScopeCandidates } from '@/server/recon/discoveredScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +47,7 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
 
   const facts = await loadReconReportFacts(session.user.id, id);
   const report = buildReconReportModel(facts);
-  const narrative = await readRunNarrative(session.user.id,facts,report);
+  const candidates = await discoveredScopeCandidates(session.user.id,id);
   const { run, observations, logs, rawLogLimit } = detail;
   const view = reconOverview({ status: run.status, outcome: run.outcome });
   const duration = elapsed(run.startedAt ?? run.createdAt, run.finishedAt);
@@ -58,7 +59,7 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
       <Link href="/recon" className="text-brand">← Recon</Link>
       <span aria-hidden className="text-subtle">/</span>
       <Link href={`/recon?program=${run.program.id}&page=${history.page}&pageSize=${history.pageSize}`} className="text-brand">Run history</Link>
-      <Link href={`/targets/${run.program.id}?tab=Recon`} className="text-brand">{run.program.companyName}</Link>
+      <Link href={`/targets/${run.program.id}`} className="text-brand">{run.program.companyName}</Link>
     </div>
 
     <header className="space-y-3">
@@ -77,7 +78,10 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
 
 
 
-    <h2 className="text-lg font-semibold">Recon timeline</h2>
+    <DiscoveredHosts runId={id} hosts={candidates}/>
+    <ReconDecision model={report}/>
+    <Link className="ui-btn" href={`/research?program=${run.program.id}`}>Open manual Research</Link>
+    <details><summary>Execution details</summary>
 
     {!run.scans.length && <section className="border-t border-border py-4"><h2 className="font-semibold">No host executions recorded</h2><p className="mt-2 text-sm text-muted">This run has no per-host execution data. The run status above remains authoritative; nothing is inferred.</p></section>}
 
@@ -93,7 +97,7 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
           <Badge tone={badgeTone[scanView.tone]}>{scanView.label}</Badge>
 
           <span className="text-sm text-muted">{scan._count.artifacts} observations</span>
-          {scan.scopeAsset && <Link className="ml-auto text-sm text-brand" href={`/scopes/${scan.scopeAsset.id}`}>Host evidence →</Link>}
+          {scan.scopeAsset && <Link className="ml-auto text-sm text-brand" href={`/targets/${run.program.id}/settings`}>Host evidence →</Link>}
         </div>
 
         <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
@@ -176,7 +180,7 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
         <div><dt className="text-subtle">Assessment mode</dt><dd>{run.assessmentModeSnapshot?.toLowerCase().replaceAll('_', ' ') ?? 'Not captured'}</dd></div>
         <div><dt className="text-subtle">Authenticated contexts</dt><dd>{contextCount > 0 ? `${contextCount} recorded` : 'None recorded'}</dd></div>
 <div><dt className="text-muted">Run ID</dt><dd className="break-all font-mono text-xs">{run.id}</dd></div></dl></details>
-    <ReconReportView model={report} narrative={narrative}/>
+    </details>
     <p className="text-xs text-muted">Missing coverage never proves safety.</p>
   </div>;
 }

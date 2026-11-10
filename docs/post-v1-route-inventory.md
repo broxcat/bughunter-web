@@ -24,8 +24,7 @@ Pages: 21. Route handlers: 67.
 | `/targets/[id]/report` | `src/app/(dashboard)/targets/[id]/report/page.tsx` |
 | `/targets/[id]/settings` | `src/app/(dashboard)/targets/[id]/settings/page.tsx` |
 | `/targets` | `src/app/(dashboard)/targets/page.tsx` |
-| `/research/[id]/hypotheses/[hypothesisId]` | `src/app/(research-console)/research/[id]/hypotheses/[hypothesisId]/page.tsx` |
-| `/research/[id]` | `src/app/(research-console)/research/[id]/page.tsx` |
+| `/research/[id]` | `src/app/(dashboard)/research/[id]/page.tsx` |
 | `/login` | `src/app/login/page.tsx` |
 | `/` | `src/app/page.tsx` |
 | `/register` | `src/app/register/page.tsx` |
@@ -37,7 +36,7 @@ Methods and status literals below are extracted from source. Delegated helpers m
 | URL | Methods | Status literals | Source |
 | --- | --- | --- | --- |
 | `/api/ai-providers/default` | POST | 400, 401, 403 | `src/app/api/ai-providers/default/route.ts` |
-| `/api/ai-providers` | GET, POST | 400, 401, 403 | `src/app/api/ai-providers/route.ts` |
+| `/api/ai-providers` | GET, POST, DELETE | 400, 401, 403 | `src/app/api/ai-providers/route.ts` |
 | `/api/auth/[...nextauth]` | POST |  | `src/app/api/auth/[...nextauth]/route.ts` |
 | `/api/evidence/[targetId]/[evidenceId]/links` | POST |  | `src/app/api/evidence/[targetId]/[evidenceId]/links/route.ts` |
 | `/api/evidence/[targetId]/[evidenceId]` | GET |  | `src/app/api/evidence/[targetId]/[evidenceId]/route.ts` |
@@ -48,7 +47,6 @@ Methods and status literals below are extracted from source. Delegated helpers m
 | `/api/findings/[id]/validate` | POST | 400, 401, 403, 404, 409 | `src/app/api/findings/[id]/validate/route.ts` |
 | `/api/findings` | GET, POST | 201, 400, 401, 403, 404 | `src/app/api/findings/route.ts` |
 | `/api/health` | GET |  | `src/app/api/health/route.ts` |
-| `/api/internal/recon-observations` | POST | 401 | `src/app/api/internal/recon-observations/route.ts` |
 | `/api/programs/[id]/assessment` | delegated | 401, 410 | `src/app/api/programs/[id]/assessment/route.ts` |
 | `/api/programs/[id]/assessment-sources/[sourceId]` | delegated | 401, 410 | `src/app/api/programs/[id]/assessment-sources/[sourceId]/route.ts` |
 | `/api/programs/[id]/assessment-sources` | delegated | 401, 410 | `src/app/api/programs/[id]/assessment-sources/route.ts` |
@@ -83,9 +81,6 @@ Methods and status literals below are extracted from source. Delegated helpers m
 | `/api/research-sessions/[id]` | GET | 401, 404 | `src/app/api/research-sessions/[id]/route.ts` |
 | `/api/research-sessions/[id]/zip` | GET | 401, 404, 409 | `src/app/api/research-sessions/[id]/zip/route.ts` |
 | `/api/research-sessions` | GET, POST | 201, 400, 401 | `src/app/api/research-sessions/route.ts` |
-| `/api/research-targets/[id]/console` | DELETE | 400, 401, 403, 503 | `src/app/api/research-targets/[id]/console/route.ts` |
-| `/api/research-targets/[id]/recon` | GET, POST |  | `src/app/api/research-targets/[id]/recon/route.ts` |
-| `/api/research-targets/[id]/terminal` | POST | 400, 401, 403, 404 | `src/app/api/research-targets/[id]/terminal/route.ts` |
 | `/api/scan-hosts` | GET | 401 | `src/app/api/scan-hosts/route.ts` |
 | `/api/scan-runs/[id]/cancel` | POST | 401, 404, 409, 500 | `src/app/api/scan-runs/[id]/cancel/route.ts` |
 | `/api/scan-runs/[id]/hunt` | GET | 401, 404 | `src/app/api/scan-runs/[id]/hunt/route.ts` |
@@ -107,3 +102,6 @@ Methods and status literals below are extracted from source. Delegated helpers m
 ## Milestone 3 route compatibility
 
 No new page or API handler: `/recon?program=<id>` now opens complete server-paginated history instead of forwarding into the Target. `/recon/runs/[id]` remains the exact retained run address; optional `historyPage`/`historyPageSize` carry its return context. `/api/programs/[id]/recon?runId=<id>` adds a read-only, owner-and-Program-scoped `{id,status}` heartbeat; the existing query-free status, POST start and DELETE cancel contracts are unchanged. Anonymous API callers receive401 and private/absent history or exact-run heartbeat receives404; documents retain login redirects and Next not-found UI (a streamed shell may already have status200).
+
+| `/api/ai-providers/test` | POST | 400, 401, 403 | `src/app/api/ai-providers/test/route.ts` |
+| `/api/recon/runs/[id]/scope` | POST | 400, 401, 403, 409 | `src/app/api/recon/runs/[id]/scope/route.ts` |

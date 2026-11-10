@@ -80,15 +80,6 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
     const global = await (await markdown.scopeMarkdownDownload(userId, programId)).text(); expect(global).toContain('# BugHunter Scope'); expect(global).toContain('CRITICAL'); expect(global).toContain(a.id);
     expect((await markdown.scopeMarkdownDownload(otherId, programId, a.id)).status).toBe(404);
   });
-  it('enriches existing ResearchReconSnapshot with type, value and precise asset scope without rewriting history', async () => {
-    const a = await create('https://app.example.test/api', { type: 'API', assetValue: 'CRITICAL' });
-    const result = await research.POST(request(), context(a.id)); expect(result.status).toBe(200); const { targetId } = await result.json();
-    const { generateReconSnapshot, reconPanelState } = await import('@/server/research/reconSnapshots');
-    const first = await generateReconSnapshot(userId, targetId); expect(first.snapshot?.context.scopeAssets?.[0]).toMatchObject({ id: a.id, type: 'API', assetValue: 'CRITICAL', normalizedValue: a.normalizedValue });
-    await service.editScopeAsset(userId, programId, a.id, { assetValue: 'HIGH' }); expect((await reconPanelState(userId, targetId)).updateAvailable).toBe(true);
-    const second = await generateReconSnapshot(userId, targetId); expect(second.snapshot?.id).not.toBe(first.snapshot?.id);
-    expect((await p.researchReconSnapshot.findUniqueOrThrow({ where: { id: first.snapshot!.id } })).context).toMatchObject({ scopeAssets: [expect.objectContaining({ assetValue: 'CRITICAL' })] });
-  });
   it('archives authorization while preserving Recon and preventing subsequent execution', async () => {
     const a = await create('api.example.test'); const { target } = await service.ensureAssetExecution(userId, programId, a.id);
     const run = await p.scanRun.create({ data: { targetId: target.id, scopeAssetId: a.id, type: 'RECON', status: 'COMPLETED', outcome: 'SUCCESS', finishedAt: new Date('2026-01-01') } });
@@ -96,25 +87,6 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
     expect((await edit.DELETE(request(undefined, 'DELETE'), context(a.id))).status).toBe(200);
     expect((await p.scanRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe('COMPLETED'); expect((await recon.GET(new Request('http://app.example.test'), context(a.id))).status).toBe(200);
     expect((await service.listScopeAssets(userId, programId))[0].active).toBe(false);
-  });
-  it('reuses parent wildcard evidence in focused Research without creating a new Recon or widening the child scope', async () => {
-    const parent = await create('*.example.test', { assetValue: 'HIGH' });
-    const { target } = await service.ensureAssetExecution(userId, programId, parent.id);
-    const { researchRecon } = await import('../fixtures/research');
-    const at = new Date(), corpus = { ...researchRecon().reconCorpus, capturedAt: at.toISOString() };
-    const scan = await p.scanRun.create({ data: { targetId: target.id, scopeAssetId: parent.id, type: 'RECON', status: 'COMPLETED', outcome: 'SUCCESS', finishedAt: at,
-      assetResults: { version: 1, scopeAssetId: parent.id, bounded: false, hosts: [{ hostname: 'app.example.test', capturedAt: at.toISOString(), corpus, dns: [], http: [], ports: [] }] } } });
-    const child = await create('https://app.example.test/search', { type: 'API', assetValue: 'CRITICAL' });
-    const response = await research.POST(request(), context(child.id)), { targetId } = await response.json(); expect(response.status).toBe(200);
-    const { generateReconSnapshot } = await import('@/server/research/reconSnapshots');
-    const state = await generateReconSnapshot(userId, targetId);
-    const snapshot = await p.researchReconSnapshot.findUniqueOrThrow({ where: { id: state.snapshot!.id } });
-    const value = snapshot.context as unknown as import('@/lib/research/recon').ResearchReconContext;
-    expect(value.sources.some(s => s.scanId === scan.id)).toBe(true);
-    expect(value.endpoints.find(e => e.url.endsWith('/search'))).toMatchObject({ inScope: true });
-    expect(value.endpoints.find(e => e.url.endsWith('/profile'))).toMatchObject({ inScope: false });
-    expect(value.scopeAssets?.[0]).toMatchObject({ id: child.id, type: 'API', assetValue: 'CRITICAL' });
-    expect(await p.scanRun.count({ where: { target: { programId } } })).toBe(1);
   });
   it('rejects foreign ownership/origin, invalid overrides and unsupported network formats', async () => {
     const a = await create();

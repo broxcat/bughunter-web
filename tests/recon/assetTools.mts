@@ -5,13 +5,11 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
-import type { ResearchReconContext } from '@/lib/research/recon';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { recordArtifact } from '@/server/recon/artifacts';
 import { createScopeAsset } from '@/server/scopeAssets';
 import { startTargetRecon, reconcileTargetRecon } from '@/server/recon/targetRuns';
-import { generateReconSnapshot } from '@/server/research/reconSnapshots';
 import { buildSummaryInput } from '@/server/recon/summaries';
 import { REPORT_PROMPT_VERSION } from '@/lib/reconReport';
 import { RECON_BUDGETS, reconUrlAllowed, type ReconPlan } from '@/lib/reconPlanner';
@@ -109,13 +107,6 @@ try {
     assert(brief.scopeMarkdown?.includes('format_version: 2') && brief.scopeMarkdown.includes('Normalized discoveries: ' + scan.artifacts.length));
     const graph = (brief.changeSet as { assetGraph?: { nodes: unknown[]; edges: unknown[]; authorizationGranted: boolean } })?.assetGraph;
     assert(graph && graph.nodes.length && graph.edges.length); assert.equal(graph.authorizationGranted, false);
-    const snapshot = await generateReconSnapshot(owner.id, scan.targetId);
-    assert(snapshot.snapshot!.context.counts.endpoints >= 5);
-    const full = (await prisma.researchReconSnapshot.findUniqueOrThrow({ where: { id: snapshot.snapshot!.id } })).context as unknown as ResearchReconContext;
-    assert(full.assetGraph?.edges.length, 'Evidence graph must reach the existing Research snapshot');
-    assert(full.observations.some(o => o.type === 'dns-address' && Array.isArray(o.facts?.addresses)));
-    assert(full.sources.some(s => s.scanId === scan.id));
-    assert.equal(await prisma.researchReconDelivery.count({ where: { sessionId: snapshot.sessionId } }), 0, 'Research is not started or sent instructions automatically');
     // Exercise real structured report preprocessing for every matrix case. This
     // does not impersonate model inference; real Settings/model acceptance is separate.
     const report = await buildSummaryInput(owner.id, asset.programId, asset.id);

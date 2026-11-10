@@ -12,7 +12,7 @@ import {researchTargetSelect,assertResearchTarget,researchAuthorizationMatches,R
 import {ownedResearch,researchRootFor} from './sessions';
 import {HypothesisWorkspace} from './hypothesisFiles';
 import {publishCoverageFiles} from './planFiles';
-import {consoleRoot} from './consoleWorkspace';
+import { archivedConsoleRoot as consoleRoot } from './sessions';
 import {reconScopePolicy} from './reconPolicy';
 import type {ResearchPlanView} from '@/lib/researchPlanView';
 const clean=(value:string)=>exportText(value).replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,'[REDACTED PRIVATE KEY]').replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,'[REDACTED EMAIL]').slice(0,2000);

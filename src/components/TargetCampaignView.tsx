@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import DeleteResourceButton from './DeleteResourceButton';
 import { Badge } from '@/components/ui/Badge';
 import { platformLabel } from '@/lib/platformPresentation';
 import type { StageState, targetCampaign } from '@/lib/targetCampaign';
@@ -31,7 +32,7 @@ export default function TargetCampaignView({ program, view, notice, summary }: {
       <div className="flex flex-wrap items-start gap-2">
         {'command' in view.action ? <CampaignCommandButton programId={id} {...view.action} />
           : <Link className="ui-btn" data-variant="primary" href={view.action.href} prefetch={false}>{view.action.label}</Link>}
-        {view.campaign && !['PAUSED', 'BLOCKED'].includes(view.campaign.state) && <CampaignCommandButton programId={id} command="pause" label="Pause campaign" secondary />}
+        {view.campaign && view.activity.active && !['PAUSED', 'BLOCKED'].includes(view.campaign.state) && <CampaignCommandButton programId={id} command="pause" label="Pause campaign" secondary />}
         {view.campaign?.state === 'MONITORING' && 'href' in view.action && <CampaignCommandButton programId={id} command="start" label="Start cycle" secondary />}
       </div>
     </header>
@@ -40,6 +41,7 @@ export default function TargetCampaignView({ program, view, notice, summary }: {
     {Boolean(view.campaign?.pendingCount) && <p className="text-sm"><Link className="text-brand underline" href={'/targets/' + id + '/settings#scope-import-review'}>
       {view.campaign!.pendingCount} {view.campaign!.pendingCount === 1 ? 'new asset' : 'new assets'} to review
     </Link></p>}
+    <DeleteResourceButton kind="Target" name={companyName} url={'/api/programs/' + id} redirectTo="/targets?deleted=1" />
     <section aria-label="Campaign stages">
       <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {view.stages.map((step, index) => <li key={step.stage} id={step.stage.toLowerCase()}

@@ -140,3 +140,13 @@ export async function POST(req: Request) {
     },
   });
 }
+
+export async function DELETE(req:Request){
+ const userId=(await auth())?.user?.id;
+ if(!userId)return Response.json({error:'Unauthorized'},{status:401});
+ if(foreignOrigin(req))return Response.json({error:'Forbidden'},{status:403});
+ const input=z.object({provider:z.enum(AiProvider)}).safeParse(await req.json().catch(()=>null));
+ if(!input.success)return Response.json({error:'Invalid provider'},{status:400});
+ await prisma.$transaction(async tx=>{await lockAiProviderSettings(tx,userId);await tx.aiProviderConfig.deleteMany({where:{userId,provider:input.data.provider}});});
+ return Response.json({deleted:true});
+}

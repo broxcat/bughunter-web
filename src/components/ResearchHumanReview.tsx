@@ -91,6 +91,6 @@ export default function ResearchHumanReview({ sessionId, hypothesisId, revision,
         <Button type="submit">{busy ? 'Recording…' : 'Record decision'}</Button>
       </fieldset>
       {error && <p role="alert">{error}</p>}
-    </form> : <p>Review requires a ready console with current authorization and a synced v2 hypothesis.</p>}
+    </form> : <p>Review requires a historical session with current authorization and a synced v2 hypothesis.</p>}
   </section>;
 }

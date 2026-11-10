@@ -12,9 +12,9 @@ export default async function TargetDetails({ params }: { params: Promise<{ id: 
   const root = '/targets/' + id;
   const links = [
     ['Target settings', root + '/settings', 'Scope, execution policy and test accounts'],
-    ['Scope assets', '/scopes?target=' + id, 'Asset inventory and authorized boundaries'],
+    ['Scope assets', root + '/settings', 'Asset inventory and authorized boundaries'],
     ['Recon history', '/recon?program=' + id, 'Runs, artifacts and logs'],
-    ['Research details', '/research?program=' + id + '&view=details', 'Workspaces, plans, coverage and terminal'],
+    ['Research details', '/research?program=' + id + '&view=details', 'Manual investigation using Recon evidence'],
     ['Findings', root + '/findings', 'Evidence and reporting'],
     ['Hunt history', '/hunt', 'Archived Hunt runs'],
   ];

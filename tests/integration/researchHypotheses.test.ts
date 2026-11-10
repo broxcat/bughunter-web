@@ -10,7 +10,7 @@ vi.mock("@/lib/auth", () => ({ auth: mocks.auth }));
 const db = process.env.TEST_DATABASE_URL, schema = `hypotheses_${randomUUID().replaceAll("-", "")}`;
 if (db) { const url = new URL(db); url.searchParams.set("schema", schema); process.env.DATABASE_URL = url.toString(); }
 let prisma: typeof import("@/lib/prisma").prisma;
-let create: typeof import("@/server/research/sessions").createResearchSession;
+let create: typeof import("../fixtures/historicalResearch").createResearchSession;
 let sync: typeof import("@/app/api/research-sessions/[id]/hypotheses/sync/route").POST;
 let list: typeof import("@/app/api/research-sessions/[id]/hypotheses/route").GET;
 let detail: typeof import("@/app/api/research-sessions/[id]/hypotheses/[hypothesisId]/route").GET;
@@ -25,7 +25,7 @@ const row = () => prisma.researchHypothesis.findFirstOrThrow({ where: { sessionI
   beforeAll(async () => {
     execFileSync("npx", ["prisma", "migrate", "deploy"], { env: process.env, stdio: "pipe" });
     ({ prisma } = await import("@/lib/prisma"));
-    ({ createResearchSession: create } = await import("@/server/research/sessions"));
+    ({ createResearchSession: create } = await import("../fixtures/historicalResearch"));
     ({ POST: sync } = await import("@/app/api/research-sessions/[id]/hypotheses/sync/route"));
     ({ GET: list } = await import("@/app/api/research-sessions/[id]/hypotheses/route"));
     ({ GET: detail } = await import("@/app/api/research-sessions/[id]/hypotheses/[hypothesisId]/route"));

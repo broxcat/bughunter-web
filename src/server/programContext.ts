@@ -1,8 +1,8 @@
 import { prisma } from '@/lib/prisma';
-import { targetIdentity } from '@/lib/research/terminal';
+import { targetIdentity } from '@/lib/research/identity';
 import { ResearchError } from './research/workspace';
 
-/** Keep existing ScanRun/ResearchSession FKs and worker/PTY infrastructure.
+/** Keep existing ScanRun/ResearchSession FKs and worker infrastructure.
  * This inactive context identity is not an asset and never enters /scopes. */
 export async function ensureProgramContext(userId: string, programId: string) {
   targetIdentity.parse(programId);

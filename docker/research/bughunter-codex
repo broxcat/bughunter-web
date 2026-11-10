@@ -1,8 +1,0 @@
-#!/bin/bash
-set -eu
-workspace=$(pwd -P)
-case "$workspace" in
-  /workspaces/research_*) exec node /opt/bughunter/docker/research/validator/codex-launch.mjs "$@" ;;
-esac
-echo 'Research workspace requires isolation migration before it can be opened.' >&2
-exit 1

@@ -1,7 +1,0 @@
-#!/bin/sh
-set -eu
-kill -0 "$(cat /run/research-sshd.pid)"
-setpriv --reuid=researcher --regid=research --init-groups node -e 'fetch("http://127.0.0.1:7681/health", {signal:AbortSignal.timeout(2000)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'
-test -S /run/bughunter-broker/control.sock
-test -x /usr/local/bin/codex
-test -x /usr/local/bin/claude

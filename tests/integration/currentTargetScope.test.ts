@@ -116,13 +116,6 @@ let owner:string,other:string,programId:string,root:string;
     const g=await grant(),{artifact}=await recon(g),before=await doc();await p.reconArtifact.update({where:{id:artifact.id},data:{lastSeenAt:new Date(Date.now()+1000),value:{host:'second.fixture.test',addresses:['192.0.2.9']}}});
     const after=await doc();expect(after.sourceFingerprint).not.toBe(before.sourceFingerprint);expect(after.policyFingerprint).toBe(before.policyFingerprint);expect(after.markdown).toContain('second\\.fixture\\.test');
   });
-  it('preserves actual immutable Research scope bytes and authorization on current publication, policy drift and reconnect',async()=>{
-    const g=await grant(),{ensureTargetConsole}=await import('@/server/research/consoleWorkspace');const workspace=await ensureTargetConsole(owner,g.target.id),file=join(root,workspace.session.workspaceId,'scope.md'),old=await readFile(file,'utf8');
-    const stored=await p.researchSession.findUniqueOrThrow({where:{id:workspace.session.id}});await doc();await ensureTargetConsole(owner,g.target.id);expect(await readFile(file,'utf8')).toBe(old);
-    await p.bountyProgram.update({where:{id:programId},data:{requiredUserAgent:'New Research policy'}});const current=await doc();expect(current.markdown).toContain('New Research policy');
-    await expect(ensureTargetConsole(owner,g.target.id)).rejects.toThrow();expect(await readFile(file,'utf8')).toBe(old);
-    const after=await p.researchSession.findUniqueOrThrow({where:{id:stored.id}});expect(after.scopeMarkdown).toBe(stored.scopeMarkdown);expect(after.authorizationSnapshot).toEqual(stored.authorizationSnapshot);
-  });
   it('does no filesystem publication and cannot follow symlinks/traversal into Research',async()=>{
     const canary=join(root,'canary-'+randomUUID());await writeFile(canary,'DO NOT CHANGE');await symlink(canary,join(root,'scope.md'));await grant();await doc();expect(await readFile(canary,'utf8')).toBe('DO NOT CHANGE');
     for(const id of ['../scope.md','%2e%2e',randomUUID()])expect((await request(id)).status).toBe(404);

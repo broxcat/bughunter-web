@@ -1,11 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtemp, lstat, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { captureAssessmentSnapshot } from '@/lib/assessment';
-import { createResearchBundle, researchAssessmentSnapshot, researchAuthorizationMatches, researchAuthorizationSnapshot, assertResearchTarget, writeResearchWorkspace } from '@/server/research/workspace';
-import { consoleBundle, writeConsoleWorkspace } from '@/server/research/consoleWorkspace';
-import { targetWorkspaceId } from '@/lib/research/terminal';
+import { createResearchBundle, researchAssessmentSnapshot, researchAuthorizationMatches, researchAuthorizationSnapshot, assertResearchTarget } from '@/server/research/workspace';
 import { researchTarget, researchSession } from '../fixtures/research';
 import { buildReconContext, type ReconRun } from '@/server/research/reconContext';
 
@@ -59,19 +54,5 @@ describe('Research assessment context is metadata, not authorization',()=>{
     expect(buildReconContext(input).assessment).toMatchObject({assessmentMode:'WHITE_BOX',authorizedSourceCount:0});
     expect(buildReconContext({...input,assessmentSnapshot:captureAssessmentSnapshot({assessmentMode:'BLACK_BOX'})}).assessment).toMatchObject({assessmentMode:'BLACK_BOX',authorizedSourceCount:0});
     expect(buildReconContext({...input,runs:[{...run,assessmentModeSnapshot:undefined,assessmentSourcesSnapshot:undefined}]}).assessment).toMatchObject({assessmentMode:null,assessmentPolicyFile:null});
-  });
-  it('publishes the assessment policy read-only in both ZIP workspace and persistent console layouts',async()=>{
-    const root=await mkdtemp(join(tmpdir(),'research-assessment-'));
-    try{
-      const session={...researchSession,authorizationSnapshot:captured()};
-      const files=createResearchBundle(researchTarget(),null,[],session);await writeResearchWorkspace(root,session.workspaceId,files);
-      expect((await lstat(join(root,session.workspaceId,'assessment-policy.json'))).mode&0o777).toBe(0o440);
-      const consoleSession={...session,workspaceId:targetWorkspaceId('target')};const consoleFiles=consoleBundle(researchTarget(),null,[],consoleSession);
-      await writeConsoleWorkspace(root,'target',consoleFiles);
-      expect((await lstat(join(root,consoleSession.workspaceId,'assessment-policy.json'))).mode&0o777).toBe(0o440);
-      expect(await readFile(join(root,consoleSession.workspaceId,'assessment-policy.json'),'utf8')).toBe(files['assessment-policy.json']);
-      expect(consoleFiles['.agents/bughunter/AGENTS.md']).toContain('This is a black-box assessment');
-      expect(JSON.parse(consoleFiles['.agents/bughunter/target.json']).assessment.authorizedSources).toEqual([]);
-    }finally{await rm(root,{recursive:true,force:true});}
   });
 });

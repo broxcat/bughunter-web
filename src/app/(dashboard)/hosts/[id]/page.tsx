@@ -5,7 +5,6 @@ import {useRouter,useSearchParams} from "next/navigation";
 import {paginationInput} from "@/lib/pagination";
 import CollectionPager from "@/components/CollectionPager";
 import TargetAuthentication from "@/components/TargetAuthentication";
-import CreateResearchButton from "@/components/CreateResearchButton";
 import { Suspense, use, useEffect, useState } from "react";
 import ScanCancelButton from "@/components/ScanCancelButton";
 import ScanLogViewer from "@/components/ScanLogViewer";
@@ -106,7 +105,7 @@ function TargetDetailContent({
   return (
     <div className="space-y-8">
       <div>
-        <Link href={target.program ? `/scopes?target=${target.program.id}` : "/scopes"} className="text-sm text-muted hover:text-foreground">
+        <Link href={target.program ? `/targets/${target.program.id}/settings` : "/targets"} className="text-sm text-muted hover:text-foreground">
           ← Scope
         </Link>
         <h1 className="mt-2 font-mono text-2xl font-semibold tracking-tight text-foreground">
@@ -128,7 +127,7 @@ function TargetDetailContent({
 
       <div className="flex flex-wrap items-center gap-3">
         {target.program && <Link className="text-brand" href={`/targets/${target.program.id}?tab=Recon`}>Recon from target assets →</Link>}
-        {scopeApproved && target.host.startsWith("*.") && target.program ? <Link className="text-brand" href={`/targets/${target.program.id}?tab=Codex%20Console`}>Open program Codex console</Link> : <CreateResearchButton targetId={id} disabled={!scopeApproved} />}
+        <Link className="text-brand" href={"/research?program="+target.program?.id}>Open manual Research</Link>
         <div className="ml-auto flex gap-4 text-sm">
           <Link
             href={`/targets/${id}/findings`}

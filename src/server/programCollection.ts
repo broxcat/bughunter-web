@@ -3,12 +3,12 @@ import { campaignFacts, campaignProgramSelect, campaignView } from './targetCamp
 import { paginationBounds, type PageRequest } from '@/lib/pagination';
 
 /** Repeatable read keeps count, page rows and campaign state in one snapshot. */
-export function programCollection(ownerId: string, input: PageRequest) {
+export function programCollection(ownerId: string, input: PageRequest, unpaged = false) {
   return prisma.$transaction(async tx => {
     const where = { ownerId, ...(input.q ? { companyName: { contains: input.q, mode: 'insensitive' as const } } : {}) };
     const bounds = paginationBounds(input, await tx.bountyProgram.count({ where }));
     const items = await tx.bountyProgram.findMany({
-      where, orderBy: [{ companyName: 'asc' }, { id: 'asc' }], skip: bounds.skip, take: bounds.pageSize,
+      where, orderBy: [{ companyName: 'asc' }, { id: 'asc' }], ...(unpaged ? {} : { skip: bounds.skip, take: bounds.pageSize }),
       select: { ...campaignProgramSelect,
         reconRuns: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, status: true, outcome: true, createdAt: true } } },
     });

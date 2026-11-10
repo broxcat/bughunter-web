@@ -18,7 +18,7 @@ export function campaignActivity(facts: CampaignFacts) {
   const recon = facts.runStatus === 'QUEUED' || facts.runStatus === 'RUNNING' || facts.handoffPending || facts.standaloneTotal > 0;
   const campaign = facts.campaignState === 'RECON_RUNNING' || facts.campaignState === 'READY';
   return {
-    active: recon || campaign || facts.researchCreating > 0,
+    active: recon || campaign,
     key: JSON.stringify([facts.runId, facts.runStatus, facts.reconTotal, facts.reconFinished, facts.reconRunning, facts.standaloneTotal,
       facts.standaloneRunning, facts.handoffPending, facts.hasHandoff, facts.researchCreating, facts.researchReady, facts.campaignState]),
   };
@@ -32,7 +32,6 @@ export function targetCampaign(program: {
   const settings = root + '/settings#' + POLICY_REVIEW_ANCHOR;
   const history = '/recon?program=' + program.id;
   const researchUrl = '/research?program=' + program.id + '&view=campaign';
-  const researchDetails = '/research?program=' + program.id + '&view=details';
   const campaign = program.campaign;
   const paused = campaign?.state === 'PAUSED';
   const running = facts.reconRunning > 0 || facts.standaloneRunning > 0;
@@ -71,13 +70,8 @@ export function targetCampaign(program: {
   } else if (facts.runId) recon.detail = 'Scope changed since the last run.';
 
   let research: StageView = { stage: 'Research', state: 'not started' };
-  if (facts.researchCreating) research = { stage: 'Research', state: 'running', detail: 'Preparing ' + facts.researchCreating + (facts.researchCreating === 1 ? ' workspace' : ' workspaces') };
-  else if (campaign?.state === 'RESEARCH_PENDING') research = { stage: 'Research', state: 'needs you', detail: 'Recon handoff ready. Open Research to continue.' };
-  else if (facts.researchReady) research = facts.findings
-    ? { stage: 'Research', state: 'done', detail: 'Findings available for review.' }
-    : { stage: 'Research', state: 'needs you', detail: facts.researchReady + (facts.researchReady === 1 ? ' workspace ready for manual Research' : ' workspaces ready for manual Research') };
-  else if (campaign?.handoffRunId && !facts.findings) research = { stage: 'Research', state: 'needs you', detail: 'Recon handoff available for manual Research.' };
-  else if (facts.researchFailed) research = { stage: 'Research', state: 'failed', detail: 'Research workspace provisioning failed.', fix: researchDetails };
+  if (facts.findings) research = { stage: 'Research', state: 'done', detail: 'Findings available for review.' };
+  else if (recon.state === 'done' || campaign?.handoffRunId) research = { stage: 'Research', state: 'needs you', detail: 'Review Recon and continue manual Research.' };
   const findings: StageView = facts.findings
     ? { stage: 'Findings', state: facts.reviewedFindings === facts.findings ? 'done' : 'needs you',
       detail: facts.reviewedFindings + '/' + facts.findings + ' reviewed' }
@@ -100,7 +94,7 @@ export function targetCampaign(program: {
     next = running ? 'Wait for Recon to finish before opening Research.' : facts.handoffPending ? 'Wait for the Research handoff.' : 'Waiting for an available Recon slot.';
   } else if (campaign?.state === 'RESEARCH_PENDING') {
     current = research;
-    action = { label: 'Open research', command: 'handoff', destination: researchUrl };
+    action = { label: 'Open research', href: researchUrl };
     next = 'Review the prepared Recon handoff in Research.';
   } else if (facts.findings) {
     current = findings;

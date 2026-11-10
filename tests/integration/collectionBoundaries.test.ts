@@ -7,8 +7,8 @@ vi.mock('@/lib/auth',()=>({auth:mocks.auth}));
 const db=process.env.TEST_DATABASE_URL,schema='boundaries_'+randomUUID().replaceAll('-','');
 if(db){const u=new URL(db);u.searchParams.set('schema',schema);process.env.DATABASE_URL=u.toString();}
 let p:typeof import('@/lib/prisma').prisma,userId:string,programId:string,targetId:string,scopeId:string;
-const kinds=['legacy','scope','hosts','history','sessions','findings','reports','hunt'] as const;
-type Kind=typeof kinds[number];
+const kinds=['legacy','scope','sessions','findings','reports','hunt'] as const;
+type Kind=typeof kinds[number] | 'hosts' | 'history';
 function findProps(node:unknown,label:string):Record<string,unknown>|undefined{
  if(!node||typeof node!=='object')return;
  if(Array.isArray(node)){for(const item of node){const found=findProps(item,label);if(found)return found;}return;}

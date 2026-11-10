@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { detectScopeAsset, assetAllowsHost, assetAllowsUrl, assetReconStatus, assetValueRank } from '@/lib/scopeAssets';
 import { buildReconPlan } from '@/lib/reconPlanner';
-import { consoleBundle } from '@/server/research/consoleWorkspace';
-import { consolePolicySchema } from '@/lib/research/consolePolicy';
-import { researchTarget } from '../fixtures/research';
-import { enforceHttp1, enforceHttp2 } from '../../docker/research/validator/burp-active.mjs';
-import { sanitizeHistoryItem } from '../../docker/research/validator/burp-http.mjs';
 import { buildReconContext, compactReconContext, reconJson, RECON_SUMMARY_BYTES } from '@/server/research/reconContext';
 import { expandAssetReconRuns } from '@/server/research/reconInputs';
 import { researchRecon } from '../fixtures/research';
@@ -57,32 +52,6 @@ describe('one asset authorization boundary', () => {
     expect(plan('*.example.test','WILDCARD').limits.maxHosts).toBe(12);
     expect(plan('https://app.example.test/api/','API')).toMatchObject({ffufProfile:'API_STANDARD',limits:{ports:[]}});
     expect(plan('example.test','WILDCARD').stages.find(s=>s.name==='Passive discovery')?.enabled).toBe(false);
-  });
-});
-describe('asset policy and existing Burp MCP', () => {
-  function bundle() {
-    const target = researchTarget(); target.contextOnly = true; target.active = false;
-    target.scopeAsset = { id: 'asset', programId: 'program', originalValue: 'https://app.example.test:8443/app', normalizedValue: 'https://app.example.test:8443/app', format: 'URL', type: 'API', assetValue: 'HIGH', active: true, updatedAt: new Date() };
-    return consoleBundle(target, null, [], { id: 'session', workspaceId: 'research_target', createdAt: new Date('2026-11-02T00:00:00Z') });
-  }
-  it('uses the same scoped policy for Codex/Claude without changing historical defaults', () => {
-    const files = bundle(), policy = consolePolicySchema.parse(JSON.parse(files['.agents/bughunter/policy.json']));
-    expect(policy).toMatchObject({ port: 8443, mode: 'SCOPED_ACTIVE_HTTP', assetScope: { format: 'URL' } });
-    expect(files['scope.md']).toContain('https://app.example.test:8443/app'); expect(files['scope.md']).toContain('Asset value (priority only): HIGH');
-    const request = { targetHostname: 'app.example.test', targetPort: 8443, usesHttps: true, content: 'GET /app/users HTTP/1.1\r\nHost: app.example.test\r\n\r\n' };
-    expect(enforceHttp1(request, policy).content).toContain('Research-Test/1');
-    expect(() => enforceHttp1({ ...request, content: request.content.replace('/app/users', '/admin') }, policy)).toThrow('OUT_OF_SCOPE');
-    expect(() => enforceHttp2({ targetHostname: 'app.example.test', targetPort: 8443, usesHttps: true, pseudoHeaders: { ':authority': 'app.example.test:8443', ':scheme': 'https', ':method': 'GET', ':path': '/admin' }, headers: {}, requestBody: '' }, policy)).toThrow('OUT_OF_SCOPE');
-    const raw = { request: request.content, response: 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n' };
-    expect(sanitizeHistoryItem(raw, policy)?.status).toBe(200);
-    expect(sanitizeHistoryItem({ ...raw, request: raw.request.replace('/app/users', '/admin') }, policy)).toBeNull();
-  });
-  it('wildcard Research remains passive and its policy only covers the selected parent', () => {
-    const target = researchTarget(); target.contextOnly = true; target.active = false; target.host = '*.example.test'; target.scope.hostPattern = '*.example.test';
-    target.scopeAsset = { id: 'wild', programId: 'program', originalValue: '*.example.test', normalizedValue: '*.example.test', format: 'WILDCARD_DOMAIN', type: 'WILDCARD', assetValue: 'CRITICAL', active: true, updatedAt: new Date() };
-    const files = consoleBundle(target, null, [], { id: 'session', workspaceId: 'research_target', createdAt: new Date() });
-    expect(JSON.parse(files['.agents/bughunter/policy.json'])).toMatchObject({ targetHost: 'example.test', mode: 'PROGRAM_PASSIVE', programScope: { rules: ['*.example.test'] } });
-    expect(files['.codex/config.toml']).not.toContain('send_http1_request');
   });
 });
 describe('structured asset Recon → Research', () => {

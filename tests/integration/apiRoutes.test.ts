@@ -570,7 +570,7 @@ d("API route authorization (integration)", () => {
     expect(saved.reviewStatus).toBe("CONFIRMED"); expect(saved.gateAnswers).toBeNull();
     expect(saved.reviewEvidence).toMatchObject({ scope: "IN_SCOPE", control: ["BASELINE_CONTROL", "INDEPENDENT_REPEAT"] });
     expect((await reportsPost(req('http://localhost',{title:'Reviewed but not validated',platform:'GENERIC',findingIds:[finding.id]}))).status).toBe(400);
-    const session=await(await import('@/server/research/sessions')).createResearchSession(userId,target.id);
+    const session=await(await import('../fixtures/historicalResearch')).createResearchSession(userId,target.id);
     await(await import('@/server/evidenceVault')).createEvidence(userId,target.id,{kind:'HTTP_REQUEST_RESPONSE',sessionId:session.id,description:'Explicit local proof',observedAt:new Date().toISOString(),http:{method:'GET',url:'https://review.example.test/api/orders',statusCode:200},link:{entity:'finding',id:finding.id,role:'SUPPORTS'}});
     const {changeFindingLifecycle}=await import('@/server/findingLifecycle');for(const [expectedRevision,state]of ['VALIDATING','VALIDATED'].entries())await changeFindingLifecycle(userId,finding.id,{eventKey:crypto.randomUUID(),expectedRevision,state,reason:'Human reviewed the reproduction, impact and negative control',...(state==='VALIDATED'?{validation:{reproduced:true,impactDemonstrated:true,scopeRespected:true,negativeControl:'PERFORMED',conclusion:'Reproduced in authorized scope with impact and negative control'}}:{})});
     expect((await reportsPost(req("http://localhost", { title: "Evidence reviewed report", platform: "GENERIC", findingIds: [finding.id] }))).status).toBe(201);

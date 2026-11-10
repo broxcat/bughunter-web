@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import ResearchModelSettings from "@/components/ResearchModelSettings";
+import { PROVIDERS as SPECS } from "@/server/brain/providers";
 
 // The 11 AiProvider enum values (kept in sync with prisma/schema.prisma).
 // OLLAMA runs locally and is keyless; every other provider needs an API key.
@@ -48,8 +48,12 @@ export default function SettingsPage() {
   const [provider, setProvider] = useState<Provider>("ANTHROPIC");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [selectingDefault, setSelectingDefault] = useState<Provider | null>(null);
+  const [baseUrl, setBaseUrl] = useState(SPECS.ANTHROPIC.defaultBaseUrl ?? "");
+  const formRef = useRef<HTMLDetailsElement>(null);
+  const [testing, setTesting] = useState(false);
+  const [selectingDefault, setSelectingDefault] = useState<Provider | null>(
+    null,
+  );
 
   const keyless = KEYLESS.has(provider);
 
@@ -69,13 +73,21 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
-    fetch("/api/ai-providers", { cache: "no-store" }).then(async res => {
-      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
-      const saved = (await res.json()).providers ?? [];
-      setConfigs(saved);
-      const selected = saved.find((config: ProviderConfig) => config.provider === 'ANTHROPIC');
-      if (selected) { setModel(selected.model ?? ''); setBaseUrl(selected.baseUrl ?? ''); }
-    }).catch(e => setError(e.message)).finally(() => setLoading(false));
+    fetch("/api/ai-providers", { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Failed to load (${res.status})`);
+        const saved = (await res.json()).providers ?? [];
+        setConfigs(saved);
+        const selected = saved.find(
+          (config: ProviderConfig) => config.provider === "ANTHROPIC",
+        );
+        if (selected) {
+          setModel(selected.model ?? "");
+          setBaseUrl(selected.baseUrl ?? SPECS.ANTHROPIC.defaultBaseUrl ?? "");
+        }
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }, []);
 
   async function onSubmit(e: React.FormEvent) {
@@ -84,7 +96,11 @@ export default function SettingsPage() {
     setError(null);
     setNotice(null);
     try {
-      const body: Record<string, unknown> = { provider, model: model.trim(), baseUrl: baseUrl.trim() };
+      const body: Record<string, unknown> = {
+        provider,
+        model: model.trim(),
+        baseUrl: baseUrl.trim(),
+      };
       // Only send apiKey when the user typed one, so saving without re-entering
       // the key leaves the stored cipher untouched.
       if (!keyless && apiKey.trim()) body.apiKey = apiKey.trim();
@@ -109,30 +125,103 @@ export default function SettingsPage() {
   }
 
   function selectProvider(next: Provider) {
-    const saved = configs.find(config => config.provider === next);
-    setProvider(next); setApiKey(''); setModel(saved?.model ?? ''); setBaseUrl(saved?.baseUrl ?? '');
+    const saved = configs.find((config) => config.provider === next);
+    setProvider(next);
+    setApiKey("");
+    setModel(saved?.model ?? SPECS[next].defaultModel ?? "");
+    setBaseUrl(
+      saved?.baseUrl ??
+        SPECS[next].defaultBaseUrl ??
+        (next === "OLLAMA"
+          ? "http://localhost:11434"
+          : "http://localhost:4000/v1"),
+    );
+    if (formRef.current) formRef.current.open = true;
   }
   async function setDefault(next: Provider) {
-    setSelectingDefault(next); setError(null); setNotice(null);
+    setSelectingDefault(next);
+    setError(null);
+    setNotice(null);
     try {
-      const response = await fetch('/api/ai-providers/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: next }) });
-      if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error ?? 'The default provider could not be changed.'); }
-      await load(); setNotice(`${next} is the default AI provider.`);
-    } catch (error) { setError(error instanceof Error ? error.message : 'The default provider could not be changed.'); }
-    finally { setSelectingDefault(null); }
+      const response = await fetch("/api/ai-providers/default", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: next }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(
+          data.error ?? "The default provider could not be changed.",
+        );
+      }
+      await load();
+      setNotice(`${next} is the default AI provider.`);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "The default provider could not be changed.",
+      );
+    } finally {
+      setSelectingDefault(null);
+    }
   }
 
+  async function test(input: {
+    provider: Provider;
+    model?: string;
+    baseUrl?: string;
+    apiKey?: string;
+  }) {
+    setTesting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const r = await fetch("/api/ai-providers/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Connection test failed");
+      setNotice(data.result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Connection test failed");
+    } finally {
+      setTesting(false);
+    }
+  }
+  async function remove(provider: Provider) {
+    if (!window.confirm(`Supprimer la configuration ${provider} ?`)) return;
+    const r = await fetch("/api/ai-providers", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider }),
+    });
+    if (!r.ok) {
+      setError("Provider could not be deleted");
+      return;
+    }
+    await load();
+    setNotice(`${provider} deleted.`);
+  }
   return (
     <div className="space-y-6">
       <h1>Settings</h1>
       <h2 className="text-lg font-semibold">AI providers</h2>
       <p className="mt-1 text-sm text-muted">
-        Choose the default for optional AI assistance. Configure Research stage routing below.
+        Configure providers for optional AI assistance.
       </p>
-      {error && <p role="alert" className="text-sm text-brand">{error}</p>}
-      {notice && <p role="status" className="text-sm"><Badge tone="proven">{notice}</Badge></p>}
-
-      <details className="ui-disclosure"><summary>Research model routing</summary><div className="mt-4"><ResearchModelSettings providers={configs} /></div></details>
+      {error && (
+        <p role="alert" className="text-sm text-brand">
+          {error}
+        </p>
+      )}
+      {notice && (
+        <p role="status" className="text-sm">
+          <Badge tone="proven">{notice}</Badge>
+        </p>
+      )}
 
       {/* Configured providers */}
       <section className="mt-8">
@@ -161,12 +250,14 @@ export default function SettingsPage() {
                       </Badge>
                     )}
                   </span>
-                  <details className="mt-2 break-all text-xs text-muted"><summary>Details</summary><p className="mt-2">
-                    {c.model ? `model: ${c.model}` : "no model set"}
-                    {c.baseUrl ? ` · ${c.baseUrl}` : ""}
-                  </p></details>
+                  <div className="mt-2 break-all text-xs text-muted">
+                    <p>
+                      {c.model ? `model: ${c.model}` : "no model set"}
+                      {` · ${c.baseUrl ?? SPECS[c.provider].defaultBaseUrl ?? (c.provider === "OLLAMA" ? "http://localhost:11434" : "Endpoint required")}`}
+                    </p>
+                  </div>
                 </div>
-                <div className="text-right">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   {KEYLESS.has(c.provider) ? (
                     <Badge tone="neutral">keyless (local)</Badge>
                   ) : c.hasApiKey ? (
@@ -174,7 +265,42 @@ export default function SettingsPage() {
                   ) : (
                     <Badge tone="medium">no key</Badge>
                   )}
-                  {!c.isActive && <Button size="sm" variant="secondary" className="ml-3" aria-label={`Set ${c.provider} as default`} disabled={saving || selectingDefault !== null} onClick={() => void setDefault(c.provider)}>{selectingDefault === c.provider ? 'Selecting…' : 'Set as default'}</Button>}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={testing}
+                    onClick={() => void test({ provider: c.provider })}
+                  >
+                    Test connection
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => selectProvider(c.provider)}
+                  >
+                    Modifier
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => void remove(c.provider)}
+                  >
+                    Supprimer
+                  </Button>
+                  {!c.isActive && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="ml-3"
+                      aria-label={`Set ${c.provider} as default`}
+                      disabled={saving || selectingDefault !== null}
+                      onClick={() => void setDefault(c.provider)}
+                    >
+                      {selectingDefault === c.provider
+                        ? "Selecting…"
+                        : "Set as default"}
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -183,7 +309,16 @@ export default function SettingsPage() {
       </section>
 
       {/* Add / update form */}
-      <details className="ui-disclosure max-w-2xl"><summary>Add or update a provider</summary>
+      <Button
+        onClick={() => {
+          setApiKey("");
+          if (formRef.current) formRef.current.open = true;
+        }}
+      >
+        Add provider
+      </Button>
+      <details ref={formRef} className="ui-disclosure max-w-2xl">
+        <summary>Provider configuration</summary>
         <div className="mt-5">
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
@@ -253,7 +388,14 @@ export default function SettingsPage() {
                 htmlFor="baseUrl"
                 className="block text-sm font-medium text-foreground"
               >
-                Base URL <span className="text-subtle">({keyless || provider === 'LITELLM' ? 'required for default' : 'optional override'})</span>
+                Base URL{" "}
+                <span className="text-subtle">
+                  (
+                  {keyless || provider === "LITELLM"
+                    ? "required for default"
+                    : "optional override"}
+                  )
+                </span>
               </label>
               <input
                 id="baseUrl"
@@ -261,16 +403,32 @@ export default function SettingsPage() {
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
                 placeholder={
-                  keyless ? "Your configured Ollama endpoint" : "Leave blank to use the provider URL"
+                  keyless
+                    ? "Your configured Ollama endpoint"
+                    : "Leave blank to use the provider URL"
                 }
                 className={FIELD_CLASS}
               />
             </div>
 
-            <Button type="submit" disabled={saving || selectingDefault !== null}>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={testing}
+              onClick={() => void test({ provider, model, baseUrl, apiKey })}
+            >
+              Test connection
+            </Button>
+            <Button
+              type="submit"
+              disabled={saving || selectingDefault !== null}
+            >
               {saving ? "Saving…" : "Save provider"}
             </Button>
-            <p className="text-xs text-muted">Save the configuration, then choose Set as default above. Saving alone keeps the current default.</p>
+            <p className="text-xs text-muted">
+              Save the configuration, then choose Set as default above. Saving
+              alone keeps the current default.
+            </p>
           </form>
         </div>
       </details>
