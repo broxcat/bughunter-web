@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/Button';
 import { ASSET_TYPES, ASSET_VALUES, assetTypeLabel, assetValueLabel, detectScopeAsset, type AssetType, type AssetValue } from '@/lib/scopeAssets';
-import { LEGACY_LIMITS, POLICY_REVIEW_ANCHOR, structuredExclusionSchema } from '@/lib/programExecutionPolicy';
+import { LEGACY_LIMITS, structuredExclusionSchema } from '@/lib/programExecutionPolicy';
 import { scopeReviewChecks, type DocumentedAsset, type ReviewRule, type ScopeEntry, type TargetReview } from '@/lib/targetReview';
 import type { ProgramData } from '@/lib/targetFormData';
 
@@ -57,15 +57,8 @@ export function policyFields(value: ReviewFields, allowProse = false): TargetRev
 export function TargetScopeReview({ value, onChange, allowProse }: { value: ReviewFields; onChange: (value: ReviewFields) => void; allowProse: boolean }) {
   const update = <K extends keyof ReviewFields>(key: K, next: ReviewFields[K]) => onChange({ ...value, [key]: next });
   const { scopeError, conflict } = scopeReviewChecks(value.scopeIn, policyFields(value, allowProse).exclusions);
-  const policy = value.policy;
-  const summary = [
-    policy.requestsPerSecond + ' req/s', policy.maxConcurrency + ' concurrent',
-    ...policy.requiredHeaders.map(({ name }) => 'header ' + name),
-    ...policy.forbiddenCategories.map(category => readable(category) + ' forbidden'),
-    ...(!policy.automationAllowed ? ['automation prohibited'] : []),
-  ];
-  return <section id={POLICY_REVIEW_ANCHOR} className="space-y-5 rounded border border-border p-4 sm:p-5">
-    <h2 className="text-lg font-semibold">Scope and execution policy</h2>
+  return <section className="space-y-5 rounded border border-border p-4 sm:p-5">
+    <h2 className="text-lg font-semibold">Scope</h2>
     <fieldset className="space-y-2"><legend className="font-semibold">In scope</legend>
       {!value.scopeIn.length && <p className="text-sm text-muted">Add the domains, wildcards or URLs you are authorized to test.</p>}
       {value.scopeIn.map((asset, index) => <div key={index} className="flex flex-wrap items-end gap-2">
@@ -99,6 +92,5 @@ export function TargetScopeReview({ value, onChange, allowProse }: { value: Revi
       <span className="text-sm font-normal text-muted">{allowProse ? 'Exact assets are enforced automatically. Other exclusions stay in the program record for review.' : 'One URL, domain, wildcard, IP or CIDR per line. Exclusions take precedence.'}</span>
     </label>
     {conflict && <p className="text-sm text-danger">{conflict}</p>}
-    <p className="text-sm text-muted" aria-label="Execution policy summary">{summary.join(' · ')}</p>
   </section>;
 }
