@@ -46,14 +46,12 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     assert.match(await response.text(), /Orion/);
     const blockedRow = page.getByRole('row').filter({ hasText: blocked.companyName });
     const readyRow = page.getByRole('row').filter({ hasText: ready.companyName });
-    assert.match(await blockedRow.innerText(), /Policy review needed[\s\S]*Target[\s\S]*Blocked/);
+    assert.doesNotMatch(await blockedRow.innerText(), /Policy review needed|Blocked/);
+    assert.match(await blockedRow.innerText(), /Recon[\s\S]*Not started/);
     assert.match(await readyRow.innerText(), /Recon[\s\S]*Not started/);
     await blockedRow.getByRole('link', { name: 'Open ' + blocked.companyName }).click();
-    await primary('link', 'Fix policy').waitFor();
-    await page.getByRole('status').filter({ hasText: '1 rule needs a decision.' }).waitFor();
-    await capture('blocked');
-    await primary('link', 'Fix policy').click();
-    await page.waitForURL(path(blocked.id) + '/settings#policy-rule-1');
+    await primary('button', 'Start recon').waitFor();
+    await capture('policy-dormant');
 
     const readyResponse = await page.goto(path(ready.id));
     assert.match(await readyResponse.text(), /Start recon/);
