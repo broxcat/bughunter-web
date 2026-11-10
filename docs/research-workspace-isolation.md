@@ -1,5 +1,7 @@
 # Research workspace isolation — failed v1.1 acceptance
 
+> **Retired.** The Research console (Codex/Claude terminals, Burp bridge and their containers) has been removed from BugHunter. Research is now done manually in a local CLI. This page is kept for history only; see [Research console removal](research-console-removal.md).
+
 ## Decision
 
 **BLOCKER — [#42](https://github.com/broxcat/bughunter-web/issues/42).** Milestone 8 stopped before production mutation or release preparation. Candidate: `041f47989c35a2b2c5a9671f4e6bc27f5b3882f5`; runtime/test parent: `dea516083bb3c50bb35553857ec37679819c4e38`.

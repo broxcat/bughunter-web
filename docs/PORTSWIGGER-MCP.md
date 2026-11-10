@@ -1,5 +1,7 @@
 # PortSwigger MCP in the target and host consoles
 
+> **Retired.** The Research console (Codex/Claude terminals, Burp bridge and their containers) has been removed from BugHunter. Research is now done manually in a local CLI. This page is kept for history only; see [Research console removal](research-console-removal.md).
+
 For active-request transport, typed errors and correlated Proxy History, see [BURP-TRANSPORT.md](BURP-TRANSPORT.md). The original integration audit below predates that correction.
 
 ## Diagnosis

@@ -1,5 +1,7 @@
 # Issue #42: runtime isolation validation
 
+> **Retired.** The Research console (Codex/Claude terminals, Burp bridge and their containers) has been removed from BugHunter. Research is now done manually in a local CLI. This page is kept for history only; see [Research console removal](research-console-removal.md).
+
 Runtime revision: `b32c4b2beec468ee11a1ab48a1ad5bbf97463d9c`, based on `818c6f4e764a948b8fe8c169ea0bf69baf98c84b`. Validation date: 2026-11-07. Production was not migrated, restarted or deployed. Stable release remains v1.0.0; #7 and Milestone 8 remain stopped/incomplete.
 
 ## Preserved failure and root cause

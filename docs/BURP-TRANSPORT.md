@@ -1,5 +1,7 @@
 # Burp request transport, status attribution and Proxy History
 
+> **Retired.** The Research console (Codex/Claude terminals, Burp bridge and their containers) has been removed from BugHunter. Research is now done manually in a local CLI. This page is kept for history only; see [Research console removal](research-console-removal.md).
+
 ## Findings before modification
 
 `bughunter_burp` has three passive tools: `burp_status`, `burp_history` and

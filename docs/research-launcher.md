@@ -1,5 +1,7 @@
 # Research launcher contract
 
+> **Retired.** The Research console (Codex/Claude terminals, Burp bridge and their containers) has been removed from BugHunter. Research is now done manually in a local CLI. This page is kept for history only; see [Research console removal](research-console-removal.md).
+
 Console ownership decision: **PER_HOST**. A business Target is a BountyProgram; execution identity and workspace belong to a technical Target. The existing workspace is `/workspaces/research_<validated Target ID>`. No migration is performed.
 
 | Concern | Per technical host (retained) | Per program with host switching (rejected) |

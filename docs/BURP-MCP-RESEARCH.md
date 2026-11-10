@@ -1,5 +1,7 @@
 # Burp + Playwright MCP for a Target console
 
+> **Retired.** The Research console (Codex/Claude terminals, Burp bridge and their containers) has been removed from BugHunter. Research is now done manually in a local CLI. This page is kept for history only; see [Research console removal](research-console-removal.md).
+
 Current target/host console integration and the optional real Community service are documented in [PORTSWIGGER-MCP.md](PORTSWIGGER-MCP.md). This guide retains the external-host bridge and legacy workspace setup.
 
 Burp Suite is an optional **external operator GUI**. It is not installed in web,

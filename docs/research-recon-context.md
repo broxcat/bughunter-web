@@ -1,5 +1,7 @@
 # Recon evidence in persistent Research
 
+> **Retired.** The Research console (Codex/Claude terminals, Burp bridge and their containers) has been removed from BugHunter. Research is now done manually in a local CLI. This page is kept for history only; see [Research console removal](research-console-removal.md).
+
 Research keeps its existing target workspace and separate native Codex/Claude tmux conversations. Open **Contexte Recon** in the console, generate a snapshot, review suggestions/provenance and select **Transmettre** for the current provider. The fixed message is pasted without Enter: submit it when the provider is ready and the input is empty. `STAGED` means pasted, never that the model read or accepted it. A network timeout records `UNKNOWN`; check the console before retrying.
 
 ## Existing components reused

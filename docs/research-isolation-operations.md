@@ -1,5 +1,7 @@
 # Research isolation: operator migration plan
 
+> **Retired.** The Research console (Codex/Claude terminals, Burp bridge and their containers) has been removed from BugHunter. Research is now done manually in a local CLI. This page is kept for history only; see [Research console removal](research-console-removal.md).
+
 Status: runtime implementation validated in disposable infrastructure, including independent CI; see [results](research-isolation-42-validation.md). Production execution is NOT authorized by this document. Milestone 8 release acceptance remains stopped and is not resumed by fixing #42. The original failed acceptance is retained in `research-workspace-isolation.md`.
 
 ## Boundary and requirements

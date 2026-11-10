@@ -1,5 +1,7 @@
 # Claude Code in Research
 
+> **Retired.** The Research console (Codex/Claude terminals, Burp bridge and their containers) has been removed from BugHunter. Research is now done manually in a local CLI. This page is kept for history only; see [Research console removal](research-console-removal.md).
+
 Research offers Codex CLI and Claude Code in the existing terminal. This change
 adds an **interactive passive Claude console**. It does not implement active
 Claude vulnerability testing or the four offensive security skills requested for

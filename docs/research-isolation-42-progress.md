@@ -1,5 +1,7 @@
 # Issue 42: retained baseline regression
 
+> **Retired.** The Research console (Codex/Claude terminals, Burp bridge and their containers) has been removed from BugHunter. Research is now done manually in a local CLI. This page is kept for history only; see [Research console removal](research-console-removal.md).
+
 Status: OPEN. Milestone 8 remains BLOCKED BY #42. This change preserves the failing gate; it does not implement isolation or authorize release acceptance.
 
 Base: 9b3aa25080b0bcdb47137d448444fb890e64b5fb. Run `node tests/research/workspaceIsolationBaseline.mjs` from the repository root. Requires existing disposable fixture images `bughunter-m7-web:local` and `bughunter-m7-research:local`. The script checks publication and validator helper source hashes against this checkout before interpreting results. Image-defined `researcher` must resolve to UID/GID 1000/1000. Root only publishes fixtures; acceptance runs as researcher with zero capabilities, network disabled and read-only container root. No production mounts or sessions are used. Only nonce-labelled fixture resources are removed.

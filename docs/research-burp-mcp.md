@@ -1,5 +1,7 @@
 # Burp MCP persistence in Research
 
+> **Retired.** The Research console (Codex/Claude terminals, Burp bridge and their containers) has been removed from BugHunter. Research is now done manually in a local CLI. This page is kept for history only; see [Research console removal](research-console-removal.md).
+
 ## Cause and evidence
 
 Before the fix, `burp` used `network_mode: service:research-console` and depended

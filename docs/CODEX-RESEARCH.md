@@ -1,5 +1,7 @@
 # Per-target Codex Research console
 
+> **Retired.** The Research console (Codex/Claude terminals, Burp bridge and their containers) has been removed from BugHunter. Research is now done manually in a local CLI. This page is kept for history only; see [Research console removal](research-console-removal.md).
+
 `/research` lists authorized concrete technical Targets. **Open console** navigates
 to `/research/<Target.id>` and opens Codex directly in a full-screen xterm.js
 terminal, with only a host/UA/status/reconnect bar. It does not inherit dashboard
