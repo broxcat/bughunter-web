@@ -159,8 +159,7 @@ export async function PATCH(req: Request, { params }: Params) {
       return NextResponse.json(saved);
     }, { timeout: 30000 });
     if (response.ok) {
-      const cleanup = await Promise.allSettled(retired.map(assetId => settleScopeAssetRetirement(session.user.id!, assetId)));
-      if (cleanup.some(result => result.status === 'rejected')) response.headers.set('X-Scope-Cleanup-Pending', '1');
+      if (retired.length) await settleScopeAssetRetirement().catch(() => response.headers.set('X-Scope-Cleanup-Pending', '1'));
     }
     return response;
   } catch (error) {

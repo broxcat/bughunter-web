@@ -1,9 +1,8 @@
 import {afterAll,beforeAll,beforeEach,describe,expect,it,vi} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-const mocks=vi.hoisted(()=>({auth:vi.fn(),pause:vi.fn(),settle:vi.fn()}));
+const mocks=vi.hoisted(()=>({auth:vi.fn(),settle:vi.fn()}));
 vi.mock('@/lib/auth',()=>({auth:mocks.auth}));
-vi.mock('@/server/research/archiveAsset',()=>({pauseAssetResearch:mocks.pause}));
 vi.mock('@/server/queue/scanCancellation',()=>({settleQueuedCancellations:mocks.settle}));
 const db=process.env.TEST_DATABASE_URL,schema='scope_management_'+randomUUID().replaceAll('-','');
 if(db){const u=new URL(db);u.searchParams.set('schema',schema);process.env.DATABASE_URL=u.toString();}
@@ -12,7 +11,7 @@ const req=(method:string,body?:unknown)=>new Request('http://app.example.test/ap
 const context=(assetId:string)=>({params:Promise.resolve({id:programId,assetId})});
 (db?describe:describe.skip)('Milestone 2 explicit Scope identity and retirement',()=>{
  beforeAll(async()=>{execFileSync('npx',['prisma','migrate','deploy'],{env:process.env,stdio:'pipe'});({prisma:p}=await import('@/lib/prisma'));service=await import('@/server/scopeAssets');route=await import('@/app/api/programs/[id]/assets/[assetId]/route');},30000);
- beforeEach(async()=>{userId=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;programId=(await p.bountyProgram.create({data:{ownerId:userId,companyName:'Scope management fixture',requiredUserAgent:'Fixture/1'}})).id;mocks.auth.mockResolvedValue({user:{id:userId}});mocks.pause.mockReset().mockResolvedValue(undefined);mocks.settle.mockResolvedValue(undefined);});
+ beforeEach(async()=>{userId=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;programId=(await p.bountyProgram.create({data:{ownerId:userId,companyName:'Scope management fixture',requiredUserAgent:'Fixture/1'}})).id;mocks.auth.mockResolvedValue({user:{id:userId}});mocks.settle.mockReset().mockResolvedValue(undefined);});
  afterAll(async()=>{if(p){await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);await p.$disconnect();}});
  const asset=(value='app.fixture.test')=>service.createScopeAsset(userId,programId,{value,assetValue:'MEDIUM'});
  it('rejects identity-changing Format PATCH even with old boundary confirmation and preserves the technical host',async()=>{
@@ -40,7 +39,7 @@ const context=(assetId:string)=>({params:Promise.resolve({id:programId,assetId})
  });
  it.each(['duplicate','same-identity','invalid','stale'])('failed replacement preserves usable original (%s)',async kind=>{
   const a=await asset();const {target}=await service.ensureAssetExecution(userId,programId,a.id);if(kind==='duplicate')await asset('other.fixture.test');
-  const response=await replace(a,kind==='same-identity'?a.normalizedValue:kind==='invalid'?'not valid':'other.fixture.test',kind==='stale'?{expectedUpdatedAt:new Date(0).toISOString()}:{});expect(response.status).toBe(kind==='invalid'?400:409);expect((await p.scopeAsset.findUniqueOrThrow({where:{id:a.id}})).active).toBe(true);expect((await(await import('@/server/execution')).loadTargetExecution(target.id,'RECON')).targetId).toBe(target.id);expect(mocks.pause).not.toHaveBeenCalled();
+  const response=await replace(a,kind==='same-identity'?a.normalizedValue:kind==='invalid'?'not valid':'other.fixture.test',kind==='stale'?{expectedUpdatedAt:new Date(0).toISOString()}:{});expect(response.status).toBe(kind==='invalid'?400:409);expect((await p.scopeAsset.findUniqueOrThrow({where:{id:a.id}})).active).toBe(true);expect((await(await import('@/server/execution')).loadTargetExecution(target.id,'RECON')).targetId).toBe(target.id);expect(mocks.settle).not.toHaveBeenCalled();
  });
  it('rolls back the new asset if retiring the original fails inside the transaction',async()=>{
   const a=await asset();await p.$executeRawUnsafe(`CREATE FUNCTION reject_retire() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.id = '${a.id}' AND NEW.active = false THEN RAISE EXCEPTION 'fixture failure'; END IF; RETURN NEW; END $$`);await p.$executeRawUnsafe('CREATE TRIGGER reject_retire BEFORE UPDATE ON "ScopeAsset" FOR EACH ROW EXECUTE FUNCTION reject_retire()');
@@ -64,7 +63,7 @@ const context=(assetId:string)=>({params:Promise.resolve({id:programId,assetId})
   expect((await route.DELETE(req('DELETE'),context(a.id))).status).toBe(200);
  });
  it('reports committed replacement separately from retryable post-commit cleanup failure',async()=>{
-  const a=await asset();mocks.pause.mockRejectedValueOnce(new Error('synthetic unavailable transport'));
+  const a=await asset();mocks.settle.mockRejectedValueOnce(new Error('synthetic unavailable transport'));
   const response=await replace(a,'replacement.fixture.test');expect(response.status).toBe(201);const body=await response.json();expect(body.cleanupWarning).toContain('authorization revoked');expect((await p.scopeAsset.findUniqueOrThrow({where:{id:a.id}})).active).toBe(false);expect((await p.scopeAsset.findUniqueOrThrow({where:{id:body.asset.id}})).active).toBe(true);
   expect((await route.DELETE(req('DELETE'),context(a.id))).status).toBe(200);
  });
@@ -100,12 +99,12 @@ const context=(assetId:string)=>({params:Promise.resolve({id:programId,assetId})
   await expect((await import('@/server/programHosts')).mutateHost(userId,programId,'EDIT',{hostId:target.id,host:'duplicate.fixture.test'})).rejects.toMatchObject({status:409});expect((await p.scopeAsset.findUniqueOrThrow({where:{id:a.id}})).active).toBe(true);expect(await p.target.findUniqueOrThrow({where:{id:target.id}})).toEqual(target);
  });
  it('a cleanup failure explicitly reports committed retirement, and repeat cleanup succeeds',async()=>{
-  const a=await asset();mocks.pause.mockRejectedValueOnce(new Error('fixture transport unavailable'));const response=await route.DELETE(req('DELETE'),context(a.id));expect(response.status).toBe(503);expect((await response.json()).error).toContain('authorization retired');expect((await p.scopeAsset.findUniqueOrThrow({where:{id:a.id}})).active).toBe(false);expect((await route.DELETE(req('DELETE'),context(a.id))).status).toBe(200);
+  const a=await asset();mocks.settle.mockRejectedValueOnce(new Error('fixture transport unavailable'));const response=await route.DELETE(req('DELETE'),context(a.id));expect(response.status).toBe(503);expect((await response.json()).error).toContain('authorization retired');expect((await p.scopeAsset.findUniqueOrThrow({where:{id:a.id}})).active).toBe(false);expect((await route.DELETE(req('DELETE'),context(a.id))).status).toBe(200);
  });
 
  it('a stale retired-view cleanup token cannot revoke an explicitly reauthorized identity',async()=>{
   const a=await asset(),retired=await service.editScopeAsset(userId,programId,a.id,null);const restored=await asset();expect(restored.id).toBe(a.id);
-  expect((await route.DELETE(req('DELETE',{expectedUpdatedAt:retired.updatedAt.toISOString()}),context(a.id))).status).toBe(409);expect((await p.scopeAsset.findUniqueOrThrow({where:{id:a.id}})).active).toBe(true);expect(mocks.pause).toHaveBeenCalledTimes(1);
+  expect((await route.DELETE(req('DELETE',{expectedUpdatedAt:retired.updatedAt.toISOString()}),context(a.id))).status).toBe(409);expect((await p.scopeAsset.findUniqueOrThrow({where:{id:a.id}})).active).toBe(true);expect(mocks.settle).toHaveBeenCalledTimes(1);
  });
 
 });

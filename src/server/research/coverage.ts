@@ -5,14 +5,12 @@ import {findingReviewStatus} from '@/lib/evidenceReview';
 import type { CoverageReviewMemory } from '@/lib/research/coverage';
 import {Prisma} from '@prisma/client';
 import {prisma} from '@/lib/prisma';
-import {COVERAGE_NOTICE,coverageCounts,coverageRecordSchema,coverageDocumentSchema,type CoverageView,type CoverageRecord,type CoverageEntry} from '@/lib/research/coverage';
+import {COVERAGE_NOTICE,coverageCounts,coverageRecordSchema,type CoverageView,type CoverageRecord,type CoverageEntry} from '@/lib/research/coverage';
 import {safeSurfaceUrl,safeAuthLabel} from '@/lib/authenticatedRecon';
 import {researchPlanState,researchPlanDetails} from './plans';
 import {researchTargetSelect,assertResearchTarget,researchAuthorizationMatches,ResearchError,exportText} from './workspace';
 import {ownedResearch,researchRootFor} from './sessions';
 import {HypothesisWorkspace} from './hypothesisFiles';
-import {publishCoverageFiles} from './planFiles';
-import {consoleRoot} from './consoleWorkspace';
 import {reconScopePolicy} from './reconPolicy';
 import type {ResearchPlanView} from '@/lib/researchPlanView';
 const clean=(value:string)=>exportText(value).replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,'[REDACTED PRIVATE KEY]').replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,'[REDACTED EMAIL]').slice(0,2000);
@@ -136,25 +134,6 @@ export async function recordResearchCoverage(userId:string,targetId:string,input
 export async function coverageHistory(userId:string,targetId:string,coverageId:string,before?:number){
  await prisma.$transaction(tx=>owned(tx,userId,targetId));
  return (await prisma.researchCoverageEvent.findMany({where:{coverageId,targetId,...(before?{revision:{lt:before}}:{})},orderBy:{revision:'desc'},take:50,include:{vaultEvidence:{select:{evidenceId:true}}}})).map(safeEvent);
-}
-export async function syncResearchCoverage(userId:string,targetId:string,sessionId:string){
- const session=await prisma.researchSession.findFirst({where:{id:sessionId,targetId,...ownedResearch(userId)},select:{id:true,workspaceId:true}});
- if(!session)throw new ResearchError('Research session not found',404);
- const workspace=await HypothesisWorkspace.open(researchRootFor(session.workspaceId),session.workspaceId);
- let raw;try{raw=await workspace.readCoverageDocument();}finally{await workspace.close();}
- let decoded;try{decoded=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(raw));}catch{throw new ResearchError('Invalid research/coverage-events.json',400);}
- const parsed=coverageDocumentSchema.safeParse(decoded);if(!parsed.success||parsed.data.sessionId!==sessionId||parsed.data.events.some(e=>e.sessionId!==sessionId))throw new ResearchError('Coverage document or session identity is invalid',400);
- return prisma.$transaction(async tx=>{for(const e of parsed.data.events)await record(tx,userId,targetId,e,'WORKSPACE_IMPORT');return{events:parsed.data.events.length};},{timeout:30000});
-}
-export async function publishResearchCoverage(userId:string,targetId:string){
- const view=await researchCoverageState(userId,targetId);
- return prisma.$transaction(async tx=>{
-  const target=await owned(tx,userId,targetId,true);
-  const session=await tx.researchSession.findFirst({where:{consoleTargetId:targetId,...ownedResearch(userId),status:'READY'},select:{workspaceId:true,authorizationSnapshot:true}});
-  if(!session)throw new ResearchError('Open a Research session before publishing context',409);
-  if(!researchAuthorizationMatches(session.authorizationSnapshot,target))throw new ResearchError('Research policy changed; refresh authorization before publishing context',409);
-  return publishCoverageFiles(consoleRoot(),session.workspaceId,view);
- },{timeout:20000});
 }
 /** Session creation uses the exact captured plan; neither provider selects another plan. */
 export async function capturedCoverage(tx:Prisma.TransactionClient,userId:string,targetId:string,plan:ResearchPlanView|null){return coverageView(tx,userId,targetId,plan);}

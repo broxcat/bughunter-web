@@ -50,7 +50,6 @@ const ctx=()=>({params:Promise.resolve({id:programId})});
     expect((await service.listScopeAssets(userId,programId))[0].scanRuns[0]._count.artifacts).toBe(5);
     const detail=await(await import('@/server/recon/intelligence')).loadAssetReconDetail(userId,programId,asset.id);expect(detail.discoveryCount).toBe(5);
     const child=await p.scanRun.findUniqueOrThrow({where:{id:scan.id}}),complete=await p.targetReconRun.findUniqueOrThrow({where:{id:parent.id}});expect(child.scopeMarkdown).toContain('format_version: 2');expect(child.scopeMarkdown).toContain('Normalized discoveries: 5');expect(complete.scopeMarkdown).toContain('Endpoints: 5');expect(complete.scopeMarkdownSha256).toMatch(/^[a-f0-9]{64}$/);
-    const {generateReconSnapshot}=await import('@/server/research/reconSnapshots');const state=await generateReconSnapshot(userId,scan.targetId);expect(state.snapshot!.context.counts.endpoints).toBe(5);expect(state.snapshot!.context.sources.some(s=>s.scanId===scan.id&&s.tool==='crawler')).toBe(true);expect(await p.researchReconDelivery.count({where:{sessionId:state.sessionId}})).toBe(0);
   });
   it('preserves multi-source provenance and previous-success diffs without rescanning for Research',async()=>{
     const asset=await add('api.example.test','API','HIGH');let parent=await runs.startTargetRecon(userId,programId),scan=await p.scanRun.findFirstOrThrow({where:{targetReconRunId:parent.id}});

@@ -1,4 +1,3 @@
-import {auditMilestone7Launcher} from './milestone7Launcher.mjs';
 import {auditMilestone6Interactions,auditScopeUrlState} from './milestone6VisualAcceptance.mjs';
 import {auditMilestone5Scope} from './milestone5ScopeContext.mjs';
 import {auditMilestone4Report} from './milestone4Report.mjs';
@@ -27,7 +26,7 @@ assert.equal((await exec('docker', ['inspect', '--format', '{{index .Config.Labe
 const listener = createServer(); await new Promise(r => listener.listen(0, '127.0.0.1', r)); const port = listener.address().port; await new Promise(r => listener.close(r));
 const origin = `http://127.0.0.1:${port}`, schema = 'postv1_' + randomUUID().replaceAll('-', '');
 const url = new URL(db); url.searchParams.set('schema', schema);
-const env = { ...process.env, DATABASE_URL: url.toString(), REDIS_URL: redis, AUTH_URL: origin, AUTH_SECRET: randomUUID(), CREDENTIALS_ENCRYPTION_KEY: 'ab'.repeat(32), LOG_LEVEL: 'silent',RESEARCH_CONSOLE_ROOT:'/dev/shm/bh-m2-nonexistent-consoles-'+schema,RESEARCH_WORKSPACE_ROOT:'/dev/shm/bh-m2-nonexistent-workspaces-'+schema,RESEARCH_TERMINAL_PRIVATE_KEY_FILE:'/dev/shm/bh-m2-absent-key-'+schema,RESEARCH_TERMINAL_CONTROL_URL:'http://127.0.0.1:1' };
+const env = { ...process.env, DATABASE_URL: url.toString(), REDIS_URL: redis, AUTH_URL: origin, AUTH_SECRET: randomUUID(), CREDENTIALS_ENCRYPTION_KEY: 'ab'.repeat(32), LOG_LEVEL: 'silent' };
 const prisma = new PrismaClient({ datasourceUrl: env.DATABASE_URL });
 let web, browser, checks = 0;
 const check = (name, work) => { work(); checks++; console.log(`PASS ${checks}: ${name}`); };
@@ -109,7 +108,6 @@ try {
   await auditMilestone4Report({prisma,owner,origin,context,page,fixtureEnv:env});
   await auditMilestone5Scope({prisma,owner,origin,context,page,otherContext});
   await auditMilestone6Interactions({prisma,owner,origin,context,page});await auditScopeUrlState({prisma,owner,origin,context,page});
-  if(!process.env.POST_V1_M7_ONLY)await auditMilestone7Launcher({prisma,owner,origin,context,page});
   check('no page exceptions or foreign browser requests', () => { assert.deepEqual(errors, []); assert.equal(foreign, 0); });
   console.log(`POST_V1_BROWSER: ${checks} passed, 0 failed, 0 skipped`);
   }

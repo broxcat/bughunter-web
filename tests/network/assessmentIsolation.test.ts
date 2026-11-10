@@ -8,11 +8,6 @@ import { probe } from '@/server/scanners/http';
 import { createReconRelay } from '@/server/recon/transport';
 import { ReconProtection } from '@/server/recon/protection';
 import { chromium } from 'playwright-chromium';
-import { enforceHttp1 } from '../../docker/research/validator/burp-active.mjs';
-import { researchAuthorizationSnapshot } from '@/server/research/workspace';
-import { consoleBundle } from '@/server/research/consoleWorkspace';
-import { targetWorkspaceId } from '@/lib/research/terminal';
-import { researchTarget, researchSession } from '../fixtures/research';
 const mocks = vi.hoisted(() => ({ asset: vi.fn() }));
 vi.mock('@/lib/prisma', () => ({ prisma: { scopeAsset: { findUnique: mocks.asset } } }));
 const suite = process.env.SCANNER_HTTP_TESTS === '1' ? describe : describe.skip;
@@ -50,16 +45,6 @@ suite('White-box metadata never becomes network authorization (real local transp
       try { expect((await fetch(relay.toRelay(base + '/app/'))).status).toBe(200); expect(() => relay.mapUrl(outside + '/app/')).toThrow(); expect(() => relay.toRelay('https://internal.example.local/')).toThrow(); }
       finally { await relay.close(); }
     });
-    expect(forbiddenRequests).toBe(0);
-  });
-  it('keeps Research/Burp network policy exact-host even with White-box advisory context', () => {
-    const target = researchTarget();
-    const session = { ...researchSession, workspaceId: targetWorkspaceId(target.id), authorizationSnapshot: { ...researchAuthorizationSnapshot(target), ...assessment } };
-    const files = consoleBundle(target, null, [], session), policy = JSON.parse(files['.agents/bughunter/policy.json']);
-    expect(JSON.parse(files['assessment-policy.json']).authorizedSources).toEqual([]);expect(JSON.stringify(files)).not.toContain('internal.example.local');
-    expect(policy.targetHost).toBe(target.host); expect(policy).not.toHaveProperty('authorizedSources');
-    expect(() => enforceHttp1({ targetHostname: target.host, targetPort: 443, usesHttps: true, content: `GET / HTTP/1.1\r\nHost: ${target.host}\r\n\r\n` }, policy)).not.toThrow();
-    expect(() => enforceHttp1({ targetHostname: 'internal.example.local', targetPort: 443, usesHttps: true, content: 'GET / HTTP/1.1\r\nHost: internal.example.local\r\n\r\n' }, policy)).toThrow('OUT_OF_SCOPE');
     expect(forbiddenRequests).toBe(0);
   });
   it('blocks an actual Playwright navigation to a source-only destination', async () => {

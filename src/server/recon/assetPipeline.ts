@@ -17,7 +17,6 @@ import { assetHostAllowed } from '../scopeAssets';
 import { analyzeCorpus } from './corpus';
 import { recordArtifact,artifactData,artifactSelect } from './artifacts';
 import { reconDiff, type ArtifactKind } from '@/lib/reconArtifacts';
-import { authorizeExecution } from '../programExecutionPolicy';
 import { probeTcp } from './tcp';
 import { parseGobuster,parsePassive,parseHttpx,parseFfuf,parseNuclei,type ParsedRecon } from './parsers';
 import { collectReconDoctor,type ToolStatus } from './toolchain';
@@ -331,7 +330,8 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
     await stage('Nuclei Recon',()=>eachWeb(async(_host,data,relay)=>{
       await command('nuclei',['-u',relay.toRelay(data.url!)],async line=>{try{const r=JSON.parse(line);if(typeof r['matched-at']==='string')r['matched-at']=relay.mapUrl(r['matched-at']);const parsed=parseNuclei(JSON.stringify(r),RECON_TEMPLATE_IDS.slice(0,plan.limits.templates),RECON_TEMPLATE_VERSION);if(!parsed.length)throw new Error('PARSER_FAILURE: unapproved Nuclei structured result');await rows(parsed,'nuclei');}catch(e){throw new Error('PARSER_FAILURE: malformed Nuclei result: '+(e as Error).message);}},Math.min(90,plan.limits.ffufSeconds+15));
     }),!selected.length?'No validated HTTP service.':undefined);
-    await stage('Burp enrichment',async()=>{authorizeExecution(execution,{tool:'burp-history'});const {collectRunBurp}=await import('./burpCollection');const result=await collectRunBurp(scanRunId,signal);toolchain.burp={available:result.status==='AVAILABLE',version:result.version??'unknown',capable:result.status==='AVAILABLE',...(result.status!=='AVAILABLE'?{reason:'Authorized history collection unavailable'}:{})};await prisma.scanRun.update({where:{id:scanRunId},data:{toolVersions:toolchain as unknown as Prisma.InputJsonValue}});for(const item of result.observations)await add('observation',item,'burp',true);if(result.status!=='AVAILABLE')throw new Error('PARTIAL: Burp history unavailable; no active requests or provider started.');},!selected.length?'No validated web service for authorized Burp history correlation.':undefined);
+    // Burp history collection was retired with the Research console. The step stays in the plan for history and is skipped explicitly.
+    await stage('Burp enrichment',async()=>{},'Burp enrichment is retired: the Research console and its Burp bridge were removed.');
     await stage('Normalization',async()=>{const all=await prisma.reconArtifact.findMany({where:{scanRunId},select:artifactSelect});const previous=await prisma.scanRun.findFirst({where:{scopeAssetId:asset.id,id:{not:scanRunId},status:'COMPLETED',outcome:'SUCCESS'},orderBy:[{createdAt:'desc'},{id:'desc'}],select:{id:true}});
       const old=previous?await prisma.reconArtifact.findMany({where:{scanRunId:previous.id},select:artifactSelect}):[];
       const diff=reconDiff(all.map(artifactData),old.map(artifactData),Boolean(previous));await prisma.scanRun.update({where:{id:scanRunId},data:{artifactVersion:2,changeSet:{...diff,previousScanId:previous?.id??null} as unknown as Prisma.InputJsonValue}});

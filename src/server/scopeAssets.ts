@@ -73,8 +73,7 @@ export async function retireScopeAssetInTransaction(tx:Prisma.TransactionClient,
   // Preserve immutable Target/Scope identity and every historical relation.
   return tx.scopeAsset.update({where:{id:asset.id},data:{active:false,updatedAt:nextAssetTime(asset.updatedAt)}});
 }
-export async function settleScopeAssetRetirement(userId:string,assetId:string){
-  const {pauseAssetResearch}=await import('./research/archiveAsset');await pauseAssetResearch(userId,assetId);
+export async function settleScopeAssetRetirement(){
   const {settleQueuedCancellations}=await import('./queue/scanCancellation');await settleQueuedCancellations();
 }
 export async function createScopeAsset(userId:string,programId:string,input:AssetInput){
@@ -97,7 +96,7 @@ export async function editScopeAsset(userId:string,programId:string,assetId:stri
     if(change&&(change.normalizedValue!==asset.normalizedValue||change.format!==asset.format))throw new ResearchError('Format and normalized value identify this asset. Use explicit replacement; existing execution identities cannot be changed.',409);
     return tx.scopeAsset.update({where:{id:assetId},data:{...fields,...(fields.type?{typeSource:'USER'}:{}),...(change?{formatSource:resetFormatToAuto?'AUTO':'MANUAL'}:{}),updatedAt:nextAssetTime(asset.updatedAt)}});
   });
-  if(!input)try{await settleScopeAssetRetirement(userId,assetId);}catch{throw new ResearchError('Scope authorization retired; Research cleanup is unconfirmed. Retry cleanup from the retired asset.',503);}
+  if(!input)try{await settleScopeAssetRetirement();}catch{throw new ResearchError('Scope authorization retired; scan cancellation is unconfirmed. Retry cleanup from the retired asset.',503);}
   return result;
 }
 /** One Program lock serializes replacement, metadata edits, retirement and
@@ -119,7 +118,7 @@ export async function replaceScopeAsset(userId:string,programId:string,assetId:s
   // Authorization is already committed: never report a failed creation when
   // only post-commit quiescence failed. Expose a retryable cleanup warning.
   let cleanupWarning:string|undefined;
-  try{await settleScopeAssetRetirement(userId,assetId);}catch{cleanupWarning='Replacement saved and original authorization revoked. Research cleanup is unconfirmed; retry cleanup from the retired asset.';}
+  try{await settleScopeAssetRetirement();}catch{cleanupWarning='Replacement saved and original authorization revoked. Scan cancellation is unconfirmed; retry cleanup from the retired asset.';}
   return{asset:replacement,retiredAssetId:assetId,...(cleanupWarning?{cleanupWarning}:{})};
 }
 export async function ensureAssetExecution(userId: string, programId: string, assetId: string) {

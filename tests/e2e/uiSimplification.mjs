@@ -13,7 +13,7 @@ assert(db&&redis&&container,'Use tests/queue/runInfrastructure.mjs --browser-onl
 assert.equal((await exec('docker',['inspect','--format','{{index .Config.Labels "bughunter.queue-test"}}',container])).stdout.trim(),'disposable');
 const listener=createServer();await new Promise(r=>listener.listen(0,'127.0.0.1',r));const port=listener.address().port;await new Promise(r=>listener.close(r));
 const origin=`http://127.0.0.1:${port}`,url=new URL(db);url.searchParams.set('schema','simplification_'+randomUUID().replaceAll('-',''));
-const env={...process.env,DATABASE_URL:url.toString(),REDIS_URL:redis,AUTH_URL:origin,AUTH_SECRET:randomUUID(),CREDENTIALS_ENCRYPTION_KEY:'ab'.repeat(32),LOG_LEVEL:'silent',RESEARCH_CONSOLE_ROOT:'/dev/shm/bh-ui-absent-console',RESEARCH_WORKSPACE_ROOT:'/dev/shm/bh-ui-absent-workspace',RESEARCH_TERMINAL_PRIVATE_KEY_FILE:'/dev/shm/bh-ui-absent-key',RESEARCH_TERMINAL_CONTROL_URL:'http://127.0.0.1:1'};
+const env={...process.env,DATABASE_URL:url.toString(),REDIS_URL:redis,AUTH_URL:origin,AUTH_SECRET:randomUUID(),CREDENTIALS_ENCRYPTION_KEY:'ab'.repeat(32),LOG_LEVEL:'silent'};
 const p=new PrismaClient({datasourceUrl:env.DATABASE_URL}),phase=process.env.UI_REVIEW_PHASE??'after',root='/tmp/bughunter-ui-review/'+phase;await mkdir(root,{recursive:true});let web,browser,page;
 const density=[];let checks=0;const verify=(condition,message)=>{assert(condition,message);checks++;};
 try{

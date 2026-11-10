@@ -1,29 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtemp, lstat, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { captureAssessmentSnapshot } from '@/lib/assessment';
-import { createResearchBundle, researchAssessmentSnapshot, researchAuthorizationMatches, researchAuthorizationSnapshot, assertResearchTarget, writeResearchWorkspace } from '@/server/research/workspace';
-import { consoleBundle, writeConsoleWorkspace } from '@/server/research/consoleWorkspace';
-import { targetWorkspaceId } from '@/lib/research/terminal';
+import { researchAssessmentSnapshot, researchAuthorizationMatches, researchAuthorizationSnapshot, assertResearchTarget } from '@/server/research/workspace';
 import { researchTarget, researchSession } from '../fixtures/research';
 import { buildReconContext, type ReconRun } from '@/server/research/reconContext';
 
 const source={id:'source-internal',label:'Internal source',kind:'GIT_REPOSITORY' as const,locator:'https://git.internal.test/team/application',reference:'release/approved',includePaths:['src/'],excludePaths:['vendor/'],updatedAt:'2026-11-04T00:00:00Z',active:true};
 const captured=()=>({...researchAuthorizationSnapshot(researchTarget()),...captureAssessmentSnapshot({assessmentMode:'WHITE_BOX'},[source])});
 describe('Research assessment context is metadata, not authorization',()=>{
-  it('exports only black-box runtime policy, even from historical white-box sessions',()=>{
+  it('keeps historical white-box assessment metadata readable',()=>{
     const snapshot={...captured(),assessmentMode:'WHITE_BOX',authorizedSources:[source]};
-    const files=createResearchBundle(researchTarget(),null,[],{...researchSession,authorizationSnapshot:snapshot});
-    expect(JSON.parse(files['assessment-policy.json'])).toMatchObject({assessmentMode:'BLACK_BOX',authorizedSources:[],sourceContentAvailable:false,sourceAnalysisPerformed:false});
-    expect(JSON.stringify(files)).not.toContain(source.locator);expect(files['AGENTS.md']).toContain('This is a black-box assessment');
     expect(researchAssessmentSnapshot(snapshot).assessmentMode).toBe('WHITE_BOX');
   });
   it('does not treat internal source hostnames as concrete network targets',()=>{
     const target=researchTarget(),snapshot=captured();
     expect(researchAuthorizationMatches(snapshot,target)).toBe(true);
     expect(()=>assertResearchTarget({...target,host:'git.internal.test'},target.userId)).toThrow();
-    expect(JSON.parse(createResearchBundle(target,null,[],{...researchSession,authorizationSnapshot:snapshot})['target.json']).host).toBe('app.example.test');
   });
   it('does not compare nested assessment arrays by reference or revoke on metadata drift',()=>{
     const target=researchTarget(),snapshot=JSON.parse(JSON.stringify(captured()));
@@ -37,14 +28,6 @@ describe('Research assessment context is metadata, not authorization',()=>{
     const historical=researchAuthorizationSnapshot(researchTarget());
     expect(researchAssessmentSnapshot(historical)).toMatchObject({assessmentMode:null,authorizedSources:[],sourceContentAvailable:false});
     expect(researchAuthorizationMatches(historical,researchTarget())).toBe(true);
-    const files=createResearchBundle(researchTarget(),null,[],researchSession);
-    expect(JSON.parse(files['assessment-policy.json']).assessmentMode).toBe('BLACK_BOX');
-  });
-  it('states the black-box evidence boundary without denying access to existing workspace evidence',()=>{
-    const snapshot={...researchAuthorizationSnapshot(researchTarget()),...captureAssessmentSnapshot({assessmentMode:'BLACK_BOX'})};
-    const files=createResearchBundle(researchTarget(),null,[],{...researchSession,authorizationSnapshot:snapshot});
-    expect(files['AGENTS.md']).toContain('Do not assume source-code access');
-    expect(files['AGENTS.md']).toContain('authenticated runtime observations');
   });
   it('bounds Recon handoff to captured mode/count and a reference instead of duplicating source metadata',()=>{
     const snapshot=captureAssessmentSnapshot({assessmentMode:'WHITE_BOX'},Array.from({length:100},(_,i)=>({...source,id:'source-'+i,includePaths:Array(100).fill('src/'+('x'.repeat(400)))})));
@@ -59,19 +42,5 @@ describe('Research assessment context is metadata, not authorization',()=>{
     expect(buildReconContext(input).assessment).toMatchObject({assessmentMode:'WHITE_BOX',authorizedSourceCount:0});
     expect(buildReconContext({...input,assessmentSnapshot:captureAssessmentSnapshot({assessmentMode:'BLACK_BOX'})}).assessment).toMatchObject({assessmentMode:'BLACK_BOX',authorizedSourceCount:0});
     expect(buildReconContext({...input,runs:[{...run,assessmentModeSnapshot:undefined,assessmentSourcesSnapshot:undefined}]}).assessment).toMatchObject({assessmentMode:null,assessmentPolicyFile:null});
-  });
-  it('publishes the assessment policy read-only in both ZIP workspace and persistent console layouts',async()=>{
-    const root=await mkdtemp(join(tmpdir(),'research-assessment-'));
-    try{
-      const session={...researchSession,authorizationSnapshot:captured()};
-      const files=createResearchBundle(researchTarget(),null,[],session);await writeResearchWorkspace(root,session.workspaceId,files);
-      expect((await lstat(join(root,session.workspaceId,'assessment-policy.json'))).mode&0o777).toBe(0o440);
-      const consoleSession={...session,workspaceId:targetWorkspaceId('target')};const consoleFiles=consoleBundle(researchTarget(),null,[],consoleSession);
-      await writeConsoleWorkspace(root,'target',consoleFiles);
-      expect((await lstat(join(root,consoleSession.workspaceId,'assessment-policy.json'))).mode&0o777).toBe(0o440);
-      expect(await readFile(join(root,consoleSession.workspaceId,'assessment-policy.json'),'utf8')).toBe(files['assessment-policy.json']);
-      expect(consoleFiles['.agents/bughunter/AGENTS.md']).toContain('This is a black-box assessment');
-      expect(JSON.parse(consoleFiles['.agents/bughunter/target.json']).assessment.authorizedSources).toEqual([]);
-    }finally{await rm(root,{recursive:true,force:true});}
   });
 });

@@ -1,9 +1,8 @@
 import { beforeAll, beforeEach, afterAll, describe, it, expect, vi } from 'vitest';
-import { randomUUID, generateKeyPairSync } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, writeFile, readFile, rm, access } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
+import { createHistoricalSession } from '../fixtures/researchHistory';
 const mocks=vi.hoisted(()=>({auth:vi.fn(),purge:vi.fn(),command:vi.fn()}));
 vi.mock('@/server/scanners/runCommand',()=>({runCommand:mocks.command}));
 vi.mock('@/lib/auth',()=>({auth:mocks.auth}));
@@ -13,22 +12,19 @@ const db=process.env.TEST_DATABASE_URL,schema=`program_${randomUUID().replaceAll
 if(db){const url=new URL(db);url.searchParams.set('schema',schema);process.env.DATABASE_URL=url.toString();}
 let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/programContext').ensureProgramContext,
   persist:typeof import('@/server/recon/program').persistProgramDiscovery,remove:typeof import('@/server/programDeletion').deleteProgram,
-  ensure:typeof import('@/server/research/consoleWorkspace').ensureTargetConsole,root:string,userId:string,programId:string;
+  userId:string,programId:string;
 (db?describe:describe.skip)('program workflow with real SQL integrity',()=>{
   beforeAll(async()=>{
     execFileSync('npx',['prisma','migrate','deploy'],{env:process.env,stdio:'pipe'});
     ({prisma:p}=await import('@/lib/prisma'));({ensureProgramContext:context}=await import('@/server/programContext'));
     ({persistProgramDiscovery:persist}=await import('@/server/recon/program'));({deleteProgram:remove}=await import('@/server/programDeletion'));
-    ({ensureTargetConsole:ensure}=await import('@/server/research/consoleWorkspace'));
-    root=await mkdtemp(join(tmpdir(),'program-workflow-'));process.env.RESEARCH_CONSOLE_ROOT=root;process.env.RESEARCH_WORKSPACE_ROOT=root;
-    const pair=generateKeyPairSync('ed25519');process.env.RESEARCH_TERMINAL_PRIVATE_KEY_FILE=join(root,'private.pem');await writeFile(process.env.RESEARCH_TERMINAL_PRIVATE_KEY_FILE,pair.privateKey.export({type:'pkcs8',format:'pem'}),{mode:0o600});
   },30000);
   beforeEach(async()=>{
     vi.restoreAllMocks();mocks.command.mockReset();mocks.command.mockResolvedValue({code:0,timedOut:false});mocks.purge.mockReset();mocks.purge.mockResolvedValue(undefined);
     userId=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;mocks.auth.mockResolvedValue({user:{id:userId}});
     programId=(await p.bountyProgram.create({data:{ownerId:userId,companyName:'Program without hosts',requiredUserAgent:'Workflow/1',scopeRules:['*.example.test'],outOfScope:['admin.example.test'],rulesOfEngagement:'Passive Recon only; no destructive actions.'}})).id;
   });
-  afterAll(async()=>{vi.restoreAllMocks();if(p){await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);await p.$disconnect();}if(root)await rm(root,{recursive:true,force:true});});
+  afterAll(async()=>{vi.restoreAllMocks();if(p){await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);await p.$disconnect();}});
   async function run(){const c=await context(userId,programId);return p.scanRun.create({data:{targetId:c.id,type:'RECON',status:'RUNNING'}});}
   it.each([true,false])('uses locked current policy when another writer adds a scope rule (active Recon: %s)',async(active)=>{
     const {PATCH}=await import('@/app/api/programs/[id]/route');
@@ -150,19 +146,11 @@ let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/progr
     expect(fetchMock).toHaveBeenCalledTimes(1);expect(String(fetchMock.mock.calls[0][0])).toMatch(/^https:\/\/crt\.sh\//);
     expect(await p.target.count({where:{programId,active:true}})).toBe(1);expect(await p.hostDiscovery.count({where:{scanRunId:r.id}})).toBe(3);
   });
-  it('creates a shared-infrastructure program console with no hosts and refreshes inventory without replacing scope or session',async()=>{
-    const c=await context(userId,programId),initial=await ensure(userId,c.id),dir=join(root,initial.session.workspaceId);
-    const scope=await readFile(join(dir,'scope.md'),'utf8');expect(scope).toContain('*.example.test');expect(scope).toContain('Passive Recon only');
-    expect(JSON.parse(await readFile(join(dir,'recon/hosts.json'),'utf8')).hosts).toEqual([]);
-    const r=await run();await persist(r.id,'api.example.test','CERTIFICATE_TRANSPARENCY');
-    const renewed=await ensure(userId,c.id);expect(renewed.session.id).toBe(initial.session.id);expect(await readFile(join(dir,'scope.md'),'utf8')).toBe(scope);
-    expect(JSON.parse(await readFile(join(dir,'recon/hosts.json'),'utf8')).hosts[0].host).toBe('api.example.test');
-  });
-  it('cascades SQL children and exclusive reports while deferring OOB and files',async()=>{
+  it('cascades SQL children, Research history and exclusive reports while deferring OOB',async()=>{
     const models:(()=>Promise<number>)[]=[()=>p.scanRun.count(),()=>p.scanLog.count(),()=>p.hostDiscovery.count(),()=>p.targetCredential.count(),()=>p.researchSession.count(),()=>p.researchHypothesis.count(),()=>p.researchHypothesisRevision.count(),()=>p.researchFindingPromotion.count(),()=>p.oobHit.count()];
     const baseline=await Promise.all(models.map(count=>count()));
     const r=await run();await persist(r.id,'api.example.test','CERTIFICATE_TRANSPARENCY');await p.scanRun.update({where:{id:r.id},data:{status:'COMPLETED'}});
-    const host=await p.target.findFirstOrThrow({where:{programId,active:true}}),consoleSession=await ensure(userId,r.targetId);
+    const host=await p.target.findFirstOrThrow({where:{programId,active:true}}),historical=await createHistoricalSession(p,userId,host.id);
     await p.targetCredential.create({data:{targetId:host.id,label:'Exclusive credential',headerCipher:'synthetic encrypted value'}});
     await p.scanLog.create({data:{scanRunId:r.id,line:'Exclusive log'}});
     const other=await p.bountyProgram.create({data:{ownerId:userId,companyName:'Keep program',requiredUserAgent:'Keep/1'}});
@@ -172,19 +160,20 @@ let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/progr
     const keep=await p.finding.create({data:{targetId:sibling.id,title:'Keep result'}});
     const shared=await p.report.create({data:{userId,targetId:host.id,title:'Shared report',items:{create:[{findingId:f.id},{findingId:keep.id}]}}});
     await p.report.create({data:{userId,targetId:host.id,title:'Exclusive report',items:{create:{findingId:f.id}}}});
-    const hypothesis=await p.researchHypothesis.create({data:{sessionId:consoleSession.session.id,externalId:randomUUID(),title:'Hypothesis',status:'CONFIRMED',hypothesis:'Synthetic',evidenceFor:[],evidenceAgainst:[],nextTest:'Synthetic',expectedSignal:'Synthetic',falsificationCondition:'Synthetic',contentSha256:'a'.repeat(64),revisions:{create:{revision:1,snapshot:{}}}}});
+    const hypothesis=await p.researchHypothesis.create({data:{sessionId:historical.id,externalId:randomUUID(),title:'Hypothesis',status:'CONFIRMED',hypothesis:'Synthetic',evidenceFor:[],evidenceAgainst:[],nextTest:'Synthetic',expectedSignal:'Synthetic',falsificationCondition:'Synthetic',contentSha256:'a'.repeat(64),revisions:{create:{revision:1,snapshot:{}}}}});
     await p.researchFindingPromotion.create({data:{hypothesisId:hypothesis.id,findingId:f.id,userId,hypothesisRevision:1,snapshot:{}}});
-    vi.spyOn(globalThis,'fetch').mockResolvedValue(Response.json({stopped:true}));
+    const network=vi.spyOn(globalThis,'fetch').mockRejectedValue(new Error('No network on the deletion path'));
     await remove(userId,programId);await remove(userId,programId);
+    expect(network).not.toHaveBeenCalled();
     expect(await p.bountyProgram.findUnique({where:{id:programId}})).toBeNull();
     for(const [i,model] of models.entries())expect(await model()).toBe(baseline[i]+(i===8?1:0));
     expect(await p.target.count({where:{programId:other.id}})).toBe(1);expect(await p.scope.findUnique({where:{id:host.scopeId}})).not.toBeNull();
     expect(await p.report.count({where:{userId}})).toBe(1);expect((await p.report.findUniqueOrThrow({where:{id:shared.id}})).targetId).toBeNull();
-    await access(join(root,consoleSession.session.workspaceId));expect(mocks.purge).not.toHaveBeenCalled();
+    expect(mocks.purge).not.toHaveBeenCalled();
   });
-  it('deletes with an offline console, hides foreign ownership and tolerates concurrent retries',async()=>{
-    const c=await context(userId,programId);await ensure(userId,c.id);
-    vi.spyOn(globalThis,'fetch').mockResolvedValue(Response.json({error:'offline'},{status:503}));
+  it('deletes without network calls, hides foreign ownership and tolerates concurrent retries',async()=>{
+    const c=await context(userId,programId);await createHistoricalSession(p,userId,c.id);
+    vi.spyOn(globalThis,'fetch').mockRejectedValue(new Error('offline'));
     await remove('foreign-user',programId);expect(await p.bountyProgram.findUnique({where:{id:programId}})).not.toBeNull();
     await Promise.all([remove(userId,programId),remove(userId,programId)]);
     expect(await p.bountyProgram.findUnique({where:{id:programId}})).toBeNull();

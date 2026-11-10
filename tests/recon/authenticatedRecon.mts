@@ -15,7 +15,6 @@ import {startTargetRecon,reconcileTargetRecon} from '@/server/recon/targetRuns';
 import {createScanProcessor} from '@/server/queue/processScan';
 import {SCAN_QUEUE_NAME,type ScanJobData} from '@/server/queue/scanQueue';
 import {readAuthSurface} from '@/server/authenticatedRecon';
-import {generateReconSnapshot} from '@/server/research/reconSnapshots';
 import {captureAuthenticatedContexts} from '@/server/authenticatedRecon';
 import {loadTargetExecution,withTargetExecution} from '@/server/execution';
 import {mapAuthenticatedSurfaces} from '@/server/recon/authenticatedMapping';
@@ -91,15 +90,11 @@ try{
       metadata('research-plan',{status:'PASS',assessmentMode:researchPlan.assessmentMode,objectives:researchPlan.items.length,high:researchPlan.items.filter(item=>item.priority==='HIGH').length,evidenceRefs:authorization.evidenceRefs,sourceAnalysisPerformed:false,hypothesesCreated:0,findingsCreated:0,modelCalls:0});
       const full=await prisma.scanRun.findUniqueOrThrow({where:{id:scan.id}});assert(full.scopeMarkdown?.includes('Observed Authentication Contexts'));privateFree(full.scopeMarkdown);privateFree(surface);
       assert.deepEqual(full.authenticatedContextsSnapshot,test.scan.authenticatedContextsSnapshot);assert.equal(full.assessmentModeSnapshot,test.program.assessmentMode);
-      const snapshot=await generateReconSnapshot(owner.id,test.target.id);assert(snapshot.snapshot);privateFree(snapshot.snapshot);
-      const detail=(await prisma.researchReconSnapshot.findUniqueOrThrow({where:{id:snapshot.snapshot.id}})).context;privateFree(detail);
-      assert(JSON.stringify(detail).includes('CONTEXT_DIFFERENTIAL'),'The immutable Research detail file must include safe context intelligence');
-      assert(!JSON.stringify(detail).includes('User session')&&!JSON.stringify(detail).includes('Manager token'),'Research exports opaque labels, not credential record labels');
       const logs=await prisma.scanLog.findMany({where:{scanRunId:scan.id},select:{line:true}});privateFree(logs);
       assert(logs.some(row=>row.line.startsWith('$ httpx ')),'Real native HTTPX must run');assert(logs.some(row=>row.line.startsWith('$ gobuster ')||row.line.startsWith('$ ffuf ')),'Real native content provider must run');
       assert(logs.some(row=>row.line.startsWith('$ nuclei ')),'Real allowlisted native Nuclei must run');
       assert(!logs.some(row=>row.line.startsWith('$ ')&&/\b(?:Cookie:|Authorization:)/i.test(row.line)),'Scanner commands must never receive authentication headers');
-      assert.equal(await prisma.researchReconDelivery.count(),0);metadata('native',{status:'PASS',assessmentMode:test.program.assessmentMode,contexts:surface.contexts.length,observations:surface.observations.length,differentials:surface.totals.contextDifferentials,toolchain:'actual-installed-native-binaries',scopeMarkdown:true,researchSnapshot:true,immutableRunSnapshot:true});
+      assert.equal(await prisma.researchReconDelivery.count(),0);metadata('native',{status:'PASS',assessmentMode:test.program.assessmentMode,contexts:surface.contexts.length,observations:surface.observations.length,differentials:surface.totals.contextDifferentials,toolchain:'actual-installed-native-binaries',scopeMarkdown:true,immutableRunSnapshot:true});
     }
     assert.equal((await seen()).filter(row=>row.method==='POST').length,loginCount,'Recon must not invoke the explicit login workflow');
     await worker.pause(true);

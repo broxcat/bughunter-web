@@ -1,18 +1,15 @@
 import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), publish: vi.fn() }));
 vi.mock('@/lib/auth', () => ({ auth: mocks.auth }));
 vi.mock('@/server/queue/scanJobPublisher', () => ({ publishScanJob: mocks.publish, dispatchSelect: { status: true, attempts: true, lastError: true, nextAttemptAt: true, publishedAt: true } }));
 const db = process.env.TEST_DATABASE_URL, schema = 'scopeassets_' + randomUUID().replaceAll('-', '');
 if (db) { const url = new URL(db); url.searchParams.set('schema', schema); process.env.DATABASE_URL = url.toString(); }
 let p: typeof import('@/lib/prisma').prisma, service: typeof import('@/server/scopeAssets'), markdown: typeof import('@/server/scopeMarkdown');
-let api: typeof import('@/app/api/programs/[id]/assets/route'), edit: typeof import('@/app/api/programs/[id]/assets/[assetId]/route'), recon: typeof import('@/app/api/programs/[id]/assets/[assetId]/recon/route'), research: typeof import('@/app/api/programs/[id]/assets/[assetId]/research/route');
+let api: typeof import('@/app/api/programs/[id]/assets/route'), edit: typeof import('@/app/api/programs/[id]/assets/[assetId]/route'), recon: typeof import('@/app/api/programs/[id]/assets/[assetId]/recon/route');
 let parentRecon:typeof import('@/app/api/programs/[id]/recon/route');
-let userId: string, otherId: string, programId: string, root: string;
+let userId: string, otherId: string, programId: string;
 const context = (assetId = '') => ({ params: Promise.resolve({ id: programId, assetId }) });
 const request = (body?: unknown, method = 'POST', origin = 'http://app.example.test') => new Request('http://app.example.test/api', { method, headers: { Origin: origin }, ...(body ? { body: JSON.stringify(body) } : {}) });
 (db ? describe : describe.skip)('Target Scope Asset PostgreSQL workflow', () => {
@@ -20,8 +17,8 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
     execFileSync('npx', ['prisma', 'migrate', 'deploy'], { env: process.env, stdio: 'pipe' });
     ({ prisma: p } = await import('@/lib/prisma')); service = await import('@/server/scopeAssets'); markdown = await import('@/server/scopeMarkdown');
     parentRecon=await import('@/app/api/programs/[id]/recon/route');
-    api = await import('@/app/api/programs/[id]/assets/route'); edit = await import('@/app/api/programs/[id]/assets/[assetId]/route'); recon = await import('@/app/api/programs/[id]/assets/[assetId]/recon/route'); research = await import('@/app/api/programs/[id]/assets/[assetId]/research/route');
-    root = await mkdtemp(join(tmpdir(), 'asset-research-')); process.env.RESEARCH_CONSOLE_ROOT = root; process.env.AUTH_URL = 'http://app.example.test';
+    api = await import('@/app/api/programs/[id]/assets/route'); edit = await import('@/app/api/programs/[id]/assets/[assetId]/route'); recon = await import('@/app/api/programs/[id]/assets/[assetId]/recon/route');
+    process.env.AUTH_URL = 'http://app.example.test';
     otherId = (await p.user.create({ data: { email: randomUUID() + '@example.test' } })).id;
   }, 30000);
   beforeEach(async () => {
@@ -29,7 +26,7 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
     programId = (await p.bountyProgram.create({ data: { ownerId: userId, companyName: 'Équipe | asset fixture', requiredUserAgent: 'Asset-Fixture/1', scopeRules: [], outOfScope: ['excluded.example.test'] } })).id;
     mocks.auth.mockResolvedValue({ user: { id: userId } }); mocks.publish.mockReset().mockResolvedValue({ dispatch: 'PENDING' });
   });
-  afterAll(async () => { if (p) { await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`); await p.$disconnect(); } if (root) await rm(root, { recursive: true, force: true }); });
+  afterAll(async () => { if (p) { await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`); await p.$disconnect(); } });
   const create = async (value = 'https://app.example.test/api', extra = {}) => {
     const response = await api.POST(request({ value, ...extra }), context()); expect(response.status).toBe(201); return response.json();
   };
@@ -80,15 +77,6 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
     const global = await (await markdown.scopeMarkdownDownload(userId, programId)).text(); expect(global).toContain('# BugHunter Scope'); expect(global).toContain('CRITICAL'); expect(global).toContain(a.id);
     expect((await markdown.scopeMarkdownDownload(otherId, programId, a.id)).status).toBe(404);
   });
-  it('enriches existing ResearchReconSnapshot with type, value and precise asset scope without rewriting history', async () => {
-    const a = await create('https://app.example.test/api', { type: 'API', assetValue: 'CRITICAL' });
-    const result = await research.POST(request(), context(a.id)); expect(result.status).toBe(200); const { targetId } = await result.json();
-    const { generateReconSnapshot, reconPanelState } = await import('@/server/research/reconSnapshots');
-    const first = await generateReconSnapshot(userId, targetId); expect(first.snapshot?.context.scopeAssets?.[0]).toMatchObject({ id: a.id, type: 'API', assetValue: 'CRITICAL', normalizedValue: a.normalizedValue });
-    await service.editScopeAsset(userId, programId, a.id, { assetValue: 'HIGH' }); expect((await reconPanelState(userId, targetId)).updateAvailable).toBe(true);
-    const second = await generateReconSnapshot(userId, targetId); expect(second.snapshot?.id).not.toBe(first.snapshot?.id);
-    expect((await p.researchReconSnapshot.findUniqueOrThrow({ where: { id: first.snapshot!.id } })).context).toMatchObject({ scopeAssets: [expect.objectContaining({ assetValue: 'CRITICAL' })] });
-  });
   it('archives authorization while preserving Recon and preventing subsequent execution', async () => {
     const a = await create('api.example.test'); const { target } = await service.ensureAssetExecution(userId, programId, a.id);
     const run = await p.scanRun.create({ data: { targetId: target.id, scopeAssetId: a.id, type: 'RECON', status: 'COMPLETED', outcome: 'SUCCESS', finishedAt: new Date('2026-01-01') } });
@@ -97,30 +85,10 @@ const request = (body?: unknown, method = 'POST', origin = 'http://app.example.t
     expect((await p.scanRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe('COMPLETED'); expect((await recon.GET(new Request('http://app.example.test'), context(a.id))).status).toBe(200);
     expect((await service.listScopeAssets(userId, programId))[0].active).toBe(false);
   });
-  it('reuses parent wildcard evidence in focused Research without creating a new Recon or widening the child scope', async () => {
-    const parent = await create('*.example.test', { assetValue: 'HIGH' });
-    const { target } = await service.ensureAssetExecution(userId, programId, parent.id);
-    const { researchRecon } = await import('../fixtures/research');
-    const at = new Date(), corpus = { ...researchRecon().reconCorpus, capturedAt: at.toISOString() };
-    const scan = await p.scanRun.create({ data: { targetId: target.id, scopeAssetId: parent.id, type: 'RECON', status: 'COMPLETED', outcome: 'SUCCESS', finishedAt: at,
-      assetResults: { version: 1, scopeAssetId: parent.id, bounded: false, hosts: [{ hostname: 'app.example.test', capturedAt: at.toISOString(), corpus, dns: [], http: [], ports: [] }] } } });
-    const child = await create('https://app.example.test/search', { type: 'API', assetValue: 'CRITICAL' });
-    const response = await research.POST(request(), context(child.id)), { targetId } = await response.json(); expect(response.status).toBe(200);
-    const { generateReconSnapshot } = await import('@/server/research/reconSnapshots');
-    const state = await generateReconSnapshot(userId, targetId);
-    const snapshot = await p.researchReconSnapshot.findUniqueOrThrow({ where: { id: state.snapshot!.id } });
-    const value = snapshot.context as unknown as import('@/lib/research/recon').ResearchReconContext;
-    expect(value.sources.some(s => s.scanId === scan.id)).toBe(true);
-    expect(value.endpoints.find(e => e.url.endsWith('/search'))).toMatchObject({ inScope: true });
-    expect(value.endpoints.find(e => e.url.endsWith('/profile'))).toMatchObject({ inScope: false });
-    expect(value.scopeAssets?.[0]).toMatchObject({ id: child.id, type: 'API', assetValue: 'CRITICAL' });
-    expect(await p.scanRun.count({ where: { target: { programId } } })).toBe(1);
-  });
   it('rejects foreign ownership/origin, invalid overrides and unsupported network formats', async () => {
     const a = await create();
     expect((await edit.PATCH(request({ assetValue: 'SUPER' }, 'PATCH'), context(a.id))).status).toBe(400);
     expect((await api.POST(request({ value: 'other.example.test' }, 'POST', 'https://foreign.test'), context())).status).toBe(403);
-    const ip = await create('192.0.2.1'); expect((await research.POST(request(), context(ip.id))).status).toBe(422);
     mocks.auth.mockResolvedValue({ user: { id: otherId } }); expect((await api.GET(new Request('http://app.example.test'), context())).status).toBe(404); expect((await edit.PATCH(request({ type: 'API' }, 'PATCH'), context(a.id))).status).toBe(404); expect((await recon.GET(new Request('http://app.example.test'), context(a.id))).status).toBe(404);
     mocks.auth.mockResolvedValue(null); expect((await api.GET(new Request('http://app.example.test'), context())).status).toBe(401);
   });

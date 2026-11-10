@@ -27,7 +27,8 @@ export async function createHistoricalSession(db: Db, userId: string, targetId: 
 
 /** Stores one hypothesis exactly as the retired workspace import did. */
 export async function createHistoricalHypothesis(db: Db, sessionId: string, input: unknown) {
-  const [parsed] = hypothesesDocumentSchema.parse({ version: 2, sessionId, hypotheses: [input] }).hypotheses;
+  const version = input && typeof input === 'object' && 'targetId' in input ? 2 : 1;
+  const [parsed] = hypothesesDocumentSchema.parse({ version, sessionId, hypotheses: [input] }).hypotheses;
   const snapshot = hypothesisSnapshot(parsed);
   const row = await db.researchHypothesis.create({ data: {
     sessionId, ...snapshot, evidenceFor: json(snapshot.evidenceFor), evidenceAgainst: json(snapshot.evidenceAgainst),

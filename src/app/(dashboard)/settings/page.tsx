@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import ResearchModelSettings from "@/components/ResearchModelSettings";
 
 // The 11 AiProvider enum values (kept in sync with prisma/schema.prisma).
 // OLLAMA runs locally and is keyless; every other provider needs an API key.
@@ -127,12 +126,10 @@ export default function SettingsPage() {
       <h1>Settings</h1>
       <h2 className="text-lg font-semibold">AI providers</h2>
       <p className="mt-1 text-sm text-muted">
-        Choose the default for optional AI assistance. Configure Research stage routing below.
+        Choose the default for optional AI assistance.
       </p>
       {error && <p role="alert" className="text-sm text-brand">{error}</p>}
       {notice && <p role="status" className="text-sm"><Badge tone="proven">{notice}</Badge></p>}
-
-      <details className="ui-disclosure"><summary>Research model routing</summary><div className="mt-4"><ResearchModelSettings providers={configs} /></div></details>
 
       {/* Configured providers */}
       <section className="mt-8">

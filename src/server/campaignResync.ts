@@ -140,5 +140,5 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
     } });
     return removed.map(asset => asset.id);
   }, { timeout: 30000 });
-  await Promise.allSettled(retired.map(id => settleScopeAssetRetirement(ownerId, id)));
+  if (retired.length) await settleScopeAssetRetirement().catch(() => undefined);
 }

@@ -2,7 +2,6 @@ import EvidencePanel from '@/components/EvidencePanel';
 import Link from "next/link";
 import ResearchProof from "@/components/ResearchProof";
 import ResearchPromotion from "@/components/ResearchPromotion";
-import ResearchStagePanel from "@/components/ResearchStagePanel";
 import ResearchHumanReview, { ResearchReviewResult } from "@/components/ResearchHumanReview";
 import { reproducibleResearchTests, savedResearchReview } from "@/lib/research/humanReview";
 import { notFound } from "next/navigation";
@@ -32,9 +31,6 @@ export default async function HypothesisPage({ params, searchParams }: { params:
   const requiresReview = Boolean(data.session.consoleTargetId);
   const reviewable = policyState === "CURRENT" && data.session.status === "READY" && proof.success;
   const testIds = h.status === "CONFIRMED" && proof.success ? reproducibleResearchTests(proof.data).map(test => test.id) : [];
-  const reviewInput = requiresReview && reviewable && proof.data.tests.length
-    ? { sessionId: id, hypothesisId: h.id, revision: h.revision }
-    : null;
   return <div className="space-y-5"><Link className="text-brand" href={`/research/history/${id}`}>← Research Session</Link><h1 className="text-2xl font-semibold">{h.externalId} — {h.title}</h1>
     {!scopeActive && <p role="alert">Scope no longer active. Do not continue active testing.</p>}
     {policyState === "CHANGED" && <p role="alert">Program or scope changed since export. Create a current workspace before promotion.</p>}
@@ -47,10 +43,6 @@ export default async function HypothesisPage({ params, searchParams }: { params:
     <Card className="p-5"><h2 className="text-xl">What would disprove it</h2><p className="whitespace-pre-wrap">{h.falsificationCondition}</p></Card>
     <Card className="p-5"><h2 className="text-xl">What to test next</h2><p className="whitespace-pre-wrap">{h.nextTest}</p><p>Expected signal: {h.expectedSignal}</p></Card>
     <Card className="p-5"><ResearchProof value={h.researchData} /></Card>
-    {reviewInput && <section aria-label="Independent research review" className="space-y-2">
-      <ResearchStagePanel key={h.revision + ":validate"} title="Challenge the hypothesis" targetId={data.session.targetId} input={{ ...reviewInput, stage: "validate" }} />
-      <ResearchStagePanel key={h.revision + ":trace"} title="Trace the demonstrated impact" targetId={data.session.targetId} input={{ ...reviewInput, stage: "trace" }} />
-    </section>}
     <EvidencePanel targetId={data.session.targetId} sessionId={id} link={{entity:'hypothesis',id:h.id,role:'SUPPORTS'}}/>
     {requiresReview && (review || !h.promotion) && <ResearchHumanReview key={h.revision} sessionId={id} hypothesisId={h.id} revision={h.revision} review={review} canReview={reviewable} testIds={testIds}/>}
     <ResearchPromotion key={h.revision} sessionId={id} hypothesisId={h.id} targetId={data.session.targetId} revision={h.revision} eligible={h.status === "CONFIRMED" && reviewable && (!requiresReview || review?.verdict === "SUPPORTED")} existing={h.promotion} requiresReview={requiresReview && review?.verdict !== "SUPPORTED"}/>

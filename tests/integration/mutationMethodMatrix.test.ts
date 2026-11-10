@@ -31,7 +31,7 @@ const call=async(row:typeof rows[number],data:string,origin?:string)=>{
   it(`${row.method} ${row.path}: anonymous`,async()=>{mocks.auth.mockResolvedValue(null);const r=await call(row,'{}');expect(r.status).toBe(401);expect(r.headers.get('location')).toBeNull();});
   if(row.path.startsWith('/api/internal/'))continue;
   it(`${row.method} ${row.path}: explicit foreign Origin`,async()=>{mocks.auth.mockResolvedValue({user:{id:userId}});const r=await call(row,'{}','http://untrusted.example.test');expect(r.status).toBe(row.retired?410:403);});
-  it(`${row.method} ${row.path}: missing resource and malformed JSON`,async()=>{mocks.auth.mockResolvedValue({user:{id:userId}});const r=await call(row,'{');const idempotent=row.method==='DELETE'&&['/api/programs/[id]','/api/research-targets/[id]/console'].includes(row.path);expect(idempotent?[200]:[400,404,410]).toContain(r.status);if(idempotent){expect(await r.json()).toEqual({deleted:true});expect((await call(row,'{')).status).toBe(200);}expect(r.headers.get('location')).toBeNull();});
+  it(`${row.method} ${row.path}: missing resource and malformed JSON`,async()=>{mocks.auth.mockResolvedValue({user:{id:userId}});const r=await call(row,'{');const idempotent=row.method==='DELETE'&&['/api/programs/[id]'].includes(row.path);expect(idempotent?[200]:[400,404,410]).toContain(r.status);if(idempotent){expect(await r.json()).toEqual({deleted:true});expect((await call(row,'{')).status).toBe(200);}expect(r.headers.get('location')).toBeNull();});
  }
- it('tracks actual method totals separately from handler totals',()=>{expect(rows.length).toBeGreaterThan(46);expect(rows.some(r=>r.method==='PUT')).toBe(false);});
+ it('tracks actual method totals separately from handler totals',()=>{expect(rows.length).toBeGreaterThanOrEqual(44);expect(rows.some(r=>r.method==='PUT')).toBe(false);});
 });

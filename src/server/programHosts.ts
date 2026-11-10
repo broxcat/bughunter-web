@@ -48,7 +48,7 @@ export async function mutateHost(ownerId: string, programId: string, action: "AD
     const scope = await tx.scope.create({ data: { userId: ownerId, hostPattern: host, status: "APPROVED" } });
     return tx.target.create({ data: { userId: ownerId, programId, scopeId: scope.id, host, active: true } });
   });
-  if(retiredAssetId)try{await settleScopeAssetRetirement(ownerId,retiredAssetId);}catch{throw new HostError('Host retired; Research cleanup unconfirmed. Retry from the Scope asset history.',503);}
+  if(retiredAssetId)try{await settleScopeAssetRetirement();}catch{throw new HostError('Host retired; scan cancellation unconfirmed. Retry from the Scope asset history.',503);}
   return result;
 }
 export function hostErrorResponse(error: unknown) {
