@@ -7,12 +7,11 @@ import { BOUNTY_PLATFORMS } from '@/lib/bountyProgram';
 import { platformLabel } from '@/lib/platformPresentation';
 import { executionPolicySchema, hasHunterTemplate, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME } from '@/lib/programExecutionPolicy';
 import { intakePreviewSchema, MAX_PROGRAM_SOURCE, splitNonQualifying, type IntakeInput } from '@/lib/programIntake';
-import { detectScopeAsset } from '@/lib/scopeAssets';
 import { scopeReviewChecks, targetReviewSchema } from '@/lib/targetReview';
 import type { ProgramData } from '@/lib/targetFormData';
 import { campaignSourceSchema, type CampaignSource } from '@/lib/campaignSource';
 import { Button } from '@/components/ui/Button';
-import { fieldClass, initialReview, isStructuredExclusion, lines, policyFields, readable, TargetScopeReview } from './TargetScopeReview';
+import { fieldClass, initialReview, lines, policyFields, readable, TargetScopeReview } from './TargetScopeReview';
 
 type Platform = (typeof BOUNTY_PLATFORMS)[number];
 const levels = ['Low', 'Medium', 'High', 'Critical'] as const;
@@ -39,7 +38,6 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
   ].join('\n'));
   const sections = stored?.sourceSnapshot.programSections;
   const [description, setDescription] = useState(sections?.description ?? program?.rulesOfEngagement ?? '');
-  const [reviewedDescription, setReviewedDescription] = useState(description);
   const [qualifying, setQualifying] = useState((sections?.qualifying ?? program?.qualifying ?? []).join('\n'));
   const [rewards, setRewards] = useState({
     currency: program?.rewardCurrency ?? 'EUR', Low: program?.rewardLow ?? '', Medium: program?.rewardMedium ?? '',
@@ -77,7 +75,6 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
       setNonQualifying(preview.nonQualifying.join('\n'));
       if (preview.programSections) {
         setDescription(preview.programSections.description);
-        setReviewedDescription(preview.programSections.description);
         setQualifying(preview.programSections.qualifying.join('\n'));
       }
       if (preview.rewards) {
@@ -93,7 +90,7 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
           ...preview.unresolved.map(text => ({ text, decision: null, origin: 'AI_INTAKE' as const })),
         ],
       }));
-      setMessage('Extraction ready for review.' + (preview.omitted.length ? ' Omitted assets without a verified in-scope entry: ' + preview.omitted.join(', ') + '.' : ''));
+      setMessage('Program details extracted.' + (preview.omitted.length ? ' Omitted assets without a verified in-scope entry: ' + preview.omitted.join(', ') + '.' : ''));
     } catch (failure) { setError((failure as Error).message); }
     finally { setImporting(false); }
   }
@@ -102,28 +99,15 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
   const policy = policyFields(review, allowProse);
   const { scopeError, conflict } = scopeReviewChecks(review.scopeIn, policy.exclusions);
   const policyResult = policyShape.safeParse(policy);
-  const legacy = program?.legacyPolicyReview;
-  const legacyMismatch = Boolean(legacy && (legacy.unconvertible.length || legacy.exclusions.some(value => !policy.exclusions.some(exclusion => {
-    try { return detectScopeAsset(exclusion).normalizedValue === value; } catch { return false; }
-  }))));
   const association = importedFrom ?? (stored?.sourceSnapshot.sourceDocument ? { url: program?.programUrl ?? '', platform: program?.platform ?? '' } : null);
   const changedSource = Boolean(association && (association.url !== url.trim() || association.platform !== platform));
-  const unreviewedMarkdown = Boolean(markdown.trim() && markdown !== sourceDocument);
-  const descriptionEdited = description !== reviewedDescription;
-  const proseExclusions = allowProse ? lines(review.exclusions).filter(value => !isStructuredExclusion(value)) : [];
-  const rules = [...review.rules];
-  for (const text of proseExclusions) if (!rules.some(rule => rule.text === text)) rules.push({ text, decision: null, origin: 'AI_INTAKE' });
-  const unresolved = rules.filter(rule => !rule.decision).length;
+  const unextractedMarkdown = Boolean(markdown.trim() && markdown !== sourceDocument);
   const needsUsername = [policy.requiredUserAgent ?? '', ...policy.requiredHeaders.map(header => header.value)].some(hasHunterTemplate) && !hunterHasUsername;
   const policyIssue = !policyResult.success ? (policyResult.error.issues[0]?.message ?? 'Invalid execution policy.')
-    : changedSource ? 'Extract the program rules again after changing its URL or platform.'
-    : unreviewedMarkdown ? 'Extract the pasted Markdown before running automation.'
-    : descriptionEdited ? 'The description has changed. Extract the current rules again before running automation.'
-    : unresolved ? unresolved + (unresolved === 1 ? ' program rule could' : ' program rules could') + ' not be represented safely. Review the source before running automation.'
     : !policy.automationAllowed ? 'The program policy does not allow automation.'
     : needsUsername ? MISSING_HUNTER_USERNAME
     : (!policy.requiredUserAgent || policy.userAgentMode === 'APPEND') && !hunterHasUserAgent ? MISSING_HUNTER_UA
-    : legacyMismatch ? 'The current exclusions do not cover all retained legacy exclusions.' : '';
+    : '';
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,15 +117,13 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
     const excluded = splitNonQualifying(lines(nonQualifying));
     const checked = targetReviewSchema.safeParse({
       scopeIn: review.scopeIn, documentedAssets: review.documentedAssets,
-      rules: [...rules, ...(descriptionEdited ? [{ text: 'Program description changed. Review the rules before automation.', decision: null, origin: 'AI_INTAKE' }] : []), ...(changedSource && !review.rules.some(rule => rule.origin === 'SOURCE_CHANGED')
-        ? [{ text: 'Program URL or platform changed. Extract the current rules before automation.', decision: null, origin: 'SOURCE_CHANGED' }] : []),
-      ...(unreviewedMarkdown ? [{ text: 'Pasted Markdown has not been extracted. Review the program rules before automation.', decision: null, origin: 'AI_INTAKE' }] : [])],
+      rules: review.rules,
       policy, expectedAssets: program?.expectedAssets,
-      sourceDocument: unreviewedMarkdown ? markdown : sourceDocument,
-      intakeVersion: !program || sourceDocument !== undefined || unreviewedMarkdown ? 1 : undefined,
+      sourceDocument: unextractedMarkdown ? markdown : sourceDocument,
+      intakeVersion: !program || sourceDocument !== undefined || unextractedMarkdown ? 1 : undefined,
       nonQualifyingText: excluded.text,
       programSections: { description, outOfScope: lines(review.exclusions), qualifying: lines(qualifying) },
-      importSource: !changedSource && !unreviewedMarkdown ? importSource : undefined,
+      importSource: !changedSource && !unextractedMarkdown ? importSource : undefined,
     });
     if (!checked.success) {
       setError(checked.error.issues.map(issue => issue.path.join('.') + ' — ' + issue.message).join(' '));
@@ -156,7 +138,6 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
       ...(!program ? { startCampaign: true } : {
         expectedUpdatedAt: program.updatedAt,
         expectedPolicyVersion: program.executionPolicies?.[0]?.version ?? 0,
-        expectedLegacyScopeFingerprint: legacy?.scopeFingerprint,
       }),
     };
     try {
@@ -234,8 +215,8 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
         <span className="text-sm text-muted">{policy.userAgentMode === 'APPEND'
           ? 'The suffix is appended to DEFAULT_USER_AGENT at execution.' : 'Leave blank to use DEFAULT_USER_AGENT.'}</span>
       </label>
-      <section aria-label="Review checks" className="space-y-2 rounded border border-border p-4">
-        <h2 className="font-semibold">Review checks</h2>
+      <section aria-label="Configuration" className="space-y-2 rounded border border-border p-4">
+        <h2 className="font-semibold">Configuration</h2>
         <Check label="Valid scope" issue={scopeError || (!review.scopeIn.length ? 'Add an authorized asset to make this target ready.' : '')} />
         <Check label="No in/out conflict" issue={conflict} />
         <Check label="Execution policy applicable" issue={policyIssue} />

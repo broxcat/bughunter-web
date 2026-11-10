@@ -1,18 +1,16 @@
+import { automationSourceText, findAutomationProhibition, isReportingRestriction, hasReportingAutomationRestriction, sameAutomationPhrase } from '@/lib/automationProhibition.mjs';
 
 import { BlockList, isIP } from 'node:net';
-import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import { requiredUserAgentSchema } from '@/lib/httpPolicy.mjs';
 import { isExcluded, matchesHost } from '@/lib/bountyProgram';
 import { assetAllowsHost, assetAllowsUrl, detectScopeAsset, type AssetBoundary } from '@/lib/scopeAssets';
-import { policyDraftNeedsReview, storedExecutionPolicySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME, hasHunterTemplate, hasHunterUsername, replaceHunterTemplate, identificationHeadersSchema, type TestCategory } from '@/lib/programExecutionPolicy';
+import { storedExecutionPolicySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME, hasHunterTemplate, hasHunterUsername, replaceHunterTemplate, identificationHeadersSchema, type TestCategory } from '@/lib/programExecutionPolicy';
 
-import { captureLegacyScopes, legacyExclusionParity, legacyScopeFingerprint, legacyScopeTargets } from './legacyPolicySource';
 
 export const currentPolicySelection = { orderBy: { version: 'desc' as const }, take: 1 };
 export const programPolicyInclude = {
   executionPolicies: currentPolicySelection,
-  targets: legacyScopeTargets,
 };
 export type PolicyProgram = {
   ownerId?: string;
@@ -23,9 +21,8 @@ export type PolicyProgram = {
   executionPolicies?: readonly { version: number; policy: unknown }[];
   targets?: readonly { scope: { id: string; userId: string; scopeDetails: string | null; outOfScope: string | null; rulesOfEngagement: string | null } }[];
 };
-type ScopeRules = { scopeDetails?: string | null; outOfScope?: string | null; rulesOfEngagement?: string | null };
 
-export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules) {
+export function resolveProgramPolicy(program: PolicyProgram) {
   const row = program.executionPolicies?.[0];
   const policy = row && storedExecutionPolicySchema.parse(row.policy);
   const defaultUserAgent = process.env.DEFAULT_USER_AGENT || '';
@@ -40,22 +37,16 @@ export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules)
   const userAgent = resolve(rawUserAgent);
   const resolvedHeaders = rawHeaders.map(({ name, value }) => ({ name, value: resolve(value) }));
   const headers = usernameMissing ? {} : Object.fromEntries(resolvedHeaders.map(({ name, value }) => [name, value]));
-  const sourceMismatch = policy && (policy.sourceSnapshot.rules !== (program.rulesOfEngagement?.trim() ?? '') ||
-    policy.sourceSnapshot.url !== (program.programUrl ?? null));
-  const captured = policy?.sourceSnapshot.legacy;
-  const scopes = program.targets && captureLegacyScopes(program.targets.map(target => target.scope), program.ownerId);
-  const hasScopeProse = scopes ? scopes.length > 0 : Boolean(scope?.scopeDetails?.trim() || scope?.outOfScope?.trim() || scope?.rulesOfEngagement?.trim());
-  const reviewedScope = Boolean(policy?.reviewState === 'OWNER_REVIEWED' && captured && scopes &&
-    legacyScopeFingerprint(captured.scopes) === legacyScopeFingerprint(scopes));
-  const legacyChanged = captured && (!isDeepStrictEqual(captured.outOfScope, program.outOfScope) ||
-    captured.programRules !== (program.rulesOfEngagement ?? null));
-  const parity = captured && policy?.automationAllowed ? legacyExclusionParity(program.outOfScope, policy.exclusions) : null;
-  const unrepresented = sourceMismatch || legacyChanged || (hasScopeProse && !reviewedScope) ||
-    Boolean(captured?.scopes.length && !reviewedScope) || Boolean(parity && (parity.missing.length || parity.unconvertible.length)) ||
-    (policy ? policy.sourceSnapshot.unrepresentedRules.length > 0 : Boolean(program.rulesOfEngagement?.trim()));
-  const blocker = policyDraftNeedsReview(policy?.reviewState) ? 'Automation is blocked until you review and save the imported policy in Target settings.'
-    : unrepresented ? 'Automation is blocked by unrepresented program or scope rules. Review the execution policy in Target settings.'
-    : policy && !policy.automationAllowed ? 'The program policy does not allow automation.'
+  const source = automationSourceText(program.rulesOfEngagement, policy?.sourceSnapshot);
+  const ignoredPhrases = policy?.automationDecisions?.map(decision => decision.phrase) ?? [];
+  const preferred = policy?.automationProhibition;
+  const reportingReason = preferred ? isReportingRestriction(preferred) : hasReportingAutomationRestriction(source);
+  const dismissed = Boolean(preferred && ignoredPhrases.some(phrase => sameAutomationPhrase(phrase, preferred)));
+  const automationProhibition = preferred && !reportingReason && !dismissed ? preferred : findAutomationProhibition(source, ignoredPhrases);
+  // Decisions suppress only their exact sentence. A different current testing
+  // prohibition is still enforced even when a previous sentence was dismissed.
+  const automationBlocked = Boolean(automationProhibition) || Boolean(policy && !policy.automationAllowed && !reportingReason && !dismissed);
+  const blocker = automationBlocked ? 'The program policy does not allow automation.' + (automationProhibition ? ' Program rule: ' + automationProhibition : '')
     : usernameMissing ? MISSING_HUNTER_USERNAME
     : appendUserAgent && !requiredUserAgentSchema.safeParse(defaultUserAgent).success ? MISSING_HUNTER_UA
     : !identificationHeadersSchema.safeParse(resolvedHeaders).success ? 'Resolved required headers are invalid. Check the program policy and HUNTER_USERNAME.'
@@ -66,10 +57,10 @@ export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules)
   const forbiddenCategories = policy ? policy.forbiddenCategories : [];
   const version = row?.version ?? 0;
   const fingerprint = createHash('sha256').update(JSON.stringify([version, blocker, headers, userAgent, program.outOfScope, exclusions, limits, forbiddenCategories])).digest('hex');
-  return { version, userAgent, headers, reviewedScope, exclusions, legacyExclusions: program.outOfScope, limits, forbiddenCategories, blocker, fingerprint };
+  return { version, automationProhibition, automationBlocked, userAgent, headers, exclusions, legacyExclusions: program.outOfScope, limits, forbiddenCategories, blocker, fingerprint };
 }
-export function programPolicyBlocker(program: PolicyProgram, scope?: ScopeRules) {
-  try { return resolveProgramPolicy(program, scope).blocker; }
+export function programPolicyBlocker(program: PolicyProgram) {
+  try { return resolveProgramPolicy(program).blocker; }
   catch { return 'Invalid program execution policy'; }
 }
 

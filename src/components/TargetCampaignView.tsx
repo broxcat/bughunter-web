@@ -4,6 +4,7 @@ import { platformLabel } from '@/lib/platformPresentation';
 import type { StageState, targetCampaign } from '@/lib/targetCampaign';
 import CampaignCommandButton from './CampaignCommandButton';
 import CampaignLiveRefresh from './CampaignLiveRefresh';
+import AutomationDecisionButton from './AutomationDecisionButton';
 
 const tones = { 'not started': 'neutral', running: 'info', done: 'passed', blocked: 'killed', 'needs you': 'medium', failed: 'killed' } as const;
 export function CampaignState({ state }: { state: StageState }) {
@@ -47,7 +48,10 @@ export default function TargetCampaignView({ program, view, notice, summary }: {
           className="relative scroll-mt-24 space-y-2 rounded-lg border border-border bg-surface p-4 aria-[current=step]:border-border-strong aria-[current=step]:bg-surface-2">
           {index < view.stages.length - 1 && <span aria-hidden="true" className="absolute left-full top-6 hidden h-px w-3 bg-border-strong lg:block" />}
           <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold"><span aria-hidden="true" className="mr-1.5 text-xs text-muted">{index + 1}</span>{step.stage}</h2><CampaignState state={step.state} /></div>
-          {step.detail && <p className="text-sm text-muted" role={['blocked', 'running', 'failed', 'needs you'].includes(step.state) ? 'status' : undefined}>{step.detail}</p>}
+          {step.detail && <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm text-muted" role={['blocked', 'running', 'failed', 'needs you'].includes(step.state) ? 'status' : undefined}>{step.detail}</p>
+            {step.stage === 'Target' && step.state === 'blocked' && view.automationBlock && <AutomationDecisionButton programId={id} {...view.automationBlock} />}
+          </div>}
           {step.stage === 'Recon' && step.state === 'done' && summary && <ul className="space-y-1 text-xs text-muted">
             <li>{summary.hosts} discovered hosts</li><li>{summary.webApps} active web apps</li>
             <li>Changes · {summary.added} new, {summary.changed} changed, {summary.notObserved} not observed</li>

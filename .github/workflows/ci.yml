@@ -69,6 +69,9 @@ jobs:
       - name: Generate Next route types
         run: npx next typegen
 
+      - name: Check generated automation detection
+        run: npm run policy:check-detection
+
       - name: Lint
         run: npm run lint
 
@@ -80,6 +83,12 @@ jobs:
 
       - name: Test (unit + integration)
         run: npm test -- --maxWorkers=1
+
+      - name: Install browser system libraries
+        run: npx playwright install-deps chromium
+
+      - name: Target deletion browser acceptance
+        run: node tests/e2e/targetDeletion.mjs
 
       - name: Validate upgrade preserves historical data
         env:

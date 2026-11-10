@@ -1,0 +1,81 @@
+{
+  "subjects": [
+    "(?:automated|automatic)\\s+(?:(?:vulnerability|security|web)\\s+)?(?:scanning\\s+tools?|tools?|tooling|scans?|scanners?|scanning|tests?|testing)",
+    "automation",
+    "(?:outils?|scanners?|scans?|tests?)\\s+(?:de\\s+(?:scan|scanning|test|s[eé]curit[eé])\\s+)?(?:automatiques?|automatis[eé](?:e|s|es)?)",
+    "automatisation"
+  ],
+  "prefixes": [
+    "no",
+    "(?:do\\s+not|don['’]t|must\\s+not|never)(?:\\s+(?:use|run|perform|conduct|launch))?",
+    "(?:please\\s+)?refrain\\s+from(?:\\s+(?:using|running|performing))?",
+    "(?:please\\s+)?avoid(?:\\s+(?:using|running|performing))?",
+    "(?:ne\\s+(?:pas|jamais)\\s+(?:utiliser|lancer|ex[eé]cuter|effectuer)|n['’]utilisez\\s+(?:pas|jamais)|ne\\s+(?:lancez|faites)\\s+(?:pas|jamais))\\s+(?:d['’]\\s*|de\\s+|des\\s+|les\\s+)?",
+    "(?:pas|aucun(?:e)?)\\s+(?:d['’]\\s*|de\\s+)?",
+    "(?:veuillez\\s+)?(?:vous\\s+)?absten(?:ez-vous|ir)\\s+d['’](?:utiliser|ex[eé]cuter)\\s+(?:des?\\s+|d['’]\\s*)?",
+    "(?:interdiction|interdit)\\s+d['’](?:utiliser|ex[eé]cuter|effectuer)\\s+(?:des?\\s+|d['’]\\s*)?"
+  ],
+  "suffixes": [
+    "(?:(?:is|are)\\s+)?(?:(?:strictly|explicitly|expressly)\\s+)?(?:forbidden|prohibited|banned|disallowed|not\\s+(?:allowed|permitted|authori[sz]ed))",
+    "must\\s+not\\s+be\\s+used",
+    "(?:(?:est|sont)\\s+)?(?:(?:strictement|formellement|express[eé]ment)\\s+)?(?:interdit(?:e|s|es)?|prohib[eé](?:e|s|es)?|non\\s+autoris[eé](?:e|s|es)?)",
+    "(?:n['’]est|ne\\s+sont)\\s+pas\\s+(?:autoris[eé](?:e|s|es)?|permis(?:e|s|es)?)"
+  ],
+  "sentenceSeparator": "[\\r\\n]+|(?<=[.!?;])\\s+",
+  "mentionPattern": "automat|scann?er|outil",
+  "sourcePaths": [
+    "$.rules",
+    "$.sourceDocument",
+    "$.programSections.description",
+    "$.legacy.programRules",
+    "$.unrepresentedRules[*]",
+    "$.ruleDecisions[*].text",
+    "$.legacy.scopes[*].rulesOfEngagement",
+    "$.legacy.scopes[*].scopeDetails",
+    "$.legacy.scopes[*].outOfScope"
+  ],
+  "reportSubjects": [
+    "reports?",
+    "submissions?",
+    "findings?",
+    "results?",
+    "outputs?",
+    "rapports?",
+    "soumissions?",
+    "r[eé]sultats?"
+  ],
+  "reportDeterminers": [
+    "the",
+    "any",
+    "all",
+    "these",
+    "those",
+    "only",
+    "les?",
+    "des?",
+    "ces",
+    "tous",
+    "toutes",
+    "seuls?",
+    "seules?",
+    "nos",
+    "vos",
+    "un",
+    "une",
+    "a",
+    "an",
+    "our",
+    "your",
+    "each",
+    "every",
+    "this",
+    "that",
+    "la",
+    "ce",
+    "cet",
+    "cette",
+    "chaque",
+    "tout",
+    "toute"
+  ]
+}

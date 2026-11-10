@@ -59,12 +59,13 @@ describe('program execution policy', () => {
     expect(executionPolicySchema.safeParse({ ...config, requiredHeaders: [{ name: 'Host', value: 'other.example.com' }] }).success).toBe(false);
   });
 
-  it('denies disabled, unrepresented and stale rules', () => {
+  it('enforces automation prohibition while ignoring review metadata and source drift', () => {
+    expect(() => authorizeExecution({ host: 'example.com', policy: resolve({ ...config, automationAllowed: false }) }, { tool: 'browser' })).toThrow(/does not allow automation/);
     for (const policy of [
-      resolve({ ...config, automationAllowed: false }),
       resolve({ ...config, sourceSnapshot: { ...config.sourceSnapshot, unrepresentedRules: ['Special window'] } }),
       resolveProgramPolicy({ ...legacy, rulesOfEngagement: 'Changed', executionPolicies: [{ version: 1, policy: config }] }),
       resolveProgramPolicy({ ...legacy, rulesOfEngagement: 'Free text' }),
-    ]) expect(() => authorizeExecution({ host: 'example.com', policy }, { tool: 'browser' })).toThrow(/automation/i);
+      resolveProgramPolicy({ ...legacy, executionPolicies: [{ version: 1, policy: { ...config, reviewState: 'BACKFILL_DRAFT', requestsPerSecond: null, maxConcurrency: null } }] }),
+    ]) expect(() => authorizeExecution({ host: 'example.com', policy }, { tool: 'browser' })).not.toThrow();
   });
 });

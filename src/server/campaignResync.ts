@@ -1,3 +1,4 @@
+import { findAutomationProhibition, isReportingRestriction, sameAutomationPhrase } from '@/lib/automationProhibition.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -65,12 +66,12 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
   else {
     const page = await publicProgramText(claim.url);
     if (page.text === (claim.baseline?.sourceDocument ?? claim.baseline?.rules[0]?.text)) return;
-    // A changed page whose rules cannot be read still requires review.
+    // Record the new source document even when extraction is unavailable.
     try {
       const preview = await extractProgram(ownerId, { mode: 'url', url: claim.url });
       fresh = campaignSourceFromIntake(preview)!;
     } catch {
-      fresh = { ...claim.baseline!, sourceDocument: page.text, rules: [{ text: 'The public program changed and its rules could not be read safely.' }] };
+      fresh = { ...claim.baseline!, sourceDocument: page.text, rules: [{ text: 'The public program changed and its rules could not be extracted.' }] };
     }
   }
   if (fresh.platform !== claim.platform || fresh.url !== claim.url) return;
@@ -99,30 +100,24 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
     const newExclusions = fresh.exclusions.filter(value => !priorExclusions.has(detectScopeAsset(value).normalizedValue));
     const newCategories = fresh.forbiddenCategories.filter(category => !policy.forbiddenCategories.includes(category));
     const existingDocument = policy.sourceSnapshot.sourceDocument ?? policy.sourceSnapshot.rules;
-    const existingRules = new Set((policy.sourceSnapshot.ruleDecisions ?? []).map(ruleKey));
     const rulesChanged = sameSource ? !isDeepStrictEqual(sameSource.rules.map(ruleKey), fresh.rules.map(ruleKey))
-      : fresh.rules.some(rule => !existingRules.has(ruleKey(rule)) && !existingDocument.includes(rule.text));
-    const overflow = policy.exclusions.length + newExclusions.length > 1000;
+      : fresh.rules.some(rule => !existingDocument.includes(rule.text));
     const newFamilies = fresh.nonQualifying.filter(family => !program.nonQualifying.includes(family));
-    const rulesNeedReview = rulesChanged || overflow;
-    if (removed.length || newExclusions.length || newCategories.length || rulesNeedReview || newFamilies.length) {
-      const previousKeys = new Set(sameSource?.rules.map(ruleKey) ?? []);
-      const ruleDecisions = policy.sourceSnapshot.ruleDecisions ?? policy.sourceSnapshot.unrepresentedRules.map(text => ({ text, decision: null }));
-      const marker = overflow ? 'Platform exclusions exceed the policy limit. Review the imported scope before enabling automation.'
-        : 'Platform rules changed. Review the current rules before enabling automation.';
-      const added = rulesChanged ? fresh.rules.filter(rule => !previousKeys.has(ruleKey(rule))) : [];
-      const decisions = rulesNeedReview ? [{ text: marker, decision: null, ...(policy.sourceSnapshot.intakeVersion ? { origin: 'PLATFORM_RESYNC' as const } : {}) },
-        ...added.filter(rule => !ruleDecisions.some(old => ruleKey(old) === ruleKey(rule) && !old.decision)).map(rule => ({ ...rule, decision: null, ...(policy.sourceSnapshot.intakeVersion ? { origin: 'PLATFORM_RESYNC' as const } : {}) })),
-        ...ruleDecisions] : ruleDecisions;
+    const ignoredPhrases = policy.automationDecisions?.map(decision => decision.phrase) ?? [];
+    const preferred = fresh.automationProhibition;
+    const automationProhibition = (preferred && !isReportingRestriction(preferred) && !ignoredPhrases.some(phrase => sameAutomationPhrase(phrase, preferred)) ? preferred : null)
+      ?? findAutomationProhibition(fresh.sourceDocument ?? fresh.rules.map(rule => rule.text).join('\n'), ignoredPhrases);
+    const automationDenied = automationProhibition !== null;
+    if (automationDenied || removed.length || newExclusions.length || newCategories.length || rulesChanged || newFamilies.length) {
       const nextPolicy = {
         ...policy,
-        exclusions: overflow ? policy.exclusions : [...policy.exclusions, ...newExclusions],
+        automationAllowed: policy.automationAllowed && !automationDenied,
+        ...(automationDenied ? { automationProhibition } : {}),
+        exclusions: [...policy.exclusions, ...newExclusions],
         forbiddenCategories: [...policy.forbiddenCategories, ...newCategories],
         sourceSnapshot: {
-          ...policy.sourceSnapshot, ruleDecisions: decisions,
+          ...policy.sourceSnapshot,
           ...(rulesChanged ? { sourceDocument: fresh.sourceDocument ?? fresh.rules.map(rule => rule.text).join('\n\n') } : {}),
-          unrepresentedRules: rulesNeedReview ? [...new Set([...policy.sourceSnapshot.unrepresentedRules, marker, ...added.map(rule => rule.text)])]
-            : policy.sourceSnapshot.unrepresentedRules,
         },
       };
       await tx.bountyProgram.update({ where: { id: programId }, data: {
@@ -130,10 +125,10 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
         executionPolicies: { create: { version: latest.version + 1, policy: nextPolicy } },
       } });
       const affected = existing.filter(asset => newExclusions.some(exclusion => overlaps(exclusion, asset.normalizedValue)));
-      if (rulesNeedReview || newCategories.length || affected.length) {
+      if (automationDenied || newCategories.length || affected.length) {
         await tx.scanRun.updateMany({ where: {
           target: { programId, userId: ownerId }, status: { in: [...active] }, cancelRequestedAt: null,
-          ...(!rulesNeedReview && !newCategories.length ? { OR: [
+          ...(!automationDenied && !newCategories.length ? { OR: [
             { scopeAssetId: { in: affected.map(asset => asset.id) } },
             { target: { discoveredFromAssetId: { in: affected.map(asset => asset.id) } } },
           ] } : {}),
@@ -142,8 +137,6 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
     }
     await tx.targetCampaign.update({ where: { programId }, data: {
       source: fresh as Prisma.InputJsonValue, pendingAssets,
-      ...(rulesNeedReview ? { state: row.state === 'PAUSED' ? 'PAUSED' : 'BLOCKED', reason: 'Platform rules need review.',
-        requestedAt: null, retryAt: null, nextCycleAt: null } : {}),
     } });
     return removed.map(asset => asset.id);
   }, { timeout: 30000 });

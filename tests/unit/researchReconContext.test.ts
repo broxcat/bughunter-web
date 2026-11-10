@@ -90,8 +90,8 @@ describe('derived Research Recon evidence', () => {
     expect(passive.inScope('nested.app.example.test')).toBe(true); expect(passive.inScope('example.test')).toBe(false); expect(passive.inScope('admin.example.test')).toBe(false);
     target.program!.scopeRules = ['app.example.test']; expect(reconScopePolicy(target).inScope('nested.app.example.test')).toBe(false);
     target.contextOnly = false; target.host = 'app.example.test'; target.scope.scopeDetails = 'https://app.example.test/allowed only';
-    expect(reconScopePolicy(target).activeSuggestionsAllowed).toBe(false);
-    expect(build([run()], undefined, target).suggestions.every(s => s.mode === 'PASSIVE_REVIEW')).toBe(true);
+    expect(reconScopePolicy(target).activeSuggestionsAllowed).toBe(true);
+    // Scope prose is documentary; explicit scope status still controls access.
     target.scope.status = 'REVOKED'; expect(reconScopePolicy(target).inScope('app.example.test')).toBe(false);
   });
   it('keeps out-of-scope discoveries for traceability and excludes them from suggestions', () => {

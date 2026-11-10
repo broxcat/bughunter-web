@@ -94,6 +94,28 @@ services:
     env_file: .env
     environment:
       TAILSCALE_BUGHUNTER_AUTHKEY: ""
+      RESEARCH_WORKSPACE_ROOT: /research-workspaces
+      RESEARCH_WORKSPACE_GID: "${RESEARCH_WORKSPACE_GID:-1000}"
+      RESEARCH_WORKSPACE_UID: "${RESEARCH_WORKSPACE_UID:-1000}"
+      RESEARCH_CONSOLE_ROOT: /research-target-workspaces
+      RESEARCH_TERMINAL_PRIVATE_KEY_FILE: /run/research-terminal/private.pem
+    volumes:
+      - research-workspaces:/research-workspaces
+      - type: bind
+        source: ${RESEARCH_HOST_ROOT:-/home/brokcat/bughunter-research}
+        target: /research-target-workspaces
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data/research-terminal/private.pem
+        target: /run/research-terminal/private.pem
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      default:
+        gw_priority: 1
+      research_terminal:
     depends_on:
       db:
         condition: service_healthy

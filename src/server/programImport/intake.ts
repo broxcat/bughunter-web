@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { findAutomationProhibition, isReportingRestriction } from '@/lib/automationProhibition.mjs';
 import { BrainClient } from '@/server/brain/client';
 import { resolveDefaultAiConfig } from '@/server/brain/config';
 import { splitNonQualifying } from '@/lib/programIntake';
@@ -121,8 +122,8 @@ export function normalizeIntake(source: string, model: ModelExtraction, referenc
   if (rate !== null && rate < .01) unresolved.add(model.rateLimit!.evidence);
   const rates = [...limits.rates, ...(rate !== null && rate >= .01 ? [rate] : [])];
   const concurrency = [...limits.concurrency, ...(model.maxConcurrency ? [model.maxConcurrency.value] : [])];
-  const explicitProhibition = /\b(?:(?:do not|must not|never|refrain from)\s+(?:use|using|run|running)\s+(?:any\s+)?automat(?:ed|ic)\s+(?:tools|scans|scanners|testing)|(?:automation|automated (?:tools|scanning|testing))\s+(?:is |are )?(?:strictly )?(?:forbidden|prohibited|not (?:allowed|permitted)))\b/i;
   const policyLines = source.split(/\r?\n/).filter(line => !modelInstruction.test(line));
+  const automationProhibition = (model.automationProhibition && !isReportingRestriction(model.automationProhibition) ? model.automationProhibition : null) ?? findAutomationProhibition(policyLines.join('\n'));
   const representedIdentity = [model.userAgent?.evidence, ...model.headers.map(header => header.evidence)].filter(Boolean);
   for (const line of policyLines) {
     if (hasHunterTemplate(line) && /\b(?:header|user.agent|identif|x-[a-z])/i.test(line) &&
@@ -141,7 +142,7 @@ export function normalizeIntake(source: string, model: ModelExtraction, referenc
     sourceDocument: source, scopeIn: [...scopeIn.values()], documentedAssets, omitted: [...omitted],
     nonQualifying: model.nonQualifying, unresolved: [...unresolved],
     policy: {
-      automationAllowed: !model.automationProhibition && !policyLines.some(line => explicitProhibition.test(line) || /\bno automated (?:tools|scanning|testing|scans)\b/i.test(line)),
+      automationAllowed: automationProhibition === null, automationProhibition,
       exclusions: [...denied], requiredUserAgent: model.userAgent?.value ?? null,
       requiredHeaders: model.headers.map(({ name, value }) => ({ name, value })),
       requestsPerSecond: rates.length ? Math.min(100, ...rates) : LEGACY_LIMITS.requestsPerSecond,
@@ -160,6 +161,7 @@ export function campaignSourceFromIntake(preview: IntakePreview) {
     url, platform, grants: [...new Set((preview.programSections ? scopeIn.map(asset => asset.value) : [...explicitScope(sourceDocument)])
       .map(value => detectScopeAsset(value).normalizedValue))],
     assets: scopeIn.map(asset => ({ ...asset, value: detectScopeAsset(asset.value).normalizedValue })),
+    ...(policy.automationProhibition ? { automationProhibition: policy.automationProhibition } : {}),
     exclusions: policy.exclusions, forbiddenCategories: policy.forbiddenCategories,
     nonQualifying: splitNonQualifying(nonQualifying).families,
     ...(preview.programSections ? { sourceDocument } : {}),
@@ -202,7 +204,7 @@ export function normalizeYesWeHack(source: string, program: YesWeHackFields, url
       ...(supportedPriority ? { assetValue: supportedPriority } : {}) });
   }
   const ruleLines = sections.description.split(/\r?\n/).map(line => line.trim()).filter(line => line && !modelInstruction.test(line));
-  const explicitAutomationDenial = /\b(?:(?:do not|must not|never|refrain from)\s+(?:use|using|run|running)\s+(?:any\s+)?automat(?:ed|ic)\s+(?:tools|scans|scanners|testing)|no automated (?:tools|scanning|testing|scans)|(?:automation|automated (?:tools|scanning|testing))\s+(?:is |are )?(?:strictly )?(?:forbidden|prohibited|not (?:allowed|permitted)))\b/i;
+  const automationProhibition = findAutomationProhibition(ruleLines.join('\n'));
   const forbidden = new Set<(typeof TEST_CATEGORIES)[number]>();
   const explicitAgents = new Set<string>();
   for (const line of ruleLines) {
@@ -215,7 +217,7 @@ export function normalizeYesWeHack(source: string, program: YesWeHackFields, url
       if (/\b(?:denial[ -]of[ -]service|d?dos)\b/i.test(line)) forbidden.add('DENIAL_OF_SERVICE');
       if (/\bfuzz(?:ing|ers?)\b/i.test(line)) forbidden.add('FUZZING');
     }
-    if (!fullAgent && !explicitAutomationDenial.test(line) &&
+    if (!fullAgent && !findAutomationProhibition(line) &&
         /\b(?:must|only|never|forbidden|prohibited|do not|not allowed|required|refrain)\b/i.test(line) &&
         /\b(?:test\w*|scann\w*|request\w*|vpn|header|user.agent|credential\w*|account\w*|automat\w*|payload\w*|rate limit)\b/i.test(line)) {
       unresolved.add(line);
@@ -232,7 +234,7 @@ export function normalizeYesWeHack(source: string, program: YesWeHackFields, url
     url, name: program.name.slice(0, 200), platform: 'YESWEHACK', sourceDocument: source,
     programSections: sections, rewards, nonQualifying, scopeIn: [...scopes.values()], documentedAssets, omitted: [...new Set(omitted)],
     unresolved: [...unresolved].slice(0, 100),
-    policy: { automationAllowed: !ruleLines.some(line => explicitAutomationDenial.test(line)),
+    policy: { automationAllowed: automationProhibition === null, automationProhibition,
       requiredUserAgent, ...(!fullAgent && program.userAgent?.mode ? { userAgentMode: program.userAgent.mode } : {}),
       requiredHeaders: [], exclusions: [...exclusions], forbiddenCategories: TEST_CATEGORIES.filter(value => forbidden.has(value)),
       requestsPerSecond: limits.rates.length ? Math.min(100, ...limits.rates) : LEGACY_LIMITS.requestsPerSecond,

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { detectProgram, readProgramPreview } from '@/server/programImport/preview';
 import { platformReader } from '@/server/programImport/transport';
-import { policyDraftNeedsReview } from '@/lib/programExecutionPolicy';
 import h1 from '../fixtures/program-import/hackerone.json';
 import bc from '../fixtures/program-import/bugcrowd.json';
 import int from '../fixtures/program-import/intigriti.json';
@@ -45,11 +44,10 @@ describe('read-only program import previews', () => {
     expect(preview.unrepresentedAssets.map(asset => asset.ref)).toEqual(['1', '2', '3', '5', '9']);
     expect(preview.unrepresentedRules).toContainEqual({ assetRef: '5', text: 'Use only accounts you own.' });
     expect(preview.policy).toMatchObject({
-      reviewState: 'IMPORT_DRAFT', automationAllowed: false,
+      automationAllowed: true,
       exclusions: ['https://app.example.test/', 'https://example.test/admin/*'],
       requiredHeaders: [], requiredUserAgent: null, requestsPerSecond: null,
     });
-    expect(policyDraftNeedsReview(preview.policy.reviewState)).toBe(true);
     expect(await readProgramPreview(h1.url, h1Reader({ data: h1.scope.data.toReversed() }))).toEqual(preview);
   });
 

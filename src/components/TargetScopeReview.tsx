@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/Button';
 import { ASSET_TYPES, ASSET_VALUES, assetTypeLabel, assetValueLabel, detectScopeAsset, type AssetType, type AssetValue } from '@/lib/scopeAssets';
-import { LEGACY_LIMITS, POLICY_REVIEW_ANCHOR, structuredExclusionSchema } from '@/lib/programExecutionPolicy';
+import { LEGACY_LIMITS, structuredExclusionSchema } from '@/lib/programExecutionPolicy';
 import { scopeReviewChecks, type DocumentedAsset, type ReviewRule, type ScopeEntry, type TargetReview } from '@/lib/targetReview';
 import type { ProgramData } from '@/lib/targetFormData';
 
@@ -21,23 +21,19 @@ export type ReviewFields = {
 
 export function initialReview(program?: ProgramData): ReviewFields {
   const policy = program?.executionPolicies?.[0]?.policy;
-  const legacy = program?.legacyPolicyReview;
-  const existing: ReviewRule[] = policy?.sourceSnapshot.ruleDecisions ??
-    (policy?.sourceSnapshot.unrepresentedRules ?? []).map(text => ({ text, decision: null }));
-  const added = (!policy || legacy?.scopeChanged ? legacy?.unrepresentedRules ?? [] : [])
-    .filter(text => !existing.some(rule => rule.text === text)).map(text => ({ text, decision: null }));
   const documentedExclusions = policy?.sourceSnapshot.programSections?.outOfScope ?? [];
   const documentedValues = new Set(documentedExclusions.filter(isStructuredExclusion).map(value => detectScopeAsset(value).normalizedValue));
   const exclusions = [...documentedExclusions, ...(policy?.exclusions ?? []).filter(value => !documentedValues.has(detectScopeAsset(value).normalizedValue)),
-    ...(legacy?.exclusions ?? [])];
+    ...(program?.legacyExclusions ?? [])];
   return {
     scopeIn: program?.scopeIn ?? [],
     exclusions: [...new Set(exclusions)].join('\n'),
     documentedAssets: policy?.sourceSnapshot.documentedAssets ?? [],
-    rules: [...existing, ...added],
+    rules: [],
     userAgent: (policy ? policy.requiredUserAgent : program?.requiredUserAgent) ?? '',
     policy: {
       automationAllowed: policy?.automationAllowed ?? true,
+      ...(policy?.automationProhibition ? { automationProhibition: policy.automationProhibition } : {}),
       requiredHeaders: policy?.requiredHeaders ?? [],
       ...(policy?.userAgentMode ? { userAgentMode: policy.userAgentMode } : {}),
       requestsPerSecond: policy?.requestsPerSecond ?? LEGACY_LIMITS.requestsPerSecond,
@@ -64,7 +60,7 @@ export function TargetScopeReview({ value, onChange, allowProse }: { value: Revi
     ...policy.forbiddenCategories.map(category => readable(category) + ' forbidden'),
     ...(!policy.automationAllowed ? ['automation prohibited'] : []),
   ];
-  return <section id={POLICY_REVIEW_ANCHOR} className="space-y-5 rounded border border-border p-4 sm:p-5">
+  return <section className="space-y-5 rounded border border-border p-4 sm:p-5">
     <h2 className="text-lg font-semibold">Scope and execution policy</h2>
     <fieldset className="space-y-2"><legend className="font-semibold">In scope</legend>
       {!value.scopeIn.length && <p className="text-sm text-muted">Add the domains, wildcards or URLs you are authorized to test.</p>}
@@ -96,10 +92,9 @@ export function TargetScopeReview({ value, onChange, allowProse }: { value: Revi
     <label id="out-of-scope" className="block font-semibold">Out of scope
       <textarea className={fieldClass + ' font-normal'} rows={3} placeholder="https://example.com/admin/*" value={value.exclusions}
         onChange={event => update('exclusions', event.target.value)} />
-      <span className="text-sm font-normal text-muted">{allowProse ? 'Exact assets are enforced automatically. Other exclusions stay in the program record for review.' : 'One URL, domain, wildcard, IP or CIDR per line. Exclusions take precedence.'}</span>
+      <span className="text-sm font-normal text-muted">{allowProse ? 'Exact assets are enforced automatically. Other exclusions stay in the program record.' : 'One URL, domain, wildcard, IP or CIDR per line. Exclusions take precedence.'}</span>
     </label>
     {conflict && <p className="text-sm text-danger">{conflict}</p>}
     <p className="text-sm text-muted" aria-label="Execution policy summary">{summary.join(' · ')}</p>
-    {value.rules.map((rule, index) => !rule.decision && <span key={index} id={'policy-rule-' + (index + 1)} className="scroll-mt-24" />)}
   </section>;
 }

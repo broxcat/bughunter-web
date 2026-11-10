@@ -34,7 +34,7 @@ export async function beginScanExecution(scanRunId: string, workerId: string): P
   return prisma.$transaction(async tx => {
     await lockScan(tx, scanRunId);
     const run = await tx.scanRun.findUnique({ where: { id: scanRunId }, include: { executionAttempts: { orderBy: { startedAt: "desc" }, take: 1 } } });
-    if (!run) throw new Error("ScanRun not found");
+    if (!run) return null;
     const previous = run.executionAttempts[0];
     if (["COMPLETED", "FAILED", "CANCELLED"].includes(run.status)) {
       if (previous) logger.info({ scanRunId, attemptId: previous.id, workerId, reason: "TERMINAL_REPLAY_REFUSED" }, "terminal execution replay refused");
@@ -95,9 +95,11 @@ export type ExecutionCompletion = { state: "COMPLETED" | "FAILED"; result: ScanE
  */
 export async function finishScanExecution(attemptId: string, workerId: string, completion: ExecutionCompletion): Promise<void> {
   await prisma.$transaction(async tx => {
-    const identity = await tx.scanExecutionAttempt.findUniqueOrThrow({ where: { id: attemptId }, select: { scanRunId: true } });
+    const identity = await tx.scanExecutionAttempt.findUnique({ where: { id: attemptId }, select: { scanRunId: true } });
+    if (!identity) return;
     await lockScan(tx, identity.scanRunId);
-    const attempt = await tx.scanExecutionAttempt.findUniqueOrThrow({ where: { id: attemptId } });
+    const attempt = await tx.scanExecutionAttempt.findUnique({ where: { id: attemptId } });
+    if (!attempt) return;
     const run = await tx.scanRun.findUniqueOrThrow({ where: { id: attempt.scanRunId } });
     if (attempt.workerId !== workerId) return;
     let state: ScanExecutionAttemptState = completion.state;
@@ -106,7 +108,7 @@ export async function finishScanExecution(attemptId: string, workerId: string, c
     if (run.cancelRequestedAt && state !== "INTERRUPTED") state = "CANCELLED";
     const reason = state === "CANCELLED" ? "USER_CANCELLED" : "reason" in completion ? completion.reason : completion.result.reason ?? null;
     // This owner callback runs after resource draining. A stale-heartbeat
-    // reconciler cannot assert this; deletion must wait for the actual owner.
+    // reconciler cannot assert this; the owner records it when rows still exist.
     if (!("reason" in completion && completion.reason === 'CLEANUP_UNCONFIRMED')) await tx.scanExecutionAttempt.updateMany({ where: { id: attemptId, workerId }, data: { cleanupConfirmedAt: new Date() } });
     const claimed = await tx.scanExecutionAttempt.updateMany({ where: { id: attemptId, state: "RUNNING", workerId }, data: { state, reason, finishedAt: new Date() } });
     if (!claimed.count) return;
@@ -146,7 +148,7 @@ export function monitorScanExecution(attempt: ScanExecutionAttempt) {
       if (!saved.count) { control.abort("EXECUTION_LOST"); return; }
       if (!stopped && !control.signal.aborted) arm();
       const run = await prisma.scanRun.findUnique({ where: { id: attempt.scanRunId }, select: { cancelRequestedAt: true, scopeAsset:{select:{active:true}},target:{select:{scope:{select:{status:true}},program:{select:{deletingAt:true}}}} } });
-      if (run?.cancelRequestedAt) control.abort("USER_CANCELLED");
+      if (!run || !run.target || run.cancelRequestedAt) control.abort("USER_CANCELLED");
       if(run?.scopeAsset?.active===false||run?.target?.program?.deletingAt||(run?.target?.scope?.status&&run.target.scope.status!=='APPROVED'))control.abort('USER_CANCELLED');
     } catch { control.abort("HEARTBEAT_LOST"); }
     finally { if (!stopped && !control.signal.aborted) timer = setTimeout(() => { pulse = tick(); }, HEARTBEAT_INTERVAL_MS); }

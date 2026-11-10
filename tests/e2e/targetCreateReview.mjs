@@ -81,7 +81,7 @@ try {
   ].join('\n');
   await page.getByLabel('Program Markdown').fill(rawYesWeHack);
   await page.getByRole('button', { name: 'Extract from Markdown' }).click();
-  await page.getByRole('status').filter({ hasText: 'Extraction ready for review' }).waitFor();
+  await page.getByRole('status').filter({ hasText: 'Program details extracted' }).waitFor();
   assert.equal(await page.getByLabel('Name', { exact: true }).inputValue(), 'Public fixture company');
   assert.equal(await page.getByLabel('Reward critical').inputValue(), '2000');
   assert.equal(await page.getByLabel('Asset 1 value').inputValue(), 'HIGH');
@@ -131,7 +131,7 @@ try {
     await page.goto(origin + '/targets/new');
     await page.getByLabel('Program Markdown').fill(documents[key]);
     await page.getByRole('button', { name: 'Extract from Markdown' }).click();
-    await page.getByRole('status').filter({ hasText: 'Extraction ready for review' }).waitFor();
+    await page.getByRole('status').filter({ hasText: 'Program details extracted' }).waitFor();
     assert.equal(await page.getByLabel('Name', { exact: true }).inputValue(), models[key].name);
     assert.equal(await page.getByLabel('Platform', { exact: true }).inputValue(), models[key].platform);
     assert.equal(await page.getByLabel('Asset 1', { exact: true }).inputValue(), models[key].scopeIn[0].value);
@@ -148,7 +148,7 @@ try {
       include: { scopeAssets: true, executionPolicies: true, campaign: true } });
     assert.equal(saved.scopeAssets.length, 2);
     const policy = saved.executionPolicies[0].policy;
-    assert.equal(policy.reviewState, 'OWNER_REVIEWED');
+    assert.equal(policy.reviewState, undefined);
     assert.equal(policy.sourceSnapshot.sourceDocument, documents[key]);
     if (key === 'hackerone') {
       assert.deepEqual(saved.nonQualifying, ['OPEN_REDIRECT']);
@@ -178,7 +178,7 @@ try {
   await page.getByText('Configure DEFAULT_USER_AGENT.', { exact: false }).waitFor();
   await page.getByRole('button', { name: 'Save and start', exact: true }).click();
   await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
-  await page.getByRole('link', { name: 'Fix policy', exact: true }).click();
+  await page.getByRole('link', { name: 'Fix configuration', exact: true }).click();
   await page.getByLabel('Required User-Agent').fill(userAgent);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.waitForURL(/\/targets\/[^/?]+\?saved=1$/);

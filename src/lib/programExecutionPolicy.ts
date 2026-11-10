@@ -48,6 +48,7 @@ const sourceSnapshotSchema = z.strictObject({
 });
 export const executionPolicySchema = z.strictObject({
   automationAllowed: z.boolean(),
+  automationProhibition: z.string().min(1).max(64000).nullable().optional(),
   requiredUserAgent: hunterIdentitySchema.shape.userAgent,
   userAgentMode: z.literal('APPEND').optional(),
   requiredHeaders: identificationHeadersSchema,
@@ -59,12 +60,12 @@ export const executionPolicySchema = z.strictObject({
 });
 export type ExecutionPolicyInput = z.infer<typeof executionPolicySchema>;
 
-// Only server writers can set review status and capture the legacy source.
-export function policyDraftNeedsReview(state?: string) {
-  return state === 'BACKFILL_DRAFT' || state === 'IMPORT_DRAFT';
-}
-
 export const storedExecutionPolicySchema = executionPolicySchema.extend({
+  automationDecisions: z.array(z.strictObject({
+    phrase: z.string().min(1).max(64000), decision: z.literal('NOT_A_TESTING_BAN'),
+    userId: z.string().min(1), decidedAt: z.iso.datetime(),
+  })).max(5000).optional(),
+  exclusions: z.array(structuredExclusionSchema),
   requestsPerSecond: executionPolicySchema.shape.requestsPerSecond.nullable(),
   maxConcurrency: executionPolicySchema.shape.maxConcurrency.nullable(),
   reviewState: z.enum(['BACKFILL_DRAFT', 'IMPORT_DRAFT', 'OWNER_REVIEWED']).optional(),
@@ -85,10 +86,9 @@ export const storedExecutionPolicySchema = executionPolicySchema.extend({
       programRules: z.string().nullable(),
     }).optional(),
   }),
-}).refine(policy => policyDraftNeedsReview(policy.reviewState) || (policy.requestsPerSecond !== null && policy.maxConcurrency !== null), 'Reviewed policies require request limits');
+});
 export type StoredExecutionPolicy = z.infer<typeof storedExecutionPolicySchema>;
 export const LEGACY_LIMITS = { requestsPerSecond: 5, maxConcurrency: 2 };
-export const POLICY_REVIEW_ANCHOR = 'execution-policy';
 export const MISSING_HUNTER_UA = 'Recon requires a User-Agent. Set the program User-Agent in Target settings or configure DEFAULT_USER_AGENT.';
 export const MISSING_HUNTER_USERNAME = 'Program identification requires a hunter username. Configure HUNTER_USERNAME before automation can run.';
 
@@ -104,3 +104,5 @@ export function headersFromLines(text: string) {
     return { name: colon > 0 ? line.slice(0, colon).trim() : '', value: line.slice(colon + 1).trim() };
   });
 }
+
+export { explicitlyForbidsAutomation } from './automationProhibition.mjs';

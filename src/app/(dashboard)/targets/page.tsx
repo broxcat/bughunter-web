@@ -40,7 +40,7 @@ export default async function TargetsPage({ searchParams }: {
         <tbody>{data.items.map(program => <tr key={program.id}>
           <td data-label="Target"><span className="font-medium">{program.companyName}</span>
             {program.policyBlocker && program.campaign.current.state === 'blocked' && 'href' in program.campaign.action && !program.deletingAt &&
-              <Link className="ml-2 inline-block rounded border px-2 py-0.5 text-xs text-brand" href={program.campaign.action.href}>Policy review needed</Link>}
+              <Link className="ml-2 inline-block rounded border px-2 py-0.5 text-xs text-brand" href={program.campaign.action.href}>Configuration required</Link>}
             {program.deletingAt && <p role="status" className="text-xs text-muted">Deletion pending</p>}
           </td>
           <td data-label="Platform" className="text-muted">{platformLabel(program.platform)}</td>

@@ -7,8 +7,8 @@ import { currentPolicySelection, programPolicyInclude } from '@/server/programEx
 import { campaignAfterReview, campaignDueAt, campaignPolicyBlocker, cancelCampaignScans } from '@/server/campaignOrchestrator';
 import { pendingScopeSchema } from '@/lib/campaignSource';
 import { z } from 'zod';
-import { convertLegacyExclusions, legacyExclusionParity, legacyFreeText, legacyScopeFingerprint, readLegacyScopes } from '@/server/legacyPolicySource';
-import { executionPolicySchema, hasHunterUsername, policyDraftNeedsReview, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
+import { convertLegacyExclusions, readLegacyScopes } from '@/server/legacyPolicySource';
+import { executionPolicySchema, hasHunterUsername, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
 import { programUpdateSchema } from "@/lib/bountyProgram";
 import { deleteProgram } from '@/server/programDeletion';
 import { ResearchError } from '@/server/research/workspace';
@@ -27,15 +27,11 @@ export async function GET(_req: Request, { params }: Params) {
   const { id } = await params;
   const program = await prisma.bountyProgram.findFirst({ where: { id, ownerId: session.user.id }, include: { executionPolicies: currentPolicySelection, targets: { where: { active: true, contextOnly: false, userId: session.user.id }, orderBy: [{host:'asc'},{id:'asc'}] } } });
   if (!program) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  const [scopes, assets, ai, campaign] = await Promise.all([
-    readLegacyScopes(prisma, id, session.user.id),
+  const [assets, ai, campaign] = await Promise.all([
     prisma.scopeAsset.findMany({ where: { programId: id, active: true } }),
     resolveDefaultAiConfig(session.user.id, { includeApiKey: false }).catch(() => null),
     prisma.targetCampaign.findUnique({ where: { programId: id }, select: { intervalMinutes: true, pendingAssets: true } }),
   ]);
-  const scopeFingerprint = legacyScopeFingerprint(scopes);
-  const latest = storedExecutionPolicySchema.safeParse(program.executionPolicies[0]?.policy).data;
-  const reviewedScopes = latest?.sourceSnapshot.legacy?.scopes ?? [];
   return NextResponse.json({
     ...program,
     scopeIn: scopeEntriesForSettings(program, assets),
@@ -44,11 +40,7 @@ export async function GET(_req: Request, { params }: Params) {
     hunterHasUsername: hasHunterUsername(process.env.HUNTER_USERNAME),
     hasAi: Boolean(ai),
     campaign: campaign ? { intervalMinutes: campaign.intervalMinutes, pendingAssets: pendingScopeSchema.safeParse(campaign.pendingAssets).data ?? [] } : null,
-    legacyPolicyReview: {
-      scopes, scopeFingerprint, scopeChanged: scopeFingerprint !== legacyScopeFingerprint(reviewedScopes),
-      ...convertLegacyExclusions(program.outOfScope),
-      unrepresentedRules: legacyFreeText(program.rulesOfEngagement, scopes),
-    },
+    legacyExclusions: convertLegacyExclusions(program.outOfScope).exclusions,
   }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 export async function PATCH(req: Request, { params }: Params) {
@@ -74,41 +66,23 @@ export async function PATCH(req: Request, { params }: Params) {
       // commit before this lock is acquired; derive removals from the locked row.
       const current = await tx.bountyProgram.findUniqueOrThrow({ where: { id }, select: { scopeRules: true, updatedAt: true, programUrl: true, platform: true, rulesOfEngagement: true, outOfScope: true, executionPolicies: { ...currentPolicySelection, select: { version: true, policy: true } } } });
       if(parsed.data.expectedUpdatedAt&&current.updatedAt.toISOString()!==parsed.data.expectedUpdatedAt)return Response.json({error:'Target settings changed. Reload before saving.'},{status:409});
-      const { executionPolicy, targetReview, expectedPolicyVersion, expectedLegacyScopeFingerprint, ...changes } = parsed.data;
+      const { executionPolicy, targetReview, expectedPolicyVersion, ...changes } = parsed.data;
+      delete changes.expectedLegacyScopeFingerprint;
       if (targetReview && (executionPolicy || changes.scopeRules || !changes.expectedUpdatedAt || expectedPolicyVersion === undefined)) {
-        return Response.json({ error: 'Reload Target settings and save one reviewed policy.' }, { status: 400 });
+        return Response.json({ error: 'Reload Target settings and save one execution policy.' }, { status: 400 });
       }
       delete changes.expectedUpdatedAt;
-      if (executionPolicy && (executionPolicy.sourceSnapshot.rules !== (changes.rulesOfEngagement === undefined ? current.rulesOfEngagement?.trim() ?? '' : changes.rulesOfEngagement ?? '') ||
-          executionPolicy.sourceSnapshot.url !== (changes.programUrl === undefined ? current.programUrl : changes.programUrl))) {
-        return Response.json({ error: 'The execution policy source must match the current program URL and rules.' }, { status: 400 });
-      }
       let reviewedPolicy;
       if (executionPolicy || targetReview) {
         const latest = current.executionPolicies[0];
         const currentVersion = latest?.version ?? 0;
         const previousPolicy = storedExecutionPolicySchema.safeParse(latest?.policy).data;
-        const reviewState = previousPolicy?.reviewState;
-        if (!targetReview && previousPolicy?.sourceSnapshot.ruleDecisions) {
-          return Response.json({ error: 'Use the Target review form to update reviewed scope and rule decisions.' }, { status: 409 });
-        }
-        const isDraft = policyDraftNeedsReview(reviewState);
-        if ((expectedPolicyVersion !== undefined || isDraft) && expectedPolicyVersion !== currentVersion) {
-          return Response.json({ error: 'Execution policy changed. Reload and review the current version before saving.' }, { status: 409 });
+        if (expectedPolicyVersion !== undefined && expectedPolicyVersion !== currentVersion) {
+          return Response.json({ error: 'Execution policy changed. Reload before saving.' }, { status: 409 });
         }
         const scopes = await readLegacyScopes(tx, id, session.user.id!);
-        if ((expectedLegacyScopeFingerprint !== undefined || scopes.length > 0) &&
-            expectedLegacyScopeFingerprint !== legacyScopeFingerprint(scopes)) {
-          return Response.json({ error: 'Legacy Scope text changed or has not been reviewed. Reload Target settings.' }, { status: 409 });
-        }
         const outOfScope = changes.outOfScope ?? current.outOfScope;
         const policy = targetReview?.policy ?? executionPolicy!;
-        if (policy.automationAllowed && !targetReview?.rules.some(rule => !rule.decision)) {
-          const parity = legacyExclusionParity(outOfScope, policy.exclusions);
-          if (parity.missing.length || parity.unconvertible.length) {
-            return Response.json({ error: 'Automation requires matching structured exclusions for every legacy exclusion.', ...parity }, { status: 400 });
-          }
-        }
         if (targetReview) {
           const effective = {
             programUrl: changes.programUrl === undefined ? current.programUrl : changes.programUrl,
@@ -133,7 +107,7 @@ export async function PATCH(req: Request, { params }: Params) {
           await storeTestAccounts(tx, { ...program, ...effective }, targetReview, nextPolicy);
           reviewedPolicy = nextPolicy;
         } else reviewedPolicy = {
-          ...executionPolicy!, reviewState: isDraft && !policy.automationAllowed ? reviewState : 'OWNER_REVIEWED',
+          ...executionPolicy!,
           sourceSnapshot: {
             ...executionPolicy!.sourceSnapshot,
             legacy: {
@@ -142,6 +116,7 @@ export async function PATCH(req: Request, { params }: Params) {
             },
           },
         };
+        if (previousPolicy?.automationDecisions) reviewedPolicy = { ...reviewedPolicy, automationDecisions: previousPolicy.automationDecisions };
       }
       if (!targetReview && parsed.data.scopeRules) {
         const removed = current.scopeRules.filter(rule => !parsed.data.scopeRules!.includes(rule));
@@ -201,5 +176,5 @@ export async function DELETE(_req: Request, { params }: Params) {
   const { id } = await params;
   if (!targetIdentity.safeParse(id).success) return Response.json({ error: 'Invalid target' }, { status: 400 });
   try { await deleteProgram(session.user.id, id); return Response.json({ deleted: true }); }
-  catch (e) { return Response.json({ error: e instanceof ResearchError ? e.message : 'Deletion incomplete; target remains blocked. Retry deletion.' }, { status: e instanceof ResearchError ? e.status : 503 }); }
+  catch (e) { return Response.json({ error: e instanceof ResearchError ? e.message : 'Target could not be deleted. Please retry.' }, { status: e instanceof ResearchError ? e.status : 503 }); }
 }

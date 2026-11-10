@@ -24,12 +24,12 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     requestsPerSecond: 3, maxConcurrency: 2, forbiddenCategories: [], reviewState: 'OWNER_REVIEWED',
     sourceSnapshot: { url: null, rules: '', unrepresentedRules: [] } };
   const blocked = await p.bountyProgram.create({ data: {
-    ownerId, companyName: 'Orion — policy review', platform: 'HACKERONE', requiredUserAgent: 'CampaignFixture/1',
+    ownerId, companyName: 'Orion — automation prohibited', platform: 'HACKERONE', requiredUserAgent: 'CampaignFixture/1',
     scopeAssets: { create: { originalValue: 'app.example.test', normalizedValue: 'app.example.test', format: 'SUBDOMAIN', type: 'WEB_APPLICATION' } },
     executionPolicies: { create: { version: 1, policy: {
-      automationAllowed: true, requiredUserAgent: 'CampaignFixture/1', requiredHeaders: [], exclusions: [],
+      automationAllowed: false, requiredUserAgent: 'CampaignFixture/1', requiredHeaders: [], exclusions: [],
       requestsPerSecond: 3, maxConcurrency: 2, forbiddenCategories: [], reviewState: 'OWNER_REVIEWED',
-      sourceSnapshot: { url: null, rules: '', unrepresentedRules: ['Testing is permitted only during an approved window.'] },
+      sourceSnapshot: { url: null, rules: 'Automation is prohibited.', unrepresentedRules: [] },
     } } },
   } });
   const ready = await p.bountyProgram.create({ data: {
@@ -46,14 +46,14 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     assert.match(await response.text(), /Orion/);
     const blockedRow = page.getByRole('row').filter({ hasText: blocked.companyName });
     const readyRow = page.getByRole('row').filter({ hasText: ready.companyName });
-    assert.match(await blockedRow.innerText(), /Policy review needed[\s\S]*Target[\s\S]*Blocked/);
+    assert.match(await blockedRow.innerText(), /Configuration required[\s\S]*Target[\s\S]*Blocked/);
     assert.match(await readyRow.innerText(), /Recon[\s\S]*Not started/);
     await blockedRow.getByRole('link', { name: 'Open ' + blocked.companyName }).click();
-    await primary('link', 'Fix policy').waitFor();
-    await page.getByRole('status').filter({ hasText: '1 rule needs a decision.' }).waitFor();
+    await primary('link', 'Fix configuration').waitFor();
+    await page.getByRole('status').filter({ hasText: 'The program policy does not allow automation.' }).waitFor();
     await capture('blocked');
-    await primary('link', 'Fix policy').click();
-    await page.waitForURL(path(blocked.id) + '/settings#policy-rule-1');
+    await primary('link', 'Fix configuration').click();
+    await page.waitForURL(path(blocked.id) + '/settings');
 
     const readyResponse = await page.goto(path(ready.id));
     assert.match(await readyResponse.text(), /Start recon/);
