@@ -88,7 +88,24 @@ export default function ResearchConsoleManager({ candidates }: { candidates: Res
     </section>
 
     <section className="space-y-3">
-      <h2 className="text-lg font-semibold">Existing consoles</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">Existing consoles</h2>
+        {existing.length > 0 && <Button type="button" variant="danger" size="sm" disabled={busy} onClick={() => void (async () => {
+          setBusy(true); setError("");
+          try {
+            for (const candidate of existing) {
+              const response = await fetch(`/api/research-targets/${candidate.id}/console`, { method: "DELETE" });
+              const result = await response.json().catch(() => ({}));
+              if (!response.ok) throw new Error(result.error ?? `Unable to delete console for ${candidate.host}`);
+            }
+            router.refresh();
+          } catch (failure) {
+            setError(failure instanceof Error ? failure.message : "Unable to delete consoles");
+          } finally {
+            setBusy(false);
+          }
+        })()}>Delete all consoles</Button>}
+      </div>
       {!existing.length ? <p className="text-sm text-muted">No research console exists.</p> :
         <ul className="space-y-2">{existing.map(candidate => <li key={candidate.id} className="flex flex-wrap items-center gap-3 rounded border border-border p-3">
           <div className="mr-auto min-w-0">
