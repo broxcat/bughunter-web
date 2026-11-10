@@ -18,23 +18,43 @@ import {
 } from "./queue/scanCancellation";
 import { purgeScanJobs } from "./queue/scanQueue";
 
+const PROGRAM_DELETION_STALE_MS = 5 * 60_000;
+
+/** Deletion is synchronous. A tombstone older than this is abandoned state
+ * left by a crash/deploy/older failed implementation and must not block a
+ * Target forever. */
+export async function recoverStaleProgramDeletions(userId: string, programId?: string, now = new Date()) {
+  return prisma.bountyProgram.updateMany({
+    where: {
+      ownerId: userId,
+      ...(programId ? { id: programId } : {}),
+      deletingAt: { lt: new Date(now.getTime() - PROGRAM_DELETION_STALE_MS) },
+    },
+    data: { deletingAt: null },
+  });
+}
+
 export async function deleteProgram(userId: string, programId: string) {
   targetIdentity.parse(programId);
-  // A durable tombstone prevents new jobs while deletion settles existing scans.
-  const exists = await prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<
-      { id: string }[]
-    >`SELECT id FROM "BountyProgram" WHERE id=${programId} AND "ownerId"=${userId} FOR UPDATE`;
-    if (!rows.length) return false;
-    await tx.bountyProgram.update({
-      where: { id: programId },
-      data: { deletingAt: new Date() },
+  const deletionStartedAt = new Date();
+  let marked = false;
+  try {
+    // Short-lived mutex only. It must never survive a failed synchronous delete.
+    const exists = await prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<
+        { id: string }[]
+      >`SELECT id FROM "BountyProgram" WHERE id=${programId} AND "ownerId"=${userId} FOR UPDATE`;
+      if (!rows.length) return false;
+      await tx.bountyProgram.update({
+        where: { id: programId },
+        data: { deletingAt: deletionStartedAt },
+      });
+      return true;
     });
-    return true;
-  });
-  if (!exists) return; // Idempotent; discloses no ownership information.
-  // Do not hold a transaction across worker cancellation. Every cleanup step is idempotent.
-  const tx = prisma;
+    if (!exists) return; // Idempotent; discloses no ownership information.
+    marked = true;
+    // Do not hold a transaction across worker cancellation. Every cleanup step is idempotent.
+    const tx = prisma;
   const program = await tx.bountyProgram.findFirst({
     where: { id: programId, ownerId: userId },
   });
@@ -201,4 +221,22 @@ export async function deleteProgram(userId: string, programId: string) {
     },
     { timeout: 15000 },
   );
+  } catch (error) {
+    // Release only the marker written by this exact attempt. A concurrent newer
+    // deletion owns a different timestamp and cannot be accidentally reopened.
+    if (marked) {
+      try {
+        await prisma.bountyProgram.updateMany({
+          where: { id: programId, ownerId: userId, deletingAt: deletionStartedAt },
+          data: { deletingAt: null },
+        });
+      } catch {
+        logger.error(
+          { operation: "program-delete-release", programId, userId, code: "TOMBSTONE_RELEASE_FAILED" },
+          "Failed to release Target deletion tombstone",
+        );
+      }
+    }
+    throw error;
+  }
 }
