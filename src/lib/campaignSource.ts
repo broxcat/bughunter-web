@@ -15,6 +15,7 @@ export const campaignSourceSchema = z.strictObject({
   platform: z.enum(IMPORT_PLATFORMS),
   grants: z.array(z.string().max(2048)).max(2000),
   sourceDocument: z.string().max(64_000).optional(),
+  automationProhibition: z.string().max(64_000).nullable().optional(),
   assets: pendingScopeSchema,
   exclusions: z.array(structuredExclusionSchema).max(1000),
   forbiddenCategories: z.array(z.enum(TEST_CATEGORIES)).max(TEST_CATEGORIES.length),
@@ -32,6 +33,7 @@ export function captureCampaignSource(preview: ProgramPreview): CampaignSource {
     url: preview.url, platform: preview.platform, grants: preview.sourceGrants,
     assets: [...assets.values()],
     exclusions: preview.policy.exclusions,
+    ...(preview.policy.automationProhibition ? { automationProhibition: preview.policy.automationProhibition } : {}),
     forbiddenCategories: preview.policy.forbiddenCategories,
     rules: preview.sourceRules, nonQualifying: preview.nonQualifying,
   });

@@ -90,7 +90,13 @@ try {
     await dialog(active); await page.getByRole('button', { name: 'Confirm deletion' }).click(); await page.waitForURL(origin + '/targets');
     await until(() => messages.includes('stopped'));
     assert(messages.includes('cleaned')); assert.equal(await p.scanRun.count({ where: { id: active.scan.id } }), 0);
-    console.log('TARGET_DELETION_BROWSER: non-JSON error, /targets redirect, offline console, dead RUNNING worker and active scan cleanup passed');
+    const denied = await fixture('French automation prohibition');
+    const phrase = "L'utilisation d'outils automatisés est interdite";
+    await p.programExecutionPolicy.create({ data: { programId: denied.program.id, version: 2,
+      policy: { ...policy, automationAllowed: false, automationProhibition: phrase, sourceSnapshot: { url: null, rules: phrase, unrepresentedRules: [] } } } });
+    await page.goto(origin + '/targets/' + denied.program.id);
+    await page.getByText('The program policy does not allow automation. Program rule: ' + phrase, { exact: true }).waitFor();
+    console.log('TARGET_DELETION_BROWSER: non-JSON error, /targets redirect, offline console, dead RUNNING worker active scan cleanup and French program evidence on the dashboard passed');
   }
 } catch (error) { console.error(logs.slice(-25).join('')); throw error; }
 finally {

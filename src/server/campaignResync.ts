@@ -1,10 +1,11 @@
+import { findAutomationProhibition } from '@/lib/automationProhibition.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { matchesHost } from '@/lib/bountyProgram';
 import { assetAllowsHost, assetAllowsUrl, detectScopeAsset } from '@/lib/scopeAssets';
 import { campaignSourceSchema, pendingScopeSchema, type CampaignSource } from '@/lib/campaignSource';
-import { explicitlyForbidsAutomation, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
+import { storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
 import { campaignPolicyBlocker } from './campaignOrchestrator';
 import { programPolicyInclude } from './programExecutionPolicy';
 import { detectProgram } from './programImport/preview';
@@ -102,11 +103,13 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
     const rulesChanged = sameSource ? !isDeepStrictEqual(sameSource.rules.map(ruleKey), fresh.rules.map(ruleKey))
       : fresh.rules.some(rule => !existingDocument.includes(rule.text));
     const newFamilies = fresh.nonQualifying.filter(family => !program.nonQualifying.includes(family));
-    const automationDenied = fresh.rules.some(rule => explicitlyForbidsAutomation(rule.text));
+    const automationProhibition = fresh.automationProhibition ?? findAutomationProhibition([fresh.sourceDocument, ...fresh.rules.map(rule => rule.text)].filter(Boolean).join('\n'));
+    const automationDenied = automationProhibition !== null;
     if (automationDenied || removed.length || newExclusions.length || newCategories.length || rulesChanged || newFamilies.length) {
       const nextPolicy = {
         ...policy,
         automationAllowed: policy.automationAllowed && !automationDenied,
+        ...(automationDenied ? { automationProhibition } : {}),
         exclusions: [...policy.exclusions, ...newExclusions],
         forbiddenCategories: [...policy.forbiddenCategories, ...newCategories],
         sourceSnapshot: {

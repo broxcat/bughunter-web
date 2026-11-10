@@ -1,7 +1,8 @@
+import { findAutomationProhibition } from '@/lib/automationProhibition.mjs';
 
 import { createHash } from 'node:crypto';
 import { detectScopeAsset, type AssetFormat } from '@/lib/scopeAssets';
-import { explicitlyForbidsAutomation, structuredExclusionSchema, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
+import { structuredExclusionSchema, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
 import { VULNERABILITY_FAMILIES } from '@/lib/bountyProgram';
 import type { ImportPlatform } from '@/lib/platformConnections';
 
@@ -98,8 +99,9 @@ export function normalizeProgram(reference: ProgramReference, name: string, rawA
   const sourceGrants = [...new Set(assets.flatMap(({ raw, detected }) => raw.disposition === 'IN' && raw.kind === 'WEB' &&
     detected?.executable && !denied.has(detected.normalizedValue) ? [detected.normalizedValue] : []))].sort(order);
   const unrepresentedRules = sortedUnique(rules.filter(rule => rule.text.trim()));
+  const automationProhibition = findAutomationProhibition(sourceRules.map(rule => rule.text).join('\n'));
   const policy = storedExecutionPolicySchema.parse({
-    automationAllowed: !sourceRules.some(rule => explicitlyForbidsAutomation(rule.text)), requiredUserAgent: null, requiredHeaders: [],
+    automationAllowed: automationProhibition === null, automationProhibition, requiredUserAgent: null, requiredHeaders: [],
     exclusions: [...exclusions].sort(order), requestsPerSecond: null, maxConcurrency: null, forbiddenCategories: [],
     sourceSnapshot: {
       url: reference.url,

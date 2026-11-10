@@ -48,6 +48,7 @@ const sourceSnapshotSchema = z.strictObject({
 });
 export const executionPolicySchema = z.strictObject({
   automationAllowed: z.boolean(),
+  automationProhibition: z.string().min(1).max(64000).nullable().optional(),
   requiredUserAgent: hunterIdentitySchema.shape.userAgent,
   userAgentMode: z.literal('APPEND').optional(),
   requiredHeaders: identificationHeadersSchema,
@@ -100,7 +101,4 @@ export function headersFromLines(text: string) {
   });
 }
 
-/** Explicit source restrictions, shared by platform import and resync. */
-export function explicitlyForbidsAutomation(text: string) {
-  return /\b(?:(?:do not|must not|never|refrain from)\s+(?:use|using|run|running)\s+(?:any\s+)?automat(?:ed|ic)\s+(?:tools|scans|scanners|testing)|no\s+automated\s+(?:tools|scanning|testing|scans)|(?:automation|automated (?:tools|scanning|testing))\s+(?:is |are )?(?:strictly )?(?:forbidden|prohibited|not (?:allowed|permitted)))\b/i.test(text);
-}
+export { explicitlyForbidsAutomation } from './automationProhibition.mjs';

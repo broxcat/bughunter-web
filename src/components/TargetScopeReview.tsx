@@ -33,6 +33,7 @@ export function initialReview(program?: ProgramData): ReviewFields {
     userAgent: (policy ? policy.requiredUserAgent : program?.requiredUserAgent) ?? '',
     policy: {
       automationAllowed: policy?.automationAllowed ?? true,
+      ...(policy?.automationProhibition ? { automationProhibition: policy.automationProhibition } : {}),
       requiredHeaders: policy?.requiredHeaders ?? [],
       ...(policy?.userAgentMode ? { userAgentMode: policy.userAgentMode } : {}),
       requestsPerSecond: policy?.requestsPerSecond ?? LEGACY_LIMITS.requestsPerSecond,

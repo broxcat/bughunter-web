@@ -1,0 +1,31 @@
+export const automationDenials = [
+  "L'utilisation d'outils automatisés est interdite",
+  'scanners automatiques interdits',
+  'Automated scanners are not allowed',
+  'No automated scanners',
+  "Don't use automated tools",
+  'Please refrain from automated scanning',
+  'Automation is strictly prohibited.',
+  'Do not run automated scanners.',
+  'Refrain from using automated tools.',
+  'Automatic vulnerability scanners are forbidden.',
+  'Automated scanning tools are not permitted.',
+  'Il est interdit d’utiliser des outils automatisés.',
+  'Les scans automatiques ne sont pas autorisés.',
+  'Ne pas utiliser de scanners automatiques.',
+  "N'utilisez pas d'outils automatisés.",
+  'Pas de scanners automatiques.',
+  'Veuillez vous abstenir d’utiliser des outils automatisés.',
+  'L’automatisation est formellement interdite.',
+];
+export const automationNonDenials = [
+  'Automated scanners are allowed at two requests per second.',
+  'Automation is not prohibited.',
+  'Les outils automatisés ne sont pas interdits.',
+  'Les scanners automatiques sont autorisés.',
+  'No destructive testing. Automated scanners are allowed.',
+  'Findings from automated scanners',
+  'Résultats des scanners automatisés',
+  'Saisie semi-automatique activée',
+];
+export const modelOnlyDenial = 'Tout balayage robotisé est proscrit.';
