@@ -27,6 +27,8 @@ export const reportRestrictions = [
   'Findings from automated scanners are not allowed.',
   'Results from automated tools are prohibited.',
   'Output from automated scanners is not allowed.',
+  'A report from automated tools is prohibited.',
+  'La soumission issue de scanners automatiques est interdite.',
   'Une soumission issue de scanners automatiques est interdite.',
   'Le rapport produit par des outils automatisés est interdit.',
 ];
