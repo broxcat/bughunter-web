@@ -7,7 +7,6 @@ import { BOUNTY_PLATFORMS } from '@/lib/bountyProgram';
 import { platformLabel } from '@/lib/platformPresentation';
 import { executionPolicySchema } from '@/lib/programExecutionPolicy';
 import { intakePreviewSchema, MAX_PROGRAM_SOURCE, splitNonQualifying, type IntakeInput } from '@/lib/programIntake';
-import { detectScopeAsset } from '@/lib/scopeAssets';
 import { scopeReviewChecks, targetReviewSchema } from '@/lib/targetReview';
 import type { ProgramData } from '@/lib/targetFormData';
 import { campaignSourceSchema, type CampaignSource } from '@/lib/campaignSource';
@@ -18,10 +17,8 @@ type Platform = (typeof BOUNTY_PLATFORMS)[number];
 const levels = ['Low', 'Medium', 'High', 'Critical'] as const;
 const policyShape = executionPolicySchema.omit({ sourceSnapshot: true });
 
-export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUsername, hasAi }: {
+export default function TargetEditor({ program, hasAi }: {
   program?: ProgramData;
-  hunterHasUserAgent: boolean;
-  hunterHasUsername: boolean;
   hasAi: boolean;
 }) {
   const router = useRouter();
@@ -103,9 +100,6 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
   const { scopeError, conflict } = scopeReviewChecks(review.scopeIn, policy.exclusions);
   const policyResult = policyShape.safeParse(policy);
   const legacy = program?.legacyPolicyReview;
-  const legacyMismatch = Boolean(legacy && (legacy.unconvertible.length || legacy.exclusions.some(value => !policy.exclusions.some(exclusion => {
-    try { return detectScopeAsset(exclusion).normalizedValue === value; } catch { return false; }
-  }))));
   const association = importedFrom ?? (stored?.sourceSnapshot.sourceDocument ? { url: program?.programUrl ?? '', platform: program?.platform ?? '' } : null);
   const changedSource = Boolean(association && (association.url !== url.trim() || association.platform !== platform));
   const unreviewedMarkdown = Boolean(markdown.trim() && markdown !== sourceDocument);
