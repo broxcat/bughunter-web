@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { campaignActivity, targetCampaign, type CampaignFacts } from '@/lib/targetCampaign';
-import { programPolicyInclude } from './programExecutionPolicy';
+import { programPolicyInclude, resolveProgramPolicy } from './programExecutionPolicy';
 import { campaignPolicyBlocker } from './campaignOrchestrator';
 import { pendingScopeSchema } from '@/lib/campaignSource';
 
@@ -89,11 +89,16 @@ export async function campaignFacts(db: Database, ownerId: string, ids: string[]
 
 export function campaignView(program: CampaignProgram, facts: CampaignFacts) {
   const policyBlocker = campaignPolicyBlocker(program);
+  let automationBlock;
+  try {
+    const resolved = resolveProgramPolicy(program);
+    if (!program.deletingAt && resolved.automationBlocked && resolved.automationProhibition) automationBlock = { phrase: resolved.automationProhibition, version: resolved.version };
+  } catch { /* Invalid configuration still displays the existing policy blocker. */ }
   const row = program.campaign;
   const campaign = row ? { state: row.state, reason: row.reason, retryAt: row.retryAt, nextCycleAt: row.nextCycleAt,
     handoffRunId: row.handoffRunId, pendingCount: pendingScopeSchema.safeParse(row.pendingAssets).data?.length ?? 0 } : null;
   return { policyBlocker, ...targetCampaign({ ...program, campaign, assetCount: program._count.scopeAssets,
-    policyBlocker }, facts) };
+    policyBlocker, automationBlock }, facts) };
 }
 
 async function loadReconSummary(db: Database, runId: string) {

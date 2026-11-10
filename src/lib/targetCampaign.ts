@@ -25,7 +25,7 @@ export function campaignActivity(facts: CampaignFacts) {
 
 export function targetCampaign(program: {
   id: string; deletingAt: Date | null; assetCount: number; policyBlocker: string | null;
-  campaign?: CampaignStatus | null;
+  campaign?: CampaignStatus | null; automationBlock?: { phrase: string; version: number };
 }, facts: CampaignFacts) {
   const root = '/targets/' + program.id;
   const settings = root + '/settings';
@@ -117,5 +117,5 @@ export function targetCampaign(program: {
     next = research.state === 'failed' ? 'Resolve the workspace issue in Research details.' : 'Continue with the Recon results in Research.';
   }
   const stages = [current.stage === 'Target' ? { ...target, state: current.state } : target, recon, research, findings];
-  return { stages, current, action, next, activity: campaignActivity(facts), campaign };
+  return { stages, current, action, next, automationBlock: program.automationBlock, activity: campaignActivity(facts), campaign };
 }

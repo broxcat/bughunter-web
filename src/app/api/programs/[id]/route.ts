@@ -116,6 +116,7 @@ export async function PATCH(req: Request, { params }: Params) {
             },
           },
         };
+        if (previousPolicy?.automationDecisions) reviewedPolicy = { ...reviewedPolicy, automationDecisions: previousPolicy.automationDecisions };
       }
       if (!targetReview && parsed.data.scopeRules) {
         const removed = current.scopeRules.filter(rule => !parsed.data.scopeRules!.includes(rule));

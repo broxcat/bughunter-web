@@ -1,4 +1,4 @@
-import { automationSourceText, findAutomationProhibition } from '@/lib/automationProhibition.mjs';
+import { automationSourceText, findAutomationProhibition, isReportingRestriction, hasReportingAutomationRestriction, sameAutomationPhrase } from '@/lib/automationProhibition.mjs';
 
 import { BlockList, isIP } from 'node:net';
 import { createHash } from 'node:crypto';
@@ -37,8 +37,15 @@ export function resolveProgramPolicy(program: PolicyProgram) {
   const userAgent = resolve(rawUserAgent);
   const resolvedHeaders = rawHeaders.map(({ name, value }) => ({ name, value: resolve(value) }));
   const headers = usernameMissing ? {} : Object.fromEntries(resolvedHeaders.map(({ name, value }) => [name, value]));
-  const automationProhibition = policy?.automationProhibition ?? findAutomationProhibition(automationSourceText(program.rulesOfEngagement, policy?.sourceSnapshot));
-  const automationBlocked = policy ? !policy.automationAllowed : automationProhibition !== null;
+  const source = automationSourceText(program.rulesOfEngagement, policy?.sourceSnapshot);
+  const ignoredPhrases = policy?.automationDecisions?.map(decision => decision.phrase) ?? [];
+  const preferred = policy?.automationProhibition;
+  const reportingReason = preferred ? isReportingRestriction(preferred) : hasReportingAutomationRestriction(source);
+  const dismissed = Boolean(preferred && ignoredPhrases.some(phrase => sameAutomationPhrase(phrase, preferred)));
+  const automationProhibition = preferred && !reportingReason && !dismissed ? preferred : findAutomationProhibition(source, ignoredPhrases);
+  // Decisions suppress only their exact sentence. A different current testing
+  // prohibition is still enforced even when a previous sentence was dismissed.
+  const automationBlocked = Boolean(automationProhibition) || Boolean(policy && !policy.automationAllowed && !reportingReason && !dismissed);
   const blocker = automationBlocked ? 'The program policy does not allow automation.' + (automationProhibition ? ' Program rule: ' + automationProhibition : '')
     : usernameMissing ? MISSING_HUNTER_USERNAME
     : appendUserAgent && !requiredUserAgentSchema.safeParse(defaultUserAgent).success ? MISSING_HUNTER_UA
@@ -50,7 +57,7 @@ export function resolveProgramPolicy(program: PolicyProgram) {
   const forbiddenCategories = policy ? policy.forbiddenCategories : [];
   const version = row?.version ?? 0;
   const fingerprint = createHash('sha256').update(JSON.stringify([version, blocker, headers, userAgent, program.outOfScope, exclusions, limits, forbiddenCategories])).digest('hex');
-  return { version, userAgent, headers, exclusions, legacyExclusions: program.outOfScope, limits, forbiddenCategories, blocker, fingerprint };
+  return { version, automationProhibition, automationBlocked, userAgent, headers, exclusions, legacyExclusions: program.outOfScope, limits, forbiddenCategories, blocker, fingerprint };
 }
 export function programPolicyBlocker(program: PolicyProgram) {
   try { return resolveProgramPolicy(program).blocker; }

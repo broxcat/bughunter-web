@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { findAutomationProhibition } from '@/lib/automationProhibition.mjs';
+import { findAutomationProhibition, isReportingRestriction } from '@/lib/automationProhibition.mjs';
 import { BrainClient } from '@/server/brain/client';
 import { resolveDefaultAiConfig } from '@/server/brain/config';
 import { splitNonQualifying } from '@/lib/programIntake';
@@ -123,7 +123,7 @@ export function normalizeIntake(source: string, model: ModelExtraction, referenc
   const rates = [...limits.rates, ...(rate !== null && rate >= .01 ? [rate] : [])];
   const concurrency = [...limits.concurrency, ...(model.maxConcurrency ? [model.maxConcurrency.value] : [])];
   const policyLines = source.split(/\r?\n/).filter(line => !modelInstruction.test(line));
-  const automationProhibition = model.automationProhibition ?? findAutomationProhibition(policyLines.join('\n'));
+  const automationProhibition = (model.automationProhibition && !isReportingRestriction(model.automationProhibition) ? model.automationProhibition : null) ?? findAutomationProhibition(policyLines.join('\n'));
   const representedIdentity = [model.userAgent?.evidence, ...model.headers.map(header => header.evidence)].filter(Boolean);
   for (const line of policyLines) {
     if (hasHunterTemplate(line) && /\b(?:header|user.agent|identif|x-[a-z])/i.test(line) &&

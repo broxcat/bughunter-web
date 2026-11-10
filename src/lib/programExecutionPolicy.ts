@@ -61,6 +61,10 @@ export const executionPolicySchema = z.strictObject({
 export type ExecutionPolicyInput = z.infer<typeof executionPolicySchema>;
 
 export const storedExecutionPolicySchema = executionPolicySchema.extend({
+  automationDecisions: z.array(z.strictObject({
+    phrase: z.string().min(1).max(64000), decision: z.literal('NOT_A_TESTING_BAN'),
+    userId: z.string().min(1), decidedAt: z.iso.datetime(),
+  })).max(5000).optional(),
   exclusions: z.array(structuredExclusionSchema),
   requestsPerSecond: executionPolicySchema.shape.requestsPerSecond.nullable(),
   maxConcurrency: executionPolicySchema.shape.maxConcurrency.nullable(),
