@@ -3,7 +3,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, readFile, lstat, symlink, rm, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { issueTerminalTicket, verifyTerminalTicket, targetWorkspaceId, tmuxIdentity, sha256 } from '@/lib/research/terminal';
+import { issueCollectorTicket, verifyCollectorTicket, issueStopTicket, verifyStopTicket, issueTerminalTicket, verifyTerminalTicket, targetWorkspaceId, tmuxIdentity, sha256 } from '@/lib/research/terminal';
 import { consoleBundle, writeConsoleWorkspace } from '@/server/research/consoleWorkspace';
 import { consolePolicySchema } from '@/lib/research/consolePolicy';
 import { researchTarget, researchRecon } from '../fixtures/research';
@@ -21,6 +21,15 @@ describe('per-target Research console contract', () => {
     expect(() => verifyTerminalTicket('', publicKey)).toThrow();
     expect(() => verifyTerminalTicket(ticket.token, generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'pem'}).toString(),101000)).toThrow();
     expect(ticket.expiresAt).toBe(130000);
+  });
+  it('restricts collector inventory tickets to their audience, key and expiry', () => {
+    const ticket = issueCollectorTicket(privateKey, 100000);
+    expect(verifyCollectorTicket(ticket, publicKey, 101000).aud).toBe('bughunter-research-collector');
+    expect(() => verifyCollectorTicket(ticket, publicKey, 131000)).toThrow();
+    expect(() => verifyCollectorTicket(ticket + 'x', publicKey, 101000)).toThrow();
+    expect(() => verifyCollectorTicket(issueStopTicket('target', 'research_target', privateKey, 100000), publicKey, 101000)).toThrow();
+    expect(() => verifyStopTicket(ticket, publicKey, 101000)).toThrow();
+    expect(() => verifyTerminalTicket(ticket, publicKey, 101000)).toThrow();
   });
   it.each(['../x','/etc/passwd','a/b','a.b','%2e%2e','x; bash','a\n'])('refuses path/command identity %s', id => {
     expect(() => targetWorkspaceId(id)).toThrow(); expect(() => tmuxIdentity(id)).toThrow();

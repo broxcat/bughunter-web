@@ -72,7 +72,7 @@ function scanScopeRejection(target: { userId: string; host: string; active: bool
 export function scanRejection(target: Parameters<typeof scanScopeRejection>[0], purpose: 'HOST' | 'RECON' = 'HOST', requirePolicy = true) {
   const rejection = scanScopeRejection(target, purpose);
   if (rejection || !requirePolicy) return rejection;
-  return programPolicyBlocker(target.program!, target.scope);
+  return programPolicyBlocker(target.program!);
 }
 
 export async function loadTargetExecution(targetId: string, purpose: 'HOST' | 'RECON' = 'HOST', captured?: ReconPlan): Promise<TargetExecution> {
@@ -87,7 +87,7 @@ export async function loadTargetExecution(targetId: string, purpose: 'HOST' | 'R
   const error = scanRejection(target, purpose);
   if (error) throw new Error(error);
   if (target.discoveredFromAsset && (!target.discoveredFromAsset.active || !assetAllowsHost(target.discoveredFromAsset, target.host))) throw new Error('Parent Scope Asset no longer authorizes this discovered host');
-  const policy = resolveProgramPolicy(target.program!, target.scope);
+  const policy = resolveProgramPolicy(target.program!);
   return { programId: target.program!.id, policy, ...(captured?{reconPlan:captured}:{}), targetId, host: target.scopeAsset?.format === 'URL' ? new URL(target.scopeAsset.normalizedValue).host : target.host, ...(target.scopeAsset ? { scopeAsset: target.scopeAsset } : {}), ...(target.discoveredFromAsset ? { parentScopeAsset: target.discoveredFromAsset } : {}), ...((target.contextOnly && !target.scopeAsset) || target.host.startsWith('*.') ? { programReconId: target.program!.id } : {}), requiredUserAgent: policy.userAgent,
     qualifying: target.program!.qualifying, nonQualifying: target.program!.nonQualifying };
 }

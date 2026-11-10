@@ -1,3 +1,5 @@
+import { prisma } from '@/lib/prisma';
+import { logger } from '@/lib/logger';
 // Queue identity/options are shared; producer connections are never shared with
 // the persistent blocking worker connection.
 import { Queue, type JobsOptions } from "bullmq";
@@ -90,4 +92,30 @@ export async function deliverScanJob(data: ScanJobData): Promise<{ alreadyPresen
     // the HTTP deadline; close its local listeners when initialization settles.
     if (queue) void queue.close().catch(() => {});
   }
+}
+
+/** Locked jobs are retried next pass; running workers detect missing SQL rows. */
+export async function collectOrphanScanJobs() {
+  const client = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', PRODUCER_REDIS_OPTIONS);
+  client.on('error', () => {});
+  let queue: Queue<ScanJobData> | undefined;
+  try {
+    await client.connect();
+    queue = new Queue<ScanJobData>(SCAN_QUEUE_NAME, { connection: client });
+    let offset = 0;
+    while (true) {
+      const jobs = await queue.getJobs(['active', 'wait', 'delayed', 'prioritized', 'waiting-children', 'completed', 'failed'], offset, offset + 99);
+      if (!jobs.length) break;
+      const runs = await prisma.scanRun.findMany({ where: { id: { in: jobs.map(job => job.data.scanRunId) } }, select: { id: true, targetId: true } });
+      let retained = 0;
+      for (const job of jobs) {
+        if (runs.some(run => run.id === job.data.scanRunId && run.targetId === job.data.targetId)) { retained++; continue; }
+        try {
+          await job.remove();
+          logger.info({ operation: 'resource-gc', resource: 'redis-job', jobId: job.id }, 'Orphan scan job deleted');
+        } catch { retained++; logger.info({ operation: 'resource-gc', resource: 'redis-job', jobId: job.id }, 'Locked orphan job deferred until next collection'); }
+      }
+      offset += retained;
+    }
+  } finally { client.disconnect(); if (queue) void queue.close().catch(() => {}); }
 }

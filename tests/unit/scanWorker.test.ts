@@ -50,6 +50,12 @@ async function previous(stale: boolean, useful = false) {
   if (useful) attempts[0].usefulWorkAt = new Date();
 }
 describe("worker execution outcome persistence", () => {
+  it('acknowledges an orphan job without starting work or retrying an absent ScanRun', async () => {
+    mocks.find.mockResolvedValue(null);
+    await expect(processor.process(job('RECON'))).resolves.toBeUndefined();
+    expect(mocks.recon).not.toHaveBeenCalled();
+    expect(mocks.attemptCreate).not.toHaveBeenCalled();
+  });
   it("refuses a queued legacy Hunt without network or target credentials", async () => {
     run.type = "HUNT";
     await processor.process(job("HUNT"));

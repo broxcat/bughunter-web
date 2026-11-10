@@ -31,12 +31,12 @@ export const researchTargetSelect = {
 } satisfies Prisma.TargetSelect;
 type SelectedResearchTarget = Prisma.TargetGetPayload<{ select: typeof researchTargetSelect }>;
 type SelectedProgram = NonNullable<SelectedResearchTarget['program']>;
-type PolicyFields = 'programUrl' | 'executionPolicies' | 'targets';
+type PolicyFields = 'programUrl' | 'executionPolicies';
 export type ResearchTarget = Omit<SelectedResearchTarget, 'scopeAsset' | 'discoveredFromAsset' | 'consoleDeletingAt' | 'program'> &
   Partial<Pick<SelectedResearchTarget, 'scopeAsset' | 'discoveredFromAsset' | 'consoleDeletingAt'>> & {
     program: (Omit<SelectedProgram, PolicyFields> & Partial<Pick<SelectedProgram, PolicyFields>>) | null;
   };
-export const researchUserAgent = (target: ResearchTarget) => resolveProgramPolicy(target.program!, target.scope).userAgent;
+export const researchUserAgent = (target: ResearchTarget) => resolveProgramPolicy(target.program!).userAgent;
 export const researchIsPassive = (target: ResearchTarget) => target.scopeAsset ? target.scopeAsset.format === 'WILDCARD_DOMAIN' : target.contextOnly;
 export type ResearchRecon = { id: string; reconCorpus: unknown } | null;
 export type ResearchFinding = { id: string; title: string; severity: string; vulnClass: string | null; reviewStatus: string; location: string | null };
@@ -50,8 +50,7 @@ export function assertResearchTarget(target: ResearchTarget, userId: string) {
   if(target.consoleDeletingAt)throw new ResearchError('Console deletion in progress; retry Delete to complete cleanup',409);
   const boundary = target.scopeAsset ?? target.discoveredFromAsset;
   if (boundary && (!boundary.active || (target.scopeAsset?.format !== 'WILDCARD_DOMAIN' && !assetAllowsHost(boundary, target.host)))) throw new ResearchError('Scope asset authorization is no longer active', 409);
-  const policy = resolveProgramPolicy(target.program!, target.scope);
-  const legacyExclusions = !policy.reviewedScope ? target.scope.outOfScope?.toLowerCase().match(/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+/g) ?? [] : [];
+  const legacyExclusions = target.scope.outOfScope?.toLowerCase().match(/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+/g) ?? [];
   if (boundary && legacyExclusions.some(rule => matchesHost(target.host, rule))) throw new ResearchError('Host is explicitly out of scope');
   if (!researchIsPassive(target) && !requiredUserAgentSchema.safeParse(researchUserAgent(target)).success) throw new ResearchError(MISSING_HUNTER_UA);
   if (target.scopeAsset) {

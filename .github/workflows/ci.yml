@@ -81,6 +81,12 @@ jobs:
       - name: Test (unit + integration)
         run: npm test -- --maxWorkers=1
 
+      - name: Install browser system libraries
+        run: npx playwright install-deps chromium
+
+      - name: Target deletion browser acceptance
+        run: node tests/e2e/targetDeletion.mjs
+
       - name: Validate upgrade preserves historical data
         env:
           TEST_MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bughunter_upgrade

@@ -158,7 +158,7 @@ let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/progr
     const renewed=await ensure(userId,c.id);expect(renewed.session.id).toBe(initial.session.id);expect(await readFile(join(dir,'scope.md'),'utf8')).toBe(scope);
     expect(JSON.parse(await readFile(join(dir,'recon/hosts.json'),'utf8')).hosts[0].host).toBe('api.example.test');
   });
-  it('cleans children, exclusive reports, sessions, credentials, logs, OOB and files while preserving shared resources and another program',async()=>{
+  it('cascades SQL children and exclusive reports while deferring OOB and files',async()=>{
     const models:(()=>Promise<number>)[]=[()=>p.scanRun.count(),()=>p.scanLog.count(),()=>p.hostDiscovery.count(),()=>p.targetCredential.count(),()=>p.researchSession.count(),()=>p.researchHypothesis.count(),()=>p.researchHypothesisRevision.count(),()=>p.researchFindingPromotion.count(),()=>p.oobHit.count()];
     const baseline=await Promise.all(models.map(count=>count()));
     const r=await run();await persist(r.id,'api.example.test','CERTIFICATE_TRANSPARENCY');await p.scanRun.update({where:{id:r.id},data:{status:'COMPLETED'}});
@@ -177,23 +177,20 @@ let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/progr
     vi.spyOn(globalThis,'fetch').mockResolvedValue(Response.json({stopped:true}));
     await remove(userId,programId);await remove(userId,programId);
     expect(await p.bountyProgram.findUnique({where:{id:programId}})).toBeNull();
-    for(const [i,model] of models.entries())expect(await model()).toBe(baseline[i]);
+    for(const [i,model] of models.entries())expect(await model()).toBe(baseline[i]+(i===8?1:0));
     expect(await p.target.count({where:{programId:other.id}})).toBe(1);expect(await p.scope.findUnique({where:{id:host.scopeId}})).not.toBeNull();
     expect(await p.report.count({where:{userId}})).toBe(1);expect((await p.report.findUniqueOrThrow({where:{id:shared.id}})).targetId).toBeNull();
-    await expect(access(join(root,consoleSession.session.workspaceId))).rejects.toThrow();expect(mocks.purge).toHaveBeenCalledWith([r.id]);
+    await access(join(root,consoleSession.session.workspaceId));expect(mocks.purge).not.toHaveBeenCalled();
   });
-  it('keeps a durable tombstone on partial failure, rejects all new launches, retries safely and hides foreign ownership',async()=>{
+  it('deletes with an offline console, hides foreign ownership and tolerates concurrent retries',async()=>{
     const c=await context(userId,programId);await ensure(userId,c.id);
     vi.spyOn(globalThis,'fetch').mockResolvedValue(Response.json({error:'offline'},{status:503}));
-    await expect(remove(userId,programId)).rejects.toThrow('cleanup unconfirmed');
-    expect((await p.bountyProgram.findUniqueOrThrow({where:{id:programId}})).deletingAt).toBeTruthy();
-    await expect(context(userId,programId)).rejects.toThrow();await expect(ensure(userId,c.id)).rejects.toThrow('deletion');
-    await expect(p.scanRun.create({data:{targetId:c.id,type:'RECON'}})).rejects.toThrow();
     await remove('foreign-user',programId);expect(await p.bountyProgram.findUnique({where:{id:programId}})).not.toBeNull();
-    vi.mocked(fetch).mockImplementation(async()=>Response.json({stopped:true}));
-    await Promise.all([remove(userId,programId),remove(userId,programId)]);expect(await p.bountyProgram.findUnique({where:{id:programId}})).toBeNull();
+    await Promise.all([remove(userId,programId),remove(userId,programId)]);
+    expect(await p.bountyProgram.findUnique({where:{id:programId}})).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
   });
-  it('waits for a running worker to confirm resource cleanup before deleting scan rows',async()=>{
+  it('deletes scan rows immediately and lets the running worker drain resources',async()=>{
     await p.bountyProgram.update({where:{id:programId},data:{rulesOfEngagement:null}});
     const c=await context(userId,programId),r=await p.scanRun.create({data:{targetId:c.id,type:'RECON'}});
     const {createScanProcessor}=await import('@/server/queue/processScan');
@@ -210,13 +207,10 @@ let p:typeof import('@/lib/prisma').prisma,context:typeof import('@/server/progr
     await started;await remove(userId,programId);await processing;
     expect(cleaned).toBe(true);expect(await p.scanRun.findUnique({where:{id:r.id}})).toBeNull();
   },10000);
-  it.each(['STALE_HEARTBEAT','CLEANUP_UNCONFIRMED'])('does not treat %s as proof that processes stopped; resumes after owner cleanup confirmation',async reason=>{
-    const r=await run();await p.scanRun.update({where:{id:r.id},data:{status:'FAILED'}});
-    const attempt=await p.scanExecutionAttempt.create({data:{scanRunId:r.id,workerId:'lost-worker',state:'INTERRUPTED',reason}});
-    const deleting=remove(userId,programId);
-    await new Promise(resolve=>setTimeout(resolve,100));
-    expect(await p.scanRun.findUnique({where:{id:r.id}})).not.toBeNull();
-    await p.scanExecutionAttempt.update({where:{id:attempt.id},data:{cleanupConfirmedAt:new Date()}});
-    await deleting;expect(await p.bountyProgram.findUnique({where:{id:programId}})).toBeNull();
+  it.each(['RUNNING','STALE_HEARTBEAT','CLEANUP_UNCONFIRMED'])('deletes without waiting for a lost worker (%s)',async reason=>{
+    const r=await run();
+    await p.scanExecutionAttempt.create({data:{scanRunId:r.id,workerId:'lost-worker',state:reason==='RUNNING'?'RUNNING':'INTERRUPTED',reason}});
+    await remove(userId,programId);
+    expect(await p.bountyProgram.findUnique({where:{id:programId}})).toBeNull();
   });
 });
