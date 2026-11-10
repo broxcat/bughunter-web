@@ -54,6 +54,9 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     await capture('blocked');
     await primary('link', 'Fix policy').click();
     await page.waitForURL(path(blocked.id) + '/settings#policy-rule-1');
+    const anchoredRule = page.locator('#policy-rule-1');
+    await anchoredRule.waitFor();
+    assert.equal(await anchoredRule.innerText(), 'Testing is permitted only during an approved window.');
 
     const readyResponse = await page.goto(path(ready.id));
     assert.match(await readyResponse.text(), /Start recon/);

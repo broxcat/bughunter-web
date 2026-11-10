@@ -68,10 +68,11 @@ try {
 
   await page.getByRole('link', { name: 'Settings', exact: true }).last().waitFor();
   assert(await page.getByRole('button', { name: 'Extract from Markdown' }).isDisabled());
+  const programRule = 'Use only test accounts that you own.';
   const rawYesWeHack = [
     'Bug bounty', 'Public', 'Submit report', 'Public fixture company',
     'Reward', '€100 Low €250 Medium €800 High €2,000 Critical',
-    'Program description', 'Keep traffic below 3 requests per second.',
+    'Program description', 'Keep traffic below 3 requests per second.', programRule,
     'Scopes', 'https://shop.example.test\tWeb application\tHigh',
     'Out of scopes', 'https://shop.example.test/admin/*',
     'Qualifying vulnerabilities', 'SQL Injection',
@@ -86,6 +87,10 @@ try {
   assert.equal(await page.getByLabel('Reward critical').inputValue(), '2000');
   assert.equal(await page.getByLabel('Asset 1 value').inputValue(), 'HIGH');
   assert.equal(await page.getByLabel('User-Agent suffix').inputValue(), 'Fixture-<your yeswehack pseudo>');
+  await page.getByText('1 program rule needs review. Automation is blocked.', { exact: true }).waitFor();
+  const rule = page.getByRole('list', { name: 'Program rules needing review' }).getByRole('listitem');
+  await rule.waitFor();
+  assert.equal(await rule.innerText(), programRule);
   await page.getByRole('button', { name: 'Save and start', exact: true }).click();
   await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
   const rawTarget = await p.bountyProgram.findFirstOrThrow({ where: { ownerId: user.id, companyName: 'Public fixture company' },
@@ -94,7 +99,9 @@ try {
   assert.equal(rawTarget.scopeAssets[0].assetValue, 'HIGH');
   assert.equal(rawTarget.executionPolicies[0].policy.userAgentMode, 'APPEND');
   assert.equal(rawTarget.executionPolicies[0].policy.sourceSnapshot.sourceDocument, rawYesWeHack);
-  assert.match(rawTarget.campaign.reason, /DEFAULT_USER_AGENT/);
+  assert.equal(rawTarget.campaign.state, 'BLOCKED');
+  assert.deepEqual(rawTarget.executionPolicies[0].policy.sourceSnapshot.unrepresentedRules, [programRule]);
+  assert.equal(await p.targetReconRun.count({ where: { programId: rawTarget.id } }), 0);
   await page.goto(origin + '/targets/new');
 
   ai = createHttpServer(async (request, response) => {

@@ -100,6 +100,5 @@ export function TargetScopeReview({ value, onChange, allowProse }: { value: Revi
     </label>
     {conflict && <p className="text-sm text-danger">{conflict}</p>}
     <p className="text-sm text-muted" aria-label="Execution policy summary">{summary.join(' · ')}</p>
-    {value.rules.map((rule, index) => !rule.decision && <span key={index} id={'policy-rule-' + (index + 1)} className="scroll-mt-24" />)}
   </section>;
 }

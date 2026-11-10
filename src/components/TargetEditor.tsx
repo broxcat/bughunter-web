@@ -113,13 +113,13 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
   const proseExclusions = allowProse ? lines(review.exclusions).filter(value => !isStructuredExclusion(value)) : [];
   const rules = [...review.rules];
   for (const text of proseExclusions) if (!rules.some(rule => rule.text === text)) rules.push({ text, decision: null, origin: 'AI_INTAKE' });
-  const unresolved = rules.filter(rule => !rule.decision).length;
+  const unresolved = rules.flatMap((rule, index) => rule.decision ? [] : [{ ...rule, number: index + 1 }]);
   const needsUsername = [policy.requiredUserAgent ?? '', ...policy.requiredHeaders.map(header => header.value)].some(hasHunterTemplate) && !hunterHasUsername;
   const policyIssue = !policyResult.success ? (policyResult.error.issues[0]?.message ?? 'Invalid execution policy.')
     : changedSource ? 'Extract the program rules again after changing its URL or platform.'
     : unreviewedMarkdown ? 'Extract the pasted Markdown before running automation.'
     : descriptionEdited ? 'The description has changed. Extract the current rules again before running automation.'
-    : unresolved ? unresolved + (unresolved === 1 ? ' program rule could' : ' program rules could') + ' not be represented safely. Review the source before running automation.'
+    : unresolved.length ? unresolved.length + (unresolved.length === 1 ? ' program rule needs review.' : ' program rules need review.') + ' Automation is blocked.'
     : !policy.automationAllowed ? 'The program policy does not allow automation.'
     : needsUsername ? MISSING_HUNTER_USERNAME
     : (!policy.requiredUserAgent || policy.userAgentMode === 'APPEND') && !hunterHasUserAgent ? MISSING_HUNTER_UA
@@ -239,6 +239,11 @@ export default function TargetEditor({ program, hunterHasUserAgent, hunterHasUse
         <Check label="Valid scope" issue={scopeError || (!review.scopeIn.length ? 'Add an authorized asset to make this target ready.' : '')} />
         <Check label="No in/out conflict" issue={conflict} />
         <Check label="Execution policy applicable" issue={policyIssue} />
+        {unresolved.length > 0 && <ul aria-label="Program rules needing review" className="list-disc space-y-2 pl-5 text-sm">
+          {unresolved.map(rule => <li key={rule.number} id={'policy-rule-' + rule.number} className="scroll-mt-24 whitespace-pre-wrap break-words">
+            {rule.text}
+          </li>)}
+        </ul>}
       </section>
       {error && <p role="alert" className="text-danger">{error}</p>}
       <div className="flex items-center justify-end gap-3">
