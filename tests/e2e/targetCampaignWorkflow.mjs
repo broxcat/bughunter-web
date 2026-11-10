@@ -113,7 +113,9 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     assert.equal(await page.getByRole('link', { name: /^Open console/ }).count(), 0);
     await page.getByRole('link', { name: 'View details', exact: true }).click();
     await page.waitForURL(origin + '/research?program=' + ready.id + '&view=details');
-    await page.getByRole('link', { name: /^Open console/ }).first().waitFor();
+    await page.getByRole('heading', { name: 'Create consoles', exact: true }).waitFor();
+    assert.equal(await page.getByRole('link', { name: /^Open$/ }).count(), 0);
+    assert(await page.getByRole('button', { name: 'Create consoles (0)', exact: true }).isDisabled());
 
     const finding = await p.finding.create({ data: {
       targetId: run.scans[0].targetId, title: 'Unauthorized access to a fixture record', severity: 'HIGH',
