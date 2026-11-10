@@ -56,15 +56,18 @@ export async function changeFindingLifecycle(userId:string,id:string,raw:unknown
  },{timeout:20000});
 }
 export async function recordFindingRetest(userId:string,id:string,raw:unknown){
- const parsed=retestResultSchema.safeParse(raw);if(!parsed.success)throw new ResearchError('Retest requires a dated conclusion, session and new proof (unless blocked)',400);const input=parsed.data;
+ const parsed=retestResultSchema.safeParse(raw);if(!parsed.success)throw new ResearchError('Retest requires a dated conclusion and new proof (unless blocked)',400);const input=parsed.data;
  return prisma.$transaction(async tx=>{
   const {finding:f}=await owned(tx,userId,id,true),retest=await tx.findingRetest.findFirst({where:{id:input.retestId,findingId:id},include:{result:true}});
   if(!retest)throw new ResearchError('Retest activity not found',404);if(retest.result)throw new ResearchError('Retest results are immutable; request another retest instead',409);
   if(f.lifecycle!=='RETEST_REQUIRED')throw new ResearchError('Finding is not awaiting a retest',409);
   const when=new Date(input.performedAt);if(when>new Date(Date.now()+60000)||when<retest.createdAt)throw new ResearchError('Retest must be dated after its request and before now',400);
   if(input.outcome!=='CANNOT_RETEST'){
-   const target=await ownedEvidenceTarget(tx,userId,f.targetId,false,true);const session=await tx.researchSession.findFirst({where:{id:input.sessionId,targetId:f.targetId,userId,status:'READY'},select:{authorizationSnapshot:true}});
-   if(!session||!researchAuthorizationMatches(session.authorizationSnapshot,target)||!f.location||!reconScopePolicy(target).inScope(f.location.startsWith('/')?new URL(f.location,`${target.scheme??'https'}://${target.host}`).href:f.location))throw new ResearchError('Retest needs a current authorized Research session and location',400);
+   // The Research session is optional; the current Target scope still bounds the location.
+   const target=await ownedEvidenceTarget(tx,userId,f.targetId,false,true);
+   if(input.sessionId){const session=await tx.researchSession.findFirst({where:{id:input.sessionId,targetId:f.targetId,userId,status:'READY'},select:{authorizationSnapshot:true}});
+    if(!session||!researchAuthorizationMatches(session.authorizationSnapshot,target))throw new ResearchError('Retest session is not current for this Target',400);}
+   if(!f.location||!reconScopePolicy(target).inScope(f.location.startsWith('/')?new URL(f.location,`${target.scheme??'https'}://${target.host}`).href:f.location))throw new ResearchError('Retest needs an authorized location within the current Target scope',400);
    if(input.evidenceIds.every(e=>retest.originalEvidenceIds.includes(e))||!await tx.evidenceRecord.findFirst({where:{id:{in:input.evidenceIds,notIn:retest.originalEvidenceIds},targetId:f.targetId,createdAt:{gte:retest.createdAt}},select:{id:true}}))throw new ResearchError('Retest requires new evidence; retain original proof separately',400);
   }
   if(input.sessionId&&!await tx.researchSession.findFirst({where:{id:input.sessionId,targetId:f.targetId,userId},select:{id:true}}))throw new ResearchError('Research session not found for this Target',404);

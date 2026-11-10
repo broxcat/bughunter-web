@@ -10,7 +10,7 @@ const common={description:z.string().trim().min(1).max(2000),link:evidenceLinkSc
 export const evidenceCreateSchema=z.discriminatedUnion('kind',[
  z.strictObject({...common,kind:z.literal('RECON_ARTIFACT'),artifactId:id}),
  z.strictObject({...common,kind:z.enum(['BURP_REFERENCE','RESEARCH_EVIDENCE']),sessionId:id,ref:z.string().max(500).refine(isEvidenceRef)}),
- z.strictObject({...common,kind:z.literal('HTTP_REQUEST_RESPONSE'),sessionId:id,observedAt:z.iso.datetime({offset:true}),http:z.strictObject({method:z.enum(['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS','TRACE','CONNECT']),url:z.url().max(4096),requestExcerpt:z.string().max(2000).optional(),statusCode:z.number().int().min(100).max(599),contentType:z.string().max(150).optional(),responseExcerpt:z.string().max(2000).optional()})}),
+ z.strictObject({...common,kind:z.literal('HTTP_REQUEST_RESPONSE'),sessionId:id.optional(),observedAt:z.iso.datetime({offset:true}),http:z.strictObject({method:z.enum(['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS','TRACE','CONNECT']),url:z.url().max(4096),requestExcerpt:z.string().max(2000).optional(),statusCode:z.number().int().min(100).max(599),contentType:z.string().max(150).optional(),responseExcerpt:z.string().max(2000).optional()})}),
 ]);
 export type EvidenceCreate=z.infer<typeof evidenceCreateSchema>;
 export type EvidenceLink=z.infer<typeof evidenceLinkSchema>;

@@ -35,6 +35,12 @@ export async function linkEvidence(tx:Prisma.TransactionClient,userId:string,tar
  else if(link.entity==='finding')await tx.evidenceFinding.createMany({data:[{evidenceId,findingId:link.id,findingReferenceId:link.id,role:link.role}],skipDuplicates:true});
  else await tx.evidenceCoverage.createMany({data:[{evidenceId,coverageEventId:link.id}],skipDuplicates:true});
 }
+async function readyResearchSession(tx:Prisma.TransactionClient,userId:string,targetId:string,sessionId:string,target:Awaited<ReturnType<typeof ownedEvidenceTarget>>){
+ const session=await tx.researchSession.findFirst({where:{id:sessionId,targetId,...ownedResearch(userId),status:'READY'},select:{id:true,workspaceId:true,authorizationSnapshot:true}});
+ if(!session)throw new ResearchError('Ready Research session not found',404);
+ if(!researchAuthorizationMatches(session.authorizationSnapshot,target))throw new ResearchError('Research policy changed',409);
+ return session;
+}
 /** Metadata and fixed safe references only; source bodies/headers are never copied. */
 export async function registerEvidence(tx:Prisma.TransactionClient,userId:string,targetId:string,input:EvidenceCreate){
  const target=await ownedEvidenceTarget(tx,userId,targetId,true,input.kind!=='RECON_ARTIFACT');
@@ -45,22 +51,21 @@ export async function registerEvidence(tx:Prisma.TransactionClient,userId:string
   if(!artifact)throw new ResearchError('Recon artifact not found for this Target',404);
   reconArtifactId=artifact.id;sourceKey=hash(['recon',artifact.id]);redactionStatus='REFERENCE_ONLY_CONTENT_NOT_COPIED';
   provenance={source:'RECON_ARTIFACT',artifactReferenceId:artifact.id,scanRunId:artifact.scanRunId,scopeAssetId:artifact.scopeAssetId};metadata={artifactKind:artifact.kind,scopeState:artifact.scopeState,verification:artifact.verification,firstSeenAt:artifact.firstSeenAt,lastSeenAt:artifact.lastSeenAt,authorizationGranted:false};
+ }else if(input.kind==='HTTP_REQUEST_RESPONSE'){
+  // A Research session is optional: operators capture HTTP evidence from their
+  // local CLI. The current Target scope still bounds the observed URL.
+  if(input.sessionId)sessionId=(await readyResearchSession(tx,userId,targetId,input.sessionId,target)).id;
+  if(!reconScopePolicy(target).inScope(input.http.url))throw new ResearchError('HTTP evidence must belong to the authorized Target surface',400);
+  if(Date.parse(input.observedAt)>Date.now()+60000)throw new ResearchError('Invalid observation date',400);
+  metadata={request:{method:input.http.method,url:safeSurfaceUrl(input.http.url),excerpt:input.http.requestExcerpt?clean(input.http.requestExcerpt):null,requestable:false},response:{statusCode:input.http.statusCode,contentType:input.http.contentType?clean(input.http.contentType):null,excerpt:input.http.responseExcerpt?clean(input.http.responseExcerpt):null}};
+  contentSha256=hash(metadata);provenance={source:'EXPLICIT_RESEARCHER_HTTP_CAPTURE',sessionReferenceId:sessionId,observedAt:input.observedAt};sourceKey=hash(['http',sessionId??'operator',input.observedAt,contentSha256]);redactionStatus='REDACTED_METADATA_AND_EXCERPTS';
  }else{
-  const session=await tx.researchSession.findFirst({where:{id:input.sessionId,targetId,...ownedResearch(userId),status:'READY'},select:{id:true,workspaceId:true,authorizationSnapshot:true}});
-  if(!session)throw new ResearchError('Ready Research session not found',404);
-  if(!researchAuthorizationMatches(session.authorizationSnapshot,target))throw new ResearchError('Research policy changed',409);sessionId=session.id;
-  if(input.kind==='HTTP_REQUEST_RESPONSE'){
-   if(!reconScopePolicy(target).inScope(input.http.url))throw new ResearchError('HTTP evidence must belong to the authorized Target surface',400);
-   if(Date.parse(input.observedAt)>Date.now()+60000)throw new ResearchError('Invalid observation date',400);
-   metadata={request:{method:input.http.method,url:safeSurfaceUrl(input.http.url),excerpt:input.http.requestExcerpt?clean(input.http.requestExcerpt):null,requestable:false},response:{statusCode:input.http.statusCode,contentType:input.http.contentType?clean(input.http.contentType):null,excerpt:input.http.responseExcerpt?clean(input.http.responseExcerpt):null}};
-   contentSha256=hash(metadata);provenance={source:'EXPLICIT_RESEARCHER_HTTP_CAPTURE',sessionReferenceId:session.id,observedAt:input.observedAt};sourceKey=hash(['http',session.id,input.observedAt,contentSha256]);redactionStatus='REDACTED_METADATA_AND_EXCERPTS';
-  }else{
-   if(clean(input.ref)!==input.ref)throw new ResearchError('Artifact names must not contain secrets',400);
-   if(input.kind==='BURP_REFERENCE'&&!/^(?:requests|evidence)\/burp\//.test(input.ref))throw new ResearchError('Use an existing bounded Burp artifact reference',400);
-   const workspace=await HypothesisWorkspace.open(researchRootFor(session.workspaceId),session.workspaceId);
-   try{contentSha256=await workspace.fingerprintReference(input.ref);}finally{await workspace.close();}
-   provenance={source:input.kind==='BURP_REFERENCE'?'BURP_WORKSPACE_REFERENCE':'RESEARCH_WORKSPACE_REFERENCE',sessionReferenceId:session.id,ref:input.ref};metadata={ref:input.ref,sourceContentCopied:false};sourceKey=hash(['workspace',session.id,input.ref,contentSha256]);redactionStatus='REFERENCE_ONLY_CONTENT_NOT_COPIED';
-  }
+  const session=await readyResearchSession(tx,userId,targetId,input.sessionId,target);sessionId=session.id;
+  if(clean(input.ref)!==input.ref)throw new ResearchError('Artifact names must not contain secrets',400);
+  if(input.kind==='BURP_REFERENCE'&&!/^(?:requests|evidence)\/burp\//.test(input.ref))throw new ResearchError('Use an existing bounded Burp artifact reference',400);
+  const workspace=await HypothesisWorkspace.open(researchRootFor(session.workspaceId),session.workspaceId);
+  try{contentSha256=await workspace.fingerprintReference(input.ref);}finally{await workspace.close();}
+  provenance={source:input.kind==='BURP_REFERENCE'?'BURP_WORKSPACE_REFERENCE':'RESEARCH_WORKSPACE_REFERENCE',sessionReferenceId:session.id,ref:input.ref};metadata={ref:input.ref,sourceContentCopied:false};sourceKey=hash(['workspace',session.id,input.ref,contentSha256]);redactionStatus='REFERENCE_ONLY_CONTENT_NOT_COPIED';
  }
  const existing=await tx.evidenceRecord.findUnique({where:{targetId_sourceKey:{targetId,sourceKey}}});
  if(!existing&&await tx.evidenceRecord.count({where:{targetId}})>=5000)throw new ResearchError('Evidence limit reached; retained records remain available',422);
