@@ -3,7 +3,6 @@ import { prisma } from '@/lib/prisma';
 import { campaignActivity, targetCampaign, type CampaignFacts } from '@/lib/targetCampaign';
 import { programPolicyInclude } from './programExecutionPolicy';
 import { campaignPolicyBlocker } from './campaignOrchestrator';
-import { storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
 import { pendingScopeSchema } from '@/lib/campaignSource';
 
 type Database = Pick<Prisma.TransactionClient, '$queryRaw'>;
@@ -90,14 +89,11 @@ export async function campaignFacts(db: Database, ownerId: string, ids: string[]
 
 export function campaignView(program: CampaignProgram, facts: CampaignFacts) {
   const policyBlocker = campaignPolicyBlocker(program);
-  const source = storedExecutionPolicySchema.safeParse(program.executionPolicies[0]?.policy).data?.sourceSnapshot;
-  const undecidedRules = source?.unrepresentedRules.length ?? 0;
-  const firstRule = (source?.ruleDecisions?.findIndex(rule => !rule.decision) ?? 0) + 1;
   const row = program.campaign;
   const campaign = row ? { state: row.state, reason: row.reason, retryAt: row.retryAt, nextCycleAt: row.nextCycleAt,
     handoffRunId: row.handoffRunId, pendingCount: pendingScopeSchema.safeParse(row.pendingAssets).data?.length ?? 0 } : null;
   return { policyBlocker, ...targetCampaign({ ...program, campaign, assetCount: program._count.scopeAssets,
-    policyBlocker, undecidedRules, firstRule: Math.max(1, firstRule) }, facts) };
+    policyBlocker }, facts) };
 }
 
 async function loadReconSummary(db: Database, runId: string) {
