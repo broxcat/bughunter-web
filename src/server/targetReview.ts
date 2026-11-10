@@ -16,7 +16,6 @@ const byValue = (a: Asset, b: Asset) => a.normalizedValue < b.normalizedValue ? 
 export function reviewedPolicy(review: TargetReview, program: Pick<Program, 'programUrl' | 'rulesOfEngagement' | 'outOfScope'>, scopes: LegacyScopeText[]) {
   return {
     ...review.policy,
-    reviewState: 'OWNER_REVIEWED' as const,
     sourceSnapshot: {
       url: program.programUrl,
       rules: program.rulesOfEngagement?.trim() ?? '',

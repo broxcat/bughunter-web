@@ -1,7 +1,7 @@
 
 import { createHash } from 'node:crypto';
 import { detectScopeAsset, type AssetFormat } from '@/lib/scopeAssets';
-import { structuredExclusionSchema, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
+import { explicitlyForbidsAutomation, structuredExclusionSchema, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
 import { VULNERABILITY_FAMILIES } from '@/lib/bountyProgram';
 import type { ImportPlatform } from '@/lib/platformConnections';
 
@@ -99,7 +99,7 @@ export function normalizeProgram(reference: ProgramReference, name: string, rawA
     detected?.executable && !denied.has(detected.normalizedValue) ? [detected.normalizedValue] : []))].sort(order);
   const unrepresentedRules = sortedUnique(rules.filter(rule => rule.text.trim()));
   const policy = storedExecutionPolicySchema.parse({
-    reviewState: 'IMPORT_DRAFT', automationAllowed: false, requiredUserAgent: null, requiredHeaders: [],
+    automationAllowed: !sourceRules.some(rule => explicitlyForbidsAutomation(rule.text)), requiredUserAgent: null, requiredHeaders: [],
     exclusions: [...exclusions].sort(order), requestsPerSecond: null, maxConcurrency: null, forbiddenCategories: [],
     sourceSnapshot: {
       url: reference.url,

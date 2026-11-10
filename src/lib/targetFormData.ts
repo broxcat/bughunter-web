@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import type { pendingScopeAssetSchema } from './campaignSource';
-import type { LegacyScopeText, StoredExecutionPolicy } from './programExecutionPolicy';
+import type { StoredExecutionPolicy } from './programExecutionPolicy';
 import type { ScopeEntry } from './targetReview';
 
 export interface ProgramData {
@@ -25,14 +25,7 @@ export interface ProgramData {
   targets: { id: string; host: string; active: boolean }[];
   _count?: { scopeAssets: number };
   executionPolicies?: { version: number; policy: StoredExecutionPolicy }[];
-  legacyPolicyReview?: {
-    scopes: LegacyScopeText[];
-    scopeFingerprint: string;
-    scopeChanged: boolean;
-    exclusions: string[];
-    unconvertible: { index: number; value: string; reason: string }[];
-    unrepresentedRules: string[];
-  };
+  legacyExclusions?: string[];
   scopeIn?: ScopeEntry[];
   expectedAssets?: string;
   hunterHasUserAgent?: boolean;

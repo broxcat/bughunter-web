@@ -12,6 +12,8 @@ import { RECON_CAPACITY } from '@/lib/reconPlanner';
 import { collectReconDoctor } from '../recon/toolchain';
 import { startReconSummaryWorker } from '../recon/summaries';
 import { startCampaignMaintenance } from '../campaignMaintenance';
+import { startResourceGarbageCollector } from '../resourceGarbageCollector';
+let collector: ReturnType<typeof startResourceGarbageCollector> | undefined;
 let summaries:ReturnType<typeof startReconSummaryWorker>|undefined;
 const workerId = workerIdentity();
 const processor = createScanProcessor(workerId);
@@ -25,6 +27,7 @@ let maintenance: ReturnType<typeof startExecutionMaintenance> | undefined;
 let campaigns: ReturnType<typeof startCampaignMaintenance> | undefined;
 let closing = false;
 export const ready = (async () => {
+  collector = startResourceGarbageCollector();
   const doctor=await collectReconDoctor();
   if(!doctor.ready)throw new Error('Recon worker execution prerequisites are not ready');
   logger.info({workerId,manifest:doctor.fingerprint,readiness:doctor.ready},'Recon Doctor validated worker execution infrastructure');
@@ -52,7 +55,7 @@ async function shutdown() {
   await Promise.all([
     processor.shutdown(),
     summaries?.close(),
-    settlesWithin(Promise.all([dispatcher?.close(), maintenance?.close(), campaigns?.close()]), 2000),
+    settlesWithin(Promise.all([dispatcher?.close(), maintenance?.close(), campaigns?.close(), collector?.close()]), 2000),
   ]);
   await settlesWithin(worker.close(true), 2000);
   redis.disconnect();

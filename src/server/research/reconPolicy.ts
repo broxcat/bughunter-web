@@ -6,14 +6,14 @@ import type { ResearchReconContext } from '@/lib/research/recon';
 import { assertResearchTarget, researchIsPassive, type ResearchTarget } from './workspace';
 
 /** Shared Recon-to-Research boundary. A plan is derived advice, never a second
- * authorization engine; legacy free-text restrictions require manual review. */
+ * authorization engine; execution restrictions come from current configuration. */
 export function reconScopePolicy(target: ResearchTarget, scopeAssets: NonNullable<ResearchReconContext['scopeAssets']> = []) {
-  const policy = resolveProgramPolicy(target.program!, target.scope);
-  const manualReview = Boolean(policy.blocker);
+  const policy = resolveProgramPolicy(target.program!);
+  const configurationBlocked = Boolean(policy.blocker);
   return {
-    activeSuggestionsAllowed: !researchIsPassive(target) && !manualReview,
+    activeSuggestionsAllowed: !researchIsPassive(target) && !configurationBlocked,
     warnings: [
-      ...(manualReview ? [policy.blocker!] : []),
+      ...(configurationBlocked ? [policy.blocker!] : []),
       ...(researchIsPassive(target) ? ['Program/wildcard console is passive only. Open an individually authorized host console before active investigation.'] : []),
     ],
     inScope(value: string) {
@@ -24,7 +24,7 @@ export function reconScopePolicy(target: ResearchTarget, scopeAssets: NonNullabl
         const boundary = target.scopeAsset ?? target.discoveredFromAsset;
         if (boundary) return boundary.active && (target.scopeAsset || host === target.host) && !isExcluded(host, target.program!.outOfScope) && (url ? assetAllowsUrl(boundary, value) : assetAllowsHost(boundary, host));
         if (target.contextOnly) {
-          const legacyExclusions = !policy.reviewedScope ? target.scope.outOfScope?.toLowerCase().match(/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+/g) ?? [] : [];
+          const legacyExclusions = target.scope.outOfScope?.toLowerCase().match(/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+/g) ?? [];
           return target.scope.status === 'APPROVED' && !legacyExclusions.some(r => matchesHost(host, r)) && !isExcluded(host, target.program!.outOfScope) && (scopeAssets.length ? scopeAssets.some(a => a.active && (url ? assetAllowsUrl(a, value) : assetAllowsHost(a, host))) : discoveryState(host, target.program!.scopeRules, target.program!.outOfScope) === 'VALIDATED');
         }
         assertResearchTarget(target, target.userId);

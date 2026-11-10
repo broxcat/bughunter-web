@@ -235,10 +235,10 @@ def lookup(target):
     return active
 
 
-def admitted(token, stop=False, recon=False):
+def admitted(token, stop=False, recon=False, inventory=False):
     if not isinstance(token, str) or len(token) > 2048:
         fail('INVALID_TICKET')
-    result = subprocess.run(['node', '/opt/bughunter/docker/research/broker/admit.mjs', *(['recon'] if recon else ['stop'] if stop else [])], input=token, text=True, capture_output=True, timeout=5, env={'PATH': '/usr/local/bin:/usr/bin:/bin'})
+    result = subprocess.run(['node', '/opt/bughunter/docker/research/broker/admit.mjs', *(['inventory'] if inventory else ['recon'] if recon else ['stop'] if stop else [])], input=token, text=True, capture_output=True, timeout=5, env={'PATH': '/usr/local/bin:/usr/bin:/bin'})
     if result.returncode:
         fail('INVALID_TICKET')
     return json.loads(result.stdout)
@@ -345,7 +345,11 @@ def revoke(token, delete=False):
     with LOCK:
         entry=ledger()['targets'].get(claims['targetId'])
     if not entry:
+        return {'stopped': True}
+    if entry['workspaceId'] != claims['workspaceId']:
         fail('IDENTITY_CHANGED')
+    if entry.get('state') == 'deleted':
+        return {'stopped': True}
     with identity_lock(entry['uid']):
         result=revoke_locked(token)
         if delete:
@@ -420,7 +424,14 @@ def handle(connection):
         request = json.loads(data)
         operation = request.get('operation')
         allowed = {'operation','targetId','provider','profile'}
-        if operation == 'recon':
+        if operation == 'inventory':
+            if set(request) != {'operation','token'}:
+                fail('INVALID_REQUEST')
+            admitted(request['token'], inventory=True)
+            with LOCK:
+                items = [{'targetId': entry['targetId'], 'workspaceId': entry['workspaceId']} for entry in ledger()['targets'].values() if entry.get('state') != 'deleted']
+            response = {'stdout': json.dumps(items)}
+        elif operation == 'recon':
             if set(request) != {'operation','token'}:
                 fail('INVALID_REQUEST')
             claims=admitted(request['token'],recon=True)

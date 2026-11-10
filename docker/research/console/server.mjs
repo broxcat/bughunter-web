@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { WebSocketServer } from 'ws';
 import * as pty from 'node-pty';
-import { verifyLauncherTicket, verifyTerminalTicket, verifyStopTicket } from '../../../src/lib/research/terminal.ts';
+import { verifyCollectorTicket, verifyLauncherTicket, verifyTerminalTicket, verifyStopTicket } from '../../../src/lib/research/terminal.ts';
 import { sessionCommand } from './providers.mjs';
 import { brokerRequest, workspaceRequest, brokerClient } from './broker.mjs';
 import { providerTmuxIdentity } from '../../../src/lib/research/provider.ts';
@@ -22,6 +22,15 @@ export async function startTerminalService({ port = 7681, host = '0.0.0.0', orig
   const wss = new WebSocketServer({ noServer: true, maxPayload: 32768, perMessageDeflate: false, handleProtocols: protocols => protocols.has('bh-terminal.v1') ? 'bh-terminal.v1' : false });
   const server = createServer((req, res) => { void (async () => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/control/inventory' && req.method === 'POST') {
+      try {
+        const token = String(req.headers.authorization ?? '').replace(/^Bearer /, '');
+        verifyCollectorTicket(token, publicKey);
+        const result = await brokerRequest({ operation: 'inventory', token });
+        res.end(result.stdout);
+      } catch { res.writeHead(503); res.end('{"error":"Console inventory unavailable"}'); }
+      return;
+    }
     if(req.url==='/control/isolation'&&req.method==='POST') {
       try {await brokerRequest({operation:'admit',token:String(req.headers.authorization??'').replace(/^Bearer /,'')});res.end('{"ready":true}');}
       catch {res.writeHead(409);res.end('{"error":"Research workspace requires isolation migration before it can be opened."}');}

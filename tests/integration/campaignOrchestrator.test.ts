@@ -203,8 +203,8 @@ suite('durable Target campaign', () => {
     await sync(owner, id, tomorrow, async () => ({ ...fresh, forbiddenCategories: ['FUZZING'] }));
     expect((await policy()).policy).toMatchObject({ forbiddenCategories: ['FUZZING'] });
     await sync(owner, id, new Date(+tomorrow + 86_400_000), async () => ({ ...fresh, rules: [{ text: 'Only test during an agreed window.' }] }));
-    expect(await state(id)).toMatchObject({ state: 'BLOCKED', nextCycleAt: null, requestedAt: null });
-    expect((await policy()).policy).toMatchObject({ sourceSnapshot: { unrepresentedRules: expect.arrayContaining(['Only test during an agreed window.']) } });
+    expect(await state(id)).toMatchObject({ state: 'RECON_RUNNING' });
+    expect((await policy()).policy).toMatchObject({ sourceSnapshot: { sourceDocument: 'Only test during an agreed window.' } });
     expect(await outbox(id)).toBe(3);
   });
 });

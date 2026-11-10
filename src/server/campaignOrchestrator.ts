@@ -1,6 +1,5 @@
 import type { Prisma, TargetCampaign } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
 import { programPolicyBlocker, programPolicyInclude, type PolicyProgram } from './programExecutionPolicy';
 import { admitTargetRecon, lockCampaignCapacity, lockReconProgram } from './recon/targetRuns';
 import { lockOwnedProgram } from './scopeAssets';
@@ -17,10 +16,7 @@ function parallelLimit() {
 }
 
 export function campaignPolicyBlocker(program: PolicyProgram) {
-  const blocker = programPolicyBlocker(program);
-  if (blocker) return blocker;
-  const policy = storedExecutionPolicySchema.safeParse(program.executionPolicies?.[0]?.policy);
-  return policy.success && policy.data.automationAllowed ? null : 'Confirm an execution policy that allows automation in Target settings.';
+  return programPolicyBlocker(program);
 }
 
 export async function cancelCampaignScans(tx: Prisma.TransactionClient, ownerId: string, programId: string, queuedOnly: boolean) {

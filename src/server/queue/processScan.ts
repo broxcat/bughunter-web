@@ -91,8 +91,10 @@ export function createScanProcessor(workerId: string, executor: Executor = execu
     }
     try { await finishScanExecution(attempt.id, workerId, completion!); }
     finally { active.delete(scanRunId); }
-    try{const {publishReconHistory}=await import('../recon/history');await publishReconHistory(scanRunId);}catch{logger.warn({scanRunId,reason:'RECON_HISTORY_PUBLICATION_DEFERRED'},'Surface history publication will retry');}
+    // A cascade can remove the run at any point, including during cleanup.
     const parent=await prisma.scanRun.findUnique({where:{id:scanRunId},select:{targetReconRunId:true,scopeAssetId:true}});
+    if (!parent) return;
+    try{const {publishReconHistory}=await import('../recon/history');await publishReconHistory(scanRunId);}catch{logger.warn({scanRunId,reason:'RECON_HISTORY_PUBLICATION_DEFERRED'},'Surface history publication will retry');}
     if(parent?.targetReconRunId)try{const {reconcileTargetRecon}=await import('../recon/targetRuns');await reconcileTargetRecon(parent.targetReconRunId);}catch{logger.warn({scanRunId,reason:'RECON_INTELLIGENCE_PUBLICATION_DEFERRED'},'Recon evidence committed; intelligence publication will retry');}
     else if(parent?.scopeAssetId)try{const {materializeAssetRecon}=await import('../scopeMarkdown');await materializeAssetRecon(scanRunId);}catch{logger.warn({scanRunId,reason:'SCOPE_INTELLIGENCE_PUBLICATION_DEFERRED'},'Scope intelligence publication deferred');}
     try{const {generatePlansForScan}=await import('../research/plans');await generatePlansForScan(scanRunId);}catch{logger.warn({scanRunId,reason:'RESEARCH_PLAN_PUBLICATION_DEFERRED'},'Recon evidence remains valid; advisory plan publication will retry');}

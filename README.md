@@ -143,27 +143,25 @@ no start or attempt; it is never falsely acknowledged as completed. The queue
 infrastructure suite also kills/restarts a real worker against a local HTTP target
 and verifies there is no second network execution.
 
-## Backfill execution policies
+## Target deletion and execution configuration
 
-After applying the Prisma migrations, inspect the selected database with the
-maintenance command. Review the dry-run output before applying it.
+Target deletion commits a PostgreSQL cascade immediately, including Research
+sessions and promoted findings. The API requests scan cancellation without
+waiting for console or worker acknowledgement. Reports spanning another Target
+keep their remaining items.
 
-```sh
-npm run policy:backfill -- --dry-run
-npm run policy:backfill -- --apply
-```
+The worker collects orphan Research workspaces/consoles, Redis jobs, empty reports
+and OOB hits at startup and every five minutes. Unreachable consoles are retried
+on the next pass; disk identity is retained until cleanup succeeds. Targets left
+with `deletingAt` by an older release are finalized on the first pass. Collection
+is idempotent and logs removed resources with `operation=resource-gc`.
 
-The dry run reports how many programs were inspected, how many would be blocked,
-and every legacy exclusion that could not be converted. The apply command adds
-one blocked draft to each program without a policy and keeps existing policy
-versions and historical records intact. Repeating it does not create duplicate
-versions.
-
-Use the **Policy review needed** link in Targets to review the policy checks.
-Re-extract current program rules when the source changes. The application keeps
-reading the original program exclusions and checks parity with the structured
-exclusions before enabling automation. Editing a linked Scope's free text
-requires another review.
+The migration appends active versions of draft execution policies and releases
+campaigns blocked by policy review. Explicit automation prohibitions, missing
+scope, missing hunter identification, invalid User-Agent/headers, exclusions,
+rate/concurrency limits and forbidden categories remain enforced. Source text
+changes are recorded without requiring policy review. Newly proposed assets
+still require explicit scope confirmation.
 
 ## Run
 

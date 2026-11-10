@@ -53,17 +53,16 @@ suite('reviewed target form with PostgreSQL', () => {
     vi.unstubAllEnvs();
   });
 
-  it('creates an owner-reviewed manual target with documented assets and blocks undecided rules', async () => {
+  it('creates an active target with documented assets and informational program rules', async () => {
     const response = await post(request(fixture('Manual reviewed target')));
     expect(response.status).toBe(201);
     const { id } = await response.json();
     const program = await prisma.bountyProgram.findUniqueOrThrow({ where: { id }, include: { ...programPolicyInclude, scopeAssets: true } });
     expect(program.scopeAssets.map(asset => asset.normalizedValue)).toEqual(['https://app.example.test/']);
     expect(program.executionPolicies[0].policy).toMatchObject({
-      reviewState: 'OWNER_REVIEWED',
       sourceSnapshot: { documentedAssets: [{ originalValue: 'com.example.app' }], unrepresentedRules: ['Use only an owned account.'] },
     });
-    expect(programPolicyBlocker(program)).toMatch(/unrepresented program or scope rules/);
+    expect(programPolicyBlocker(program)).toBeNull();
     const params = { params: Promise.resolve({ id }) };
     const review = await (await settings.GET(new Request('http://app.example.test'), params)).json();
     auth.mockResolvedValueOnce({ user: { id: otherId } });
@@ -73,7 +72,6 @@ suite('reviewed target form with PostgreSQL', () => {
     update.targetReview.testAccounts.push({ asset: 'https://app.example.test', loginUrl: 'https://app.example.test/login', username: 'fixture-user', password: 'fixture-password', purpose: 'ACCOUNT_A' });
     const saved = await settings.PATCH(request({
       expectedUpdatedAt: review.updatedAt, expectedPolicyVersion: 1,
-      expectedLegacyScopeFingerprint: review.legacyPolicyReview.scopeFingerprint,
       targetReview: { ...update.targetReview, expectedAssets: review.expectedAssets },
     }, 'PATCH'), params);
     expect(saved.status).toBe(200);
