@@ -4,6 +4,7 @@ import { campaignActivity, targetCampaign, type CampaignFacts } from '@/lib/targ
 import { programPolicyInclude } from './programExecutionPolicy';
 import { campaignPolicyBlocker } from './campaignOrchestrator';
 import { pendingScopeSchema } from '@/lib/campaignSource';
+import { recoverStaleProgramDeletions } from './programDeletion';
 
 type Database = Pick<Prisma.TransactionClient, '$queryRaw'>;
 
@@ -117,7 +118,8 @@ async function loadReconSummary(db: Database, runId: string) {
   return row ?? null;
 }
 
-export function loadTargetCampaign(ownerId: string, id: string) {
+export async function loadTargetCampaign(ownerId: string, id: string) {
+  await recoverStaleProgramDeletions(ownerId, id);
   return prisma.$transaction(async tx => {
     const program = await tx.bountyProgram.findFirst({ where: { id, ownerId }, select: campaignProgramSelect });
     if (!program) return null;
