@@ -89,7 +89,6 @@ const toolCategories: Record<string, readonly TestCategory[]> = {
   ffuf: ['ACTIVE_SCANNING', 'FUZZING', 'BRUTE_FORCE'],
   'gobuster-dir': ['ACTIVE_SCANNING', 'FUZZING', 'BRUTE_FORCE'],
   'gobuster-dns': ['DNS_LOOKUP', 'FUZZING', 'BRUTE_FORCE'],
-  'burp-history': ['PASSIVE_RECON'],
   'http-probe': ['ACTIVE_SCANNING'], 'http-crawl': ['ACTIVE_SCANNING', 'CRAWLING'],
   'content-discovery': ['ACTIVE_SCANNING', 'FUZZING', 'BRUTE_FORCE'],
   'authenticated-probe': ['ACTIVE_SCANNING', 'AUTHENTICATED_TESTING'],

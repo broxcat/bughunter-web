@@ -29,7 +29,7 @@ export default async function HypothesisPage({ params, searchParams }: { params:
   const scopeActive = policyState !== "INACTIVE";
   const proof = researchDataSchema.safeParse(h.researchData);
   const review = savedResearchReview.safeParse(data.humanReview).data ?? null;
-  const requiresReview = Boolean(data.session.consoleTargetId);
+  const requiresReview = Boolean(data.session.activeTargetId);
   const reviewable = policyState === "CURRENT" && data.session.status === "READY" && proof.success;
   const testIds = h.status === "CONFIRMED" && proof.success ? reproducibleResearchTests(proof.data).map(test => test.id) : [];
   const reviewInput = requiresReview && reviewable && proof.data.tests.length
@@ -55,7 +55,7 @@ export default async function HypothesisPage({ params, searchParams }: { params:
     {requiresReview && (review || !h.promotion) && <ResearchHumanReview key={h.revision} sessionId={id} hypothesisId={h.id} revision={h.revision} review={review} canReview={reviewable} testIds={testIds}/>}
     <ResearchPromotion key={h.revision} sessionId={id} hypothesisId={h.id} targetId={data.session.targetId} revision={h.revision} eligible={h.status === "CONFIRMED" && reviewable && (!requiresReview || review?.verdict === "SUPPORTED")} existing={h.promotion} requiresReview={requiresReview && review?.verdict !== "SUPPORTED"}/>
     <Evidence title="Evidence for" entries={h.evidenceFor} /><Evidence title="Evidence against" entries={h.evidenceAgainst} />
-    <p>Tags: {h.tags.join(", ") || "None"}. Workspace: {data.session.workspaceId}. Raw evidence is not imported.</p>
+    <p>Tags: {h.tags.join(", ") || "None"}. Raw evidence is not imported.</p>
     <section className="space-y-3"><h2 className="text-xl">Revision history</h2>{h.revisions.map(r => { const decision = savedResearchReview.safeParse(r.humanReview).data; return <Card key={r.id} className="p-4"><p>Revision {r.revision}{r.revision === h.revision ? " — current" : ""} · {r.createdAt.toISOString()} · {r.source}</p><p>Status: {String((r.snapshot as { status?: string }).status ?? "Unknown")}</p><details><summary>View snapshot</summary><pre className="whitespace-pre-wrap break-words">{JSON.stringify(r.snapshot, null, 2)}</pre></details>{decision && <ResearchReviewResult review={decision}/>}</Card>; })}<div className="flex gap-4">{data.revisionPage > 1 && <Link className="text-brand" href={`?revisionPage=${data.revisionPage - 1}`}>Newer revisions</Link>}{data.revisionPage < data.revisionPages && <Link className="text-brand" href={`?revisionPage=${data.revisionPage + 1}`}>Older revisions</Link>}</div></section>
   </div>;
 }

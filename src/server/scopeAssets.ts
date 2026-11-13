@@ -74,7 +74,7 @@ export async function retireScopeAssetInTransaction(tx:Prisma.TransactionClient,
   return tx.scopeAsset.update({where:{id:asset.id},data:{active:false,updatedAt:nextAssetTime(asset.updatedAt)}});
 }
 export async function settleScopeAssetRetirement(userId:string,assetId:string){
-  const {pauseAssetResearch}=await import('./research/archiveAsset');await pauseAssetResearch(userId,assetId);
+  void userId;void assetId;
   const {settleQueuedCancellations}=await import('./queue/scanCancellation');await settleQueuedCancellations();
 }
 export async function createScopeAsset(userId:string,programId:string,input:AssetInput){

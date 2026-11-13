@@ -1,7 +1,7 @@
 import {auth} from '@/lib/auth';
 import {foreignOrigin} from '@/lib/requestOrigin';
 import {ResearchError} from './workspace';
-import {HypothesisSyncError} from './hypothesisFiles';
+import {HypothesisSyncError} from './hypotheses';
 export const coverageJson=(value:unknown,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'private, no-store'}});
 export async function coverageRequest(req:Request,write=false){
  const user=(await auth())?.user?.id;if(!user)throw new ResearchError('Unauthorized',401);

@@ -56,7 +56,7 @@ describe('shared backoff and blocking policy',()=>{
 
 describe('artifact credential redaction at the storage boundary',()=>{
   it('redacts sensitive keys, array strings and source references before any Markdown export',()=>{
-    const row=normalizeArtifact('observation',{hostname:'api.example.test',Authorization:'Bearer RAW_HEADER_SECRET','X-CSRF-Token':'RAW_CSRF_SECRET',notes:['Cookie: RAW_COOKIE_SECRET','https://api.example.test/path?key=RAW_QUERY_SECRET']},{tool:'burp',sourceRef:'Authorization: RAW_REF_SECRET',observedAt:'2026-11-03T00:00:00Z'},{normalizedValue:'*.example.test',format:'WILDCARD_DOMAIN',active:true},[]);
+    const row=normalizeArtifact('observation',{hostname:'api.example.test',Authorization:'Bearer RAW_HEADER_SECRET','X-CSRF-Token':'RAW_CSRF_SECRET',notes:['Cookie: RAW_COOKIE_SECRET','https://api.example.test/path?key=RAW_QUERY_SECRET']},{tool:'http-capture',sourceRef:'Authorization: RAW_REF_SECRET',observedAt:'2026-11-03T00:00:00Z'},{normalizedValue:'*.example.test',format:'WILDCARD_DOMAIN',active:true},[]);
     expect(row).not.toBeNull();expect(JSON.stringify(row)).not.toMatch(/RAW_(HEADER|COOKIE|QUERY|REF|CSRF)_SECRET/);
   });
 });
@@ -69,9 +69,8 @@ describe('Subfinder collected-source JSON',()=>{
 
 describe('distinct observations on the same surface',()=>{
   const boundary={normalizedValue:'*.example.test',format:'WILDCARD_DOMAIN',active:true},source={tool:'nuclei',sourceRef:'scan:nuclei',observedAt:'2026-11-03T00:00:00Z'};
-  it('keeps each matched template and each Burp request/response reference',()=>{
+  it('keeps each matched template',()=>{
     const rows=['header','auth'].map(templateId=>normalizeArtifact('observation',{url:'https://api.example.test/',type:'nuclei-recon',templateId},source,boundary,[])!);expect(deduplicateArtifacts(rows)).toHaveLength(2);
-    const history=['response1','response2'].map(responseRef=>normalizeArtifact('observation',{url:'https://api.example.test/',type:'burp-history',requestRef:'request',responseRef},{...source,tool:'burp'},boundary,[])!);expect(deduplicateArtifacts(history)).toHaveLength(2);
   });
   it('merges both observed address families and case-equivalent technology sources',()=>{
     const rows=['192.0.2.1','2001:db8::1'].map(address=>normalizeArtifact('observation',{hostname:'api.example.test',type:'dns-address',addresses:[address]},{...source,tool:'dns'},boundary,[])!);expect(deduplicateArtifacts(rows)[0].value.addresses).toEqual(['192.0.2.1','2001:db8::1']);

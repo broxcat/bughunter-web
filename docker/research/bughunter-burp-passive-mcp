@@ -1,3 +1,0 @@
-#!/bin/sh
-set -eu
-exec node /opt/bughunter/docker/research/validator/console-burp-main.mjs passive

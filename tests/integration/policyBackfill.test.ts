@@ -68,14 +68,10 @@ describe.skipIf(!testDatabase)('lossless execution policy backfill', () => {
       programId: legacy.id, normalizedValue: 'app.example.test', originalValue: 'app.example.test', format: 'SUBDOMAIN', type: 'WEB_APPLICATION',
     } });
     const hunt = await prisma.scanRun.create({ data: { targetId: target.id, type: 'HUNT', status: 'COMPLETED', huntReport: { legacy: true } } });
-    const recon = await prisma.scanRun.create({ data: { targetId: target.id, scopeAssetId: asset.id, type: 'RECON', status: 'COMPLETED' } });
-    const plan = await prisma.researchPlan.create({ data: {
-      programId: legacy.id, targetId: target.id, scopeAssetId: asset.id, scanRunId: recon.id,
-      sourceFingerprint: 'fixture-plan', methodologyVersion: 'legacy', metadata: { evidence: 'Original plan' },
-    } });
+    await prisma.scanRun.create({ data: { targetId: target.id, scopeAssetId: asset.id, type: 'RECON', status: 'COMPLETED' } });
     const session = await prisma.researchSession.create({ data: {
-      userId: user.id, targetId: target.id, workspaceId: randomUUID(), targetHost: target.host,
-      programName: legacy.companyName, researchPlanId: plan.id, scopeMarkdown: 'Original Research evidence', authorizationSnapshot: { legacy: true },
+      userId: user.id, targetId: target.id, targetHost: target.host,
+      programName: legacy.companyName, scopeMarkdown: 'Original Research evidence', authorizationSnapshot: { legacy: true },
     } });
     const report = await prisma.report.create({ data: { userId: user.id, targetId: target.id, title: 'Original report' } });
     const params = { params: Promise.resolve({ id: legacy.id }) };
@@ -106,7 +102,6 @@ describe.skipIf(!testDatabase)('lossless execution policy backfill', () => {
     expect(await prisma.target.findUnique({ where: { id: target.id } })).toEqual(target);
     expect(await prisma.scopeAsset.findUnique({ where: { id: asset.id } })).toEqual(asset);
     expect(await prisma.scanRun.findUnique({ where: { id: hunt.id } })).toEqual(hunt);
-    expect(await prisma.researchPlan.findUnique({ where: { id: plan.id } })).toEqual(plan);
     expect(await prisma.researchSession.findUnique({ where: { id: session.id } })).toEqual(session);
     expect(await prisma.report.findUnique({ where: { id: report.id } })).toEqual(report);
     expect(await prisma.programExecutionPolicy.count({ where: { programId: manual.id } })).toBe(1);

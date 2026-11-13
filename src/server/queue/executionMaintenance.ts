@@ -3,7 +3,7 @@ import { reconcileScanExecutions } from "./executionAttempts";
 import { settleQueuedCancellations } from "./scanCancellation";
 import { HEARTBEAT_INTERVAL_MS } from "./executionAttempts";
 
-export async function maintainScanExecutions() { await reconcileScanExecutions(); await settleQueuedCancellations(); const {maintainTargetRecons}=await import('../recon/targetRuns');await maintainTargetRecons(); const {maintainResearchPlans}=await import('../research/plans');await maintainResearchPlans(); const {maintainReconHistory}=await import('../recon/history');await maintainReconHistory(); }
+export async function maintainScanExecutions() { await reconcileScanExecutions(); await settleQueuedCancellations(); const {maintainTargetRecons}=await import('../recon/targetRuns');await maintainTargetRecons(); const {maintainReconHistory}=await import('../recon/history');await maintainReconHistory(); }
 export function startExecutionMaintenance() {
   let stopped = false, timer: ReturnType<typeof setTimeout> | undefined;
   let pending: Promise<void> = Promise.resolve();

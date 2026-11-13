@@ -5,7 +5,6 @@ import {useRouter,useSearchParams} from "next/navigation";
 import {paginationInput} from "@/lib/pagination";
 import CollectionPager from "@/components/CollectionPager";
 import TargetAuthentication from "@/components/TargetAuthentication";
-import CreateResearchButton from "@/components/CreateResearchButton";
 import { Suspense, use, useEffect, useState } from "react";
 import ScanCancelButton from "@/components/ScanCancelButton";
 import ScanLogViewer from "@/components/ScanLogViewer";
@@ -128,7 +127,7 @@ function TargetDetailContent({
 
       <div className="flex flex-wrap items-center gap-3">
         {target.program && <Link className="text-brand" href={`/targets/${target.program.id}?tab=Recon`}>Recon from target assets →</Link>}
-        {scopeApproved && target.host.startsWith("*.") && target.program ? <Link className="text-brand" href={`/targets/${target.program.id}?tab=Codex%20Console`}>Open program Codex console</Link> : <CreateResearchButton targetId={id} disabled={!scopeApproved} />}
+        {scopeApproved ? <Link className="text-brand" href={`/research?q=${encodeURIComponent(target.host)}`}>Open Research</Link> : <span className="text-muted">Research unavailable</span>}
         <div className="ml-auto flex gap-4 text-sm">
           <Link
             href={`/targets/${id}/findings`}

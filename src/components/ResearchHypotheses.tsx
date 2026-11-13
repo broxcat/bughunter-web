@@ -1,59 +1,86 @@
-"use client";
-import Link from "next/link";
-import {useRouter} from 'next/navigation';
-import ResearchProof from "./ResearchProof";
-import { useState } from "react";
-import { Button } from "./ui/Button";
-import { Card } from "./ui/Card";
-import { HYPOTHESIS_STATUSES, REGISTRY_NOTICE, type HypothesisStatus } from "@/lib/research/hypotheses";
+'use client';
 
-type Hypothesis = { id: string; externalId: string; title: string; status: HypothesisStatus; hypothesis: string; evidenceFor: unknown[]; evidenceAgainst: unknown[]; nextTest: string; expectedSignal: string; falsificationCondition: string; blockedReason: string | null; notes: string | null; researchData: unknown; promotion: { findingId: string } | null };
-export type HypothesisListData = { session: { status: string; hypothesesSyncedAt: string | null }; counts: Record<string, number>; total: number; page: number; pageSize: number; hypotheses: Hypothesis[] };
-export default function ResearchHypotheses({ sessionId, initial,initialStatus }: { sessionId: string; initial: HypothesisListData;initialStatus?:HypothesisStatus }) {
-  const [data,setData]=useState(initial),status=initialStatus??'',router=useRouter();
-  const [busy, setBusy] = useState(false), [error, setError] = useState(""), [result, setResult] = useState("");
-  async function load(filter: HypothesisStatus | "", page = 1) {
-    const r = await fetch(`/api/research-sessions/${sessionId}/hypotheses?${new URLSearchParams({ ...(filter ? { status: filter } : {}), page: String(page) })}`, { cache: "no-store" });
-    if (!r.ok) throw new Error("Unable to load hypotheses");
-    const body=await r.json();setData(body);
-    if(body.page!==data.page)navigate(filter,body.page,true);
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { HYPOTHESIS_STATUSES, REGISTRY_NOTICE, type HypothesisStatus } from '@/lib/research/hypotheses';
+import ResearchProof from './ResearchProof';
+import { Button } from './ui/Button';
+import { Card } from './ui/Card';
+
+type Hypothesis = {
+  id: string; externalId: string; title: string; status: HypothesisStatus; hypothesis: string;
+  evidenceFor: unknown[]; evidenceAgainst: unknown[]; nextTest: string; expectedSignal: string;
+  falsificationCondition: string; blockedReason: string | null; notes: string | null;
+  researchData: unknown; promotion: { findingId: string } | null;
+};
+export type HypothesisListData = {
+  session: { status: string }; counts: Record<string, number>; total: number; page: number; pageSize: number; hypotheses: Hypothesis[];
+};
+
+export default function ResearchHypotheses({ sessionId, initial, initialStatus }: {
+  sessionId: string; initial: HypothesisListData; initialStatus?: HypothesisStatus;
+}) {
+  const [data, setData] = useState(initial);
+  const status = initialStatus ?? '';
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  function navigate(next: HypothesisStatus | '', page = 1, replace = false) {
+    const query = new URLSearchParams();
+    if (next) query.set('status', next);
+    query.set('hypothesisPage', String(page));
+    const href = '/research/history/' + sessionId + '?' + query;
+    if (replace) router.replace(href); else router.push(href);
   }
-  function navigate(next:HypothesisStatus|"",page=1,replace=false){const q=new URLSearchParams();if(next)q.set('status',next);q.set('hypothesisPage',String(page));const href=`/research/history/${sessionId}?${q}`;if(replace)router.replace(href);else router.push(href);}
-  async function filter(next:HypothesisStatus|"",page=1){navigate(next,page);}
-  async function sync() {
-    if (busy) return;
-    setBusy(true); setError(""); setResult("");
+  async function filter(next: HypothesisStatus | '', page = 1) {
+    setBusy(true);
+    setError('');
     try {
-      const response = await fetch(`/api/research-sessions/${sessionId}/hypotheses/sync`, { method: "POST" });
+      const response = await fetch('/api/research-sessions/' + sessionId + '/hypotheses?' + new URLSearchParams({
+        ...(next ? { status: next } : {}), page: String(page),
+      }), { cache: 'no-store' });
+      if (!response.ok) throw new Error('Unable to load hypotheses');
       const body = await response.json();
-      if (!response.ok) throw new Error(`${body.code ?? "SYNC_FAILED"}: ${body.error}. ${(body.issues ?? []).map((issue: { path: string; message: string }) => `${issue.path}: ${issue.message}`).join("; ")}`);
-      await load(status,data.page);
-      setResult(`Synced: ${body.created} created, ${body.updated} updated, ${body.unchanged} unchanged.`);
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+      setData(body);
+      navigate(next, body.page, true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load hypotheses');
+    } finally {
+      setBusy(false);
+    }
   }
+
   return <section id="hypotheses" className="space-y-4" aria-label="Hypotheses">
     <h2 className="text-xl">Hypotheses</h2>
-    <p>Workspace → BugHunter, read-only registry. A CONFIRMED hypothesis is a research claim requiring human evidence review before any Finding.</p>
-    <p>Last synced: {data.session.hypothesesSyncedAt ? new Date(data.session.hypothesesSyncedAt).toLocaleString() : "Never"}</p>
-    <Button onClick={sync} disabled={busy || data.session.status !== "READY"}>{busy ? "Working…" : "Sync from workspace"}</Button>
-    {data.session.status === "ARCHIVED" && <p>Archived session — sync disabled.</p>}
-    <p className="text-sm text-muted">Validate inside the workspace with <code>bughunter-validate-hypotheses</code> before syncing. No automatic synchronization.</p>
-    {error && <div role="alert"><p>Hypotheses sync failed</p><p className="whitespace-pre-wrap">{error}</p><p>Run <code>bughunter-validate-hypotheses</code> inside the research workspace.</p></div>}
-    {result && <p role="status">{result}</p>}
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-5">{HYPOTHESIS_STATUSES.map(s => <Card key={s} className="p-3"><p>{s}</p><p aria-label={`${s} hypotheses`} className="text-2xl">{data.counts[s] ?? 0}</p></Card>)}</div>
-    <div className="flex flex-wrap gap-2" aria-label="Filter hypotheses">{(["", ...HYPOTHESIS_STATUSES] as const).map(s => <Button key={s} variant="secondary" disabled={busy} aria-pressed={status === s} onClick={() => void filter(s)}>{s ? s[0] + s.slice(1).toLowerCase() : "All"}</Button>)}</div>
-    {data.hypotheses.map(h => <Card key={h.id} className="p-5 space-y-2">
-      <p>{h.externalId} · {h.status}</p><h3 className="text-lg font-semibold">{h.title}</h3>
-      {h.status === "CONFIRMED" && <p className="font-semibold">{REGISTRY_NOTICE}</p>}
-      <p><strong>Hypothesis:</strong> {h.hypothesis}</p><p>Evidence for: {h.evidenceFor.length} · Evidence against: {h.evidenceAgainst.length}</p>
-      {h.status === "BLOCKED" && <p>Blocked: {h.blockedReason}</p>}
-      {h.status === "REJECTED" && h.notes && <p>Why rejected: {h.notes}</p>}
-      <ResearchProof value={h.researchData} compact />
-      {h.promotion && <p>Finding draft already created; Evidence Review remains independent.</p>}
-      <p><strong>Next distinct test:</strong> {h.nextTest}</p><p><strong>Expected signal:</strong> {h.expectedSignal}</p><p><strong>Falsification condition:</strong> {h.falsificationCondition}</p>
-      <Link href={`/research/history/${sessionId}/hypotheses/${h.id}`} className="text-brand">View details — {h.externalId}</Link>
+    <p>Read-only Research registry. A CONFIRMED hypothesis is a research claim requiring human evidence review before any Finding.</p>
+    {error && <p role="alert">{error}</p>}
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-5">{HYPOTHESIS_STATUSES.map(value =>
+      <Card key={value} className="p-3"><p>{value}</p><p aria-label={value + ' hypotheses'} className="text-2xl">{data.counts[value] ?? 0}</p></Card>)}</div>
+    <div className="flex flex-wrap gap-2" aria-label="Filter hypotheses">{(['', ...HYPOTHESIS_STATUSES] as const).map(value =>
+      <Button key={value} variant="secondary" disabled={busy} aria-pressed={status === value} onClick={() => void filter(value)}>
+        {value ? value[0] + value.slice(1).toLowerCase() : 'All'}
+      </Button>)}</div>
+    {data.hypotheses.map(hypothesis => <Card key={hypothesis.id} className="space-y-2 p-5">
+      <p>{hypothesis.externalId} · {hypothesis.status}</p><h3 className="text-lg font-semibold">{hypothesis.title}</h3>
+      {hypothesis.status === 'CONFIRMED' && <p className="font-semibold">{REGISTRY_NOTICE}</p>}
+      <p><strong>Hypothesis:</strong> {hypothesis.hypothesis}</p>
+      <p>Evidence for: {hypothesis.evidenceFor.length} · Evidence against: {hypothesis.evidenceAgainst.length}</p>
+      {hypothesis.status === 'BLOCKED' && <p>Blocked: {hypothesis.blockedReason}</p>}
+      {hypothesis.status === 'REJECTED' && hypothesis.notes && <p>Why rejected: {hypothesis.notes}</p>}
+      <ResearchProof value={hypothesis.researchData} compact />
+      {hypothesis.promotion && <p>Finding draft already created; Evidence Review remains independent.</p>}
+      <p><strong>Next distinct test:</strong> {hypothesis.nextTest}</p>
+      <p><strong>Expected signal:</strong> {hypothesis.expectedSignal}</p>
+      <p><strong>Falsification condition:</strong> {hypothesis.falsificationCondition}</p>
+      <Link href={'/research/history/' + sessionId + '/hypotheses/' + hypothesis.id} className="text-brand">View details — {hypothesis.externalId}</Link>
     </Card>)}
-    {!data.hypotheses.length && <p>No hypotheses in this view. Keep negative and rejected results in the registry.</p>}
-    {data.total > data.pageSize && <div className="flex gap-3"><Button disabled={busy || data.page === 1} onClick={() => void filter(status, data.page - 1)}>Previous</Button><p>Page {data.page} / {Math.ceil(data.total / data.pageSize)}</p><Button disabled={busy || data.page * data.pageSize >= data.total} onClick={() => void filter(status, data.page + 1)}>Next</Button></div>}
+    {!data.hypotheses.length && <p>No hypotheses in this view.</p>}
+    {data.total > data.pageSize && <div className="flex gap-3">
+      <Button disabled={busy || data.page === 1} onClick={() => void filter(status, data.page - 1)}>Previous</Button>
+      <p>Page {data.page} / {Math.ceil(data.total / data.pageSize)}</p>
+      <Button disabled={busy || data.page * data.pageSize >= data.total} onClick={() => void filter(status, data.page + 1)}>Next</Button>
+    </div>}
   </section>;
 }

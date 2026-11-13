@@ -12,29 +12,29 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 model User {
-  hunterIdentity HunterIdentity?
+  hunterIdentity      HunterIdentity?
   platformConnections PlatformConnection[]
-  id            String    @id @default(cuid())
-  name          String?
-  email         String    @unique
-  emailVerified DateTime?
-  image         String?
+  id                  String               @id @default(cuid())
+  name                String?
+  email               String               @unique
+  emailVerified       DateTime?
+  image               String?
   // Credentials provider: bcrypt hash. Null for OAuth-only users.
-  passwordHash  String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  passwordHash        String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
-  bountyPrograms   BountyProgram[]
-  accounts         Account[]
-  sessions         Session[]
-  aiProviderConfig AiProviderConfig[]
-  scopes           Scope[]
-  targets          Target[]
-  reports          Report[]
-  scanRequestKeys  ScanRequestKey[]
-  researchSessions ResearchSession[]
+  bountyPrograms     BountyProgram[]
+  accounts           Account[]
+  sessions           Session[]
+  aiProviderConfig   AiProviderConfig[]
+  scopes             Scope[]
+  targets            Target[]
+  reports            Report[]
+  scanRequestKeys    ScanRequestKey[]
+  researchSessions   ResearchSession[]
   researchPromotions ResearchFindingPromotion[]
-  researchRouting ResearchModelRouting?
+  researchRouting    ResearchModelRouting?
 }
 
 model Account {
@@ -161,91 +161,89 @@ enum AssessmentSourceKind {
 
 // Current program context only. Historical Research/Recon snapshots are separate.
 model TargetScopeContext {
-  programId String @id
+  programId         String        @id
   policyFingerprint String
   sourceFingerprint String
-  rendererVersion Int
-  markdown String @db.Text
-  markdownSha256 String
-  generatedAt DateTime
-  program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  rendererVersion   Int
+  markdown          String        @db.Text
+  markdownSha256    String
+  generatedAt       DateTime
+  program           BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
 }
 
 model BountyProgram {
-  campaign TargetCampaign?
-  executionPolicies ProgramExecutionPolicy[]
+  campaign            TargetCampaign?
+  executionPolicies   ProgramExecutionPolicy[]
   currentScopeContext TargetScopeContext?
-  researchPlans ResearchPlan[]
   // Legacy enum retained; current programs are constrained to BLACK_BOX.
-  assessmentMode AssessmentMode @default(BLACK_BOX)
-  assessmentSources AssessmentSource[]
-  scopeRules        String[]        @default([])
-  rulesOfEngagement String?         @db.Text
-  deletingAt        DateTime?
-  id                String          @id @default(cuid())
-  ownerId           String
-  companyName       String
-  platform          BountyPlatform?
-  programUrl        String?
-  rewardCurrency    String          @default("EUR")
-  rewardLow         Decimal?        @db.Decimal(18, 2)
-  rewardMedium      Decimal?        @db.Decimal(18, 2)
-  rewardHigh        Decimal?        @db.Decimal(18, 2)
-  rewardCritical    Decimal?        @db.Decimal(18, 2)
-  requiredUserAgent String
-  outOfScope        String[]        @default([])
-  qualifying        String[]        @default([])
-  nonQualifying     String[]        @default([])
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  owner             User            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
-  targets           Target[]
-  scopeAssets       ScopeAsset[]
-  reconRuns TargetReconRun[]
-  reconSummaries ReconSummary[]
+  assessmentMode      AssessmentMode           @default(BLACK_BOX)
+  assessmentSources   AssessmentSource[]
+  scopeRules          String[]                 @default([])
+  rulesOfEngagement   String?                  @db.Text
+  deletingAt          DateTime?
+  id                  String                   @id @default(cuid())
+  ownerId             String
+  companyName         String
+  platform            BountyPlatform?
+  programUrl          String?
+  rewardCurrency      String                   @default("EUR")
+  rewardLow           Decimal?                 @db.Decimal(18, 2)
+  rewardMedium        Decimal?                 @db.Decimal(18, 2)
+  rewardHigh          Decimal?                 @db.Decimal(18, 2)
+  rewardCritical      Decimal?                 @db.Decimal(18, 2)
+  requiredUserAgent   String
+  outOfScope          String[]                 @default([])
+  qualifying          String[]                 @default([])
+  nonQualifying       String[]                 @default([])
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  owner               User                     @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  targets             Target[]
+  scopeAssets         ScopeAsset[]
+  reconRuns           TargetReconRun[]
+  reconSummaries      ReconSummary[]
 
   @@index([ownerId])
 }
 
 // Data authorization metadata only. This relation never grants network scope.
 model AssessmentSource {
-  id String @id @default(cuid())
-  programId String
-  label String
-  kind AssessmentSourceKind
-  locator String
-  reference String?
-  includePaths String[] @default([])
-  excludePaths String[] @default([])
-  active Boolean @default(false)
-  notes String? @db.Text
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  id           String               @id @default(cuid())
+  programId    String
+  label        String
+  kind         AssessmentSourceKind
+  locator      String
+  reference    String?
+  includePaths String[]             @default([])
+  excludePaths String[]             @default([])
+  active       Boolean              @default(false)
+  notes        String?              @db.Text
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  program      BountyProgram        @relation(fields: [programId], references: [id], onDelete: Cascade)
+
   @@index([programId, active])
 }
 
 model Target {
-  reconHistory ReconHistoryRun[]
-  reconSurfaces ReconSurface[]
+  reconHistory    ReconHistoryRun[]
+  reconSurfaces   ReconSurface[]
   evidenceRecords EvidenceRecord[]
 
   researchCoverage ResearchCoverage[]
 
-  researchPlans ResearchPlan[]
-  consoleDeletingAt DateTime?
-  scopeAssetId String? @unique
-  scopeAsset ScopeAsset? @relation("AssetExecution", fields: [scopeAssetId], references: [id], onDelete: SetNull)
+  scopeAssetId          String?        @unique
+  scopeAsset            ScopeAsset?    @relation("AssetExecution", fields: [scopeAssetId], references: [id], onDelete: SetNull)
   discoveredFromAssetId String?
-  discoveredFromAsset ScopeAsset? @relation("AssetDiscoveries", fields: [discoveredFromAssetId], references: [id], onDelete: SetNull)
+  discoveredFromAsset   ScopeAsset?    @relation("AssetDiscoveries", fields: [discoveredFromAssetId], references: [id], onDelete: SetNull)
   // Internal program execution/workspace identity; never a discovered host.
-  contextOnly Boolean @default(false)
-  discoverySource String?
-  discoveredAt DateTime?
+  contextOnly           Boolean        @default(false)
+  discoverySource       String?
+  discoveredAt          DateTime?
   discoveredByScanRunId String?
-  programId String?
-  active    Boolean        @default(true)
-  program   BountyProgram? @relation(fields: [programId], references: [id], onDelete: Restrict)
+  programId             String?
+  active                Boolean        @default(true)
+  program               BountyProgram? @relation(fields: [programId], references: [id], onDelete: Restrict)
 
   id        String   @id @default(cuid())
   userId    String
@@ -262,12 +260,12 @@ model Target {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scope       Scope              @relation(fields: [scopeId], references: [id], onDelete: Restrict)
-  scanRuns    ScanRun[]
-  findings    Finding[]
-  reports     Report[]
-  credentials TargetCredential[]
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scope            Scope              @relation(fields: [scopeId], references: [id], onDelete: Restrict)
+  scanRuns         ScanRun[]
+  findings         Finding[]
+  reports          Report[]
+  credentials      TargetCredential[]
   researchSessions ResearchSession[]
 
   @@index([userId])
@@ -293,31 +291,31 @@ enum CredentialPurpose {
 
 model TargetCredential {
   // Operator-declared context; never a verified role or an execution permission.
-  persona String?
-  reconEnabled Boolean @default(false)
+  persona              String?
+  reconEnabled         Boolean             @default(false)
   sessionStatus        TargetSessionStatus @default(UNKNOWN)
   sessionCheckedAt     DateTime?
   sessionExpiresAt     DateTime?
-  validationUrl        String? @db.Text
+  validationUrl        String?             @db.Text
   sessionIdentityHash  String?
   sessionCheckId       String?
-  purpose              CredentialPurpose @default(OTHER)
+  purpose              CredentialPurpose   @default(OTHER)
   // Explicit user attestation: a read-only object owned by this test account.
   ownedObjectUrl       String?
-  id                   String            @id @default(cuid())
+  id                   String              @id @default(cuid())
   targetId             String
   label                String
-  mode                 CredentialMode    @default(COOKIES)
-  cookiesCipher        String?           @db.Text // AES-GCM of JSON.stringify(cookies map)
-  headerCipher         String?           @db.Text // AES-GCM of a bearer token (Authorization value)
+  mode                 CredentialMode      @default(COOKIES)
+  cookiesCipher        String?             @db.Text // AES-GCM of JSON.stringify(cookies map)
+  headerCipher         String?             @db.Text // AES-GCM of a bearer token (Authorization value)
   // EMAIL_PASSWORD mode: the app logs in via headless Chromium to mint/refresh
   // the session cookies automatically. Email/password encrypted like everything else.
-  loginUrl             String?           @db.Text
-  emailCipher          String?           @db.Text
-  passwordCipher       String?           @db.Text
-  sessionCookiesCipher String?           @db.Text // cached cookies obtained by auto-login
+  loginUrl             String?             @db.Text
+  emailCipher          String?             @db.Text
+  passwordCipher       String?             @db.Text
+  sessionCookiesCipher String?             @db.Text // cached cookies obtained by auto-login
   sessionRefreshedAt   DateTime? // when the cached session was last minted
-  createdAt            DateTime          @default(now())
+  createdAt            DateTime            @default(now())
 
   target Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
 
@@ -342,60 +340,59 @@ enum CredentialMode {
 // ---------------------------------------------------------------------------
 
 model ScanRun {
-  surfaceHistory ReconHistoryRun?
-  researchPlans ResearchPlan[]
+  surfaceHistory                ReconHistoryRun?
   authenticatedContextsSnapshot Json?
-  authenticatedReconResult Json?
-  surfaceObservations ReconSurfaceObservation[]
+  authenticatedReconResult      Json?
+  surfaceObservations           ReconSurfaceObservation[]
   // Null means historical mode was not captured; never infer from today's program.
-  assessmentModeSnapshot AssessmentMode?
-  assessmentSourcesSnapshot Json?
-  reconSummaries ReconSummary[]
-  targetReconRunId String?
-  targetReconRun TargetReconRun? @relation(fields: [targetReconRunId], references: [id], onDelete: SetNull)
-  reconOrder Int @default(0)
-  reconPlan Json?
-  toolVersions Json?
-  toolManifest Json?
-  artifactVersion Int @default(0)
-  artifacts ReconArtifact[]
-  changeSet Json?
-  scopeMarkdown String? @db.Text
-  scopeMarkdownSha256 String?
-  scopeAssetId String?
-  scopeAsset ScopeAsset? @relation(fields: [scopeAssetId], references: [id], onDelete: SetNull)
-  scopeAssetSnapshot Json?
-  assetResults Json?
-  reconSteps ReconPipelineStep[]
-  discoveries HostDiscovery[]
-  approvedHuntTechniques String[]   @default([])
-  huntReport             Json?
-  reconCorpus            Json?
+  assessmentModeSnapshot        AssessmentMode?
+  assessmentSourcesSnapshot     Json?
+  reconSummaries                ReconSummary[]
+  targetReconRunId              String?
+  targetReconRun                TargetReconRun?           @relation(fields: [targetReconRunId], references: [id], onDelete: SetNull)
+  reconOrder                    Int                       @default(0)
+  reconPlan                     Json?
+  toolVersions                  Json?
+  toolManifest                  Json?
+  artifactVersion               Int                       @default(0)
+  artifacts                     ReconArtifact[]
+  changeSet                     Json?
+  scopeMarkdown                 String?                   @db.Text
+  scopeMarkdownSha256           String?
+  scopeAssetId                  String?
+  scopeAsset                    ScopeAsset?               @relation(fields: [scopeAssetId], references: [id], onDelete: SetNull)
+  scopeAssetSnapshot            Json?
+  assetResults                  Json?
+  reconSteps                    ReconPipelineStep[]
+  discoveries                   HostDiscovery[]
+  approvedHuntTechniques        String[]                  @default([])
+  huntReport                    Json?
+  reconCorpus                   Json?
   // Immutable execution-time Hunt policy; legacy runs remain unknown.
-  huntSnapshot           Json?
+  huntSnapshot                  Json?
   // Effective execution-time configuration, never changed by later program edits.
-  requiredUserAgent      String?
-  id                     String     @id @default(cuid())
-  targetId               String
-  type                   ScanType
-  status                 ScanStatus @default(QUEUED)
+  requiredUserAgent             String?
+  id                            String                    @id @default(cuid())
+  targetId                      String
+  type                          ScanType
+  status                        ScanStatus                @default(QUEUED)
   // Execution result; null for live jobs and historical runs of unknown outcome.
-  outcome                ScanOutcome?
+  outcome                       ScanOutcome?
   // BullMQ job id, set once enqueued.
-  jobId                  String?
-  error                  String?    @db.Text
-  createdAt              DateTime   @default(now())
-  startedAt              DateTime?
-  finishedAt             DateTime?
-  cancelRequestedAt      DateTime?
+  jobId                         String?
+  error                         String?                   @db.Text
+  createdAt                     DateTime                  @default(now())
+  startedAt                     DateTime?
+  finishedAt                    DateTime?
+  cancelRequestedAt             DateTime?
 
-  target   Target    @relation(fields: [targetId], references: [id], onDelete: Cascade)
-  logs     ScanLog[]
-  findings Finding[]
-  jobOutbox ScanJobOutbox?
-  requestKey ScanRequestKey?
+  target            Target                 @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  logs              ScanLog[]
+  findings          Finding[]
+  jobOutbox         ScanJobOutbox?
+  requestKey        ScanRequestKey?
   executionAttempts ScanExecutionAttempt[]
-  researchSessions ResearchSession[]
+  researchSessions  ResearchSession[]
 
   @@index([targetId])
   @@index([scopeAssetId, createdAt])
@@ -404,31 +401,32 @@ model ScanRun {
 }
 
 model HostDiscovery {
-  id String @id @default(cuid())
+  id        String   @id @default(cuid())
   scanRunId String
-  host String
-  source String
-  state String
-  added Boolean @default(false)
+  host      String
+  source    String
+  state     String
+  added     Boolean  @default(false)
   createdAt DateTime @default(now())
-  scanRun ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  scanRun   ScanRun  @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+
   @@unique([scanRunId, host])
 }
 
 // Real starts only: historical scans have no invented execution attempts.
 model ScanExecutionAttempt {
   cleanupConfirmedAt DateTime?
-  id               String                    @id @default(cuid())
-  scanRunId        String
-  workerId         String
-  state            ScanExecutionAttemptState @default(RUNNING)
-  startedAt        DateTime                  @default(now())
-  heartbeatAt      DateTime                  @default(now())
-  finishedAt       DateTime?
-  networkStartedAt DateTime?
-  usefulWorkAt     DateTime?
-  reason           String?                   @db.Text
-  scanRun          ScanRun                   @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  id                 String                    @id @default(cuid())
+  scanRunId          String
+  workerId           String
+  state              ScanExecutionAttemptState @default(RUNNING)
+  startedAt          DateTime                  @default(now())
+  heartbeatAt        DateTime                  @default(now())
+  finishedAt         DateTime?
+  networkStartedAt   DateTime?
+  usefulWorkAt       DateTime?
+  reason             String?                   @db.Text
+  scanRun            ScanRun                   @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
 
   @@index([scanRunId])
   @@index([state, heartbeatAt])
@@ -463,8 +461,8 @@ model ScanRequestKey {
   userId      String
   key         String
   requestHash String
-  scanRunId   String @unique
-  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scanRunId   String  @unique
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   scanRun     ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
 
   @@id([userId, key])
@@ -494,59 +492,59 @@ model ScanLog {
 
 model Finding {
   // Null on historical rows: no invented lifecycle or past validation.
-  lifecycle FindingLifecycle? @default(CANDIDATE)
-  lifecycleRevision Int @default(0)
-  submission Json?
-  lifecycleEvents FindingLifecycleEvent[]
-  retests FindingRetest[]
+  lifecycle         FindingLifecycle?       @default(CANDIDATE)
+  lifecycleRevision Int                     @default(0)
+  submission        Json?
+  lifecycleEvents   FindingLifecycleEvent[]
+  retests           FindingRetest[]
 
   vaultEvidence EvidenceFinding[]
 
-  reviewStatus FindingReviewStatus @default(CANDIDATE)
+  reviewStatus   FindingReviewStatus @default(CANDIDATE)
   reviewEvidence Json?
-  reviewedAt DateTime?
-  huntMetadata Json?
-  id           String             @id @default(cuid())
-  targetId     String
-  scanRunId    String?
-  title        String
-  vulnClass    String?
-  severity     Severity           @default(INFO)
-  description  String?            @db.Text
+  reviewedAt     DateTime?
+  huntMetadata   Json?
+  id             String              @id @default(cuid())
+  targetId       String
+  scanRunId      String?
+  title          String
+  vulnClass      String?
+  severity       Severity            @default(INFO)
+  description    String?             @db.Text
   // Where the finding was observed: URL, endpoint, or parameter
   // (e.g. "/api/users/{id}", "?redirect="). Optional.
-  location     String?
-  evidence     String?            @db.Text
+  location       String?
+  evidence       String?             @db.Text
   // Confidence axis, INDEPENDENT of severity and gateStatus. PROVEN = direct
   // evidence in the HTTP response/observed behavior; CANDIDATE = needs manual or
   // out-of-band confirmation. A CANDIDATE may still carry a high severity.
-  confidence   FindingConfidence? @default(CANDIDATE)
-  gateStatus   GateStatus         @default(UNVALIDATED)
+  confidence     FindingConfidence?  @default(CANDIDATE)
+  gateStatus     GateStatus          @default(UNVALIDATED)
   // Historical validation columns retained for migration compatibility only.
-  gateAnswers  Json?
-  killedReason String?            @db.Text
+  gateAnswers    Json?
+  killedReason   String?             @db.Text
   // Out-of-band correlation key (Phase 5). The SSRF scanner sets this to the
   // per-attempt token it embedded in a self-hosted OOB callback URL; a matching
   // OobHit.token row (written by the catcher when the target calls back) CONFIRMS
   // blind SSRF. Nullable, no backfill — most findings never use OOB.
-  oobToken     String?
+  oobToken       String?
   // Industry-standard classification, all optional and complementary to
   // `severity` (which stays the source of truth for badges/filters).
   // cwe: e.g. "CWE-79"; pre-filled from vulnClass at creation, editable.
-  cwe          String?
+  cwe            String?
   // CVSS v3.1 base vector, e.g. "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H".
   // cvssScore is always recomputed server-side from the vector.
-  cvssVector   String?
-  cvssScore    Float?
+  cvssVector     String?
+  cvssScore      Float?
   // Manually written report sections; the report shows a placeholder when empty.
-  impact       String?            @db.Text
-  remediation  String?            @db.Text
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  impact         String?             @db.Text
+  remediation    String?             @db.Text
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
-  target      Target       @relation(fields: [targetId], references: [id], onDelete: Cascade)
-  scanRun     ScanRun?     @relation(fields: [scanRunId], references: [id], onDelete: SetNull)
-  reportItems ReportItem[]
+  target            Target                    @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  scanRun           ScanRun?                  @relation(fields: [scanRunId], references: [id], onDelete: SetNull)
+  reportItems       ReportItem[]
   researchPromotion ResearchFindingPromotion?
 
   @@index([targetId])
@@ -647,7 +645,7 @@ enum ScopeStatus {
 
 enum ScanType {
   RECON
-  HUNT      // Legacy: read-only, execution retired
+  HUNT // Legacy: read-only, execution retired
   VALIDATE
 }
 
@@ -708,41 +706,28 @@ enum ResearchSessionStatus {
 }
 
 model ResearchSession {
-  // Trusted hashes for CREATING recovery; never authorization from filesystem.
-  publicationManifest Json?
   evidenceRecords EvidenceRecord[]
 
   coverageEvents ResearchCoverageEvent[]
 
-  researchPlanId String?
-  researchPlan ResearchPlan? @relation(fields: [researchPlanId], references: [id], onDelete: SetNull)
-  id             String @id @default(cuid())
-  userId         String
-  targetId       String
-  workspaceId    String @unique
-  // Null for historical UUID sessions. One persistent console per technical Target.
-  consoleTargetId String? @unique
-  // Selected console; native conversations remain separate for each provider.
-  provider       ResearchProvider @default(codex)
-  reconScanRunId String?
-  status         ResearchSessionStatus @default(CREATING)
-  targetHost     String
-  programName    String
-  scopeMarkdown  String @db.Text
-  files          String[] @default([])
-  exportSha256   String?
+  id                    String                @id @default(cuid())
+  userId                String
+  targetId              String
+  // One current automated Research context per technical Target.
+  activeTargetId        String?               @unique
+  reconScanRunId        String?
+  status                ResearchSessionStatus @default(CREATING)
+  targetHost            String
+  programName           String
+  scopeMarkdown         String                @db.Text
   authorizationSnapshot Json?
-  hypothesesSyncedAt DateTime?
-  hypothesesSourceSha256 String?
-  hypotheses ResearchHypothesis[]
-  reconSnapshots ResearchReconSnapshot[]
-  reconDeliveries ResearchReconDelivery[]
-  harnessRuns ResearchHarnessRun[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  hypotheses            ResearchHypothesis[]
+  harnessRuns           ResearchHarnessRun[]
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
 
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  target Target @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  target Target   @relation(fields: [targetId], references: [id], onDelete: Restrict)
   recon  ScanRun? @relation(fields: [reconScanRunId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
@@ -766,60 +751,57 @@ enum ResearchHypothesisConfidence {
 }
 
 enum ResearchHypothesisSource {
-  CODEX_WORKSPACE
+  AUTOMATED_RESEARCH
 }
 
 enum ResearchHypothesisRevisionSource {
-  WORKSPACE_IMPORT
+  STRUCTURED_RESEARCH
 }
 
 model ResearchHypothesis {
   vaultEvidence EvidenceHypothesis[]
 
-  planItemId String?
-  planItem ResearchPlanItem? @relation(fields: [planItemId], references: [id], onDelete: SetNull)
-  id                     String @id @default(cuid())
+  id                     String                        @id @default(cuid())
   sessionId              String
   externalId             String
-  title                  String @db.VarChar(200)
+  title                  String                        @db.VarChar(200)
   status                 ResearchHypothesisStatus
-  hypothesis             String @db.Text
+  hypothesis             String                        @db.Text
   evidenceFor            Json
   evidenceAgainst        Json
-  nextTest               String @db.Text
-  expectedSignal         String @db.Text
-  falsificationCondition String @db.Text
-  blockedReason          String? @db.Text
-  notes                  String? @db.Text
+  nextTest               String                        @db.Text
+  expectedSignal         String                        @db.Text
+  falsificationCondition String                        @db.Text
+  blockedReason          String?                       @db.Text
+  notes                  String?                       @db.Text
   confidence             ResearchHypothesisConfidence?
-  tags                   String[] @default([])
-  source                 ResearchHypothesisSource @default(CODEX_WORKSPACE)
+  tags                   String[]                      @default([])
+  source                 ResearchHypothesisSource      @default(AUTOMATED_RESEARCH)
   sourceUpdatedAt        DateTime?
-  importedAt             DateTime @default(now())
+  importedAt             DateTime                      @default(now())
   researchData           Json?
   contentSha256          String
-  revision               Int @default(1)
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  revision               Int                           @default(1)
+  createdAt              DateTime                      @default(now())
+  updatedAt              DateTime                      @updatedAt
 
-  session   ResearchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session   ResearchSession              @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   revisions ResearchHypothesisRevision[]
   promotion ResearchFindingPromotion?
 
   @@unique([sessionId, externalId])
-  @@index([planItemId])
   @@index([sessionId, status])
 }
 
 // Append-only through the import service. No mutation API or inline UI editing.
 model ResearchHypothesisRevision {
-  id           String @id @default(cuid())
+  id           String                           @id @default(cuid())
   hypothesisId String
   revision     Int
   snapshot     Json
   humanReview  Json?
-  source       ResearchHypothesisRevisionSource @default(WORKSPACE_IMPORT)
-  createdAt    DateTime @default(now())
+  source       ResearchHypothesisRevisionSource @default(STRUCTURED_RESEARCH)
+  createdAt    DateTime                         @default(now())
 
   hypothesis ResearchHypothesis @relation(fields: [hypothesisId], references: [id], onDelete: Cascade)
 
@@ -829,43 +811,19 @@ model ResearchHypothesisRevision {
 // Explicit human action only. Unique keys make retries/concurrency idempotent.
 // Retain promoted Research provenance rather than cascade-delete its history.
 model ResearchFindingPromotion {
-  id                 String @id @default(cuid())
-  hypothesisId       String @unique
-  findingId          String @unique
+  id                 String   @id @default(cuid())
+  hypothesisId       String   @unique
+  findingId          String   @unique
   userId             String
   hypothesisRevision Int
   snapshot           Json
   createdAt          DateTime @default(now())
 
   hypothesis ResearchHypothesis @relation(fields: [hypothesisId], references: [id], onDelete: Restrict)
-  finding    Finding @relation(fields: [findingId], references: [id], onDelete: Restrict)
-  user       User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  finding    Finding            @relation(fields: [findingId], references: [id], onDelete: Restrict)
+  user       User               @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([userId])
-}
-
-enum ResearchProvider {
-  codex
-  claude
-}
-
-// Derived, immutable evidence. Original ScanRun/HostDiscovery/ScanLog stay authoritative.
-model ResearchReconSnapshot {
-  researchPlanId String?
-  researchPlan ResearchPlan? @relation(fields: [researchPlanId], references: [id], onDelete: SetNull)
-  id String @id @default(cuid())
-  sessionId String
-  sourceFingerprint String
-  contentSha256 String
-  summarySha256 String
-  context Json
-  summary Json
-  createdAt DateTime @default(now())
-  session ResearchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  deliveries ResearchReconDelivery[]
-
-  @@unique([sessionId, sourceFingerprint])
-  @@index([sessionId, createdAt])
 }
 
 enum ScopeAssetFormat {
@@ -877,44 +835,48 @@ enum ScopeAssetFormat {
   IP
   CIDR
 }
+
 enum ScopeAssetType {
   API
   WEB_APPLICATION
   WILDCARD
   OTHER
 }
+
 enum AssetValue {
   CRITICAL
   HIGH
   MEDIUM
   LOW
 }
+
 model ScopeAsset {
   researchCoverage ResearchCoverage[]
 
-  researchPlans ResearchPlan[]
   surfaceObservations ReconSurfaceObservation[]
-  id String @id @default(cuid())
-  programId String
-  originalValue String
-  normalizedValue String
-  formatSource String @default("AUTO")
-  format ScopeAssetFormat
-  type ScopeAssetType
-  typeSource String @default("HEURISTIC")
-  assetValue AssetValue @default(MEDIUM)
-  active Boolean @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
-  executionTarget Target? @relation("AssetExecution")
-  discoveredTargets Target[] @relation("AssetDiscoveries")
-  scanRuns ScanRun[]
-  artifacts ReconArtifact[]
-  reconSummaries ReconSummary[]
+  id                  String                    @id @default(cuid())
+  programId           String
+  originalValue       String
+  normalizedValue     String
+  formatSource        String                    @default("AUTO")
+  format              ScopeAssetFormat
+  type                ScopeAssetType
+  typeSource          String                    @default("HEURISTIC")
+  assetValue          AssetValue                @default(MEDIUM)
+  active              Boolean                   @default(true)
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  program             BountyProgram             @relation(fields: [programId], references: [id], onDelete: Cascade)
+  executionTarget     Target?                   @relation("AssetExecution")
+  discoveredTargets   Target[]                  @relation("AssetDiscoveries")
+  scanRuns            ScanRun[]
+  artifacts           ReconArtifact[]
+  reconSummaries      ReconSummary[]
+
   @@unique([programId, normalizedValue])
   @@index([programId, active])
 }
+
 enum ReconPipelineState {
   COMPLETED_WITH_FALLBACK
   SKIPPED_NOT_APPLICABLE
@@ -928,99 +890,90 @@ enum ReconPipelineState {
   SKIPPED
   FAILED
 }
+
 model ReconPipelineStep {
   capability String?
-  details Json?
-  id String @id @default(cuid())
-  scanRunId String
-  name String
-  position Int
-  state ReconPipelineState @default(PENDING)
-  reason String?
-  startedAt DateTime?
+  details    Json?
+  id         String             @id @default(cuid())
+  scanRunId  String
+  name       String
+  position   Int
+  state      ReconPipelineState @default(PENDING)
+  reason     String?
+  startedAt  DateTime?
   finishedAt DateTime?
-  scanRun ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  scanRun    ScanRun            @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+
   @@unique([scanRunId, name])
-}
-
-// Delivery means a message was staged for the operator, never that an LLM consumed it.
-model ResearchReconDelivery {
-  id String @id @default(cuid())
-  sessionId String
-  snapshotId String
-  provider ResearchProvider
-  status String @default("PENDING")
-  createdAt DateTime @default(now())
-  session ResearchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  snapshot ResearchReconSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
-
-  @@index([sessionId, createdAt])
 }
 
 // Parent execution contains immutable child membership, not another scan engine.
 model TargetReconRun {
-  campaignKey String? @unique
-  assessmentModeSnapshot AssessmentMode?
+  campaignKey               String?         @unique
+  assessmentModeSnapshot    AssessmentMode?
   assessmentSourcesSnapshot Json?
-  reconSummaries ReconSummary[]
-  id String @id @default(cuid())
-  programId String
-  program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
-  status ScanStatus @default(QUEUED)
-  outcome ScanOutcome?
-  preflight Json?
-  createdAt DateTime @default(now())
-  startedAt DateTime?
-  finishedAt DateTime?
-  cancelRequestedAt DateTime?
-  scopeMarkdown String? @db.Text
-  scopeMarkdownSha256 String?
-  scans ScanRun[]
+  reconSummaries            ReconSummary[]
+  id                        String          @id @default(cuid())
+  programId                 String
+  program                   BountyProgram   @relation(fields: [programId], references: [id], onDelete: Cascade)
+  status                    ScanStatus      @default(QUEUED)
+  outcome                   ScanOutcome?
+  preflight                 Json?
+  createdAt                 DateTime        @default(now())
+  startedAt                 DateTime?
+  finishedAt                DateTime?
+  cancelRequestedAt         DateTime?
+  scopeMarkdown             String?         @db.Text
+  scopeMarkdownSha256       String?
+  scans                     ScanRun[]
+
   @@index([programId, createdAt])
 }
 
 model ReconArtifact {
   vaultRecords EvidenceRecord[]
 
-  id String @id @default(cuid())
-  scanRunId String
+  id           String     @id @default(cuid())
+  scanRunId    String
   scopeAssetId String
-  kind String
+  kind         String
   canonicalKey String
-  value Json
-  scopeState String
+  value        Json
+  scopeState   String
   verification String
-  sources Json
-  firstSeenAt DateTime
-  lastSeenAt DateTime
-  scanRun ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
-  scopeAsset ScopeAsset @relation(fields: [scopeAssetId], references: [id], onDelete: Cascade)
+  sources      Json
+  firstSeenAt  DateTime
+  lastSeenAt   DateTime
+  scanRun      ScanRun    @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  scopeAsset   ScopeAsset @relation(fields: [scopeAssetId], references: [id], onDelete: Cascade)
+
   @@unique([scanRunId, kind, canonicalKey])
   @@index([scopeAssetId, kind])
 }
 
 // How an endpoint was observed in one context; no raw bodies or credentials.
 model ReconSurfaceObservation {
-  id String @id @default(cuid())
-  scanRunId String
-  scopeAssetId String
-  contextKey String
-  contextType String
-  canonicalKey String
-  url String @db.Text
-  urlRedacted Boolean @default(false)
-  method String
-  statusCode Int?
-  contentType String?
-  redirect String? @db.Text
-  redirectPattern String? @db.Text
-  bodyHash String?
-  bodyLength Int?
-  responseClass String
-  observedAt DateTime @default(now())
-  source String
-  scanRun ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
-  scopeAsset ScopeAsset @relation(fields: [scopeAssetId], references: [id], onDelete: Cascade)
+  id              String     @id @default(cuid())
+  scanRunId       String
+  scopeAssetId    String
+  contextKey      String
+  contextType     String
+  canonicalKey    String
+  url             String     @db.Text
+  urlRedacted     Boolean    @default(false)
+  method          String
+  statusCode      Int?
+  contentType     String?
+  redirect        String?    @db.Text
+  redirectPattern String?    @db.Text
+  bodyHash        String?
+  bodyLength      Int?
+  responseClass   String
+  observedAt      DateTime   @default(now())
+  source          String
+  scanRun         ScanRun    @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  scopeAsset      ScopeAsset @relation(fields: [scopeAssetId], references: [id], onDelete: Cascade)
+
   @@unique([scanRunId, contextKey, canonicalKey])
   @@index([scanRunId])
   @@index([scopeAssetId])
@@ -1028,116 +981,32 @@ model ReconSurfaceObservation {
 
 // Durable post-Recon tasks; never an investigation provider or source of facts.
 model ReconSummary {
-  id String @id @default(cuid())
-  provider AiProvider @default(OLLAMA)
-  programId String
-  scopeAssetId String?
-  scanRunId String?
-  targetReconRunId String?
-  automaticKey String? @unique
-  status String @default("PENDING")
-  model String
-  endpoint String
-  promptVersion String
+  id                String          @id @default(cuid())
+  provider          AiProvider      @default(OLLAMA)
+  programId         String
+  scopeAssetId      String?
+  scanRunId         String?
+  targetReconRunId  String?
+  automaticKey      String?         @unique
+  status            String          @default("PENDING")
+  model             String
+  endpoint          String
+  promptVersion     String
   sourceFingerprint String
-  input Json
-  content Json?
-  error String?
-  createdAt DateTime @default(now())
-  startedAt DateTime?
-  generatedAt DateTime?
-  program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
-  scopeAsset ScopeAsset? @relation(fields: [scopeAssetId], references: [id], onDelete: Cascade)
-  scanRun ScanRun? @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
-  targetReconRun TargetReconRun? @relation(fields: [targetReconRunId], references: [id], onDelete: Cascade)
+  input             Json
+  content           Json?
+  error             String?
+  createdAt         DateTime        @default(now())
+  startedAt         DateTime?
+  generatedAt       DateTime?
+  program           BountyProgram   @relation(fields: [programId], references: [id], onDelete: Cascade)
+  scopeAsset        ScopeAsset?     @relation(fields: [scopeAssetId], references: [id], onDelete: Cascade)
+  scanRun           ScanRun?        @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+  targetReconRun    TargetReconRun? @relation(fields: [targetReconRunId], references: [id], onDelete: Cascade)
+
   @@index([status, createdAt])
   @@index([programId, createdAt])
   @@index([scopeAssetId, createdAt])
-}
-
-// Advisory objectives derived only from immutable runtime Recon evidence.
-enum ResearchPlanStatus {
-  CURRENT
-  SUPERSEDED
-  STALE
-}
-enum ResearchPlanPriority {
-  HIGH
-  MEDIUM
-  LOW
-}
-enum ResearchPlanCategory {
-  AUTHORIZATION
-  AUTHENTICATION
-  SESSION_MANAGEMENT
-  API
-  API_VERSIONING
-  GRAPHQL
-  FILE_UPLOAD
-  SERVER_SIDE_REQUEST
-  REDIRECT_HANDLING
-  BUSINESS_LOGIC
-  PRIVILEGED_FUNCTIONS
-  ACCOUNT_LIFECYCLE
-  TENANT_ISOLATION
-  INPUT_HANDLING
-}
-enum ResearchPlanItemStatus {
-  READY
-  NOT_APPLICABLE_BY_PROGRAM
-}
-model ResearchPlan {
-  id String @id @default(cuid())
-  targetId String
-  programId String
-  scopeAssetId String?
-  scanRunId String
-  sourceFingerprint String
-  methodologyVersion String
-  assessmentMode AssessmentMode?
-  status ResearchPlanStatus @default(CURRENT)
-  metadata Json
-  createdAt DateTime @default(now())
-  supersededAt DateTime?
-  target Target @relation(fields: [targetId], references: [id], onDelete: Cascade)
-  program BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
-  scopeAsset ScopeAsset? @relation(fields: [scopeAssetId], references: [id], onDelete: SetNull)
-  scanRun ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
-  items ResearchPlanItem[]
-  sessions ResearchSession[]
-  reconSnapshots ResearchReconSnapshot[]
-  @@unique([targetId, sourceFingerprint])
-  @@index([targetId, createdAt])
-  @@index([programId])
-  @@index([scanRunId])
-}
-model ResearchPlanItem {
-  researchCoverage ResearchCoverage[]
-
-  id String @id @default(cuid())
-  planId String
-  stableKey String
-  category ResearchPlanCategory
-  priority ResearchPlanPriority
-  title String
-  objective String @db.Text
-  rationale String @db.Text
-  methodology String @db.Text
-  surfaceRefs Json
-  evidenceRefs Json
-  contextRefs Json
-  runtimeSignals Json
-  sourceSignals Json
-  sourceEvidenceRefs Json
-  score Int
-  evidenceStrength Int
-  status ResearchPlanItemStatus @default(READY)
-  isNew Boolean @default(true)
-  createdAt DateTime @default(now())
-  plan ResearchPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  hypotheses ResearchHypothesis[]
-  @@unique([planId, stableKey])
-  @@index([planId, priority])
 }
 
 // Target-owned memory survives session closure and console deletion.
@@ -1152,274 +1021,297 @@ enum ResearchCoverageState {
   FINDING
   NEEDS_RETEST
 }
+
 model ResearchCoverage {
   scopeAssetReferenceId String?
-  planItemReferenceId String
-  id String @id @default(cuid())
-  targetId String
-  scopeAssetId String?
-  planItemId String?
-  objectiveKey String
-  coverageKey String
-  category String
-  surface String
-  method String
-  contextKey String
-  contextLabel String
-  comparisonKey String?
-  comparisonLabel String?
-  contextRunId String
-  testKey String
-  revision Int @default(0)
-  state ResearchCoverageState @default(NOT_TESTED)
-  createdAt DateTime @default(now())
-  target Target @relation(fields:[targetId],references:[id],onDelete:Cascade)
-  scopeAsset ScopeAsset? @relation(fields:[scopeAssetId],references:[id],onDelete:SetNull)
-  planItem ResearchPlanItem? @relation(fields:[planItemId],references:[id],onDelete:SetNull)
-  events ResearchCoverageEvent[]
-  @@unique([targetId,coverageKey])
-  @@index([targetId,objectiveKey])
+  planItemReferenceId   String
+  id                    String                  @id @default(cuid())
+  targetId              String
+  scopeAssetId          String?
+  objectiveKey          String
+  coverageKey           String
+  category              String
+  surface               String
+  method                String
+  contextKey            String
+  contextLabel          String
+  comparisonKey         String?
+  comparisonLabel       String?
+  contextRunId          String
+  testKey               String
+  revision              Int                     @default(0)
+  state                 ResearchCoverageState   @default(NOT_TESTED)
+  createdAt             DateTime                @default(now())
+  target                Target                  @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  scopeAsset            ScopeAsset?             @relation(fields: [scopeAssetId], references: [id], onDelete: SetNull)
+  events                ResearchCoverageEvent[]
+
+  @@unique([targetId, coverageKey])
+  @@index([targetId, objectiveKey])
 }
+
 // Append-only revisions. Session reference and plan identity survive FK deletion.
 model ResearchCoverageEvent {
   vaultEvidence EvidenceCoverage[]
 
-  id String @id @default(cuid())
-  coverageId String
-  targetId String
-  eventKey String
-  contentSha256 String
-  revision Int
-  state ResearchCoverageState
-  action String @db.Text
-  result String @db.Text
-  evidence Json
-  performedAt DateTime
-  createdAt DateTime @default(now())
-  actorId String
-  source String
-  sessionId String?
-  sessionReferenceId String
+  id                    String                @id @default(cuid())
+  coverageId            String
+  targetId              String
+  eventKey              String
+  contentSha256         String
+  revision              Int
+  state                 ResearchCoverageState
+  action                String                @db.Text
+  result                String                @db.Text
+  evidence              Json
+  performedAt           DateTime
+  createdAt             DateTime              @default(now())
+  actorId               String
+  source                String
+  sessionId             String?
+  sessionReferenceId    String
   hypothesisReferenceId String?
-  hypothesisTestId String?
-  findingReferenceId String?
-  coverage ResearchCoverage @relation(fields:[coverageId],references:[id],onDelete:Cascade)
-  session ResearchSession? @relation(fields:[sessionId],references:[id],onDelete:SetNull)
-  @@unique([targetId,eventKey])
-  @@unique([coverageId,revision])
-  @@index([coverageId,createdAt])
+  hypothesisTestId      String?
+  findingReferenceId    String?
+  coverage              ResearchCoverage      @relation(fields: [coverageId], references: [id], onDelete: Cascade)
+  session               ResearchSession?      @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@unique([targetId, eventKey])
+  @@unique([coverageId, revision])
+  @@index([coverageId, createdAt])
 }
 
 enum EvidenceKind {
- HTTP_REQUEST_RESPONSE
- RECON_ARTIFACT
- BURP_REFERENCE
- RESEARCH_EVIDENCE
+  HTTP_REQUEST_RESPONSE
+  RECON_ARTIFACT
+  RESEARCH_EVIDENCE
 }
+
 enum EvidenceRelationRole {
- SUPPORTS
- REFUTES
- CONTEXT
+  SUPPORTS
+  REFUTES
+  CONTEXT
 }
+
 model EvidenceRecord {
- id String @id
- targetId String
- sessionId String?
- sessionReferenceId String?
- kind EvidenceKind
- sourceKey String
- description String
- provenance Json
- redactionStatus String
- contentSha256 String?
- metadata Json
- reconArtifactId String?
- reconArtifactReferenceId String?
- createdAt DateTime @default(now())
- target Target @relation(fields:[targetId],references:[id],onDelete:Cascade)
- session ResearchSession? @relation(fields:[sessionId],references:[id],onDelete:SetNull)
- reconArtifact ReconArtifact? @relation(fields:[reconArtifactId],references:[id],onDelete:SetNull)
- hypotheses EvidenceHypothesis[]
- findings EvidenceFinding[]
- reports EvidenceReport[]
- coverage EvidenceCoverage[]
- @@unique([targetId,sourceKey])
- @@index([targetId,createdAt])
+  id                       String               @id
+  targetId                 String
+  sessionId                String?
+  sessionReferenceId       String?
+  kind                     EvidenceKind
+  sourceKey                String
+  description              String
+  provenance               Json
+  redactionStatus          String
+  contentSha256            String?
+  metadata                 Json
+  reconArtifactId          String?
+  reconArtifactReferenceId String?
+  createdAt                DateTime             @default(now())
+  target                   Target               @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  session                  ResearchSession?     @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  reconArtifact            ReconArtifact?       @relation(fields: [reconArtifactId], references: [id], onDelete: SetNull)
+  hypotheses               EvidenceHypothesis[]
+  findings                 EvidenceFinding[]
+  reports                  EvidenceReport[]
+  coverage                 EvidenceCoverage[]
+
+  @@unique([targetId, sourceKey])
+  @@index([targetId, createdAt])
 }
+
 model EvidenceHypothesis {
- id String @id @default(cuid())
- evidenceId String
- hypothesisId String?
- hypothesisReferenceId String
- revision Int
- role EvidenceRelationRole
- createdAt DateTime @default(now())
- evidence EvidenceRecord @relation(fields:[evidenceId],references:[id],onDelete:Cascade)
- hypothesis ResearchHypothesis? @relation(fields:[hypothesisId],references:[id],onDelete:SetNull)
- @@unique([evidenceId,hypothesisReferenceId,revision,role])
- @@index([hypothesisId])
+  id                    String               @id @default(cuid())
+  evidenceId            String
+  hypothesisId          String?
+  hypothesisReferenceId String
+  revision              Int
+  role                  EvidenceRelationRole
+  createdAt             DateTime             @default(now())
+  evidence              EvidenceRecord       @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  hypothesis            ResearchHypothesis?  @relation(fields: [hypothesisId], references: [id], onDelete: SetNull)
+
+  @@unique([evidenceId, hypothesisReferenceId, revision, role])
+  @@index([hypothesisId])
 }
+
 model EvidenceFinding {
- id String @id @default(cuid())
- evidenceId String
- findingId String?
- findingReferenceId String
- role EvidenceRelationRole
- createdAt DateTime @default(now())
- evidence EvidenceRecord @relation(fields:[evidenceId],references:[id],onDelete:Cascade)
- finding Finding? @relation(fields:[findingId],references:[id],onDelete:SetNull)
- @@unique([evidenceId,findingReferenceId,role])
- @@index([findingId])
+  id                 String               @id @default(cuid())
+  evidenceId         String
+  findingId          String?
+  findingReferenceId String
+  role               EvidenceRelationRole
+  createdAt          DateTime             @default(now())
+  evidence           EvidenceRecord       @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  finding            Finding?             @relation(fields: [findingId], references: [id], onDelete: SetNull)
+
+  @@unique([evidenceId, findingReferenceId, role])
+  @@index([findingId])
 }
+
 model EvidenceReport {
- id String @id @default(cuid())
- evidenceId String
- reportId String?
- reportReferenceId String
- createdAt DateTime @default(now())
- evidence EvidenceRecord @relation(fields:[evidenceId],references:[id],onDelete:Cascade)
- report Report? @relation(fields:[reportId],references:[id],onDelete:SetNull)
- @@unique([evidenceId,reportReferenceId])
- @@index([reportId])
+  id                String         @id @default(cuid())
+  evidenceId        String
+  reportId          String?
+  reportReferenceId String
+  createdAt         DateTime       @default(now())
+  evidence          EvidenceRecord @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  report            Report?        @relation(fields: [reportId], references: [id], onDelete: SetNull)
+
+  @@unique([evidenceId, reportReferenceId])
+  @@index([reportId])
 }
+
 model EvidenceCoverage {
- id String @id @default(cuid())
- evidenceId String
- coverageEventId String
- createdAt DateTime @default(now())
- evidence EvidenceRecord @relation(fields:[evidenceId],references:[id],onDelete:Cascade)
- coverageEvent ResearchCoverageEvent @relation(fields:[coverageEventId],references:[id],onDelete:Cascade)
- @@unique([evidenceId,coverageEventId])
- @@index([coverageEventId])
+  id              String                @id @default(cuid())
+  evidenceId      String
+  coverageEventId String
+  createdAt       DateTime              @default(now())
+  evidence        EvidenceRecord        @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  coverageEvent   ResearchCoverageEvent @relation(fields: [coverageEventId], references: [id], onDelete: Cascade)
+
+  @@unique([evidenceId, coverageEventId])
+  @@index([coverageEventId])
 }
 
 // Durable documentary surface identities; never a Scope authorization source.
 model ReconHistoryRun {
- id String @id @default(cuid())
- targetId String
- scopeAssetReferenceId String
- scanRunId String? @unique
- scanReferenceId String @unique
- runCreatedAt DateTime
- outcome String
- truncated Boolean @default(false)
- target Target @relation(fields:[targetId],references:[id],onDelete:Cascade)
- scanRun ScanRun? @relation(fields:[scanRunId],references:[id],onDelete:SetNull)
- observations ReconSurfaceSeen[]
- @@index([targetId,scopeAssetReferenceId,runCreatedAt])
+  id                    String             @id @default(cuid())
+  targetId              String
+  scopeAssetReferenceId String
+  scanRunId             String?            @unique
+  scanReferenceId       String             @unique
+  runCreatedAt          DateTime
+  outcome               String
+  truncated             Boolean            @default(false)
+  target                Target             @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  scanRun               ScanRun?           @relation(fields: [scanRunId], references: [id], onDelete: SetNull)
+  observations          ReconSurfaceSeen[]
+
+  @@index([targetId, scopeAssetReferenceId, runCreatedAt])
 }
+
 model ReconSurface {
- id String @id
- targetId String
- scopeAssetReferenceId String
- kind String
- identity String @db.Text
- label String @db.Text
- firstSeenAt DateTime
- lastSeenAt DateTime
- target Target @relation(fields:[targetId],references:[id],onDelete:Cascade)
- observations ReconSurfaceSeen[]
- @@index([targetId,scopeAssetReferenceId])
+  id                    String             @id
+  targetId              String
+  scopeAssetReferenceId String
+  kind                  String
+  identity              String             @db.Text
+  label                 String             @db.Text
+  firstSeenAt           DateTime
+  lastSeenAt            DateTime
+  target                Target             @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  observations          ReconSurfaceSeen[]
+
+  @@index([targetId, scopeAssetReferenceId])
 }
+
 model ReconSurfaceSeen {
- id String @id @default(cuid())
- surfaceId String
- historyId String
- fingerprint String
- details Json
- sourceRefs String[]
- surface ReconSurface @relation(fields:[surfaceId],references:[id],onDelete:Cascade)
- history ReconHistoryRun @relation(fields:[historyId],references:[id],onDelete:Cascade)
- @@unique([historyId,surfaceId])
- @@index([surfaceId])
+  id          String          @id @default(cuid())
+  surfaceId   String
+  historyId   String
+  fingerprint String
+  details     Json
+  sourceRefs  String[]
+  surface     ReconSurface    @relation(fields: [surfaceId], references: [id], onDelete: Cascade)
+  history     ReconHistoryRun @relation(fields: [historyId], references: [id], onDelete: Cascade)
+
+  @@unique([historyId, surfaceId])
+  @@index([surfaceId])
 }
 
 enum FindingLifecycle {
- CANDIDATE
- VALIDATING
- VALIDATED
- REJECTED
- READY_TO_SUBMIT
- SUBMITTED
- TRIAGED
- ACCEPTED
- DUPLICATE
- INFORMATIVE
- NOT_APPLICABLE
- RESOLVED
- RETEST_REQUIRED
- CLOSED
+  CANDIDATE
+  VALIDATING
+  VALIDATED
+  REJECTED
+  READY_TO_SUBMIT
+  SUBMITTED
+  TRIAGED
+  ACCEPTED
+  DUPLICATE
+  INFORMATIVE
+  NOT_APPLICABLE
+  RESOLVED
+  RETEST_REQUIRED
+  CLOSED
 }
+
 enum RetestOutcome {
- FIX_CONFIRMED
- STILL_REPRODUCIBLE
- PARTIALLY_FIXED
- CANNOT_RETEST
+  FIX_CONFIRMED
+  STILL_REPRODUCIBLE
+  PARTIALLY_FIXED
+  CANNOT_RETEST
 }
+
 // Append-only decisions. Evidence review remains an independent required gate.
 model FindingLifecycleEvent {
- id String @id @default(cuid())
- findingId String
- revision Int
- eventKey String
- contentSha256 String
- previous FindingLifecycle?
- state FindingLifecycle
- actorId String
- reason String @db.Text
- validation Json?
- submission Json?
- createdAt DateTime @default(now())
- finding Finding @relation(fields:[findingId],references:[id],onDelete:Cascade)
- @@unique([findingId,revision])
- @@unique([findingId,eventKey])
+  id            String            @id @default(cuid())
+  findingId     String
+  revision      Int
+  eventKey      String
+  contentSha256 String
+  previous      FindingLifecycle?
+  state         FindingLifecycle
+  actorId       String
+  reason        String            @db.Text
+  validation    Json?
+  submission    Json?
+  createdAt     DateTime          @default(now())
+  finding       Finding           @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@unique([findingId, revision])
+  @@unique([findingId, eventKey])
 }
+
 model FindingRetest {
- id String @id @default(cuid())
- findingId String
- requestedBy String
- reason String @db.Text
- originalEvidenceIds String[]
- createdAt DateTime @default(now())
- finding Finding @relation(fields:[findingId],references:[id],onDelete:Cascade)
- result FindingRetestResult?
- @@index([findingId,createdAt])
+  id                  String               @id @default(cuid())
+  findingId           String
+  requestedBy         String
+  reason              String               @db.Text
+  originalEvidenceIds String[]
+  createdAt           DateTime             @default(now())
+  finding             Finding              @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  result              FindingRetestResult?
+
+  @@index([findingId, createdAt])
 }
+
 // A completed retest is never edited or substituted for the original proof.
 model FindingRetestResult {
- id String @id @default(cuid())
- retestId String @unique
- outcome RetestOutcome
- actorId String
- sessionReferenceId String?
- performedAt DateTime
- conclusion String @db.Text
- evidenceIds String[]
- createdAt DateTime @default(now())
- retest FindingRetest @relation(fields:[retestId],references:[id],onDelete:Cascade)
+  id                 String        @id @default(cuid())
+  retestId           String        @unique
+  outcome            RetestOutcome
+  actorId            String
+  sessionReferenceId String?
+  performedAt        DateTime
+  conclusion         String        @db.Text
+  evidenceIds        String[]
+  createdAt          DateTime      @default(now())
+  retest             FindingRetest @relation(fields: [retestId], references: [id], onDelete: Cascade)
 }
 
 model ResearchModelRouting {
-  userId String @id
-  fastProvider AiProvider?
-  fastModel String? @db.VarChar(200)
+  userId         String      @id
+  fastProvider   AiProvider?
+  fastModel      String?     @db.VarChar(200)
   reviewProvider AiProvider?
-  reviewModel String? @db.VarChar(200)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewModel    String?     @db.VarChar(200)
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model ResearchHarnessRun {
-  id String @id @default(cuid())
-  sessionId String
-  requestKey String @db.Uuid
-  stage String
-  subject String
-  status String
-  provider AiProvider
-  model String @db.VarChar(200)
-  result Json?
-  createdAt DateTime @default(now())
-  session ResearchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id         String          @id @default(cuid())
+  sessionId  String
+  requestKey String          @db.Uuid
+  stage      String
+  subject    String
+  status     String
+  provider   AiProvider
+  model      String          @db.VarChar(200)
+  result     Json?
+  createdAt  DateTime        @default(now())
+  session    ResearchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, requestKey])
   @@index([sessionId, stage, subject, createdAt])
@@ -1429,24 +1321,24 @@ model ProgramExecutionPolicy {
   programId String
   version   Int
   policy    Json
-  createdAt DateTime @default(now())
+  createdAt DateTime      @default(now())
   program   BountyProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
 
   @@id([programId, version])
 }
 
 model HunterIdentity {
-  userId    String @id
+  userId    String  @id
   userAgent String?
   headers   Json
-  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model PlatformConnection {
   userId           String
   platform         BountyPlatform
   credentialCipher String
-  user             User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, platform])
 }

@@ -1,8 +1,0 @@
-{
-  "user_options": {
-    "extender": {
-      "extensions": [{"extension_type":"java","extension_file":"/opt/burp/burp-mcp-all.jar","name":"Burp MCP Server","loaded":true,"auto_reload":false,"output":"ui","errors":"ui"}],
-      "settings": {"automatically_reload_extensions_on_startup":true,"automatically_update_bapps_on_startup":false,"suppress_extension_loaded_popup":true}
-    }
-  }
-}

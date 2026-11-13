@@ -12,7 +12,6 @@ import { executionPolicySchema, hasHunterUsername, policyDraftNeedsReview, store
 import { programUpdateSchema } from "@/lib/bountyProgram";
 import { deleteProgram } from '@/server/programDeletion';
 import { ResearchError } from '@/server/research/workspace';
-import { targetIdentity } from '@/lib/research/terminal';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { targetReviewSchema } from '@/lib/targetReview';
 import { scopeEntriesForSettings, targetScopeVersion, reviewedPolicy as buildReviewedPolicy, storeTestAccounts, updateReviewedScope } from '@/server/targetReview';
@@ -199,7 +198,7 @@ export async function DELETE(_req: Request, { params }: Params) {
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   if (foreignOrigin(_req)) return Response.json({error:'Forbidden'},{status:403});
   const { id } = await params;
-  if (!targetIdentity.safeParse(id).success) return Response.json({ error: 'Invalid target' }, { status: 400 });
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,149}$/.test(id)) return Response.json({ error: 'Invalid target' }, { status: 400 });
   try { await deleteProgram(session.user.id, id); return Response.json({ deleted: true }); }
   catch (e) { return Response.json({ error: e instanceof ResearchError ? e.message : 'Deletion incomplete; target remains blocked. Retry deletion.' }, { status: e instanceof ResearchError ? e.status : 503 }); }
 }

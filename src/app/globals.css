@@ -235,16 +235,14 @@ select {
 }
 
 
-/* Work surfaces share a rhythm. The fixed Research terminal is deliberately
- * outside workspace-ui/auth-ui: no xterm sizing, palette or key handling here. */
+/* Work surfaces share a rhythm. */
 @layer components {
-  .research-console { color-scheme: dark; }
   .workspace-ui { min-width: 0; line-height: 1.6; overflow-wrap: anywhere; }
   .workspace-ui h1 { min-width: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -0.025em; line-height: 1.25; }
   .workspace-ui :where(h2,h3) { line-height: 1.4; }
   .workspace-ui p { max-width: 85ch; }
   .workspace-ui :where(a:not(.ui-btn)):hover { text-decoration: underline; text-underline-offset: 0.2em; }
-  :where(.workspace-ui,.auth-ui,.ui-dialog) :where(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),select,textarea:not(.xterm-helper-textarea)) {
+  :where(.workspace-ui,.auth-ui,.ui-dialog) :where(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),select,textarea) {
     min-width: 0; max-width: 100%; min-height: 2.5rem;
     border: 1px solid var(--control-border); border-radius: var(--radius);
     background: var(--surface); color: var(--foreground);

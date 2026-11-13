@@ -4,8 +4,7 @@ import {prisma} from '@/lib/prisma';
 import {evidenceCreateSchema,evidenceLinkSchema,redactEvidenceText,type EvidenceCreate,type EvidenceLink,type EvidenceView} from '@/lib/evidenceVault';
 import {safeSurfaceUrl} from '@/lib/authenticatedRecon';
 import {assertResearchTarget,researchAuthorizationMatches,researchTargetSelect,ResearchError,exportText} from './research/workspace';
-import {ownedResearch,researchRootFor} from './research/sessions';
-import {HypothesisWorkspace} from './research/hypothesisFiles';
+import {ownedResearch} from './research/sessions';
 import {reconScopePolicy} from './research/reconPolicy';
 const clean=(v:string)=>redactEvidenceText(exportText(v)).slice(0,4000);
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
@@ -39,14 +38,14 @@ export async function linkEvidence(tx:Prisma.TransactionClient,userId:string,tar
 export async function registerEvidence(tx:Prisma.TransactionClient,userId:string,targetId:string,input:EvidenceCreate){
  const target=await ownedEvidenceTarget(tx,userId,targetId,true,input.kind!=='RECON_ARTIFACT');
  let sessionId:string|null=null,contentSha256:string|null=null,reconArtifactId:string|null=null;
- let metadata:Record<string,unknown>={},provenance:Record<string,unknown>={},sourceKey:string,redactionStatus:string;
+ let metadata:Record<string,unknown>={},provenance:Record<string,unknown>={},sourceKey!:string,redactionStatus!:string;
  if(input.kind==='RECON_ARTIFACT'){
   const artifact=await tx.reconArtifact.findFirst({where:{id:input.artifactId,scanRun:{targetId,target:{userId}}},select:{id:true,kind:true,scanRunId:true,scopeAssetId:true,scopeState:true,verification:true,firstSeenAt:true,lastSeenAt:true}});
   if(!artifact)throw new ResearchError('Recon artifact not found for this Target',404);
   reconArtifactId=artifact.id;sourceKey=hash(['recon',artifact.id]);redactionStatus='REFERENCE_ONLY_CONTENT_NOT_COPIED';
   provenance={source:'RECON_ARTIFACT',artifactReferenceId:artifact.id,scanRunId:artifact.scanRunId,scopeAssetId:artifact.scopeAssetId};metadata={artifactKind:artifact.kind,scopeState:artifact.scopeState,verification:artifact.verification,firstSeenAt:artifact.firstSeenAt,lastSeenAt:artifact.lastSeenAt,authorizationGranted:false};
  }else{
-  const session=await tx.researchSession.findFirst({where:{id:input.sessionId,targetId,...ownedResearch(userId),status:'READY'},select:{id:true,workspaceId:true,authorizationSnapshot:true}});
+  const session=await tx.researchSession.findFirst({where:{id:input.sessionId,targetId,...ownedResearch(userId),status:'READY'},select:{id:true,authorizationSnapshot:true}});
   if(!session)throw new ResearchError('Ready Research session not found',404);
   if(!researchAuthorizationMatches(session.authorizationSnapshot,target))throw new ResearchError('Research policy changed',409);sessionId=session.id;
   if(input.kind==='HTTP_REQUEST_RESPONSE'){
@@ -54,12 +53,6 @@ export async function registerEvidence(tx:Prisma.TransactionClient,userId:string
    if(Date.parse(input.observedAt)>Date.now()+60000)throw new ResearchError('Invalid observation date',400);
    metadata={request:{method:input.http.method,url:safeSurfaceUrl(input.http.url),excerpt:input.http.requestExcerpt?clean(input.http.requestExcerpt):null,requestable:false},response:{statusCode:input.http.statusCode,contentType:input.http.contentType?clean(input.http.contentType):null,excerpt:input.http.responseExcerpt?clean(input.http.responseExcerpt):null}};
    contentSha256=hash(metadata);provenance={source:'EXPLICIT_RESEARCHER_HTTP_CAPTURE',sessionReferenceId:session.id,observedAt:input.observedAt};sourceKey=hash(['http',session.id,input.observedAt,contentSha256]);redactionStatus='REDACTED_METADATA_AND_EXCERPTS';
-  }else{
-   if(clean(input.ref)!==input.ref)throw new ResearchError('Artifact names must not contain secrets',400);
-   if(input.kind==='BURP_REFERENCE'&&!/^(?:requests|evidence)\/burp\//.test(input.ref))throw new ResearchError('Use an existing bounded Burp artifact reference',400);
-   const workspace=await HypothesisWorkspace.open(researchRootFor(session.workspaceId),session.workspaceId);
-   try{contentSha256=await workspace.fingerprintReference(input.ref);}finally{await workspace.close();}
-   provenance={source:input.kind==='BURP_REFERENCE'?'BURP_WORKSPACE_REFERENCE':'RESEARCH_WORKSPACE_REFERENCE',sessionReferenceId:session.id,ref:input.ref};metadata={ref:input.ref,sourceContentCopied:false};sourceKey=hash(['workspace',session.id,input.ref,contentSha256]);redactionStatus='REFERENCE_ONLY_CONTENT_NOT_COPIED';
   }
  }
  const existing=await tx.evidenceRecord.findUnique({where:{targetId_sourceKey:{targetId,sourceKey}}});

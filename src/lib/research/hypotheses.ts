@@ -21,7 +21,6 @@ export const evidenceReferenceSchema = z.strictObject({
 });
 export type ResearchEvidenceReference = z.infer<typeof evidenceReferenceSchema>;
 const legacyFields = z.strictObject({
-  planItemId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,149}$/).nullable().optional(),
   externalId: z.string().regex(/^H-[0-9]{3,6}$/),
   title: text(200),
   status: z.enum(["OPEN", "BLOCKED", "REJECTED", "CONFIRMED"]),
@@ -42,7 +41,7 @@ export const hypothesisSchema = legacyFields.superRefine((hypothesis, ctx) => {
   if (hypothesis.status === "BLOCKED" && !hypothesis.blockedReason) ctx.addIssue({ code: "custom", path: ["blockedReason"], message: "BLOCKED requires a blockedReason" });
   if (hypothesis.status === "REJECTED" && !hypothesis.evidenceAgainst.length && !hypothesis.notes) ctx.addIssue({ code: "custom", path: ["evidenceAgainst"], message: "REJECTED requires evidenceAgainst or a notes justification" });
 });
-export const OBSERVATION_SOURCES = ["RECON", "BURP_MCP", "MANUAL", "HTTP", "BROWSER", "STATIC_ANALYSIS", "EXISTING_FINDING"] as const;
+export const OBSERVATION_SOURCES = ["RECON", "MANUAL", "HTTP", "BROWSER", "STATIC_ANALYSIS", "EXISTING_FINDING"] as const;
 export const EVIDENCE_QUALITIES = ["OBSERVATION", "REPRODUCIBLE", "CONTROLLED", "IMPACT_DEMONSTRATED"] as const;
 const hostField = text(253).regex(/^(?:[a-z0-9-]+\.)+[a-z0-9-]+$/);
 const locationField = text(2048).nullable();
@@ -84,7 +83,7 @@ export function researchObservations(data: ResearchData) {
   return [...data.initialObservations, ...data.tests.flatMap(t => [...t.observations, ...(t.negativeControl.kind === "PERFORMED" ? t.negativeControl.observations : [])])];
 }
 export function hasReproducibleProof(data: ResearchData) {
-  const direct = (o: z.infer<typeof researchObservationSchema>) => ["MANUAL", "HTTP", "BROWSER"].includes(o.source) && o.evidence.some(e => (e.ref.startsWith("evidence/") || e.ref.startsWith("requests/")) && !e.ref.startsWith("evidence/burp/") && !e.ref.startsWith("requests/burp/") && !e.ref.endsWith("README.md"));
+  const direct = (o: z.infer<typeof researchObservationSchema>) => ["MANUAL", "HTTP", "BROWSER"].includes(o.source) && o.evidence.some(e => (e.ref.startsWith("evidence/") || e.ref.startsWith("requests/")) && !e.ref.endsWith("README.md"));
   return data.tests.some(t => t.outcome === "SUPPORTS" && t.reproduced &&
     t.reproductionSteps.length >= 2 && t.reproducibility.length >= 40 && t.securityEffect.length >= 40 &&
     t.evidenceQuality !== "OBSERVATION" && t.negativeControl.kind !== "NOT_PERFORMED" &&

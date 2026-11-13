@@ -1,6 +1,4 @@
-import ResearchLauncher from '@/components/ResearchLauncher';
 import type {ReactElement} from 'react';
-import {renderToStaticMarkup} from 'react-dom/server';
 import {beforeAll,beforeEach,afterAll,it,expect,describe,vi} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
@@ -47,7 +45,7 @@ let p:typeof import('@/lib/prisma').prisma,get:typeof import('@/app/api/programs
  it('reaches Research hosts and immutable history beyond former caps',async()=>{
   await seed(1);const programId=ownerId+'_000';await p.bountyProgram.update({where:{id:programId},data:{scopeRules:['*.fixture.test']}});const scope=await p.scope.create({data:{userId:ownerId,hostPattern:'*.fixture.test',status:'APPROVED'}});
   await p.target.createMany({data:Array.from({length:501},(_,n)=>({id:ownerId+'_host_'+String(n).padStart(4,'0'),userId:ownerId,programId,scopeId:scope.id,host:`h${String(n).padStart(4,'0')}.fixture.test`,contextOnly:false}))});
-  await p.researchSession.createMany({data:Array.from({length:101},(_,n)=>({id:ownerId+'_session_'+String(n).padStart(3,'0'),userId:ownerId,targetId:ownerId+'_host_0000',workspaceId:randomUUID(),status:'ARCHIVED',targetHost:'h0000.fixture.test',programName:'Fixture',scopeMarkdown:'# Historical snapshot',createdAt:new Date('2026-01-01')}))});
+  await p.researchSession.createMany({data:Array.from({length:101},(_,n)=>({id:ownerId+'_session_'+String(n).padStart(3,'0'),userId:ownerId,targetId:ownerId+'_host_0000',status:'ARCHIVED',targetHost:'h0000.fixture.test',programName:'Fixture',scopeMarkdown:'# Historical snapshot',createdAt:new Date('2026-01-01')}))});
   const Page=(await import('@/app/(dashboard)/research/page')).default;
   // Render only the real client launcher at its boundary; other controls
   // require a browser App Router. Preserve the original canonical host/history
@@ -55,11 +53,6 @@ let p:typeof import('@/lib/prisma').prisma,get:typeof import('@/app/api/programs
   const links:string[]=[];const visit=(node:unknown)=>{
    if(!node||typeof node!=='object')return;if(Array.isArray(node)){node.forEach(visit);return;}
    const element=node as ReactElement<{href?:string;children?:unknown}>;
-   if(element.type===ResearchLauncher){
-    const html=renderToStaticMarkup(element);
-    for(const match of html.matchAll(/href="([^"]+)"/g))links.push(new URL(match[1].replaceAll('&amp;','&'),'http://app.example.test').pathname);
-    return;
-   }
    if(element.props?.href)links.push(element.props.href);visit(element.props?.children);
   };
   visit(await Page({searchParams:Promise.resolve({page:'21',historyPage:'5',program:programId})}));
@@ -97,7 +90,7 @@ let p:typeof import('@/lib/prisma').prisma,get:typeof import('@/app/api/programs
   await p.evidenceRecord.delete({where:{id:last.items[0].id}});expect(await listEvidence(ownerId,target.id,{},first.nextCursor!)).toMatchObject({reset:true,nextCursor:null});
  });
  it('clamps Hypothesis pages and revision history beyond the end',async()=>{
-  const scope=await p.scope.create({data:{userId:ownerId,hostPattern:'fixture.test'}}),target=await p.target.create({data:{userId:ownerId,scopeId:scope.id,host:'fixture.test'}}),session=await p.researchSession.create({data:{userId:ownerId,targetId:target.id,workspaceId:randomUUID(),targetHost:target.host,programName:'Fixture',scopeMarkdown:'# Immutable'}});
+  const scope=await p.scope.create({data:{userId:ownerId,hostPattern:'fixture.test'}}),target=await p.target.create({data:{userId:ownerId,scopeId:scope.id,host:'fixture.test'}}),session=await p.researchSession.create({data:{userId:ownerId,targetId:target.id,targetHost:target.host,programName:'Fixture',scopeMarkdown:'# Immutable'}});
   await p.researchHypothesis.createMany({data:Array.from({length:51},(_,n)=>({id:ownerId+'_hyp_'+String(n).padStart(3,'0'),sessionId:session.id,externalId:'H-'+String(n+1).padStart(3,'0'),title:'Hypothesis fixture',status:'OPEN',hypothesis:'Unknown',evidenceFor:[],evidenceAgainst:[],nextTest:'Manual',expectedSignal:'Unknown',falsificationCondition:'Unknown',contentSha256:'a'.repeat(64)}))});
   const h=await import('@/server/research/hypotheses');expect.soft(await h.listHypotheses(session.id,ownerId,undefined,99)).toMatchObject({page:3,total:51});
   const hypothesisId=ownerId+'_hyp_000';await p.researchHypothesisRevision.createMany({data:Array.from({length:26},(_,n)=>({hypothesisId,revision:n+1,snapshot:{status:'OPEN'}}))});

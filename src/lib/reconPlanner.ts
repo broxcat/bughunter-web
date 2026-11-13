@@ -3,7 +3,7 @@ import { isExcluded } from './bountyProgram';
 import { buildCapabilityPlans, type ReconCapabilityPlan } from './reconCapabilities';
 import { isSafeReadUrl } from './observationSafety';
 
-export type ReconTool = 'subfinder' | 'amass' | 'assetfinder' | 'httpx' | 'guarded-tcp' | 'ffuf' | 'gobuster' | 'nuclei' | 'burp' | 'internal';
+export type ReconTool = 'subfinder' | 'amass' | 'assetfinder' | 'httpx' | 'guarded-tcp' | 'ffuf' | 'gobuster' | 'nuclei' | 'internal';
 export type ReconDepth = 'LIGHT' | 'STANDARD' | 'DEEP';
 export const RECON_CAPACITY = { globalAssets: 2, perTarget: 1, maxHttpRps: 6, processesPerTool: 1 } as const;
 export const RECON_BUDGETS = {
@@ -12,7 +12,7 @@ export const RECON_BUDGETS = {
   HIGH: { depth: 'DEEP', maxDurationMs: 1200000, rps: 2, maxRequests: 600, maxHosts: 24, enrichHosts: 5, ffufSeconds: 60, ffufDepth: 2, words: 20, ports: [21,22,25,53,80,443,3000,5000,8000,8080,8443,9000], templates: 3, passiveSeconds: 90, crawlPages: 15 },
   CRITICAL: { depth: 'DEEP', maxDurationMs: 1800000, rps: 3, maxRequests: 1200, maxHosts: 40, enrichHosts: 8, ffufSeconds: 90, ffufDepth: 3, words: 30, ports: [21,22,25,53,80,110,143,443,445,587,993,995,1433,3000,3306,5000,5432,6379,8000,8080,8443,9000,9200], templates: 4, passiveSeconds: 120, crawlPages: 25 },
 } as const;
-export const RECON_STAGE_NAMES = ['Preflight', 'Passive discovery', 'Scope validation / DNS', 'HTTP surface', 'Host prioritization', 'Ports / services', 'Content discovery', 'Web / API mapping', 'Nuclei Recon', 'Burp enrichment', 'Normalization', 'Scope intelligence'] as const;
+export const RECON_STAGE_NAMES = ['Preflight', 'Passive discovery', 'Scope validation / DNS', 'HTTP surface', 'Host prioritization', 'Ports / services', 'Content discovery', 'Web / API mapping', 'Nuclei Recon', 'Normalization', 'Scope intelligence'] as const;
 export const RECON_AUTH_MAPPING_BUDGETS = {
   LOW: { maxRequests:16,maxPagesPerContext:3,maxDepth:1,maxDurationMs:30000 },
   MEDIUM: { maxRequests:48,maxPagesPerContext:8,maxDepth:2,maxDurationMs:60000 },
@@ -43,11 +43,11 @@ export function buildReconPlan(asset: { id: string; normalizedValue: string; for
     ports: httpOnly ? [] : api || asset.type === 'WEB_APPLICATION' ? budget.ports.filter(p => [80,443,3000,5000,8000,8080,8443,9000].includes(p)) : [...budget.ports] };
   const gobuster={dir:active && (asset.type==='WEB_APPLICATION'||api&&budget.depth!=='LIGHT'||httpOnly&&!api),dns:active&&wildcard&&budget.depth==='DEEP',vhost:false as const,seconds:Math.min(30,budget.ffufSeconds),words:budget.depth==='LIGHT'?6:budget.depth==='STANDARD'?4:8,reason:'Dir uses disjoint bounded words behind the HTTP scope relay; DNS only for explicitly authorized DEEP wildcard descendants. Vhost disabled: exact hosts do not authorize other virtual hosts.'};
   const stages = RECON_STAGE_NAMES.map(name => {
-    const passive = ['Preflight', 'Passive discovery', 'Host prioritization', 'Burp enrichment', 'Normalization', 'Scope intelligence'].includes(name);
+    const passive = ['Preflight', 'Passive discovery', 'Host prioritization', 'Normalization', 'Scope intelligence'].includes(name);
     const enabled = name === 'Passive discovery' ? wildcard && asset.active : name === 'Ports / services' ? active && !httpOnly : passive || active;
-    const tools: ReconTool[] = name === 'Passive discovery' ? ['subfinder','amass','assetfinder'] : name === 'HTTP surface' ? ['httpx'] : name === 'Ports / services' ? ['guarded-tcp'] : name === 'Content discovery' ? [...(gobuster.dir&&budget.depth==='LIGHT'?[]:['ffuf' as const]),...(gobuster.dir?['gobuster' as const]:[])] : name === 'Scope validation / DNS'&&gobuster.dns ? ['internal','gobuster'] : name === 'Nuclei Recon' ? ['nuclei'] : name === 'Burp enrichment' ? ['burp'] : ['internal'];
+    const tools: ReconTool[] = name === 'Passive discovery' ? ['subfinder','amass','assetfinder'] : name === 'HTTP surface' ? ['httpx'] : name === 'Ports / services' ? ['guarded-tcp'] : name === 'Content discovery' ? [...(gobuster.dir&&budget.depth==='LIGHT'?[]:['ffuf' as const]),...(gobuster.dir?['gobuster' as const]:[])] : name === 'Scope validation / DNS'&&gobuster.dns ? ['internal','gobuster'] : name === 'Nuclei Recon' ? ['nuclei'] : ['internal'];
     return { name, tools, mode: passive ? 'PASSIVE' as const : 'ACTIVE' as const, enabled,
-      reason: !enabled ? httpOnly && name === 'Ports / services' ? 'URL authorization does not grant host-wide port discovery.' : !active ? 'Effective authorization does not permit active target traffic.' : 'Exact host/URL: no parent-domain enumeration.' : name === 'Burp enrichment' ? 'Read existing, authorized history only; never start an agent.' : `${budget.depth} ${api ? 'API' : asset.type} collection within the immutable asset boundary.` };
+      reason: !enabled ? httpOnly && name === 'Ports / services' ? 'URL authorization does not grant host-wide port discovery.' : !active ? 'Effective authorization does not permit active target traffic.' : 'Exact host/URL: no parent-domain enumeration.' : `${budget.depth} ${api ? 'API' : asset.type} collection within the immutable asset boundary.` };
   });
   const capabilities=buildCapabilityPlans({wildcard,active,assetActive:asset.active,httpOnly,type:asset.type,depth:budget.depth,gobusterDir:gobuster.dir,gobusterDns:gobuster.dns,authenticatedContexts:context.authenticatedContexts});
   return { version: 2, methodologyVersion:2,strategy,capabilities,scopeAssetId: asset.id, format: asset.format, type: asset.type, assetValue: value, activityMode: active ? 'ACTIVE' : 'PASSIVE', depth: budget.depth,

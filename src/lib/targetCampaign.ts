@@ -71,13 +71,13 @@ export function targetCampaign(program: {
   } else if (facts.runId) recon.detail = 'Scope changed since the last run.';
 
   let research: StageView = { stage: 'Research', state: 'not started' };
-  if (facts.researchCreating) research = { stage: 'Research', state: 'running', detail: 'Preparing ' + facts.researchCreating + (facts.researchCreating === 1 ? ' workspace' : ' workspaces') };
+  if (facts.researchCreating) research = { stage: 'Research', state: 'running', detail: 'Preparing automated Research.' };
   else if (campaign?.state === 'RESEARCH_PENDING') research = { stage: 'Research', state: 'needs you', detail: 'Recon handoff ready. Open Research to continue.' };
   else if (facts.researchReady) research = facts.findings
     ? { stage: 'Research', state: 'done', detail: 'Findings available for review.' }
-    : { stage: 'Research', state: 'needs you', detail: facts.researchReady + (facts.researchReady === 1 ? ' workspace ready for manual Research' : ' workspaces ready for manual Research') };
-  else if (campaign?.handoffRunId && !facts.findings) research = { stage: 'Research', state: 'needs you', detail: 'Recon handoff available for manual Research.' };
-  else if (facts.researchFailed) research = { stage: 'Research', state: 'failed', detail: 'Research workspace provisioning failed.', fix: researchDetails };
+    : { stage: 'Research', state: 'needs you', detail: 'Automated Research results are ready for review.' };
+  else if (campaign?.handoffRunId && !facts.findings) research = { stage: 'Research', state: 'needs you', detail: 'Recon handoff available for automated Research.' };
+  else if (facts.researchFailed) research = { stage: 'Research', state: 'failed', detail: 'Automated Research failed.', fix: researchDetails };
   const findings: StageView = facts.findings
     ? { stage: 'Findings', state: facts.reviewedFindings === facts.findings ? 'done' : 'needs you',
       detail: facts.reviewedFindings + '/' + facts.findings + ' reviewed' }
@@ -119,7 +119,7 @@ export function targetCampaign(program: {
   } else {
     current = research;
     action = { label: 'Open research', href: research.fix ?? researchUrl };
-    next = research.state === 'failed' ? 'Resolve the workspace issue in Research details.' : 'Continue with the Recon results in Research.';
+    next = research.state === 'failed' ? 'Review the Research error and retry.' : 'Continue with the Recon results in Research.';
   }
   const stages = [current.stage === 'Target' ? { ...target, state: current.state } : target, recon, research, findings];
   return { stages, current, action, next, activity: campaignActivity(facts), campaign };

@@ -1,11 +1,10 @@
 import { prisma } from '@/lib/prisma';
-import { targetIdentity } from '@/lib/research/terminal';
 import { ResearchError } from './research/workspace';
 
-/** Keep existing ScanRun/ResearchSession FKs and worker/PTY infrastructure.
- * This inactive context identity is not an asset and never enters /scopes. */
+/** Keep existing ScanRun/ResearchSession FKs. This inactive context identity
+ * is not an asset and never enters /scopes. */
 export async function ensureProgramContext(userId: string, programId: string) {
-  targetIdentity.parse(programId);
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,149}$/.test(programId)) throw new ResearchError('Invalid program identity', 400);
   return prisma.$transaction(async tx => {
     const rows = await tx.$queryRaw<{id:string}[]>`SELECT id FROM "BountyProgram" WHERE id=${programId} AND "ownerId"=${userId} AND "deletingAt" IS NULL FOR UPDATE`;
     if (!rows.length) throw new ResearchError('Target unavailable', 404);

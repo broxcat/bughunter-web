@@ -6,14 +6,12 @@ import type { ResearchReconContext } from '@/lib/research/recon';
 import { assertResearchTarget, researchIsPassive, type ResearchTarget } from './workspace';
 
 /** Shared Recon-to-Research boundary. A plan is derived advice, never a second
- * authorization engine; legacy free-text restrictions require manual review. */
+ * authorization engine. No policy state gates a suggestion. */
 export function reconScopePolicy(target: ResearchTarget, scopeAssets: NonNullable<ResearchReconContext['scopeAssets']> = []) {
-  const policy = resolveProgramPolicy(target.program!, target.scope);
-  const manualReview = Boolean(policy.blocker);
+  const policy = resolveProgramPolicy(target.program!);
   return {
-    activeSuggestionsAllowed: !researchIsPassive(target) && !manualReview,
+    activeSuggestionsAllowed: !researchIsPassive(target),
     warnings: [
-      ...(manualReview ? [policy.blocker!] : []),
       ...(researchIsPassive(target) ? ['Program/wildcard console is passive only. Open an individually authorized host console before active investigation.'] : []),
     ],
     inScope(value: string) {

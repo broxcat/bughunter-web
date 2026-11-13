@@ -18,7 +18,6 @@ vi.mock('@/server/recon/toolchain', () => ({ collectReconDoctor: mocks.doctor })
 vi.mock('@/server/scanners/http', () => ({ probe: mocks.probe }));
 vi.mock('@/server/scanners/runCommand', () => ({ runCommand: mocks.command }));
 vi.mock('@/server/recon/toolLimits', () => ({ withReconToolLease: async (_tool: string, signal: AbortSignal, work: (signal: AbortSignal) => Promise<unknown>) => work(signal) }));
-vi.mock('@/server/recon/burpCollection', () => ({ collectRunBurp: vi.fn(async () => ({ status: 'UNAVAILABLE', observations: [] })) }));
 vi.mock('node:dns/promises', () => ({ Resolver: class {
   resolve4 = async () => ['192.0.2.1'];
   resolve6 = async () => { if (mocks.mode === 'dns-partial') throw Object.assign(new Error('queryAaaa ETIMEOUT'), { code: 'ETIMEOUT' }); throw new Error('ENODATA'); };
@@ -111,9 +110,9 @@ function response(url: string): ProbeResult {
     mocks.mode = 'budget'; plan.limits.maxRequests = 5; await p.scanRun.update({ where: { id: runId }, data: { reconPlan: plan as unknown as import('@prisma/client').Prisma.InputJsonValue } });
     expect((await run()).outcome).toBe('PARTIAL'); expect(['PARTIAL', 'BLOCKED']).toContain((await step()).state); expect(mocks.closed).toBe(1);
   });
-  it('does not downgrade required coverage because optional Nuclei/Burp enrichment is unavailable', async () => {
+  it('does not downgrade required coverage because optional Nuclei enrichment is unavailable', async () => {
     mocks.mode = 'optional'; expect((await run()).outcome).toBe('SUCCESS');
-    const rows = await p.reconPipelineStep.findMany({ where: { scanRunId: runId, name: { in: ['Nuclei Recon', 'Burp enrichment'] } } });
+    const rows = await p.reconPipelineStep.findMany({ where: { scanRunId: runId, name: 'Nuclei Recon' } });
     expect(rows.every(row => row.state !== 'COMPLETED')).toBe(true); expect((await step()).state).toBe('COMPLETED_WITH_FALLBACK');
   });
   it('stops on a 429 calibration response and records blocked rather than a clean empty inventory', async () => {

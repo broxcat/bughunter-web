@@ -31,7 +31,7 @@ export default function TargetSettings({ id }: { id: string }) {
     {current && <>
       <TargetPolicySettings key={current.id} program={current} />
       <details className="ui-disclosure"><summary>Delete target</summary>
-        <div className="mt-4"><DeleteResourceButton kind="Target" name={current.companyName}
+        <div className="mt-4"><DeleteResourceButton name={current.companyName}
           url={'/api/programs/' + id} redirectTo="/targets?deleted=1" /></div>
       </details>
     </>}

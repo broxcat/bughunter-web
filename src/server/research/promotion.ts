@@ -36,8 +36,8 @@ async function checkDecisionScope(tx: Prisma.TransactionClient, session: { targe
   target = await tx.target.findUniqueOrThrow({ where: { id: session.targetId }, select: researchTargetSelect });
   try { assertResearchTarget(target, userId); } catch { throw new HypothesisSyncError("SCOPE_UNAVAILABLE", "Target authorization is no longer active", 409); }
   const snapshot = session.authorizationSnapshot as Record<string, unknown> | null;
-  if (!snapshot) throw new HypothesisSyncError("LEGACY_AUTHORIZATION", "Legacy authorization snapshot: create a current Research Workspace before promotion", 409);
-  if (!researchAuthorizationMatches(snapshot, target)) throw new HypothesisSyncError("POLICY_CHANGED", "Program or scope changed since export. Create a current workspace before promotion.", 409);
+  if (!snapshot) throw new HypothesisSyncError("LEGACY_AUTHORIZATION", "Legacy authorization snapshot: run the current automated Research stage before promotion", 409);
+  if (!researchAuthorizationMatches(snapshot, target)) throw new HypothesisSyncError("POLICY_CHANGED", "Program or scope changed since capture. Run the current automated Research stage before promotion.", 409);
   return target;
 }
 
@@ -54,11 +54,11 @@ function hasScopedReviewTest(proof: ResearchData, testId: string, target: Resear
 export async function recordResearchReview(sessionId: string, hypothesisId: string, userId: string, input: ResearchReviewInput) {
   return prisma.$transaction(async tx => {
     const { session, h } = await lockHypothesis(tx, sessionId, hypothesisId, userId);
-    if (!session.consoleTargetId || session.status !== 'READY') throw new HypothesisSyncError('SESSION_NOT_READY', 'Review requires a ready Research console', 409);
+    if (!session.activeTargetId || session.status !== 'READY') throw new HypothesisSyncError('SESSION_NOT_READY', 'Review requires a ready automated Research session', 409);
     if (h.revision !== input.expectedRevision) throw new HypothesisSyncError('REVISION_CHANGED', 'Hypothesis changed. Reload and review its current revision.', 409);
     const target = await checkDecisionScope(tx, session, userId);
     const proof = researchDataSchema.safeParse(h.researchData);
-    if (!proof.success) throw new HypothesisSyncError('PROOF_REQUIRED', 'Sync a structured v2 hypothesis before reviewing it.', 409);
+    if (!proof.success) throw new HypothesisSyncError('PROOF_REQUIRED', 'A structured v2 hypothesis is required before review.', 409);
     if (input.verdict === 'SUPPORTED' && (h.status !== 'CONFIRMED' || !hasScopedReviewTest(proof.data, input.testId, target))) {
       throw new HypothesisSyncError('PROOF_REQUIRED', 'Select an in-scope reproduced test with direct evidence, impact and controls from this CONFIRMED revision.', 409);
     }
@@ -75,7 +75,7 @@ export async function recordResearchReview(sessionId: string, hypothesisId: stri
     if (row.humanReview !== null) {
       const previous = savedResearchReview.safeParse(row.humanReview);
       if (previous.success && isDeepStrictEqual(previous.data, { ...saved.data, reviewedAt: previous.data.reviewedAt })) return previous.data;
-      throw new HypothesisSyncError('ALREADY_REVIEWED', 'This revision already has a recorded decision. Sync new evidence to review a new revision.', 409);
+      throw new HypothesisSyncError('ALREADY_REVIEWED', 'This revision already has a recorded decision. Create a new evidence-backed revision before reviewing again.', 409);
     }
     if (h.promotion) throw new HypothesisSyncError('ALREADY_PROMOTED', 'Use Evidence Review on the existing Finding to record a changed decision.', 409);
     await tx.researchHypothesisRevision.update({ where, data: { humanReview: saved.data } });
@@ -94,7 +94,6 @@ export async function promoteHypothesis(sessionId: string, hypothesisId: string,
     if (h.status !== "CONFIRMED") throw new HypothesisSyncError("NOT_CONFIRMED", "Only a CONFIRMED research hypothesis can be submitted to human Finding review", 409);
     const target = await checkDecisionScope(tx, session, userId);
     const candidate = hypothesisV2Schema.safeParse({
-      planItemId:h.planItemId,
       externalId: h.externalId, title: h.title, status: h.status, hypothesis: h.hypothesis,
       evidenceFor: h.evidenceFor, evidenceAgainst: h.evidenceAgainst, nextTest: h.nextTest,
       expectedSignal: h.expectedSignal, falsificationCondition: h.falsificationCondition,
@@ -105,7 +104,7 @@ export async function promoteHypothesis(sessionId: string, hypothesisId: string,
     if (researchBindingError(candidate.data, { id: target.id, host: target.host, scheme: target.scheme ?? "https" })) throw new HypothesisSyncError("SCOPE_MISMATCH", "Research proof does not belong to this target", 409);
     const safe = hypothesisSnapshot(candidate.data), proof = researchDataSchema.parse(safe.researchData);
     let humanReview;
-    if (session.consoleTargetId) {
+    if (session.activeTargetId) {
       const revision = await tx.researchHypothesisRevision.findUnique({
         where: { hypothesisId_revision: { hypothesisId, revision: h.revision } },
         select: { humanReview: true },
@@ -119,8 +118,7 @@ export async function promoteHypothesis(sessionId: string, hypothesisId: string,
     }
     const evidence = {
       source: "RESEARCH_HUMAN_PROMOTION", sessionId, hypothesisId, externalId: h.externalId,
-      planItemId: h.planItemId,
-      revision: h.revision, workspaceId: session.workspaceId, targetHost: target.host,
+      revision: h.revision, targetHost: target.host,
       ...(humanReview ? { humanReview } : {}),
       evidenceFor: safe.evidenceFor, evidenceAgainst: safe.evidenceAgainst,
       observations: proof.initialObservations, tests: proof.tests,

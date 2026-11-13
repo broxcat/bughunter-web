@@ -155,9 +155,8 @@ export function buildReconContext(input: {
         }else if(a.kind==='technology'&&typeof v.name==='string'&&/^[a-z0-9][a-z0-9 .+:/_-]{0,79}$/i.test(v.name))merge(maps.technologies,`${host}:${v.name.toLowerCase()}`,{name:v.name,asset:host},tool,ref,at,host,'INFERRED');
         else{
           const type=a.kind==='observation'&&typeof v.type==='string'?v.type:a.kind;
-          const description=type==='nuclei-recon'?`Read-only Recon template ${String(v.templateId)} matched; this is not a confirmed vulnerability.`:type==='burp-history'?'Existing Burp history metadata, not a live verification. Collection time does not establish the original request date.':a.kind==='auth-surface'?'Authentication surface observed; access-control behavior requires verification.':a.kind==='port'||a.kind==='service'?`TCP port ${String(v.port)} observed ${String(v.state??'service label')}; version and vulnerability unconfirmed.`:a.kind==='api-surface'?'API surface signal observed; behavior and authorization require verification.':`Structured ${type} observation; review the original artifact.`;
+          const description=type==='nuclei-recon'?`Read-only Recon template ${String(v.templateId)} matched; this is not a confirmed vulnerability.`:a.kind==='auth-surface'?'Authentication surface observed; access-control behavior requires verification.':a.kind==='port'||a.kind==='service'?`TCP port ${String(v.port)} observed ${String(v.state??'service label')}; version and vulnerability unconfirmed.`:a.kind==='api-surface'?'API surface signal observed; behavior and authorization require verification.':`Structured ${type} observation; review the original artifact.`;
           merge(maps.observations,`${a.kind}:${a.canonicalKey}`,{type,description,asset:url??host,facts:v},tool,ref,at,url??host,a.verification==='OBSERVED'?'OBSERVED':'INFERRED');
-          if(url&&tool==='burp'){const e=endpoint(url,tool,ref,at,typeof v.method==='string'?v.method:undefined);if(e&&typeof v.statusCode==='number')e.statusCode=v.statusCode;}
         }
       }
       continue; // Structured runs never reparse scanner logs or legacy corpus.
@@ -230,7 +229,6 @@ export function buildReconContext(input: {
         const newest = latest.get(targetId); return Boolean(newest && item.lastSeenAt < latestTime.get(targetId)! && !item.sources.some(s => s.startsWith(`${newest}/`)));
       });
       if (item.sources.length && item.sources.every(source => source.endsWith('/gau'))) item.historical = true;
-      if (item.sources.length && item.sources.every(source => source.endsWith('/burp'))) item.historical = true;
     }
   }
   context.sources.sort((a, b) => a.id.localeCompare(b.id));

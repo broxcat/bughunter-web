@@ -79,7 +79,7 @@ export async function campaignFacts(db: Database, ownerId: string, ids: string[]
       FROM "Target" t JOIN "ResearchSession" w ON w."targetId" = t.id AND w."userId" = p."ownerId"
       LEFT JOIN "ScopeAsset" a ON a.id = t."scopeAssetId"
       LEFT JOIN "ScopeAsset" d ON d.id = t."discoveredFromAssetId"
-      WHERE t."programId" = p.id AND t."userId" = p."ownerId" AND w."consoleTargetId" IS NOT NULL
+      WHERE t."programId" = p.id AND t."userId" = p."ownerId" AND w."activeTargetId" IS NOT NULL
         AND (a.active OR d.active OR t."contextOnly" OR (t.active AND t."scopeAssetId" IS NULL AND t."discoveredFromAssetId" IS NULL))
     ) research
     ${findingJoin}

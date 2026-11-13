@@ -6,7 +6,6 @@ export type ReconEvidence = {
   confidence: 'OBSERVED' | 'INFERRED'; freshness: ReconFreshness; historical: boolean; inScope: boolean;
 };
 export type ResearchReconContext = {
-  researchPlan?: import('./planReference').ResearchPlanReference;
   authenticatedRecon?: import('../authenticatedRecon').SafeAuthSurface[];
   assessment?: { assessmentMode: import('../assessment').AssessmentMode | null; authorizedSourceCount: number; sourceContentAvailable: false; sourceAnalysisPerformed: false; assessmentPolicyFile: 'assessment-policy.json' | null };
   assetGraph?: import('../reconGraph').ReconAssetGraph;
@@ -22,9 +21,4 @@ export type ResearchReconContext = {
   warnings: string[];
   counts: { assets: number; endpoints: number; technologies: number; observations: number; sources: number; suggestions: number };
   truncated: boolean;
-};
-export type ReconPanelState = {
-  sessionId: string; snapshot: { id: string; contentSha256: string; createdAt: string; context: ResearchReconContext } | null;
-  updateAvailable: boolean; aged: boolean;
-  deliveries: Array<{ id: string; snapshotId: string; provider: 'codex' | 'claude'; status: string; createdAt: string }>;
 };

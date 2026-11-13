@@ -1,17 +1,5 @@
-import type { ResearchPlanPanelState, ResearchPlanView } from '../researchPlanView';
-
-export function canPrepareResearchHunt(
-  targetId: string,
-  selected: ResearchPlanView | null,
-  state: ResearchPlanPanelState | null,
-): boolean {
-  return Boolean(selected && state?.reconCurrent && !state.configurationChanged &&
-    selected.targetId === targetId && selected.status === 'CURRENT' && selected.id === state.sessionPlanId);
-}
-
 export type ResearchStage =
   | { stage: 'map' }
-  | { stage: 'hunt'; planId: string; objectiveId: string }
   | { stage: 'validate' | 'trace'; sessionId: string; hypothesisId: string; revision: number };
 
 export type HarnessSource = {
@@ -37,7 +25,7 @@ export type HarnessRunView = {
   result: HarnessResult | null;
 };
 
-export const researchTier = (stage: ResearchStage['stage']) => stage === 'map' || stage === 'hunt' ? 'fast' : 'review';
+export const researchTier = (stage: ResearchStage['stage']) => stage === 'map' ? 'fast' : 'review';
 
 export const stageAssessments = (stage: ResearchStage['stage']): HarnessResult['assessment'][] =>
   researchTier(stage) === 'fast' ? ['PLANNED'] : ['SUPPORTED', 'REFUTED', 'INCONCLUSIVE'];

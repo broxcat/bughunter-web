@@ -5,7 +5,7 @@ export const RECON_CAPABILITIES = [
   'TECHNOLOGY_FINGERPRINTING', 'CONTENT_CALIBRATION', 'CONTENT_DISCOVERY',
   'CRAWLING', 'ENTRY_POINT_MAPPING', 'API_MAPPING', 'AUTH_MAPPING',
   'AUTHENTICATED_MAPPING',
-  'TLS_MAPPING', 'PASSIVE_BURP_ENRICHMENT', 'SURFACE_TEMPLATE_MATCHING',
+  'TLS_MAPPING', 'SURFACE_TEMPLATE_MATCHING',
   'NORMALIZATION', 'ATTACK_SURFACE_INTELLIGENCE',
 ] as const;
 export type ReconCapability = typeof RECON_CAPABILITIES[number];
@@ -188,12 +188,11 @@ export function buildCapabilityPlans(input: {
     add('CONTENT_CALIBRATION', 'Content discovery', ['guarded-http'], input.active && web, input.active, 'ACTIVE', 'At least three controlled unknown-path responses or explicit blocking limitation'),
     add('CONTENT_DISCOVERY', 'Content discovery', contentProviders, input.active && web, input.active, 'ACTIVE', 'Bounded calibrated directory enumeration; observed-link crawl alone is insufficient'),
     add('CRAWLING', 'Web / API mapping', ['bounded-crawler'], false, input.active, 'ACTIVE', 'Bounded observation-only traversal of authorized safe links'),
-    add('ENTRY_POINT_MAPPING', 'Web / API mapping', ['bounded-crawler', 'burp'], input.active && web, input.active, 'ACTIVE', 'Analyzed entry-page/link/form inventory without submitting forms'),
-    add('API_MAPPING', 'Web / API mapping', ['bounded-crawler', 'burp'], false, input.active, 'ACTIVE', 'Observable specifications, API paths, methods and parameters'),
-    add('AUTH_MAPPING', 'Web / API mapping', ['bounded-crawler', 'burp'], false, input.active, 'ACTIVE', 'Observable authentication routes/challenges; no bypass/exploitation'),
+    add('ENTRY_POINT_MAPPING', 'Web / API mapping', ['bounded-crawler'], input.active && web, input.active, 'ACTIVE', 'Analyzed entry-page/link/form inventory without submitting forms'),
+    add('API_MAPPING', 'Web / API mapping', ['bounded-crawler'], false, input.active, 'ACTIVE', 'Observable specifications, API paths, methods and parameters'),
+    add('AUTH_MAPPING', 'Web / API mapping', ['bounded-crawler'], false, input.active, 'ACTIVE', 'Observable authentication routes/challenges; no bypass/exploitation'),
     add('AUTHENTICATED_MAPPING', 'Web / API mapping', ['guarded-auth-mapper'], authenticated, input.active && authenticated, 'ACTIVE', 'Bounded read-only mapping of explicitly captured verified contexts; no login or scanner credential arguments'),
     add('SURFACE_TEMPLATE_MATCHING', 'Nuclei Recon', ['nuclei'], false, input.active, 'ACTIVE', 'Only the pinned allowlisted surface-mapping templates'),
-    add('PASSIVE_BURP_ENRICHMENT', 'Burp enrichment', ['burp'], false, input.active, 'PASSIVE', 'Authorized existing history references without active replay'),
     add('NORMALIZATION', 'Normalization', ['artifact-normalizer'], true, true, 'PASSIVE', 'Validated structured artifacts, scope states, deduplication and provenance'),
     add('ATTACK_SURFACE_INTELLIGENCE', 'Scope intelligence', ['internal'], true, true, 'PASSIVE', 'Evidence-backed relationships, coverage gaps and manual Research handoff'),
   ];

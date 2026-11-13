@@ -15,11 +15,10 @@ describe("evidence-driven contract v2", () => {
     expect(hypothesisV2Schema.safeParse({ ...h(), tests: Array(31).fill(data().tests[0]) }).success).toBe(false);
     expect(hypothesisV2Schema.safeParse({ ...h(), initialObservations: [{ ...h().initialObservations[0], source: "SCANNER_VERDICT" }] }).success).toBe(false);
   });
-  it.each(["status code", "static analysis", "Burp metadata", "unperformed control", "unreproduced", "no security effect", "no evidence", "duplicate test"])("cannot confirm from %s alone", reason => {
+  it.each(["status code", "static analysis", "unperformed control", "unreproduced", "no security effect", "no evidence", "duplicate test"])("cannot confirm from %s alone", reason => {
     const value = h("CONFIRMED"), test = value.tests[0];
     if (reason === "status code") test.evidenceQuality = "OBSERVATION";
     if (reason === "static analysis") test.observations[0].source = "STATIC_ANALYSIS";
-    if (reason === "Burp metadata") test.observations[0].evidence = [{ ref: "evidence/burp/fixture.json", summary: "HTTP 200 is not evidence of ownership failure." }];
     if (reason === "unperformed control") test.negativeControl = { kind: "NOT_PERFORMED", reason: "Not tested" };
     if (reason === "unreproduced") test.reproduced = false;
     if (reason === "no security effect") test.securityEffect = "HTTP 200";
@@ -31,7 +30,7 @@ describe("evidence-driven contract v2", () => {
     const value = h("CONFIRMED"); value.tests[0].negativeControl = { kind: "NOT_APPLICABLE", reason: "A separate negative execution cannot reasonably apply to this one-time fixture disclosure, as documented by the operator." };
     expect(hypothesisV2Schema.safeParse(value).success).toBe(true);
   });
-  it("binds every observation to the concrete workspace target, location and scheme", () => {
+  it("binds every observation to the concrete target, location and scheme", () => {
     const target = { id: "target", host: "app.example.test", scheme: "https" };
     expect(researchBindingError(h(), target)).toBeNull();
     for (const value of [{ ...h(), targetId: "foreign" }, { ...h(), host: "discovered.example.test" }, { ...h(), location: "https://foreign.example.test/" }, { ...h(), location: "http://app.example.test/" }, { ...h(), initialObservations: [{ ...h().initialObservations[0], host: "foreign.example.test" }] }]) expect(researchBindingError(value, target)).not.toBeNull();

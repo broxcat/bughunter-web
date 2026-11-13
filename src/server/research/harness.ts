@@ -11,7 +11,6 @@ import { ResearchError } from './workspace';
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,149}$/);
 export const stageInput = z.discriminatedUnion('stage', [
   z.strictObject({ stage: z.literal('map') }),
-  z.strictObject({ stage: z.literal('hunt'), planId: id, objectiveId: id }),
   z.strictObject({ stage: z.enum(['validate', 'trace']), sessionId: id, hypothesisId: id, revision: z.number().int().min(1).max(2147483647) }),
 ]);
 export const runStageInput = z.strictObject({ requestKey: z.uuid(), input: stageInput });
@@ -35,7 +34,6 @@ const stageFormat = (stage: ResearchStage['stage'], sourceIds: string[]) => ({
 
 const instructions = {
   map: 'Map up to three observed surfaces, trust boundaries, recorded access contexts and one knowledge gap. A URL, status code or recorded endpoint never demonstrates unauthorized access. Do not declare a vulnerability. Use PLANNED.',
-  hunt: 'Propose one falsifiable hypothesis and one minimal, distinct test. Specify prerequisite, expected signal, falsification and negative control. Check previous coverage before recommending it. The next step must request operator approval for this specific test. Use PLANNED.',
   validate: 'Evaluate the selected hypothesis impartially. Compare the exact recorded positive test and negative control, then check prerequisites and minimum access. An account may be permitted to sign in but forbidden to access another account’s record. Distinguish the intended authorization policy from observed behavior. SUPPORTED means the recorded test and control support the hypothesis. REFUTED requires an observed counterexample, never an expected denial or a proposed future test. Use INCONCLUSIVE for missing proof. Do not reverse or invent a recorded result.',
   trace: 'Trace only observed steps from controlled input or action to a trust boundary and demonstrated security impact, with the minimum privileges needed. Identify any missing links. Output SUPPORTED, REFUTED or INCONCLUSIVE. Hand the evidence to the operator for an independent human decision.',
 };
@@ -90,7 +88,7 @@ export async function runResearchStage(userId: string, targetId: string, request
     }
     const cutoff = new Date(Date.now() - maxAge);
     const busy = await tx.researchHarnessRun.findFirst({ where: { sessionId, status: 'RUNNING', createdAt: { gt: cutoff } }, select: { id: true } });
-    if (busy) throw new ResearchError('A Research stage is already running in this console.', 409);
+    if (busy) throw new ResearchError('A Research stage is already running for this target.', 409);
     const row = await tx.researchHarnessRun.create({ data: {
       sessionId, requestKey, subject, stage: input.stage, status: 'RUNNING', provider: config.provider, model: config.model,
     }, select: runSelect });
@@ -106,7 +104,7 @@ export async function runResearchStage(userId: string, targetId: string, request
   try {
     const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(80000)]);
     const active = await ownedHarnessSession(userId, targetId);
-    if (active.session.id !== sessionId) throw new ResearchError('The Research session changed. Reopen the current console.', 409);
+    if (active.session.id !== sessionId) throw new ResearchError('The Research context changed. Reload the current target.', 409);
     const memory = await retrieveSemanticMemory(context.query, context.corpus, requestSignal);
     const sources = [...context.facts, ...memory];
     const brain = new BrainClient({ provider: config.provider, model: config.model, apiKey: config.apiKey, baseUrl: config.effectiveBaseUrl });
@@ -121,7 +119,7 @@ Return one JSON object with assessment, summary, nextStep, and citations (an arr
       maxResponseBytes: 96 * 1024, signal: requestSignal, temperature: 0.1 });
     const raw = output.trim().replace(/^\x60{3}(?:json)?\s*/i, '').replace(/\s*\x60{3}$/, '');
     const parsed = modelResult.parse(JSON.parse(raw));
-    const planning = input.stage === 'map' || input.stage === 'hunt';
+    const planning = input.stage === 'map';
     const allowed = new Map(sources.map(source => [source.id, source]));
     const cited = [...new Set(parsed.citations)];
     if (planning !== (parsed.assessment === 'PLANNED') ||

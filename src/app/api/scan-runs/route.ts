@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
   if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json().catch(() => null);
-  if (body?.type === "HUNT") return NextResponse.json({ error: "Legacy HUNT is retired. Create a Codex Research Workspace instead." }, { status: 410 });
+  if (body?.type === "HUNT") return NextResponse.json({ error: "Legacy HUNT is retired. Use the automated Research stage instead." }, { status: 410 });
   if (body?.type === "VALIDATE") {
     return NextResponse.json({ error: "VALIDATE scans are not supported: the validation engine is not implemented." }, { status: 400 });
   }

@@ -55,7 +55,7 @@ export function createScanProcessor(workerId: string, executor: Executor = execu
         await monitor.ready;
         control.assertActive();
         const run = await prisma.scanRun.findUniqueOrThrow({ where: { id: scanRunId }, include: { target: { include: { scope: true } }, scopeAsset: true } });
-        if (type === "HUNT" || run.type === "HUNT") return { outcome: "UNSUPPORTED" as const, reason: "Legacy HUNT is retired. Create a Codex Research Workspace instead." };
+        if (type === "HUNT" || run.type === "HUNT") return { outcome: "UNSUPPORTED" as const, reason: "Legacy HUNT is retired. Use the automated Research stage instead." };
         if (type === "VALIDATE" || run.type === "VALIDATE") return { outcome: "UNSUPPORTED" as const, reason: "VALIDATE scan type is not supported: validation engine is not implemented." };
         if (run.type !== type || run.targetId !== targetId) throw new Error("Scan job identity mismatch");
         // Scope/policy are revalidated on every real start, after winning the claim.
@@ -95,7 +95,6 @@ export function createScanProcessor(workerId: string, executor: Executor = execu
     const parent=await prisma.scanRun.findUnique({where:{id:scanRunId},select:{targetReconRunId:true,scopeAssetId:true}});
     if(parent?.targetReconRunId)try{const {reconcileTargetRecon}=await import('../recon/targetRuns');await reconcileTargetRecon(parent.targetReconRunId);}catch{logger.warn({scanRunId,reason:'RECON_INTELLIGENCE_PUBLICATION_DEFERRED'},'Recon evidence committed; intelligence publication will retry');}
     else if(parent?.scopeAssetId)try{const {materializeAssetRecon}=await import('../scopeMarkdown');await materializeAssetRecon(scanRunId);}catch{logger.warn({scanRunId,reason:'SCOPE_INTELLIGENCE_PUBLICATION_DEFERRED'},'Scope intelligence publication deferred');}
-    try{const {generatePlansForScan}=await import('../research/plans');await generatePlansForScan(scanRunId);}catch{logger.warn({scanRunId,reason:'RESEARCH_PLAN_PUBLICATION_DEFERRED'},'Recon evidence remains valid; advisory plan publication will retry');}
     if (failed && !control.signal.aborted) throw failed; // BullMQ attempts stays 1.
   };
   return {

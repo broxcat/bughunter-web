@@ -22,7 +22,7 @@ describe('methodology v2 objectives, scope and provider substitution', () => {
   ])('%s × %s × %s preserves budget depth and adds %s strategy', (value, type, importance, strategy, depth) => {
     const p = build(value, type, importance); expect(p).toMatchObject({ methodologyVersion: 2, strategy, depth }); expect(p.capabilities!.length).toBeGreaterThan(12);
     expect(p.capabilities!.filter(c => c.required).map(c => c.id)).toContain('AUTHORIZATION'); expect(p.capabilities!.filter(c => c.required).map(c => c.id)).toContain('NORMALIZATION');
-    expect(p.capabilities!.find(c => c.id === 'SURFACE_TEMPLATE_MATCHING')?.required).toBe(false); expect(p.capabilities!.find(c => c.id === 'PASSIVE_BURP_ENRICHMENT')?.required).toBe(false);
+    expect(p.capabilities!.find(c => c.id === 'SURFACE_TEMPLATE_MATCHING')?.required).toBe(false);
     expect(p.limits.rps).toBeLessThanOrEqual(3); expect(p.limits.maxRequests).toBeLessThanOrEqual(1200);
     expect(reconUrlAllowed(p, 'https://outside.test/')).toBe(false); if (p.format === 'URL') expect(p.limits.ports).toEqual([]);
   });
