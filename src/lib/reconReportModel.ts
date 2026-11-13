@@ -10,6 +10,7 @@ import { buildReportEvidence } from './reconReportEvidence';
 import { reconOverview } from './reconOverview';
 import { providerAttempts } from './reconTimeline';
 import { redactObservationText } from './observationSafety';
+import { buildHostReportSection, type HostReportSection } from './reconHostReport';
 
 export type ReportStep = { id?: string; name: string; state: string; reason: string | null; details: unknown };
 
@@ -51,6 +52,7 @@ export type ReportFacts = {
 export type StageLine = { host: string; name: string; tools: string[]; state: string; label: string; reason: string | null };
 
 export type ReconReportModel = ReturnType<typeof buildReportEvidence> & {
+  report: HostReportSection;
   title: string;
   metadata: {
     program: string;
@@ -245,7 +247,8 @@ export function buildReconReportModel(facts: ReportFacts): ReconReportModel {
   const activity = facts.scans.length && facts.scans.every(scan => scan.plan?.activityMode === 'PASSIVE') ? 'PASSIVE' : facts.scans.some(scan => scan.plan?.activityMode === 'ACTIVE') ? 'ACTIVE' : 'UNKNOWN';
   const result: ReconReportModel = {
     ...buildReportEvidence(facts),
-    title: `Recon Report — ${facts.program.companyName}`,
+    report: buildHostReportSection(facts),
+    title: `Rapport de reconnaissance — ${facts.program.companyName}`,
     metadata: {
       program: facts.program.companyName,
       platform: facts.program.platform,

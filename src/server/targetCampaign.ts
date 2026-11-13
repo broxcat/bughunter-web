@@ -121,7 +121,7 @@ export function loadTargetCampaign(ownerId: string, id: string) {
     const facts = (await campaignFacts(tx, ownerId, [id])).get(id)!;
     const view = campaignView(program, facts);
     const summary = facts.runId && view.stages[1].state === 'done' ? await loadReconSummary(tx, facts.runId) : null;
-    return { program, view, summary };
+    return { program, view, summary, latestReconRunId: facts.runId };
   }, { isolationLevel: 'RepeatableRead' });
 }
 

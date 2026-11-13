@@ -13,7 +13,7 @@ import { reconOverview, type ReconTone } from '@/lib/reconOverview';
 import { authContextCount, capabilityRows, providerAttempts, elapsed, formatDuration, groupObservationKinds, redactLogLines, stageTools, stepView, type StepTone } from '@/lib/reconTimeline';
 import { buildReconReportModel } from '@/lib/reconReportModel';
 import { loadReconReportFacts } from '@/server/recon/reportFacts';
-import ReconReportView from '@/components/ReconReportView';
+import ReconHostReport from '@/components/ReconHostReport';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,7 +66,6 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
         <h1 className="break-all text-2xl font-semibold">{run.scans.length===1?redactObservationText(run.scans[0].capturedHost??run.program.companyName):run.program.companyName} <span className="font-normal text-muted">/ Recon run</span></h1>
         <Badge tone={badgeTone[view.tone]}>{view.label}</Badge>
 
-        <a className="ml-auto text-sm text-brand" href={`/api/recon/runs/${run.id}/report`}>Download report (.md)</a>
       </div>
       {view.detail && <p className="text-sm text-muted">{view.detail}</p>}
       <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
@@ -77,7 +76,10 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
 
 
 
-    <h2 className="text-lg font-semibold">Recon timeline</h2>
+    <ReconHostReport report={report.report} program={report.metadata.program} runStatus={`${report.metadata.status} · ${report.metadata.outcomeLabel}`} collectionDate={report.metadata.reconDate}/>
+
+    <h2 className="border-t border-border pt-6 text-lg font-semibold">Exécution technique</h2>
+    <p className="text-sm text-muted">Étapes, outils, fallbacks, erreurs, invocations et journaux du run source.</p>
 
     {!run.scans.length && <section className="border-t border-border py-4"><h2 className="font-semibold">No host executions recorded</h2><p className="mt-2 text-sm text-muted">This run has no per-host execution data. The run status above remains authoritative; nothing is inferred.</p></section>}
 
@@ -176,7 +178,7 @@ export default async function ReconRunPage({ params, searchParams }: { params: P
         <div><dt className="text-subtle">Assessment mode</dt><dd>{run.assessmentModeSnapshot?.toLowerCase().replaceAll('_', ' ') ?? 'Not captured'}</dd></div>
         <div><dt className="text-subtle">Authenticated contexts</dt><dd>{contextCount > 0 ? `${contextCount} recorded` : 'None recorded'}</dd></div>
 <div><dt className="text-muted">Run ID</dt><dd className="break-all font-mono text-xs">{run.id}</dd></div></dl></details>
-    <ReconReportView model={report} narrative={narrative}/>
+    {narrative.state === 'AI_ASSISTED' && <p className="text-xs text-muted">Une synthèse IA historique existe pour ce run, mais le rapport déterministe ci-dessus reste autoritaire.</p>}
     <p className="text-xs text-muted">Missing coverage never proves safety.</p>
   </div>;
 }

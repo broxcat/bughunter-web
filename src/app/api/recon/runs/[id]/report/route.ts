@@ -16,11 +16,12 @@ export async function GET(_req: Request, { params }: Params) {
     const facts = await loadReconReportFacts(session.user.id, id);
     const model = buildReconReportModel(facts);
     const markdown = renderReconReportMarkdown(model,await readRunNarrative(session.user.id,facts,model));
-    const slug = facts.program.companyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'target';
+    const slug = facts.program.companyName.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'target';
+    const date=(facts.run.startedAt??facts.run.createdAt).slice(0,10);
     return new Response(markdown, {
       headers: {
         'Content-Type': 'text/markdown; charset=utf-8',
-        'Content-Disposition': `attachment; filename="recon-report-${slug}.md"`,
+        'Content-Disposition': `attachment; filename="rapport-recon-${slug}-${date}-${id.slice(0,8)}.md"`,
         'Cache-Control': 'no-store',
       },
     });

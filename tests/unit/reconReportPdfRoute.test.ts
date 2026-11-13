@@ -1,0 +1,12 @@
+import {beforeEach,describe,expect,it,vi} from 'vitest';
+const mocks=vi.hoisted(()=>({auth:vi.fn(),load:vi.fn(),pdf:vi.fn()}));
+vi.mock('@/lib/auth',()=>({auth:mocks.auth}));
+vi.mock('@/server/recon/reportFacts',()=>({loadReconReportFacts:mocks.load}));
+vi.mock('@/server/recon/reportPdf',()=>({renderReconReportPdf:mocks.pdf}));
+import {ResearchError} from '@/server/research/workspace';
+import {GET} from '@/app/api/recon/runs/[id]/report/pdf/route';
+const call=()=>GET(new Request('http://app.test/api/recon/runs/run/report/pdf'),{params:Promise.resolve({id:'run'})});
+describe('PDF reconnaissance report authorization',()=>{beforeEach(()=>vi.resetAllMocks());
+ it('refuses unauthenticated reads before loading facts or launching Chromium',async()=>{mocks.auth.mockResolvedValue(null);expect((await call()).status).toBe(401);expect(mocks.load).not.toHaveBeenCalled();expect(mocks.pdf).not.toHaveBeenCalled();});
+ it('does not disclose a foreign or absent run',async()=>{mocks.auth.mockResolvedValue({user:{id:'owner'}});mocks.load.mockRejectedValue(new ResearchError('Recon run not found',404));const r=await call();expect(r.status).toBe(404);expect(await r.json()).toEqual({error:'Recon run not found'});expect(mocks.load).toHaveBeenCalledWith('owner','run');expect(mocks.pdf).not.toHaveBeenCalled();});
+});

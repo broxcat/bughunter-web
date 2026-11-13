@@ -10,11 +10,12 @@ export function CampaignState({ state }: { state: StageState }) {
   return <Badge tone={tones[state]}>{state === 'running' && <span aria-hidden="true" className="mr-1.5 inline-block size-1.5 rounded-full bg-current motion-safe:animate-pulse" />}{state.charAt(0).toUpperCase() + state.slice(1)}</Badge>;
 }
 
-export default function TargetCampaignView({ program, view, notice, summary }: {
+export default function TargetCampaignView({ program, view, notice, summary, latestReconRunId }: {
   program: { id: string; companyName: string; platform: string | null };
   view: ReturnType<typeof targetCampaign>;
   notice?: string;
   summary?: { hosts: number; webApps: number; added: number; changed: number; notObserved: number } | null;
+  latestReconRunId?: string | null;
 }) {
   const { id, companyName, platform } = program;
   return <div className="max-w-6xl space-y-6">
@@ -22,7 +23,7 @@ export default function TargetCampaignView({ program, view, notice, summary }: {
     <header className="space-y-4 rounded-lg border border-border bg-surface p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div><p className="text-sm text-muted">{platformLabel(platform)}</p><h1 className="mt-1 break-words text-2xl font-semibold">{companyName}</h1></div>
-        <Link href={'/targets/' + id + '/details'} prefetch={false} className="text-sm text-brand underline">View details</Link>
+        <div className="flex flex-wrap gap-3">{latestReconRunId&&<Link href={'/recon/runs/'+latestReconRunId} prefetch={false} className="text-sm text-brand underline">Rapport de reconnaissance</Link>}<Link href={'/targets/' + id + '/details'} prefetch={false} className="text-sm text-brand underline">View details</Link></div>
       </div>
       <div className="flex flex-wrap items-center gap-2" aria-label="Current campaign stage">
         <span className="font-medium">{view.current.stage}</span><CampaignState state={view.current.state} />
