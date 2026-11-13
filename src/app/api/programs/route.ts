@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { advanceCampaign, campaignPolicyBlocker } from '@/server/campaignOrchestrator';
+import { advanceCampaign } from '@/server/campaignOrchestrator';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
@@ -53,8 +53,8 @@ export async function POST(req: Request) {
         } });
         await storeTestAccounts(tx, created, targetReview, policy);
         if (startCampaign) {
-          const blocker = campaignPolicyBlocker({ ...created, executionPolicies: [{ version: 1, policy }] }) ??
-            (assets.length ? null : 'Add at least one active Scope Asset before Recon');
+          // Only an empty scope can hold a new campaign; no policy is reviewed.
+          const blocker = assets.length ? null : 'Add at least one active Scope Asset before Recon';
           const source = targetReview.importSource;
           const matchedSource = source?.url === created.programUrl && source?.platform === created.platform ? source : undefined;
           await tx.targetCampaign.create({ data: { programId: created.id, state: blocker ? 'BLOCKED' : 'READY', reason: blocker,

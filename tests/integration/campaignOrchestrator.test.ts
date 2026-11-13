@@ -144,12 +144,11 @@ suite('durable Target campaign', () => {
     }
   });
 
-  it('schedules only changed assets and never queues a policy that disallows automation', async () => {
+  it('schedules only changed assets without gating on the policy review state', async () => {
     const denied = await target(['denied'], { allow: false, interval: 60 });
-    await expect(advance(owner, denied, { beforeCommit: crash })).rejects.toThrow('BLOCKED');
     await advance(owner, denied);
-    expect(await state(denied)).toMatchObject({ state: 'BLOCKED', requestedAt: null, retryAt: null, nextCycleAt: null });
-    expect(await outbox(denied)).toBe(0);
+    expect(await state(denied)).toMatchObject({ state: 'RECON_RUNNING', requestedAt: null, retryAt: null, nextCycleAt: null });
+    expect(await outbox(denied)).toBe(1);
 
     const id = await target(['unchanged', 'changed'], { interval: 60 });
     await advance(owner, id);
@@ -174,7 +173,7 @@ suite('durable Target campaign', () => {
     expect((await Promise.all(ids.map(state))).map(row => row.state).sort()).toEqual(['READY', 'RECON_RUNNING']);
   });
 
-  it('applies restrictions, proposes extensions, and blocks changed rules without testing pending scope', async () => {
+  it('applies restrictions and records changed rules without blocking automation or testing pending scope', async () => {
     const source: CampaignSource = {
       platform: 'HACKERONE', url: 'https://hackerone.com/example-program', grants: [host('removed'), host('restricted')],
       assets: assets('removed', 'restricted'), exclusions: [], forbiddenCategories: [], rules: [], nonQualifying: [],
@@ -203,7 +202,7 @@ suite('durable Target campaign', () => {
     await sync(owner, id, tomorrow, async () => ({ ...fresh, forbiddenCategories: ['FUZZING'] }));
     expect((await policy()).policy).toMatchObject({ forbiddenCategories: ['FUZZING'] });
     await sync(owner, id, new Date(+tomorrow + 86_400_000), async () => ({ ...fresh, rules: [{ text: 'Only test during an agreed window.' }] }));
-    expect(await state(id)).toMatchObject({ state: 'BLOCKED', nextCycleAt: null, requestedAt: null });
+    expect(await state(id)).toMatchObject({ state: 'RECON_RUNNING', reason: null });
     expect((await policy()).policy).toMatchObject({ sourceSnapshot: { unrepresentedRules: expect.arrayContaining(['Only test during an agreed window.']) } });
     expect(await outbox(id)).toBe(3);
   });

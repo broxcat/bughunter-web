@@ -1,4 +1,3 @@
-import { POLICY_REVIEW_ANCHOR } from './programExecutionPolicy';
 
 type Stage = 'Target' | 'Recon' | 'Research' | 'Findings';
 export type StageState = 'not started' | 'running' | 'done' | 'blocked' | 'needs you' | 'failed';
@@ -25,11 +24,10 @@ export function campaignActivity(facts: CampaignFacts) {
 }
 
 export function targetCampaign(program: {
-  id: string; deletingAt: Date | null; assetCount: number; policyBlocker: string | null;
-  firstRule?: number; undecidedRules?: number; campaign?: CampaignStatus | null;
+  id: string; deletingAt: Date | null; assetCount: number; campaign?: CampaignStatus | null;
 }, facts: CampaignFacts) {
   const root = '/targets/' + program.id;
-  const settings = root + '/settings#' + POLICY_REVIEW_ANCHOR;
+  const settings = root + '/settings';
   const history = '/recon?program=' + program.id;
   const researchUrl = '/research?program=' + program.id + '&view=campaign';
   const researchDetails = '/research?program=' + program.id + '&view=details';
@@ -37,15 +35,12 @@ export function targetCampaign(program: {
   const paused = campaign?.state === 'PAUSED';
   const running = facts.reconRunning > 0 || facts.standaloneRunning > 0;
   const busyRecon = running || facts.runStatus === 'QUEUED' || facts.standaloneTotal > 0 || facts.handoffPending;
+  // Only deletion or an empty scope can hold the Target stage. No execution
+  // policy is reviewed, so nothing else gates the campaign.
   const deletion = program.deletingAt ? 'Target deletion is in progress. Retry Delete target to finish cleanup.' : null;
-  const blocker = deletion ?? program.policyBlocker;
   const scopeMissing = !program.assetCount;
-  const ruleCount = !deletion ? program.undecidedRules ?? 0 : 0;
-  const target: StageView = blocker || scopeMissing
-    ? { stage: 'Target', state: 'blocked', detail: ruleCount ? ruleCount + (ruleCount === 1 ? ' rule needs' : ' rules need') + ' a decision.'
-      : blocker ?? 'Add at least one active Scope Asset before Recon.',
-      fix: ruleCount ? root + '/settings#policy-rule-' + (program.firstRule ?? 1)
-        : deletion ? root + '/settings' : settings }
+  const target: StageView = deletion || scopeMissing
+    ? { stage: 'Target', state: 'blocked', detail: deletion ?? 'Add at least one active Scope Asset before Recon.', fix: settings }
     : { stage: 'Target', state: 'done', detail: program.assetCount + (program.assetCount === 1 ? ' asset in scope' : ' assets in scope') };
 
   let recon: StageView = { stage: 'Recon', state: 'not started' };
@@ -88,12 +83,12 @@ export function targetCampaign(program: {
   let next: string;
   if (target.state === 'blocked') {
     current = target;
-    action = { label: deletion ? 'Open target settings' : blocker ? 'Fix policy' : 'Add scope', href: target.fix! };
-    next = deletion ? 'Finish Target cleanup.' : blocker ? 'Resolve the execution policy before starting Recon.' : 'Add an authorized asset to start Recon.';
+    action = { label: deletion ? 'Open target settings' : 'Add scope', href: target.fix! };
+    next = deletion ? 'Finish Target cleanup.' : 'Add an authorized asset to start Recon.';
   } else if (paused || campaign?.state === 'BLOCKED') {
     current = { stage: 'Target', state: 'needs you' };
     action = { label: 'Resume campaign', command: 'resume' };
-    next = paused ? 'Resume when you are ready. A running job can finish while paused.' : 'The policy is ready. Resume the campaign.';
+    next = paused ? 'Resume when you are ready. A running job can finish while paused.' : 'Resume the campaign to continue.';
   } else if (busyRecon || campaign?.state === 'READY' || campaign?.state === 'RECON_RUNNING') {
     current = recon;
     action = { label: 'View progress', href: '#recon' };

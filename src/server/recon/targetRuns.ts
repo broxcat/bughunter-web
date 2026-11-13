@@ -1,4 +1,3 @@
-import { programPolicyBlocker, programPolicyInclude } from '../programExecutionPolicy';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { assetValueRank, detectScopeAsset, scopeAssetExecutable } from '@/lib/scopeAssets';
@@ -22,9 +21,7 @@ export async function lockReconProgram(tx: Prisma.TransactionClient, userId: str
 }
 
 export async function admitTargetRecon(tx: Prisma.TransactionClient, userId: string, programId: string, campaignKey?: string) {
-  const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude });
-  const blocker = programPolicyBlocker(program);
-  if (blocker) throw new ResearchError(blocker, 409);
+  const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId } });
   await backfillProgramAssets(tx,programId,userId);
   const live=await tx.targetReconRun.findFirst({where:{programId,status:{in:['QUEUED','RUNNING']}},include:{scans:{select:{id:true}}}});if(live)return live;
   let assets=(await tx.scopeAsset.findMany({where:{programId,active:true},include:{executionTarget:{include:{scope:true}}}})).sort((a,b)=>assetValueRank(a.assetValue)-assetValueRank(b.assetValue)||a.normalizedValue.localeCompare(b.normalizedValue));

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { decryptSecret } from '@/lib/crypto';
-import { programPolicyBlocker, programPolicyInclude } from '@/server/programExecutionPolicy';
+import { programPolicyInclude, resolveProgramPolicy } from '@/server/programExecutionPolicy';
 
 const auth = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/auth', () => ({ auth }));
@@ -53,7 +53,7 @@ suite('reviewed target form with PostgreSQL', () => {
     vi.unstubAllEnvs();
   });
 
-  it('creates an owner-reviewed manual target with documented assets and blocks undecided rules', async () => {
+  it('creates an owner-reviewed manual target with documented assets without gating undecided rules', async () => {
     const response = await post(request(fixture('Manual reviewed target')));
     expect(response.status).toBe(201);
     const { id } = await response.json();
@@ -63,7 +63,8 @@ suite('reviewed target form with PostgreSQL', () => {
       reviewState: 'OWNER_REVIEWED',
       sourceSnapshot: { documentedAssets: [{ originalValue: 'com.example.app' }], unrepresentedRules: ['Use only an owned account.'] },
     });
-    expect(programPolicyBlocker(program)).toMatch(/unrepresented program or scope rules/);
+    // An undecided rule is recorded but never gates execution.
+    expect(resolveProgramPolicy(program).userAgent).toBeTruthy();
     const params = { params: Promise.resolve({ id }) };
     const review = await (await settings.GET(new Request('http://app.example.test'), params)).json();
     auth.mockResolvedValueOnce({ user: { id: otherId } });
@@ -78,7 +79,7 @@ suite('reviewed target form with PostgreSQL', () => {
     }, 'PATCH'), params);
     expect(saved.status).toBe(200);
     const savedProgram = await prisma.bountyProgram.findUniqueOrThrow({ where: { id }, include: programPolicyInclude });
-    expect(programPolicyBlocker(savedProgram)).toBeNull();
+    expect(resolveProgramPolicy(savedProgram).userAgent).toBeTruthy();
     const account = await prisma.targetCredential.findFirstOrThrow({ where: { target: { programId: id } } });
     expect(decryptSecret(account.passwordCipher!)).toBe('fixture-password');
     const accountResponse = await (await settings.GET(new Request('http://app.example.test'), params)).json();

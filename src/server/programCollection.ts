@@ -15,8 +15,8 @@ export function programCollection(ownerId: string, input: PageRequest) {
     const facts = await campaignFacts(tx, ownerId, items.map(program => program.id));
     return { ...bounds, items: items.map(program => {
       const { id, companyName, platform, deletingAt, _count, reconRuns } = program;
-      const { policyBlocker, current, action, activity } = campaignView(program, facts.get(id)!);
-      return { id, companyName, platform, deletingAt, _count, reconRuns, policyBlocker, campaign: { current, action, activity } };
+      const { current, action, activity } = campaignView(program, facts.get(id)!);
+      return { id, companyName, platform, deletingAt, _count, reconRuns, campaign: { current, action, activity } };
     }) };
   }, { isolationLevel: 'RepeatableRead' });
 }

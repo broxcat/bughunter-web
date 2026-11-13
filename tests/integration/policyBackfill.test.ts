@@ -37,7 +37,8 @@ describe.skipIf(!testDatabase)('lossless execution policy backfill', () => {
     const { GET, PATCH } = await import('@/app/api/programs/[id]/route');
     const { programCollection } = await import('@/server/programCollection');
     const { loadTargetExecution, assertExecutionUrl } = await import('@/server/execution');
-    const { MISSING_HUNTER_UA } = await import('@/lib/programExecutionPolicy');
+    const { FALLBACK_USER_AGENT } = await import('@/lib/programExecutionPolicy');
+    const { resolveProgramPolicy } = await import('@/server/programExecutionPolicy');
     const user = await prisma.user.create({ data: { email: 'policy@example.test' } });
     auth.mockResolvedValue({ user: { id: user.id } });
     const programRules = '  At most one request per second.\nIdentify manually.  ';
@@ -81,7 +82,7 @@ describe.skipIf(!testDatabase)('lossless execution policy backfill', () => {
     expect(await prisma.programExecutionPolicy.count()).toBe(1);
 
     expect(await backfillExecutionPolicies(true)).toMatchObject({
-      programsProcessed: 3, programsBlockedAfterBackfill: 2, draftsPlanned: 2, draftsCreated: 0, existingPoliciesKept: 1,
+      programsProcessed: 3, draftsPlanned: 2, draftsCreated: 0, existingPoliciesKept: 1,
       unconvertibleExclusions: [{ programId: invalid.id, index: 0, value: 'Contact program first', reason: expect.any(String) }],
     });
     expect(await prisma.programExecutionPolicy.count()).toBe(1);
@@ -106,10 +107,9 @@ describe.skipIf(!testDatabase)('lossless execution policy backfill', () => {
     expect(await prisma.report.findUnique({ where: { id: report.id } })).toEqual(report);
     expect(await prisma.programExecutionPolicy.count({ where: { programId: manual.id } })).toBe(1);
 
-    const collectionBlocker = async () => (await programCollection(user.id, { page: 1, pageSize: 10, q: '' })).items.find(item => item.id === legacy.id)!.policyBlocker;
-    const draftBlocker = await collectionBlocker();
-    expect(draftBlocker).toMatch(/review and save/);
-    await expect(loadTargetExecution(target.id)).rejects.toThrow(draftBlocker!);
+    // A backfill draft is still recorded, but no policy state gates execution.
+    expect((await programCollection(user.id, { page: 1, pageSize: 10, q: '' })).items.find(item => item.id === legacy.id)).toBeTruthy();
+    await expect(loadTargetExecution(target.id)).resolves.toBeTruthy();
     const { legacyPolicyReview: { scopeFingerprint } } = await (await GET(request(), params)).json();
     const policy = {
       automationAllowed: true, requiredUserAgent: 'Fixture/1', requiredHeaders: [],
@@ -123,19 +123,18 @@ describe.skipIf(!testDatabase)('lossless execution policy backfill', () => {
     expect((await patch({ ...revision, executionPolicy: policy })).status).toBe(200);
     expect((await read()).map(row => row.version)).toEqual([1, 2]);
     expect((await read())[0]).toEqual(draft);
-    expect(await collectionBlocker()).toBeNull();
     const execution = await loadTargetExecution(target.id);
     expect(() => assertExecutionUrl('https://app.example.test/admin/x', execution)).toThrow('out of scope');
     expect(() => assertExecutionUrl('https://app.example.test/app', execution)).not.toThrow();
     expect((await prisma.bountyProgram.findUniqueOrThrow({ where: { id: legacy.id } })).outOfScope).toEqual(outOfScope);
 
     await prisma.scope.update({ where: { id: scope.id }, data: { scopeDetails: 'Changed restriction' } });
-    const changedBlocker = await collectionBlocker();
-    expect(changedBlocker).toMatch(/unrepresented/);
-    await expect(loadTargetExecution(target.id)).rejects.toThrow(changedBlocker!);
+    // Changed legacy scope prose no longer holds execution; the revision conflict stands.
+    await expect(loadTargetExecution(target.id)).resolves.toBeTruthy();
     expect((await patch({ ...revision, expectedPolicyVersion: 2, executionPolicy: policy })).status).toBe(409);
 
-    await prisma.bountyProgram.create({ data: { ownerId: user.id, companyName: 'Needs UA', requiredUserAgent: '' } });
-    expect((await programCollection(user.id, { page: 1, pageSize: 10, q: 'Needs UA' })).items[0].policyBlocker).toBe(MISSING_HUNTER_UA);
+    const needsUa = await prisma.bountyProgram.create({ data: { ownerId: user.id, companyName: 'Needs UA', requiredUserAgent: '' } });
+    // A program without any User-Agent is identified by the fallback, not blocked.
+    expect(resolveProgramPolicy({ ...needsUa, outOfScope: [] }).userAgent).toBe(FALLBACK_USER_AGENT);
   }, 30_000);
 });

@@ -3,8 +3,8 @@ import { Prisma } from '@prisma/client';
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { currentPolicySelection, programPolicyInclude } from '@/server/programExecutionPolicy';
-import { campaignAfterReview, campaignDueAt, campaignPolicyBlocker, cancelCampaignScans } from '@/server/campaignOrchestrator';
+import { currentPolicySelection } from '@/server/programExecutionPolicy';
+import { campaignAfterReview, campaignDueAt } from '@/server/campaignOrchestrator';
 import { pendingScopeSchema } from '@/lib/campaignSource';
 import { z } from 'zod';
 import { convertLegacyExclusions, legacyExclusionParity, legacyFreeText, legacyScopeFingerprint, readLegacyScopes } from '@/server/legacyPolicySource';
@@ -157,9 +157,6 @@ export async function PATCH(req: Request, { params }: Params) {
         const campaign = await tx.targetCampaign.findUnique({ where: { programId: id } });
         const interval = targetReview.campaignInterval === undefined ? campaign?.intervalMinutes ?? null : targetReview.campaignInterval;
         if (campaign || interval !== null) {
-          const policyProgram = await tx.bountyProgram.findUniqueOrThrow({ where: { id }, include: programPolicyInclude });
-          const blocker = campaignPolicyBlocker(policyProgram);
-          if (blocker) await cancelCampaignScans(tx, session.user.id!, id, false);
           if (campaign) {
             const reviewedAssets = new Set((await tx.scopeAsset.findMany({ where: { programId: id, active: true }, select: { normalizedValue: true } }))
               .map(asset => asset.normalizedValue));
@@ -168,14 +165,14 @@ export async function PATCH(req: Request, { params }: Params) {
             const imported = targetReview.importSource;
             const matchedSource = imported?.url === saved.programUrl && imported?.platform === saved.platform ? imported : undefined;
             await tx.targetCampaign.update({ where: { programId: id }, data: {
-              ...campaignAfterReview(campaign, blocker, interval),
+              ...campaignAfterReview(campaign, interval),
               ...(matchedSource ? { source: matchedSource, lastSyncAt: new Date(), pendingAssets: [] }
                 : sourceChanged ? { source: Prisma.DbNull, pendingAssets: [] }
                   : { pendingAssets: pending.filter(asset => !reviewedAssets.has(asset.value)) }),
             } });
           } else {
             await tx.targetCampaign.create({ data: { programId: id, intervalMinutes: interval,
-              state: blocker ? 'BLOCKED' : 'MONITORING', reason: blocker, nextCycleAt: blocker ? null : campaignDueAt(interval, new Date()),
+              state: 'MONITORING', reason: null, nextCycleAt: campaignDueAt(interval, new Date()),
               source: targetReview.importSource?.url === saved.programUrl && targetReview.importSource?.platform === saved.platform ? targetReview.importSource : undefined } });
           }
         }

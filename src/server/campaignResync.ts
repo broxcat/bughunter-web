@@ -5,7 +5,6 @@ import { matchesHost } from '@/lib/bountyProgram';
 import { assetAllowsHost, assetAllowsUrl, detectScopeAsset } from '@/lib/scopeAssets';
 import { campaignSourceSchema, pendingScopeSchema, type CampaignSource } from '@/lib/campaignSource';
 import { storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
-import { campaignPolicyBlocker } from './campaignOrchestrator';
 import { programPolicyInclude } from './programExecutionPolicy';
 import { detectProgram } from './programImport/preview';
 import { publicProgramText } from './programImport/publicPage';
@@ -49,7 +48,7 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
       tx.targetCampaign.findUnique({ where: { programId } }),
       tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude }),
     ]);
-    if (!row || row.state === 'PAUSED' || row.state === 'BLOCKED' || campaignPolicyBlocker(program) ||
+    if (!row || row.state === 'PAUSED' || row.state === 'BLOCKED' ||
         (row.lastSyncAt && +now - +row.lastSyncAt < CAMPAIGN_SYNC_INTERVAL)) return null;
     const detected = program.programUrl && program.platform ? detectProgram(program.programUrl) : null;
     await tx.targetCampaign.update({ where: { programId }, data: { lastSyncAt: now } });
@@ -81,7 +80,7 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
       tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude }),
     ]);
     if (!row || +row.lastSyncAt! !== +now || program.platform !== claim.platform || !program.programUrl ||
-        detectProgram(program.programUrl)?.reference.url !== claim.url || campaignPolicyBlocker(program)) return [];
+        detectProgram(program.programUrl)?.reference.url !== claim.url) return [];
     const latest = program.executionPolicies[0];
     const policy = storedExecutionPolicySchema.parse(latest.policy);
     const previous = campaignSourceSchema.safeParse(row.source).data;
@@ -130,10 +129,12 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
         executionPolicies: { create: { version: latest.version + 1, policy: nextPolicy } },
       } });
       const affected = existing.filter(asset => newExclusions.some(exclusion => overlaps(exclusion, asset.normalizedValue)));
-      if (rulesNeedReview || newCategories.length || affected.length) {
+      // Rule text is retained for auditability, but it is not a manual-review
+      // gate. Only newly enforceable restrictions cancel affected live work.
+      if (newCategories.length || affected.length) {
         await tx.scanRun.updateMany({ where: {
           target: { programId, userId: ownerId }, status: { in: [...active] }, cancelRequestedAt: null,
-          ...(!rulesNeedReview && !newCategories.length ? { OR: [
+          ...(!newCategories.length ? { OR: [
             { scopeAssetId: { in: affected.map(asset => asset.id) } },
             { target: { discoveredFromAssetId: { in: affected.map(asset => asset.id) } } },
           ] } : {}),
@@ -142,8 +143,6 @@ export async function resyncCampaign(ownerId: string, programId: string, now = n
     }
     await tx.targetCampaign.update({ where: { programId }, data: {
       source: fresh as Prisma.InputJsonValue, pendingAssets,
-      ...(rulesNeedReview ? { state: row.state === 'PAUSED' ? 'PAUSED' : 'BLOCKED', reason: 'Platform rules need review.',
-        requestedAt: null, retryAt: null, nextCycleAt: null } : {}),
     } });
     return removed.map(asset => asset.id);
   }, { timeout: 30000 });

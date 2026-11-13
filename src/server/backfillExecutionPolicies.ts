@@ -2,7 +2,7 @@
 import { prisma } from '@/lib/prisma';
 import { hunterIdentitySchema, storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
 import { captureLegacyScopes, convertLegacyExclusions, legacyFreeText } from './legacyPolicySource';
-import { programPolicyBlocker, programPolicyInclude, type PolicyProgram } from './programExecutionPolicy';
+import { programPolicyInclude, type PolicyProgram } from './programExecutionPolicy';
 
 export function draftExecutionPolicy(program: PolicyProgram, exclusions: string[]) {
   const scopes = captureLegacyScopes(program.targets?.map(target => target.scope) ?? [], program.ownerId);
@@ -30,7 +30,6 @@ export async function backfillExecutionPolicies(dryRun: boolean) {
   const report = {
     mode: dryRun ? 'dry-run' : 'apply',
     programsProcessed: 0,
-    programsBlockedAfterBackfill: 0,
     draftsPlanned: 0,
     draftsCreated: 0,
     existingPoliciesKept: 0,
@@ -52,14 +51,13 @@ export async function backfillExecutionPolicies(dryRun: boolean) {
         const program = await tx.bountyProgram.findUnique({ where: { id }, include: programPolicyInclude });
         if (!program || program.deletingAt) return null;
         const { exclusions, unconvertible } = convertLegacyExclusions(program.outOfScope);
-        if (program.executionPolicies.length) return { draft: false, blocked: Boolean(programPolicyBlocker(program)), unconvertible };
+        if (program.executionPolicies.length) return { draft: false, unconvertible };
 
         if (!dryRun) await tx.programExecutionPolicy.create({ data: { programId: id, version: 1, policy: draftExecutionPolicy(program, exclusions) } });
-        return { draft: true, blocked: true, unconvertible };
+        return { draft: true, unconvertible };
       });
       if (!result) { report.retiringProgramsSkipped++; continue; }
       report.programsProcessed++;
-      if (result.blocked) report.programsBlockedAfterBackfill++;
       if (result.draft) {
         report.draftsPlanned++;
         if (!dryRun) report.draftsCreated++;

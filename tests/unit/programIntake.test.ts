@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '@/app/api/programs/import-preview/route';
-import { LEGACY_LIMITS, MISSING_HUNTER_USERNAME } from '@/lib/programExecutionPolicy';
+import { FALLBACK_USER_AGENT, LEGACY_LIMITS } from '@/lib/programExecutionPolicy';
 import { splitNonQualifying } from '@/lib/programIntake';
 import { resolveProgramPolicy, authorizeExecution } from '@/server/programExecutionPolicy';
 import { INVALID_EXTRACTION, modelExtraction, normalizeIntake } from '@/server/programImport/intake';
@@ -104,12 +104,14 @@ describe('Target intake', () => {
       requiredUserAgent: 'Agent/[your username]',
       sourceSnapshot: { url: null, rules: '', unrepresentedRules: [] } } }] };
     vi.stubEnv('HUNTER_USERNAME', '');
-    const blocked = resolveProgramPolicy(program);
-    expect(blocked.blocker).toBe(MISSING_HUNTER_USERNAME);
-    expect(blocked.headers).toEqual({});
-    expect(() => authorizeExecution({ host: 'app.orion.example.test', policy: blocked }, { tool: 'http-probe' })).toThrow('HUNTER_USERNAME');
+    // An unresolved username no longer blocks: the identity falls back and the
+    // half-filled headers are dropped rather than sent.
+    const unresolved = resolveProgramPolicy(program);
+    expect(unresolved.userAgent).toBe(FALLBACK_USER_AGENT);
+    expect(unresolved.headers).toEqual({});
+    expect(() => authorizeExecution({ host: 'app.orion.example.test', policy: unresolved }, { tool: 'http-probe' })).not.toThrow();
     vi.stubEnv('HUNTER_USERNAME', 'owner-test');
-    expect(resolveProgramPolicy(program)).toMatchObject({ blocker: null, userAgent: 'Agent/owner-test', headers: { 'x-bug-bounty': 'HackerOne-owner-test' } });
+    expect(resolveProgramPolicy(program)).toMatchObject({ userAgent: 'Agent/owner-test', headers: { 'x-bug-bounty': 'HackerOne-owner-test' } });
   });
 
   it('fetches a canonical public page only, ignores hidden text, and falls back for unsupported and private pages', async () => {

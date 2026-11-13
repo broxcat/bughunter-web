@@ -4,6 +4,7 @@ import { campaignSourceFromIntake, normalizeYesWeHack } from '@/server/programIm
 import { publicProgramText } from '@/server/programImport/publicPage';
 import { parseYesWeHackRaw, yesWeHackPageData } from '@/server/programImport/yesWeHack';
 import { authorizeExecution, resolveProgramPolicy } from '@/server/programExecutionPolicy';
+import { FALLBACK_USER_AGENT } from '@/lib/programExecutionPolicy';
 
 const scopes = [
   { scope: 'https://www.example.test', scope_type: 'web-application', asset_value: 'MEDIUM' },
@@ -122,13 +123,15 @@ describe('deterministic YesWeHack intake', () => {
     } }] };
     vi.stubEnv('DEFAULT_USER_AGENT', '');
     vi.stubEnv('HUNTER_USERNAME', 'fixture-hunter');
-    expect(resolveProgramPolicy(program).blocker).toContain('DEFAULT_USER_AGENT');
+    // APPEND mode with no DEFAULT_USER_AGENT falls back instead of blocking.
+    expect(resolveProgramPolicy(program).userAgent).toBe(FALLBACK_USER_AGENT);
     vi.stubEnv('DEFAULT_USER_AGENT', 'DefaultAgent/1');
     vi.stubEnv('HUNTER_USERNAME', '');
-    const denied = resolveProgramPolicy(program);
-    expect(() => authorizeExecution({ host: 'example.test', policy: denied }, { tool: 'http-probe' })).toThrow('HUNTER_USERNAME');
+    const unresolved = resolveProgramPolicy(program);
+    expect(unresolved.userAgent).toBe(FALLBACK_USER_AGENT);
+    expect(() => authorizeExecution({ host: 'example.test', policy: unresolved }, { tool: 'http-probe' })).not.toThrow();
     vi.stubEnv('HUNTER_USERNAME', 'fixture-hunter');
-    expect(resolveProgramPolicy(program)).toMatchObject({ blocker: null, userAgent: 'DefaultAgent/1 Bounty-fixture-hunter' });
+    expect(resolveProgramPolicy(program)).toMatchObject({ userAgent: 'DefaultAgent/1 Bounty-fixture-hunter' });
   });
 
   it('rejects private data and never downloads an unrecognized URL', async () => {

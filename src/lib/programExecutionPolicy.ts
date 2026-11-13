@@ -88,6 +88,9 @@ export const storedExecutionPolicySchema = executionPolicySchema.extend({
 }).refine(policy => policyDraftNeedsReview(policy.reviewState) || (policy.requestsPerSecond !== null && policy.maxConcurrency !== null), 'Reviewed policies require request limits');
 export type StoredExecutionPolicy = z.infer<typeof storedExecutionPolicySchema>;
 export const LEGACY_LIMITS = { requestsPerSecond: 5, maxConcurrency: 2 };
+// Execution is never gated on policy state, so Recon always has an identifying
+// User-Agent: this is used when neither the program nor DEFAULT_USER_AGENT sets one.
+export const FALLBACK_USER_AGENT = "bughunter-web research scanner";
 export const POLICY_REVIEW_ANCHOR = 'execution-policy';
 export const MISSING_HUNTER_UA = 'Recon requires a User-Agent. Set the program User-Agent in Target settings or configure DEFAULT_USER_AGENT.';
 export const MISSING_HUNTER_USERNAME = 'Program identification requires a hunter username. Configure HUNTER_USERNAME before automation can run.';

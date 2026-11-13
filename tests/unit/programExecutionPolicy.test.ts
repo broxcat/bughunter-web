@@ -1,6 +1,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { executionPolicySchema, MISSING_HUNTER_UA, type ExecutionPolicyInput } from '@/lib/programExecutionPolicy';
+import { executionPolicySchema, FALLBACK_USER_AGENT, type ExecutionPolicyInput } from '@/lib/programExecutionPolicy';
 import { authorizeExecution, excludedByPolicy, resolveProgramPolicy } from '@/server/programExecutionPolicy';
 import { executionHeaders, withTargetExecution } from '@/server/execution';
 
@@ -48,7 +48,8 @@ describe('program execution policy', () => {
     expect(resolve().userAgent).toBe('Hunter/1');
     expect(resolveProgramPolicy(legacy).userAgent).toBe('Legacy/1');
     vi.stubEnv('DEFAULT_USER_AGENT', '');
-    expect(resolveProgramPolicy({ ...legacy, requiredUserAgent: '' }).blocker).toBe(MISSING_HUNTER_UA);
+    // Nothing is gated on policy state: an unusable User-Agent falls back.
+    expect(resolveProgramPolicy({ ...legacy, requiredUserAgent: '' }).userAgent).toBe(FALLBACK_USER_AGENT);
   });
 
   it('enforces case-insensitive required headers after user-supplied headers', () => {
@@ -59,12 +60,12 @@ describe('program execution policy', () => {
     expect(executionPolicySchema.safeParse({ ...config, requiredHeaders: [{ name: 'Host', value: 'other.example.com' }] }).success).toBe(false);
   });
 
-  it('denies disabled, unrepresented and stale rules', () => {
+  it('admits disabled, unrepresented and stale rules: no policy state gates execution', () => {
     for (const policy of [
       resolve({ ...config, automationAllowed: false }),
       resolve({ ...config, sourceSnapshot: { ...config.sourceSnapshot, unrepresentedRules: ['Special window'] } }),
       resolveProgramPolicy({ ...legacy, rulesOfEngagement: 'Changed', executionPolicies: [{ version: 1, policy: config }] }),
       resolveProgramPolicy({ ...legacy, rulesOfEngagement: 'Free text' }),
-    ]) expect(() => authorizeExecution({ host: 'example.com', policy }, { tool: 'browser' })).toThrow(/automation/i);
+    ]) expect(() => authorizeExecution({ host: 'example.com', policy }, { tool: 'browser' })).not.toThrow();
   });
 });

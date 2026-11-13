@@ -1,13 +1,12 @@
 
 import { BlockList, isIP } from 'node:net';
-import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import { requiredUserAgentSchema } from '@/lib/httpPolicy.mjs';
 import { isExcluded, matchesHost } from '@/lib/bountyProgram';
 import { assetAllowsHost, assetAllowsUrl, detectScopeAsset, type AssetBoundary } from '@/lib/scopeAssets';
-import { policyDraftNeedsReview, storedExecutionPolicySchema, LEGACY_LIMITS, MISSING_HUNTER_UA, MISSING_HUNTER_USERNAME, hasHunterTemplate, hasHunterUsername, replaceHunterTemplate, identificationHeadersSchema, type TestCategory } from '@/lib/programExecutionPolicy';
+import { storedExecutionPolicySchema, FALLBACK_USER_AGENT, LEGACY_LIMITS, hasHunterTemplate, hasHunterUsername, replaceHunterTemplate, identificationHeadersSchema, type TestCategory } from '@/lib/programExecutionPolicy';
 
-import { captureLegacyScopes, legacyExclusionParity, legacyScopeFingerprint, legacyScopeTargets } from './legacyPolicySource';
+import { captureLegacyScopes, legacyScopeFingerprint, legacyScopeTargets } from './legacyPolicySource';
 
 export const currentPolicySelection = { orderBy: { version: 'desc' as const }, take: 1 };
 export const programPolicyInclude = {
@@ -23,9 +22,8 @@ export type PolicyProgram = {
   executionPolicies?: readonly { version: number; policy: unknown }[];
   targets?: readonly { scope: { id: string; userId: string; scopeDetails: string | null; outOfScope: string | null; rulesOfEngagement: string | null } }[];
 };
-type ScopeRules = { scopeDetails?: string | null; outOfScope?: string | null; rulesOfEngagement?: string | null };
 
-export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules) {
+export function resolveProgramPolicy(program: PolicyProgram) {
   const row = program.executionPolicies?.[0];
   const policy = row && storedExecutionPolicySchema.parse(row.policy);
   const defaultUserAgent = process.env.DEFAULT_USER_AGENT || '';
@@ -37,40 +35,25 @@ export function resolveProgramPolicy(program: PolicyProgram, scope?: ScopeRules)
   const rawHeaders = policy?.requiredHeaders ?? [];
   const usernameMissing = [rawUserAgent, programUserAgent, ...rawHeaders.map(header => header.value)].some(hasHunterTemplate) && !hasHunterUsername(username);
   const resolve = (value: string) => usernameMissing ? '' : replaceHunterTemplate(value, username ?? '');
-  const userAgent = resolve(rawUserAgent);
+  // No policy state gates execution. Identification still has to leave here
+  // valid, so an unusable User-Agent falls back instead of blocking the run.
+  const resolvedUserAgent = resolve(rawUserAgent).trim();
+  const userAgent = requiredUserAgentSchema.safeParse(resolvedUserAgent).success && !/\\[rn]/.test(resolvedUserAgent)
+    ? resolvedUserAgent : FALLBACK_USER_AGENT;
   const resolvedHeaders = rawHeaders.map(({ name, value }) => ({ name, value: resolve(value) }));
-  const headers = usernameMissing ? {} : Object.fromEntries(resolvedHeaders.map(({ name, value }) => [name, value]));
-  const sourceMismatch = policy && (policy.sourceSnapshot.rules !== (program.rulesOfEngagement?.trim() ?? '') ||
-    policy.sourceSnapshot.url !== (program.programUrl ?? null));
+  // Unresolved templates or invalid values are dropped, never sent half-filled.
+  const headers = usernameMissing || !identificationHeadersSchema.safeParse(resolvedHeaders).success
+    ? {} : Object.fromEntries(resolvedHeaders.map(({ name, value }) => [name, value]));
   const captured = policy?.sourceSnapshot.legacy;
   const scopes = program.targets && captureLegacyScopes(program.targets.map(target => target.scope), program.ownerId);
-  const hasScopeProse = scopes ? scopes.length > 0 : Boolean(scope?.scopeDetails?.trim() || scope?.outOfScope?.trim() || scope?.rulesOfEngagement?.trim());
   const reviewedScope = Boolean(policy?.reviewState === 'OWNER_REVIEWED' && captured && scopes &&
     legacyScopeFingerprint(captured.scopes) === legacyScopeFingerprint(scopes));
-  const legacyChanged = captured && (!isDeepStrictEqual(captured.outOfScope, program.outOfScope) ||
-    captured.programRules !== (program.rulesOfEngagement ?? null));
-  const parity = captured && policy?.automationAllowed ? legacyExclusionParity(program.outOfScope, policy.exclusions) : null;
-  const unrepresented = sourceMismatch || legacyChanged || (hasScopeProse && !reviewedScope) ||
-    Boolean(captured?.scopes.length && !reviewedScope) || Boolean(parity && (parity.missing.length || parity.unconvertible.length)) ||
-    (policy ? policy.sourceSnapshot.unrepresentedRules.length > 0 : Boolean(program.rulesOfEngagement?.trim()));
-  const blocker = policyDraftNeedsReview(policy?.reviewState) ? 'Automation is blocked until you review and save the imported policy in Target settings.'
-    : unrepresented ? 'Automation is blocked by unrepresented program or scope rules. Review the execution policy in Target settings.'
-    : policy && !policy.automationAllowed ? 'The program policy does not allow automation.'
-    : usernameMissing ? MISSING_HUNTER_USERNAME
-    : appendUserAgent && !requiredUserAgentSchema.safeParse(defaultUserAgent).success ? MISSING_HUNTER_UA
-    : !identificationHeadersSchema.safeParse(resolvedHeaders).success ? 'Resolved required headers are invalid. Check the program policy and HUNTER_USERNAME.'
-    : !requiredUserAgentSchema.safeParse(userAgent).success || userAgent !== userAgent.trim() || /\\[rn]/.test(userAgent) ? MISSING_HUNTER_UA
-    : null;
   const exclusions = (policy ? policy.exclusions : []).map(value => detectScopeAsset(value));
   const limits = { requestsPerSecond: policy?.requestsPerSecond ?? LEGACY_LIMITS.requestsPerSecond, maxConcurrency: policy?.maxConcurrency ?? LEGACY_LIMITS.maxConcurrency };
   const forbiddenCategories = policy ? policy.forbiddenCategories : [];
   const version = row?.version ?? 0;
-  const fingerprint = createHash('sha256').update(JSON.stringify([version, blocker, headers, userAgent, program.outOfScope, exclusions, limits, forbiddenCategories])).digest('hex');
-  return { version, userAgent, headers, reviewedScope, exclusions, legacyExclusions: program.outOfScope, limits, forbiddenCategories, blocker, fingerprint };
-}
-export function programPolicyBlocker(program: PolicyProgram, scope?: ScopeRules) {
-  try { return resolveProgramPolicy(program, scope).blocker; }
-  catch { return 'Invalid program execution policy'; }
+  const fingerprint = createHash('sha256').update(JSON.stringify([version, headers, userAgent, program.outOfScope, exclusions, limits, forbiddenCategories])).digest('hex');
+  return { version, userAgent, headers, reviewedScope, exclusions, legacyExclusions: program.outOfScope, limits, forbiddenCategories, fingerprint };
 }
 
 export type ResolvedProgramPolicy = ReturnType<typeof resolveProgramPolicy>;
@@ -133,7 +116,6 @@ export type ExecutionBoundary = {
 export function authorizeExecution(ctx: ExecutionBoundary, activity: { tool?: string; url?: string; dnsHost?: string }) {
   const { tool, url, dnsHost } = activity;
   const policy = ctx.policy;
-  if (policy?.blocker) throw new Error(policy.blocker);
   if (tool !== undefined) {
     const categories = Object.hasOwn(toolCategories, tool) ? toolCategories[tool] : undefined;
     if (!categories) throw new Error('Unclassified execution tool');

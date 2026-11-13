@@ -30,7 +30,6 @@ const fixtures = new URL('../fixtures/program-intake/', import.meta.url);
 const models = JSON.parse(await readFile(new URL('model.json', fixtures), 'utf8'));
 const documents = Object.fromEntries(await Promise.all(['hackerone', 'yeswehack'].map(async name =>
   [name, await readFile(new URL(name + '.md', fixtures), 'utf8')])));
-const userAgent = 'ReviewFixture/1.0';
 const logs = [];
 let web, browser, ai;
 try {
@@ -162,8 +161,8 @@ try {
     } else {
       assert.deepEqual(saved.nonQualifying, ['XSS']);
       assert.equal(policy.sourceSnapshot.documentedAssets[0].originalValue, 'com.altair.mobile');
-      assert.equal(saved.campaign.state, 'BLOCKED');
-      assert.equal(await p.targetReconRun.count({ where: { programId: saved.id } }), 0);
+      assert.equal(saved.campaign.state, 'RECON_RUNNING');
+      assert.equal(await p.targetReconRun.count({ where: { programId: saved.id } }), 1);
     }
   }
 
@@ -178,10 +177,6 @@ try {
   await page.getByText('Configure DEFAULT_USER_AGENT.', { exact: false }).waitFor();
   await page.getByRole('button', { name: 'Save and start', exact: true }).click();
   await page.waitForURL(/\/targets\/(?!new)[^/?]+$/);
-  await page.getByRole('link', { name: 'Fix policy', exact: true }).click();
-  await page.getByLabel('Required User-Agent').fill(userAgent);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.waitForURL(/\/targets\/[^/?]+\?saved=1$/);
   const manual = await p.bountyProgram.findFirstOrThrow({ where: { ownerId: user.id, companyName: 'Manual review fixture' } });
   await p.targetCampaign.update({ where: { programId: manual.id }, data: { state: 'PAUSED', requestedAt: null } });
   await verifyCampaignWorkflow({ page, context, origin, p, ownerId: user.id });

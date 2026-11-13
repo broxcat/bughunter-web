@@ -1,7 +1,5 @@
 import type { Prisma, TargetCampaign } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { storedExecutionPolicySchema } from '@/lib/programExecutionPolicy';
-import { programPolicyBlocker, programPolicyInclude, type PolicyProgram } from './programExecutionPolicy';
 import { admitTargetRecon, lockCampaignCapacity, lockReconProgram } from './recon/targetRuns';
 import { lockOwnedProgram } from './scopeAssets';
 import { ResearchError } from './research/workspace';
@@ -14,13 +12,6 @@ export const campaignDueAt = (minutes: number | null, now: Date) => minutes ? ne
 function parallelLimit() {
   const limit = Number(process.env.TARGET_CAMPAIGN_MAX_ACTIVE ?? 3);
   return Number.isInteger(limit) && limit >= 1 && limit <= 100 ? limit : 3;
-}
-
-export function campaignPolicyBlocker(program: PolicyProgram) {
-  const blocker = programPolicyBlocker(program);
-  if (blocker) return blocker;
-  const policy = storedExecutionPolicySchema.safeParse(program.executionPolicies?.[0]?.policy);
-  return policy.success && policy.data.automationAllowed ? null : 'Confirm an execution policy that allows automation in Target settings.';
 }
 
 export async function cancelCampaignScans(tx: Prisma.TransactionClient, ownerId: string, programId: string, queuedOnly: boolean) {
@@ -41,10 +32,7 @@ export async function changeCampaign(ownerId: string, programId: string, action:
     };
     if (!current) {
       if (action !== 'start') throw new ResearchError('Campaign has not been started', 409);
-      const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude });
-      const blocker = campaignPolicyBlocker(program);
-      const row = await tx.targetCampaign.create({ data: { programId, state: blocker ? 'BLOCKED' : 'READY',
-        reason: blocker, requestedAt: blocker ? null : now } });
+      const row = await tx.targetCampaign.create({ data: { programId, state: 'READY', reason: null, requestedAt: now } });
       beforeCommit?.(row.state);
       return;
     }
@@ -58,17 +46,11 @@ export async function changeCampaign(ownerId: string, programId: string, action:
     if (action === 'handoff') {
       if (current.state === 'MONITORING') return;
       if (current.state !== 'RESEARCH_PENDING') throw new ResearchError('Research handoff is not ready', 409);
-      const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude });
-      const blocker = campaignPolicyBlocker(program);
-      if (blocker) throw new ResearchError(blocker, 409);
       await update({ state: 'MONITORING', nextCycleAt: campaignDueAt(current.intervalMinutes, now) });
       return;
     }
     if (current.state === 'RECON_RUNNING' || (current.state === 'READY' && current.requestedAt)) return;
     if (current.state === 'PAUSED' && action !== 'resume') throw new ResearchError('Resume the paused campaign first', 409);
-    const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude });
-    const blocker = campaignPolicyBlocker(program);
-    if (blocker) throw new ResearchError(blocker, 409);
     const continuing = action === 'resume' && current.continuing;
     await update({ state: 'READY', requestedAt: now, retryAt: null, nextCycleAt: null, reason: null, continuing });
   });
@@ -85,18 +67,11 @@ export async function advanceCampaign(ownerId: string, programId: string, option
     await lockReconProgram(tx, ownerId, programId);
     const row = await tx.targetCampaign.findUnique({ where: { programId } });
     if (!row || row.state === 'PAUSED') return;
-    const program = await tx.bountyProgram.findUniqueOrThrow({ where: { id: programId }, include: programPolicyInclude });
-    const blocker = campaignPolicyBlocker(program);
     const save = async (data: Prisma.TargetCampaignUpdateInput) => {
       const changed = await tx.targetCampaign.update({ where: { programId }, data });
       options.beforeCommit?.(changed.state);
       return changed;
     };
-    if (blocker) {
-      if (row.state === 'BLOCKED' && row.reason === blocker) return;
-      await cancelCampaignScans(tx, ownerId, programId, false);
-      return save({ state: 'BLOCKED', reason: blocker, requestedAt: null, retryAt: null, nextCycleAt: null, continuing: false });
-    }
     const recon = row.reconRunId ? await tx.targetReconRun.findFirst({ where: { id: row.reconRunId, programId },
       select: { id: true, status: true, outcome: true, finishedAt: true, scopeMarkdown: true, preflight: true } }) : null;
     if (row.state === 'RECON_RUNNING') {
@@ -146,9 +121,9 @@ export async function advanceCampaign(ownerId: string, programId: string, option
   }, { timeout: 30000 });
 }
 
-export function campaignAfterReview(row: TargetCampaign, blocker: string | null, intervalMinutes: number | null, now = new Date()): Prisma.TargetCampaignUpdateInput {
+export function campaignAfterReview(row: TargetCampaign, intervalMinutes: number | null, now = new Date()): Prisma.TargetCampaignUpdateInput {
   const common = { intervalMinutes };
-  if (blocker && row.state !== 'PAUSED') return { ...common, state: 'BLOCKED', reason: blocker, requestedAt: null, retryAt: null, nextCycleAt: null };
+  // Rows blocked by the former policy gate recover on the next review.
   if (row.state === 'BLOCKED') return { ...common, state: 'READY', reason: null, requestedAt: now, nextCycleAt: null };
   if (row.state === 'MONITORING') return { ...common, nextCycleAt: campaignDueAt(intervalMinutes, now) };
   return common;
