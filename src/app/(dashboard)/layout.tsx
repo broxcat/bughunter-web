@@ -20,7 +20,7 @@ export default async function DashboardLayout({
   const session = await auth();
 
   return (
-    <AuthenticatedSession><div className="flex min-h-full flex-col bg-background text-foreground">
+    <AuthenticatedSession><div className="flex min-h-dvh flex-col bg-background text-foreground">
       <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="sticky top-0 z-10 border-b border-border bg-surface/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 py-3">

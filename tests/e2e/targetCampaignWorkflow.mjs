@@ -51,9 +51,16 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     await blockedRow.getByRole('link', { name: 'Open ' + blocked.companyName }).click();
     await primary('link', 'Fix policy').waitFor();
     await page.getByRole('status').filter({ hasText: '1 rule needs a decision.' }).waitFor();
+    const footer = page.getByRole('contentinfo');
+    assert(await footer.evaluate(node => Math.abs(node.getBoundingClientRect().bottom - window.innerHeight) <= 1),
+      'short pages place the footer at the bottom of the viewport');
     await capture('blocked');
     await primary('link', 'Fix policy').click();
     await page.waitForURL(path(blocked.id) + '/settings#policy-rule-1');
+    await page.getByLabel('Required User-Agent').waitFor();
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+    assert(await footer.evaluate(node => node.getBoundingClientRect().top >= document.querySelector('main').getBoundingClientRect().bottom - 1
+      && node.getBoundingClientRect().top >= window.innerHeight), 'long pages place the footer after the content');
 
     const readyResponse = await page.goto(path(ready.id));
     assert.match(await readyResponse.text(), /Start recon/);
@@ -96,8 +103,8 @@ export async function verifyCampaignWorkflow({ page, context, origin, p, ownerId
     ]);
     assert.equal((await campaign(ready.id, 'start')).status(), 202); // Idempotent wake-up for the test's completed worker fixture.
     await primary('button', 'Open research').waitFor();
-    await page.getByText('1 discovered hosts', { exact: true }).waitFor();
-    await page.getByText('1 active web apps', { exact: true }).waitFor();
+    await page.getByText('1 discovered host', { exact: true }).waitFor();
+    await page.getByText('1 active web app', { exact: true }).waitFor();
     await p.targetCampaign.update({ where: { programId: ready.id }, data: { pendingAssets: ['docs','login','media'].map(name => ({ value: name + '.example.test', type: 'WEB_APPLICATION' })) } });
     await page.reload();
     await page.getByRole('link', { name: '3 new assets to review', exact: true }).waitFor();
