@@ -8,7 +8,7 @@ vi.mock('@/lib/auth', () => ({ auth }));
 const db = process.env.TEST_DATABASE_URL;
 const suite = db ? describe : describe.skip;
 const request = (body: unknown, method = 'POST') => new Request('http://app.example.test/api/programs', {
-  method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  method, headers: { 'Content-Type': 'application/json', Origin: 'http://app.example.test' }, body: JSON.stringify(body),
 });
 const fixture = (name: string) => ({
   companyName: name,

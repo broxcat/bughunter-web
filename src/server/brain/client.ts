@@ -1,4 +1,5 @@
 import { currentScanControl, throwIfScanAborted } from "@/server/scanControl";
+import { guardedProviderFetch } from "@/server/egress/fetch";
 // BrainClient — fetch-based multi-provider LLM client, ported from the CLI
 // brain.py LLMClient. Three request/response shapes: Anthropic Messages API,
 // OpenAI-compatible chat/completions, and Ollama. Timeout per request (abort),
@@ -168,12 +169,13 @@ export class BrainClient {
     const release = scan?.track(async () => { controller.abort(); await done; });
     const signal = AbortSignal.any([controller.signal, ...(opts.signal ? [opts.signal] : []), ...(scan ? [scan.signal] : [])]);
     try {
-      const res = await fetch(url, {
+      // M1: pinned, public-only (or operator-defined) and never redirected.
+      const res = await guardedProviderFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify(body),
         signal,
-        ...(opts.rejectRedirects ? { redirect: 'error' } : {}),
+        timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       });
       if (!res.ok) {
         const detail = opts.format ? await boundedErrorDetail(res) : await res.text().catch(() => "");
@@ -325,7 +327,7 @@ export class BrainClient {
 
   private async firstOllamaModel(host: string): Promise<string | null> {
     try {
-      const res = await fetch(`${host}/api/tags`, { signal: AbortSignal.any([AbortSignal.timeout(5000), ...(currentScanControl() ? [currentScanControl()!.signal] : [])]) });
+      const res = await guardedProviderFetch(`${host}/api/tags`, { timeoutMs: 5000, signal: AbortSignal.any([AbortSignal.timeout(5000), ...(currentScanControl() ? [currentScanControl()!.signal] : [])]) });
       if (!res.ok) return null;
       const json = (await res.json()) as { models?: Array<{ name?: string }> };
       return json.models?.[0]?.name ?? null;

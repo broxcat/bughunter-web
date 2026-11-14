@@ -116,7 +116,7 @@ describe.skipIf(!testDatabase)('lossless execution policy backfill', () => {
       exclusions: [...outOfScope, 'https://app.example.test/admin/*'], requestsPerSecond: 1, maxConcurrency: 1,
       forbiddenCategories: ['FUZZING'], sourceSnapshot: { url: null, rules: programRules.trim(), unrepresentedRules: [] },
     };
-    const patch = (payload: object) => PATCH(new Request(request().url, { method: 'PATCH', body: JSON.stringify(payload) }), params);
+    const patch = (payload: object) => PATCH(new Request(request().url, { method: 'PATCH', headers: { Origin: 'http://localhost' }, body: JSON.stringify(payload) }), params);
     const revision = { expectedPolicyVersion: 1, expectedLegacyScopeFingerprint: scopeFingerprint };
     expect((await patch({ executionPolicy: policy })).status).toBe(409);
     expect((await patch({ ...revision, executionPolicy: { ...policy, exclusions: [] } })).status).toBe(400);

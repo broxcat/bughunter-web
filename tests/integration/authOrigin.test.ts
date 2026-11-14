@@ -39,7 +39,7 @@ describe("public authentication origin", () => {
     if (configured) vi.stubEnv("AUTH_URL", origin);
     mocks.findUnique.mockResolvedValue({
       id: "origin-test-user", email: "origin@example.test", name: "Origin test",
-      image: null, passwordHash: await bcrypt.hash("fixture-password", 4),
+      image: null, sessionVersion: 0, passwordHash: await bcrypt.hash("fixture-password", 4),
     });
     const { GET, POST } = await import("@/app/api/auth/[...nextauth]/route");
     const cookies = new Map<string, string>();

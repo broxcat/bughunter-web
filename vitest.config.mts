@@ -18,6 +18,7 @@ export default defineConfig({
     // Auth.js imports extensionless Next entry points, resolved by the bundler.
     server: { deps: { inline: ["next-auth"] } },
     include: ["tests/**/*.test.ts"],
+    setupFiles: ["tests/setup/hermeticEnv.ts"],
   },
   resolve: {
     alias: {

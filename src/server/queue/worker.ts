@@ -7,6 +7,7 @@ import { workerIdentity } from "./executionAttempts";
 import { maintainScanExecutions, startExecutionMaintenance } from "./executionMaintenance";
 import { settlesWithin } from "@/server/scanControl";
 import { logger } from "@/lib/logger";
+import { assertWorkerEnv } from "@/lib/env";
 import { RECON_CAPACITY } from '@/lib/reconPlanner';
 
 import { collectReconDoctor } from '../recon/toolchain';
@@ -25,6 +26,7 @@ let maintenance: ReturnType<typeof startExecutionMaintenance> | undefined;
 let campaigns: ReturnType<typeof startCampaignMaintenance> | undefined;
 let closing = false;
 export const ready = (async () => {
+  assertWorkerEnv(); // B4: refuse an unauthenticated Redis in production.
   const doctor=await collectReconDoctor();
   if(!doctor.ready)throw new Error('Recon worker execution prerequisites are not ready');
   logger.info({workerId,manifest:doctor.fingerprint,readiness:doctor.ready},'Recon Doctor validated worker execution infrastructure');

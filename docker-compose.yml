@@ -9,7 +9,36 @@
 #
 # `web` and `worker` share the SAME image (built from ./Dockerfile). They differ
 # only in command: web runs `next start`, worker runs the tsx scan worker.
-# Both get NET_RAW + NET_ADMIN so in-container nmap can do -sV / SYN scans.
+#
+# Secrets (H2): no service loads the whole .env. Compose reads .env only to
+# interpolate the variables below, and each service receives the minimum it
+# uses. Every app service runs as the unprivileged image user with all Linux
+# capabilities dropped and no-new-privileges (nmap/raw sockets are disabled).
+
+x-hardened-service: &hardened-service
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+# Variables used by both web and worker. Interpolated from .env; never the
+# whole file. REDIS_URL is built here so it always carries the password.
+x-shared-runtime-env: &shared-runtime-env
+  DATABASE_URL: "${DATABASE_URL:?Set DATABASE_URL}"
+  REDIS_URL: "redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD (openssl rand -hex 32)}@redis:6379"
+  CREDENTIALS_ENCRYPTION_KEY: "${CREDENTIALS_ENCRYPTION_KEY:?Set CREDENTIALS_ENCRYPTION_KEY}"
+  CREDENTIALS_ENCRYPTION_KEY_ID: "${CREDENTIALS_ENCRYPTION_KEY_ID:-primary}"
+  CREDENTIALS_ENCRYPTION_LEGACY_KEY_ID: "${CREDENTIALS_ENCRYPTION_LEGACY_KEY_ID:-primary}"
+  CREDENTIALS_ENCRYPTION_PREVIOUS_KEYS: "${CREDENTIALS_ENCRYPTION_PREVIOUS_KEYS:-{}}"
+  TARGET_CAMPAIGN_MAX_ACTIVE: "${TARGET_CAMPAIGN_MAX_ACTIVE:-3}"
+  TARGET_SESSION_TTL_MINUTES: "${TARGET_SESSION_TTL_MINUTES:-}"
+  DEFAULT_USER_AGENT: "${DEFAULT_USER_AGENT:-}"
+  HUNTER_USERNAME: "${HUNTER_USERNAME:-}"
+  OOB_PUBLIC_BASE_URL: "${OOB_PUBLIC_BASE_URL:-}"
+  OLLAMA_HOST: "${OLLAMA_HOST:-}"
+  RESEARCH_EMBEDDING_URL: "${RESEARCH_EMBEDDING_URL:-}"
+  RESEARCH_EMBEDDING_MODEL: "${RESEARCH_EMBEDDING_MODEL:-}"
+  EGRESS_LAB_ALLOWLIST: "${EGRESS_LAB_ALLOWLIST:-}"
+  BROWSER_SANDBOX: "${BROWSER_SANDBOX:-enabled}"
+  LOG_LEVEL: "${LOG_LEVEL:-info}"
 
 services:
   # Only ingress to the stack: no service publishes a host port. Userspace
@@ -58,6 +87,11 @@ services:
 
   redis:
     image: redis:7-alpine
+    # B4: authentication required. Clients receive REDIS_URL with this password.
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD (openssl rand -hex 32)}"
+      REDISCLI_AUTH: "${REDIS_PASSWORD}"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -72,45 +106,47 @@ services:
     image: bughunter-web
     command: npm run start
     # Reachable through the dedicated Tailscale node on port 3000 only.
-    env_file: .env
     environment:
+      <<: [*shared-runtime-env]
       # Auth.js must use the browser-visible origin, not a container hostname.
       AUTH_URL: "${AUTH_URL:?Set AUTH_URL to the Tailscale origin used in your browser}"
-      RESEARCH_EMBEDDING_URL: "${RESEARCH_EMBEDDING_URL:-}"
-      RESEARCH_EMBEDDING_MODEL: "${RESEARCH_EMBEDDING_MODEL:-}"
+      AUTH_SECRET: "${AUTH_SECRET:?Set AUTH_SECRET}"
+      ALLOW_PUBLIC_REGISTRATION: "${ALLOW_PUBLIC_REGISTRATION:-false}"
+      TRUST_PROXY_HEADERS: "${TRUST_PROXY_HEADERS:-false}"
+      TRUSTED_PROXY_HOPS: "${TRUSTED_PROXY_HOPS:-1}"
+      GITHUB_ID: "${GITHUB_ID:-}"
+      GITHUB_SECRET: "${GITHUB_SECRET:-}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      PDF_EXPORT_MAX_CONCURRENCY: "${PDF_EXPORT_MAX_CONCURRENCY:-1}"
+      SESSION_MAX_AGE_HOURS: "${SESSION_MAX_AGE_HOURS:-12}"
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    cap_add:
-      - NET_RAW
-      - NET_ADMIN
+    <<: *hardened-service
     restart: unless-stopped
 
   worker:
     build: .
     image: bughunter-web
     command: npm run worker
-    env_file: .env
+    # No AUTH_SECRET, OAuth or registration settings: the worker never signs
+    # sessions. Headless Chromium runs sandboxed with a scrubbed environment
+    # (src/server/browserPolicy.ts). The sandbox needs unprivileged user
+    # namespaces; if the host/seccomp policy refuses them, browser stages fail
+    # closed. BROWSER_SANDBOX=disabled is an explicit, documented risk
+    # acceptance, never the default.
+    environment:
+      <<: [*shared-runtime-env]
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    cap_add:
-      - NET_RAW
-      - NET_ADMIN
-    # The worker launches headless Chromium (via playwright-chromium) to confirm
-    # DOM-XSS. Chromium's own sandbox relies on unprivileged user namespaces,
-    # which aren't reliably available inside a container without granting broad
-    # caps (e.g. SYS_ADMIN) or shipping a custom seccomp profile — both of which
-    # would weaken this container more than the feature is worth. Instead the
-    # worker launches Chromium with --no-sandbox (passed in code), which is the
-    # standard trade-off for containerized headless Chromium: the container is
-    # already the isolation boundary, and NO extra caps/privileges are added
-    # here. A larger /dev/shm keeps the renderer from crashing on busy pages
-    # (the alternative is the --disable-dev-shm-usage Chromium flag in code).
+    <<: *hardened-service
+    # A larger /dev/shm keeps the renderer from crashing on busy pages.
     shm_size: "1gb"
     restart: unless-stopped
 
@@ -121,15 +157,19 @@ services:
   #
   # Tailscale Serve forwards port 8089 privately, with no host publication.
   # OOB_PUBLIC_BASE_URL must be reachable by the scanned target: targets outside
-  # the tailnet need a separately operated callback service. Needs no Redis or caps.
+  # the tailnet need a separately operated callback service. It parses untrusted
+  # input, so it receives only the database URL: no Redis, keys or caps.
   oob-catcher:
     build: .
     image: bughunter-web
     command: npx tsx src/server/oob/server.ts
-    env_file: .env
+    environment:
+      DATABASE_URL: "${DATABASE_URL:?Set DATABASE_URL}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
     depends_on:
       db:
         condition: service_healthy
+    <<: *hardened-service
     restart: unless-stopped
 
 volumes:

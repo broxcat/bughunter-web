@@ -9,7 +9,7 @@ import "@/lib/auth";
 import { POST } from "@/app/api/register/route";
 import { guardCredentials, credentialsResponse } from "@/lib/credentialsGuard";
 import { loginAccountKey, RATE_LIMIT_POLICIES } from "@/lib/abusePolicy";
-const req = (email = " Known@Example.test ") => new Request("https://app.test/api/register", { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.1", "x-real-ip": "203.0.113.2" }, body: JSON.stringify({ name: "Fixture", email, password: "valid-fixture-password" }) });
+const req = (email = " Known@Example.test ") => new Request("https://app.test/api/register", { method: "POST", headers: { "content-type": "application/json", origin: "https://app.test", "x-forwarded-for": "203.0.113.1", "x-real-ip": "203.0.113.2" }, body: JSON.stringify({ name: "Fixture", email, password: "valid-fixture-password" }) });
 function authorize(email = " Known@Example.test ") {
   const provider = mocks.config.providers.find(provider => typeof provider !== "function" && provider.id === "credentials") as unknown as { options: { authorize: (raw: object, request: Request) => Promise<unknown> } };
   return provider.options.authorize({ email, password: "fixture-password" }, req());
@@ -80,7 +80,8 @@ describe("private and non-enumerating registration", () => {
     expect([first.status, second.status]).toEqual([200, 200]); expect(await first.json()).toEqual(await second.json());
     expect(mocks.hash).toHaveBeenCalledTimes(2); expect(mocks.create).toHaveBeenCalledOnce();
     expect(mocks.create.mock.calls[0][0].data.email).toBe("known@example.test");
-    expect(mocks.limit).not.toHaveBeenCalled(); // Registration is not rate limited.
+    // B3: registration is rate limited (per client and globally) before hashing.
+    expect(mocks.limit).toHaveBeenCalledWith("rl:register:global", RATE_LIMIT_POLICIES.registerGlobal.limit, RATE_LIMIT_POLICIES.registerGlobal.windowSec);
   });
   it("conceals duplicate creation races, too", async () => {
     mocks.create.mockRejectedValue(new Prisma.PrismaClientKnownRequestError("duplicate", { code: "P2002", clientVersion: "fixture" }));

@@ -10,7 +10,7 @@ async function request(path: string, authenticated = false) {
 }
 
 describe('authentication proxy response contract', () => {
-  it.each(['/api/programs', '/api/scan-runs', '/api/recon/runs/private/report'])('returns JSON 401 for %s', async path => {
+  it.each(['/api/programs', '/api/scan-runs', '/api/recon/runs/private/report', '/api/internal/recon-observations', '/api/internal/research-traffic', '/api/findings/abc.json'])('returns JSON 401 for %s', async path => {
     const response = await request(path);
     expect(response.status).toBe(401);
     expect(response.headers.has('location')).toBe(false);
@@ -21,8 +21,14 @@ describe('authentication proxy response contract', () => {
     expect(response.status).toBe(307);
     expect(new URL(response.headers.get('location')!).searchParams.get('callbackUrl')).toBe('/targets/private?tab=Recon');
   });
-  it.each(['/api/health', '/api/register', '/api/auth/session', '/api/internal/recon-observations'])('leaves public handler authentication intact: %s', async path => {
+  it.each(['/api/health', '/api/register', '/api/auth/session'])('leaves public handler authentication intact: %s', async path => {
     expect((await request(path)).headers.get('x-middleware-next')).toBe('1');
+  });
+  it('answers malformed API identifiers with 404 before authentication (B6)', async () => {
+    for (const path of ['/api/findings/a%2Fb/lifecycle', '/api/findings/%2e%2e%2fx/lifecycle', '/api/scan-runs/a%20b/summary', '/api/recon/runs/' + 'x'.repeat(200) + '/report']) {
+      const response = await request(path);
+      expect(response.status, path).toBe(404);
+    }
   });
   it('allows authenticated requests to reach ownership checks', async () => {
     expect((await request('/api/programs', true)).headers.get('x-middleware-next')).toBe('1');

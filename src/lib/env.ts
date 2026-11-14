@@ -33,6 +33,8 @@ export function assertRequiredEnv(): void {
     );
   }
 
+  errors.push(...redisAuthErrors());
+
   const authSecret = process.env.AUTH_SECRET;
   if (!authSecret || authSecret.trim() === "") {
     errors.push(
@@ -46,4 +48,25 @@ export function assertRequiredEnv(): void {
         errors.map((e) => `  - ${e}`).join("\n"),
     );
   }
+}
+
+/**
+ * B4: in production Redis must require authentication. The queue and rate
+ * limits share it, so an unauthenticated URL is refused at startup by both the
+ * web process and the worker (which has no AUTH_SECRET and its own check).
+ */
+export function redisAuthErrors(env: Record<string, string | undefined> = process.env): string[] {
+  if (env.NODE_ENV !== "production") return [];
+  const raw = env.REDIS_URL;
+  if (!raw) return ["REDIS_URL is required in production and must include the Redis password."];
+  try {
+    const url = new URL(raw);
+    if (!/^rediss?:$/.test(url.protocol)) return ["REDIS_URL must use redis:// or rediss://."];
+    if (!url.password) return ["REDIS_URL must include the Redis password (redis://:PASSWORD@host:6379); Redis must run with requirepass."];
+  } catch { return ["REDIS_URL is not a valid URL."]; }
+  return [];
+}
+export function assertWorkerEnv(env: Record<string, string | undefined> = process.env): void {
+  const errors = redisAuthErrors(env);
+  if (errors.length) throw new Error("Invalid worker environment:\n" + errors.map(e => `  - ${e}`).join("\n"));
 }

@@ -19,10 +19,6 @@ export function reconToolArguments(tool:string,args:string[],ctx:{reconPlan:Reco
     if(!p.gobuster?.dns||p.format!=='WILDCARD_DOMAIN'||p.depth!=='DEEP'||!ctx.gobusterResolver||!/^127\.0\.0\.1:\d+$/.test(ctx.gobusterResolver)||!ctx.gobusterWordlist)throw new Error('Unauthorized DNS discovery');
     return ['dns','--domain',p.boundary.normalizedValue.slice(2),'--resolver',ctx.gobusterResolver,'--protocol','udp','--wordlist',ctx.gobusterWordlist,'--threads','1','--delay',`${Math.ceil(1000/b.rps)}ms`,'--timeout','3s','--quiet','--no-progress','--no-color'];
   }
-  if(tool==='nmap') {
-    if(!b.ports.length||p.format==='URL'||args.at(-1)!==ctx.host)throw new Error('Host-wide discovery is not authorized');
-    return ['-sT','-Pn','-n','-p',b.ports.join(','),'--max-retries','0','--max-rate',String(Math.max(1,b.rps)),'--host-timeout','45s','-oX','-',ctx.host];
-  }
   const url=args[args.indexOf('-u')+1];
   if(!url||!ctx.reconRelayOrigin||!ctx.reconRelayTarget)throw new Error('Guarded Recon relay required');
   const local=new URL(url.replace('FUZZ','probe')),origin=new URL(ctx.reconRelayOrigin);

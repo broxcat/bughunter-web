@@ -1,3 +1,4 @@
+import { assertPublicScopeValues, scopeAdmissionResponse } from '@/server/scopeAdmission';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -19,6 +20,7 @@ export async function POST(req: Request, { params }: Params) {
   const { id } = await params;
   const parsed = z.object({ host: fqdnSchema, legacyTargetId: z.string().optional() }).safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: parsed.error.issues.map(i => i.message).join("; ") }, { status: 400 });
+  try { await assertPublicScopeValues([parsed.data.host]); } catch (e) { const refused = scopeAdmissionResponse(e); if (refused) return refused; throw e; }
   try { return Response.json(await mutateHost(session.user.id, id, "ADD", parsed.data), { status: 201 }); }
   catch (e) { return hostErrorResponse(e); }
 }

@@ -9,6 +9,9 @@ import type { ReconPlan } from '@/lib/reconPlanner';
 import { isSafeReadUrl } from '@/lib/observationSafety';
 import { authorizeExecution, programPolicyInclude, resolveProgramPolicy, type PolicyProgram, type ResolvedProgramPolicy } from './programExecutionPolicy';
 import { acquireProgramTraffic, releaseProgramTraffic } from './programTraffic';
+import { guardedFetch } from './egress/fetch';
+import { hardenedBrowserLaunch } from './browserPolicy';
+export { BROWSER_EGRESS_ARGS } from './browserPolicy';
 
 export interface TargetRequestGuard {
   assertRequest?(url: string, method: string, body?: string): void;
@@ -155,7 +158,14 @@ export async function authenticatedExecutionHeaders(url: string, method: string,
 export async function launchTargetBrowser(options: Parameters<typeof chromium.launch>[0]) {
   throwIfScanAborted();
   authorizeExecution(currentTargetExecution(), { tool: 'browser' });
-  const pending = chromium.launch(options);
+  // Chromium never resolves or connects by itself: every HTTP(S) request is
+  // intercepted and fetched by the egress guard below. Its own resolver maps
+  // every name to NOTFOUND and its proxy is a closed loopback port, so a
+  // request that escaped interception fails instead of reaching the network.
+  // It runs sandboxed with a scrubbed environment (H1). Hostile JavaScript
+  // still runs, so container network isolation remains the boundary for
+  // non-HTTP channels.
+  const pending = chromium.launch(hardenedBrowserLaunch(options));
   const control = currentScanControl();
   let closing: Promise<void> | undefined;
   const stop = () => closing ??= pending.then(browser => browser.close(), () => {});
@@ -168,6 +178,7 @@ export async function launchTargetBrowser(options: Parameters<typeof chromium.la
   } catch (error) { release?.(); throw error; }
 }
 
+const BROWSER_RESPONSE_LIMIT = 8 * 1024 * 1024;
 /** All browser traffic, including redirects, scripts, forms and subresources. */
 export async function newTargetBrowserContext(browser: Browser, syntheticPage?: { url: string; html: string }) {
   const ctx = currentTargetExecution();
@@ -221,14 +232,18 @@ export async function newTargetBrowserContext(browser: Browser, syntheticPage?: 
       const authorizedHeaders = await authenticatedExecutionHeaders(url, route.request().method(), headers, route.request().postData() ?? undefined);
       signal.throwIfAborted();
       releaseTraffic = await acquireExecution({ tool: 'browser', url }, AbortSignal.any([signal, AbortSignal.timeout(5000)]), ctx);
-      const response = await route.fetch({ headers: Object.fromEntries(authorizedHeaders), maxRedirects: 0, timeout: Math.min(5000, ctx.requestGuard?.remainingMs() ?? 5000) });
+      // Never route.fetch(): Playwright would resolve the host independently.
+      const response = await guardedFetch(url, { method: route.request().method(), headers: authorizedHeaders, body: route.request().postDataBuffer() ?? undefined, redirect: 'manual', signal, timeoutMs: Math.min(5000, ctx.requestGuard?.remainingMs() ?? 5000) });
+      const reader = response.body?.getReader(), chunks: Uint8Array[] = []; let bytes = 0;
+      if (reader) try { while (true) { const item = await reader.read(); if (item.done) break; bytes += item.value.byteLength; if (bytes > BROWSER_RESPONSE_LIMIT) throw new Error('BROWSER_RESPONSE_LIMIT'); chunks.push(item.value); } } finally { await reader.cancel().catch(() => {}); }
       await recordUsefulScanWork();
-      const responseHeaders = { ...response.headers() };
-      if (response.status() >= 300 && response.status() < 400 && responseHeaders.location) {
+      const responseHeaders: Record<string, string> = {};
+      response.headers.forEach((value, key) => { responseHeaders[key] = value; });
+      if (response.status >= 300 && response.status < 400 && responseHeaders.location) {
         responseHeaders["x-bughunter-redirect-location"] = responseHeaders.location;
         delete responseHeaders.location;
       }
-      try { await route.fulfill({ response, headers: responseHeaders }); } finally { await response.dispose(); }
+      await route.fulfill({ status: response.status, headers: responseHeaders, body: Buffer.concat(chunks) });
     } catch { await route.abort("failed").catch(() => {}); } finally { await releaseTraffic?.(); release?.(); }
   });
   // Browser WebSocket traffic has no HTTP scan capability in BugHunter.

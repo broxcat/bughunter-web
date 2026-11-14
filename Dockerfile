@@ -185,16 +185,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Go scanner binaries (subfinder, httpx, nuclei, katana, dnsx, ffuf, gau, dalfox).
 COPY --from=tools /root/go/bin/ /usr/local/bin/
+# Unprivileged runtime identity (H1/H2). Chromium refuses its sandbox as root,
+# and no service needs root: the app only binds port 3000 and scanners use
+# ordinary TCP connect (no raw sockets; nmap is disabled).
+RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --create-home --home-dir /home/app --shell /usr/sbin/nologin app
+ENV HOME=/home/app
 # nuclei templates + config so `nuclei` runs without a first-boot network pull.
-COPY --from=tools /root/nuclei-templates /root/nuclei-templates
-COPY --from=tools /root/.config/nuclei /root/.config/nuclei
+COPY --from=tools --chown=app:app /root/nuclei-templates /home/app/nuclei-templates
+COPY --from=tools --chown=app:app /root/.config/nuclei /home/app/.config/nuclei
 # Headless Chromium browser binary (downloaded in the deps stage) at the same
 # PLAYWRIGHT_BROWSERS_PATH the worker reads, so playwright-chromium finds it.
 COPY --from=deps /ms-playwright /ms-playwright
 
 # The built application: node_modules (incl. generated Prisma client), .next,
 # src (the tsx worker runs TS source directly), prisma, and config files.
+# Root owns the code (read-only to the app user); only the Next.js cache and
+# the doctor manifest are writable by the runtime user.
 COPY --from=builder /app /app
+RUN mkdir -p /app/.next/cache && chown -R app:app /app/.next/cache && touch /app/recon-tool-manifest.json && chown app:app /app/recon-tool-manifest.json
+USER app
 # Audit the actual runtime libraries, architecture, resources and writable tmp.
 # This manifest is an image artifact; each run also captures a fresh doctor report.
 RUN --network=none npm run recon:doctor -- --strict --output /app/recon-tool-manifest.json

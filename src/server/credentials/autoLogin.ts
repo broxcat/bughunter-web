@@ -33,7 +33,7 @@ export async function acquireSessionCookies(input: AutoLoginInput): Promise<Auto
   try {
     const execution = currentTargetExecution();
     assertExecutionUrl(base);
-    browser = await launchTargetBrowser({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"], timeout: 5000 });
+    browser = await launchTargetBrowser({ headless: true, args: ["--disable-dev-shm-usage"], timeout: 5000 });
     context = await newTargetBrowserContext(browser);
     const page = await context.newPage();
     const candidates = [base];

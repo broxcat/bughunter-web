@@ -4,6 +4,9 @@ export const RATE_LIMIT_POLICIES = {
   loginIp: { limit: 20, windowSec: 15 * 60 },
   loginAccount: { limit: 8, windowSec: 15 * 60 },
   scanUser: { limit: 20, windowSec: 60 * 60 },
+  // B3: bcrypt(12) on an unauthenticated endpoint; bounded before hashing.
+  registerIp: { limit: 5, windowSec: 60 * 60 },
+  registerGlobal: { limit: 30, windowSec: 60 * 60 },
 } as const;
 
 export const publicRegistrationEnabled = () => process.env.ALLOW_PUBLIC_REGISTRATION === "true";

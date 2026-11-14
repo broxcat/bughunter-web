@@ -26,7 +26,7 @@ describe('wildcard discovery inputs', () => {
     withTargetExecution({targetId:'context',host:'program.invalid',programReconId:'program',reconSeeds:['api.example.test'],requiredUserAgent:'laziza',qualifying:[],nonQualifying:[]},()=>{
       expect(enforcedToolArgs('subfinder',['-d','api.example.test'])).toEqual(['-d','api.example.test','-silent','-duc','-timeout','15','-max-time','1','-rl','5']);
       for(const args of [['-d','*.api.example.test'],['-d','example.test'],['-d','api.example.test','-active'],['-d','api.example.test; id']])expect(()=>enforcedToolArgs('subfinder',args)).toThrow();
-      for(const tool of ['nmap','httpx','katana'])expect(()=>enforcedToolArgs(tool,[])).toThrow(/passive/);
+      for(const tool of ['httpx','katana'])expect(()=>enforcedToolArgs(tool,[])).toThrow(/passive|guarded relay/);expect(()=>enforcedToolArgs('nmap',[])).toThrow(/nmap is disabled/);
     });
   });
 });

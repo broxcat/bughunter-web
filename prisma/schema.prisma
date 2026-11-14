@@ -21,6 +21,8 @@ model User {
   image               String?
   // Credentials provider: bcrypt hash. Null for OAuth-only users.
   passwordHash        String?
+  // M3: bumped to revoke every outstanding JWT session of this user.
+  sessionVersion      Int                  @default(0)
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 

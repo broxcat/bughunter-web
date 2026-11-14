@@ -1,3 +1,4 @@
+import { assertPublicScopeValues, scopeAdmissionResponse } from '@/server/scopeAdmission';
 import { z } from 'zod';
 import { advanceCampaign } from '@/server/campaignOrchestrator';
 import { foreignOrigin } from '@/lib/requestOrigin';
@@ -41,6 +42,9 @@ export async function POST(req: Request) {
   if (targetReview?.scopeIn.some(asset => asset.type === 'OTHER')) {
     return Response.json({ error: 'Use a web asset type or keep the asset for reference.' }, { status: 400 });
   }
+  // M2: refuse scope entries that resolve to non-public addresses.
+  try { await assertPublicScopeValues(targetReview ? targetReview.scopeIn.map(asset => asset.value) : [...scopeHosts, ...data.scopeRules]); }
+  catch (error) { const refused = scopeAdmissionResponse(error); if (refused) return refused; throw error; }
   if (targetReview) {
     try {
       const program = await prisma.$transaction(async tx => {

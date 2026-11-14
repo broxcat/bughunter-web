@@ -1,3 +1,4 @@
+import { assertPublicScopeValues, scopeAdmissionResponse } from '@/server/scopeAdmission';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { auth } from "@/lib/auth";
 import { z } from "zod";
@@ -11,6 +12,7 @@ export async function PATCH(req: Request, { params }: Params) {
   const { id, hostId } = await params;
   const parsed = z.object({ host: fqdnSchema }).safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: parsed.error.issues.map(i => i.message).join("; ") }, { status: 400 });
+  try { await assertPublicScopeValues([parsed.data.host]); } catch (e) { const refused = scopeAdmissionResponse(e); if (refused) return refused; throw e; }
   try { return Response.json(await mutateHost(session.user.id, id, "EDIT", { ...parsed.data, hostId })); }
   catch (e) { return hostErrorResponse(e); }
 }

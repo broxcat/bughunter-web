@@ -1,3 +1,4 @@
+import { assertPublicScopeValues, scopeAdmissionResponse } from '@/server/scopeAdmission';
 import {prisma} from '@/lib/prisma';
 import {paginationInput} from '@/lib/pagination';
 import {assetReconStatus} from '@/lib/scopeAssets';
@@ -32,5 +33,6 @@ export async function POST(req: Request, { params }: Context) {
   if (Number(req.headers.get('content-length')) > 4096) return Response.json({ error: 'Input too large' }, { status: 413 });
   const input = assetInputSchema.safeParse(await req.json().catch(() => null));
   if (!input.success) return Response.json({ error: input.error.issues.map(i => i.message).join('; ') }, { status: 400 });
+  try { await assertPublicScopeValues([input.data.value]); } catch (e) { const refused = scopeAdmissionResponse(e); if (refused) return refused; throw e; }
   try { return Response.json(await createScopeAsset(session.user.id, (await params).id, input.data), { status: 201 }); } catch (e) { return assetError(e); }
 }

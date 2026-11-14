@@ -13,6 +13,7 @@
     "test:ui": "npm run build && node tests/queue/runInfrastructure.mjs --target-browser",
     "worker": "tsx src/server/queue/worker.ts",
     "user:create": "node scripts/create-user.mjs",
+    "user:revoke-sessions": "node scripts/revoke-sessions.mjs",
     "policy:backfill": "tsx scripts/backfill-execution-policies.mts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",

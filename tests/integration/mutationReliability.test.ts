@@ -8,7 +8,7 @@ vi.mock('@/lib/auth',()=>({auth:mocks.auth}));
 const db=process.env.TEST_DATABASE_URL,schema='mutation_'+randomUUID().replaceAll('-','');
 if(db){const u=new URL(db);u.searchParams.set('schema',schema);process.env.DATABASE_URL=u.toString();}
 let p:typeof import('@/lib/prisma').prisma,userId:string;
-const request=(path:string,method:string,body?:unknown,origin?:string)=>new NextRequest('http://app.example.test'+path,{method,headers:{'Content-Type':'application/json',...(origin?{Origin:origin}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
+const request=(path:string,method:string,body?:unknown,origin='http://app.example.test')=>new NextRequest('http://app.example.test'+path,{method,headers:{'Content-Type':'application/json',Origin:origin},...(body!==undefined?{body:JSON.stringify(body)}:{})});
 (db?describe:describe.skip)('Mutation admission and concurrent removal',()=>{
  beforeAll(async()=>{execFileSync('npx',['prisma','migrate','deploy'],{env:process.env,stdio:'pipe'});({prisma:p}=await import('@/lib/prisma'));},30000);
  beforeEach(async()=>{userId=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;mocks.auth.mockResolvedValue({user:{id:userId}});});

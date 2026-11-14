@@ -1,5 +1,6 @@
 import { beforeScanNetwork, currentScanControl, recordUsefulScanWork, throwIfScanAborted } from "@/server/scanControl";
 import { acquireExecution, assertExecutionUrl, authenticatedExecutionHeaders, currentTargetExecution } from "@/server/execution";
+import { guardedFetch } from "@/server/egress/fetch";
 // Minimal HTTP probe helper for the vuln-class scanners. Uses global fetch with
 // a hard per-request timeout and manual redirect handling (so a 30x is observed,
 // not silently followed — important for auth/bypass checks). Never throws: a
@@ -66,12 +67,15 @@ export async function probe(
     opts.signal?.throwIfAborted();
     const signal = AbortSignal.any([controller.signal, ...(scan ? [scan.signal] : []), ...(opts.signal ? [opts.signal] : []), ...(guard ? [guard.signal, AbortSignal.timeout(Math.max(1, Math.min(5000, guard.remainingMs())))] : [])]);
     releaseTraffic = await acquireExecution({ tool: opts.tool ?? (guard || currentTargetExecution().authenticatedRequestHeaders ? 'authenticated-probe' : 'http-probe'), url }, signal);
-    const res = await fetch(url, {
+    // Egress guard: one DNS resolution, public-only (or exact lab entry),
+    // pinned socket, redirects observed but never followed.
+    const res = await guardedFetch(url, {
       method,
       headers: requestHeaders,
       body: opts.body,
       redirect: "manual",
       signal,
+      timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT,
     });
     const reader = res.body?.getReader();
     const chunks: Uint8Array[] = []; let bytes = 0;

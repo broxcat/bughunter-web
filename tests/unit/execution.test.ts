@@ -1,3 +1,4 @@
+import { allowFixture } from '../helpers/egressLab';
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
@@ -12,6 +13,7 @@ beforeAll(async () => {
   server = createServer((req, res) => { seen.push(req.headers["user-agent"]); if (req.url === "/redirect") { res.writeHead(302, { Location: "http://foreign.example/" }); } res.end("ok"); });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  allowFixture(server);
 });
 afterAll(() => new Promise<void>(r => server.close(() => r())));
 function context() { return { targetId: "test", host: new URL(base).host, requiredUserAgent: "Program-Required/2.1", qualifying: [], nonQualifying: [] }; }
@@ -35,16 +37,24 @@ describe("enforced Target HTTP context", () => {
     });
     expect(seen.length).toBe(before + 1);
   });
-  it("overrides CLI User-Agent proposals without shell interpolation or logging secrets", () => {
+  it("refuses binaries that would resolve targets themselves and redacts CLI secrets", () => {
     withTargetExecution(context(), () => {
+      // C1: without the guarded loopback relay, HTTP tools would resolve and
+      // connect on their own, bypassing the pinned public-only egress guard.
       for (const tool of ["httpx", "katana", "nuclei", "dalfox"]) {
-        const args = enforcedToolArgs(tool, ["-H", "user-agent: wrong", "--user-agent", "wrong", "-headers=User-Agent: wrong", "--header=USER-AGENT: wrong", "-user-agent=wrong", "-H", "Cookie: secret"]);
-        expect(args.join(" ")).not.toContain("wrong"); expect(args.join(" ")).toContain(context().requiredUserAgent);
-        expect(safeCommandSummary(tool, args)).not.toContain("secret");
+        expect(() => enforcedToolArgs(tool, ["-u", base, "-H", "Cookie: secret"])).toThrow(/guarded relay/);
+        expect(safeCommandSummary(tool, ["-u", base, "-H", "Cookie: secret"])).not.toContain("secret");
       }
-      expect(enforcedToolArgs("nmap", ["-sV", "-A", "foreign.example"])).toEqual(["-sT", "-Pn", "-n", "127.0.0.1"]);
+      expect(() => enforcedToolArgs("nmap", ["-sV", "-A", "foreign.example"])).toThrow(/nmap is disabled/);
       expect(() => enforcedToolArgs("curl", [base])).toThrow(/Unclassified/);
       expect(() => enforcedToolArgs("ffuf", ["-u", base])).toThrow(/Unaudited/);
+    });
+  });
+  it("relay-mode CLI arguments still strip proposed User-Agents and multiline headers", () => {
+    withTargetExecution({ ...context(), reconRelayOrigin: "http://127.0.0.1:1" }, () => {
+      const args = enforcedToolArgs("httpx", ["-H", "user-agent: wrong", "--user-agent", "wrong", "-headers=User-Agent: wrong", "--header=USER-AGENT: wrong", "-user-agent=wrong", "-H", "Cookie: secret"]);
+      expect(args.join(" ")).not.toContain("wrong"); expect(args.join(" ")).toContain(context().requiredUserAgent);
+      expect(safeCommandSummary("httpx", args)).not.toContain("secret");
       expect(() => enforcedToolArgs("httpx", ["-H", "Cookie: fixture\r\nUser-Agent: wrong"])).toThrow(/Multiline/);
       expect(() => enforcedToolArgs("httpx", ["-u", "http://foreign.example"])).toThrow(/Scope/);
     });

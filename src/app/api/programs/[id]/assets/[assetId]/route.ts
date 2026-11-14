@@ -1,3 +1,4 @@
+import { assertPublicScopeValues, scopeAdmissionResponse } from '@/server/scopeAdmission';
 import { auth } from '@/lib/auth';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { assetEditSchema,assetReplaceSchema,assetRetireSchema } from '@/lib/scopeAssets';
@@ -25,5 +26,6 @@ export async function POST(req:Request,{params}:Context){
   const input=assetReplaceSchema.safeParse(await req.json().catch(()=>null));
   if(!input.success)return Response.json({error:input.error.issues.map(i=>i.message).join('; ')},{status:400});
   const{id,assetId}=await params;
+  try{await assertPublicScopeValues([input.data.value]);}catch(e){const refused=scopeAdmissionResponse(e);if(refused)return refused;throw e;}
   try{return Response.json(await replaceScopeAsset(session.user.id,id,assetId,input.data),{status:201});}catch(e){return assetError(e);}
 }

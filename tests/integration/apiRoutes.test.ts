@@ -61,7 +61,7 @@ let userId: string;
 function req(url: string, body: unknown, method = "POST") {
   return new NextRequest(url, {
     method,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", origin: new URL(url).origin },
     body: JSON.stringify(body),
   });
 }

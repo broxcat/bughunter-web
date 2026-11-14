@@ -1,3 +1,4 @@
+import { allowFixture } from '../helpers/egressLab';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -41,6 +42,7 @@ beforeEach(async()=>{
   });
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   origin='http://127.0.0.1:'+(server.address() as AddressInfo).port;
+  allowFixture(server);
   execution={targetId:'target',host:new URL(origin).host,requiredUserAgent:'Auth-Mapper-Test/1',qualifying:[],nonQualifying:[],scopeAsset:{id:'asset',programId:'program',normalizedValue:origin+'/app/',originalValue:origin+'/app/',format:'URL',active:true,type:'WEB_APPLICATION',assetValue:'MEDIUM'}};
   let calls=0;
   vi.mocked(loadReconCredential).mockImplementation(async(_target,captured)=>{

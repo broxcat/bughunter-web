@@ -6,7 +6,7 @@ const db=process.env.TEST_DATABASE_URL,schema='default_ai_'+randomUUID().replace
 if(db){const url=new URL(db);url.searchParams.set('schema',schema);process.env.DATABASE_URL=url.toString();}
 let p:typeof import('@/lib/prisma').prisma,route:typeof import('@/app/api/ai-providers/route'),defaults:typeof import('@/app/api/ai-providers/default/route'),config:typeof import('@/server/brain/config');
 let owner:string;const oldKey=process.env.CREDENTIALS_ENCRYPTION_KEY,oldAuth=process.env.AUTH_URL;
-const request=(path:string,body:unknown,origin?:string)=>new Request('http://app.test/api/ai-providers'+path,{method:'POST',headers:{'Content-Type':'application/json',...(origin?{Origin:origin}:{})},body:JSON.stringify(body)});
+const request=(path:string,body:unknown,origin='http://app.test')=>new Request('http://app.test/api/ai-providers'+path,{method:'POST',headers:{'Content-Type':'application/json',Origin:origin},body:JSON.stringify(body)});
 (db?describe:describe.skip)('Settings default selection with PostgreSQL persistence and concurrency',()=>{
   beforeAll(async()=>{process.env.CREDENTIALS_ENCRYPTION_KEY='a1'.repeat(32);process.env.AUTH_URL='http://app.test';execFileSync('npx',['prisma','migrate','deploy'],{env:process.env,stdio:'pipe'});({prisma:p}=await import('@/lib/prisma'));route=await import('@/app/api/ai-providers/route');defaults=await import('@/app/api/ai-providers/default/route');config=await import('@/server/brain/config');},30000);
   beforeEach(async()=>{owner=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;mocks.auth.mockResolvedValue({user:{id:owner}});});

@@ -1,3 +1,4 @@
+import { assertPublicScopeValues, scopeAdmissionResponse } from '@/server/scopeAdmission';
 import { isDeepStrictEqual } from 'node:util';
 import { Prisma } from '@prisma/client';
 import { NextResponse } from "next/server";
@@ -64,6 +65,9 @@ export async function PATCH(req: Request, { params }: Params) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });
   const program = await prisma.bountyProgram.findFirst({ where: { id, ownerId: session.user.id, deletingAt: null } });
   if (!program) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // M2: refuse new scope entries that resolve to non-public addresses.
+  try { await assertPublicScopeValues([...(parsed.data.targetReview?.scopeIn.map(asset => asset.value) ?? []), ...(parsed.data.scopeRules ?? [])]); }
+  catch (error) { const refused = scopeAdmissionResponse(error); if (refused) return refused; throw error; }
   const retired: string[] = [];
   try {
     const response = await prisma.$transaction(async tx => {

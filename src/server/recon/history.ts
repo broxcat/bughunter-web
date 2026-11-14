@@ -66,11 +66,13 @@ export async function reconHistory(userId:string,assetId:string,currentId?:strin
  const chosen=currentId?runs.find(r=>r.id===currentId):runs[0],index=runs.findIndex(r=>r.id===chosen?.id),prior=previousId?runs.find(r=>r.id===previousId):runs[index+1];
  if(currentId&&!chosen||previousId&&!prior)throw new ResearchError('Select retained Recon runs for this Scope Asset',404);
  if(chosen&&prior&&(prior.createdAt>chosen.createdAt||prior.id===chosen.id))throw new ResearchError('Comparison must use an earlier Recon',400);
- // Publish this bounded comparison window oldest first; the API and UI disclose its limit.
- for(const run of [...runs].reverse())await publishReconHistory(run.id);
+ // B5: this is a read path (GET). Publication, including coverage NEEDS_RETEST
+ // writes, happens when a run finishes (processScan) and in execution
+ // maintenance; a run not yet published is reported, never written from here.
  const load=async(id?:string)=>id?prisma.reconHistoryRun.findUnique({where:{scanReferenceId:id},include:{observations:{include:{surface:true}}}}):null;
  const [a,b]=await Promise.all([load(chosen?.id),load(prior?.id)]);
+ const published=new Set((await prisma.reconHistoryRun.findMany({where:{scanReferenceId:{in:runs.map(r=>r.id)}},select:{scanReferenceId:true}})).map(r=>r.scanReferenceId));
  const rows=a?.observations.map(seenRow)??[],old=b?.observations.map(seenRow)??[];
  const ids=[...new Set([...rows,...old].map(r=>r.id))],counts=await prisma.reconSurfaceSeen.groupBy({by:['surfaceId'],where:{surfaceId:{in:ids}},_count:true});const countMap=new Map(counts.map(c=>[c.surfaceId,c._count]));for(const r of [...rows,...old])r.observedRuns=countMap.get(r.id)??0;
- return{runs,runWindowLimit:50,runWindowTruncated:candidates.length>runs.length,currentId:chosen?.id??null,previousId:prior?.id??null,comparable:Boolean(a&&b),truncated:Boolean(a?.truncated||b?.truncated),notice:'Comparison selection is limited to the latest 50 retained runs to bound evidence processing; it is not complete run-history navigation. Observations do not grant Scope authorization. Not observed this run does not prove removal. Compare methodology and run coverage. First/last seen describe recorded observations, not continuous availability.',...compareHistory(rows,old)};
+ return{runs,pendingPublication:runs.filter(r=>!published.has(r.id)).map(r=>r.id),runWindowLimit:50,runWindowTruncated:candidates.length>runs.length,currentId:chosen?.id??null,previousId:prior?.id??null,comparable:Boolean(a&&b),truncated:Boolean(a?.truncated||b?.truncated),notice:'Comparison selection is limited to the latest 50 retained runs to bound evidence processing; it is not complete run-history navigation. Observations do not grant Scope authorization. Not observed this run does not prove removal. Compare methodology and run coverage. First/last seen describe recorded observations, not continuous availability.',...compareHistory(rows,old)};
 }

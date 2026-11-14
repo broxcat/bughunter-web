@@ -1,3 +1,4 @@
+import { allowFixture } from '../helpers/egressLab';
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
@@ -10,6 +11,7 @@ let server: Server, base: string, arrived: () => void, disconnected: () => void;
 beforeAll(async () => {
   server = createServer((_req, res) => { res.writeHead(200); res.write("partial body"); arrived(); res.on("close", () => disconnected()); });
   server.listen(0, "127.0.0.1"); await once(server, "listening"); base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  allowFixture(server);
 });
 afterAll(() => { server.closeAllConnections(); return new Promise<void>(resolve => server.close(() => resolve())); });
 const target = () => ({ targetId: "target", host: new URL(base).host, requiredUserAgent: "AbortTest/1", qualifying: [], nonQualifying: [] });

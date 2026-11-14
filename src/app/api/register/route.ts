@@ -4,21 +4,51 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
-import { normalizeLogin, publicRegistrationEnabled } from "@/lib/abusePolicy";
+import { RATE_LIMIT_POLICIES, normalizeLogin, publicRegistrationEnabled } from "@/lib/abusePolicy";
+import { isUsableClientIdentity, resolveClientIp } from "@/lib/clientIdentity";
+import { rateLimit } from "@/lib/rateLimit";
+import { foreignOrigin } from "@/lib/requestOrigin";
 
-const RegisterSchema = z.object({
+const RegisterSchema = z.strictObject({
   name: z.string().trim().min(1, "Name is required").max(100),
   email: z.string().trim().max(254).email("A valid email is required"),
   password: z.string().min(10, "Password must be at least 10 characters")
     .refine(value => Buffer.byteLength(value, "utf8") <= 72, "Password must be at most 72 bytes"),
 });
+const MAX_BODY_BYTES = 4096;
 const accepted = () => NextResponse.json({ message: "If this address can be registered, your account is ready. Please sign in." }, { status: 200 });
+
+/** B3: per-client and global windows run before any bcrypt work; a limiter
+ * outage refuses registration rather than allowing unbounded hashing. */
+async function registrationAdmission(req: Request): Promise<Response | null> {
+  const ip = resolveClientIp(req);
+  const { registerIp, registerGlobal } = RATE_LIMIT_POLICIES;
+  const results = isUsableClientIdentity(ip)
+    ? await Promise.all([rateLimit(`rl:register:ip:${ip.ip}`, registerIp.limit, registerIp.windowSec), rateLimit("rl:register:global", registerGlobal.limit, registerGlobal.windowSec)])
+    : [{ status: "UNAVAILABLE" as const }];
+  if (results.some(result => result.status === "UNAVAILABLE")) {
+    return NextResponse.json({ error: "Registration temporarily unavailable. Please try again shortly." }, { status: 503, headers: { "Retry-After": "30" } });
+  }
+  const blocked = results.filter(result => result.status === "BLOCKED") as { resetSec: number }[];
+  if (blocked.length) {
+    logger.warn({ operation: "register", code: "rate_limited", identitySource: ip.source }, "registration refused by anti-abuse policy");
+    return NextResponse.json({ error: "Too many registration attempts. Please try again later." }, { status: 429, headers: { "Retry-After": String(Math.max(...blocked.map(result => result.resetSec))) } });
+  }
+  return null;
+}
 
 export async function POST(req: Request) {
   if (!publicRegistrationEnabled()) {
     return NextResponse.json({ error: "Public registration is disabled. Contact your administrator." }, { status: 403 });
   }
-  const body = await req.json().catch(() => null);
+  if (foreignOrigin(req)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (Number(req.headers.get("content-length")) > MAX_BODY_BYTES) return NextResponse.json({ error: "Input too large" }, { status: 413 });
+  const refused = await registrationAdmission(req);
+  if (refused) return refused;
+  const text = await req.text().catch(() => "");
+  if (Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES) return NextResponse.json({ error: "Input too large" }, { status: 413 });
+  let body: unknown = null;
+  try { body = JSON.parse(text); } catch { /* reported as validation failure */ }
   const parsed = RegisterSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Validation failed", issues: parsed.error.flatten().fieldErrors }, { status: 400 });

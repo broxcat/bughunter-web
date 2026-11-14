@@ -1,3 +1,4 @@
+import { allowFixture } from '../helpers/egressLab';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { BrainClient, BrainError } from '@/server/brain/client';
@@ -21,6 +22,7 @@ describe('provider structured request contracts over local mocked HTTP (not real
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    allowFixture(server);
   });
   beforeEach(() => { mode = 'ok'; status = 400; failure = ''; requests = []; });
   afterAll(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });

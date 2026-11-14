@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { semanticRank } from '@/lib/research/semanticRank';
 import type { HarnessSource } from '@/lib/research/workflow';
 import { ResearchError } from './workspace';
+import { guardedProviderFetch } from '../egress/fetch';
 
 const embeddings = z.object({ embeddings: z.array(z.array(z.number().finite()).min(1).max(4096)).max(41) });
 
@@ -21,12 +22,12 @@ export async function retrieveSemanticMemory(query: string, corpus: HarnessSourc
   if (!corpus.length) return [];
   const candidates = corpus.slice(0, 40);
   try {
-    const response = await fetch(config.endpoint, {
+    const response = await guardedProviderFetch(config.endpoint, {
+      timeoutMs: 25000,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: config.model, input: [query.slice(0, 2000), ...candidates.map(item => item.text.slice(0, 1200))] }),
       signal: AbortSignal.any([signal, AbortSignal.timeout(25000)]),
-      redirect: 'error',
     });
     if (!response.ok || !response.body) throw new Error('Embedding unavailable');
     const reader = response.body.getReader();

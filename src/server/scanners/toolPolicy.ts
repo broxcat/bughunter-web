@@ -12,7 +12,12 @@ export function enforcedToolArgs(cmd: string, args: string[]): string[] {
   const ctx = currentTargetExecution();
   const tool = cmd === 'gobuster' ? (args[0] === 'dns' ? 'gobuster-dns' : 'gobuster-dir') : cmd;
   authorizeExecution(ctx, { tool });
-  if (ctx.policy && (cmd === 'nmap' || (HTTP_TOOLS.has(cmd) && !ctx.reconRelayOrigin))) {
+  // Egress (C1): a binary that resolves a FQDN itself bypasses the pinned,
+  // public-only egress guard. nmap has no relay mode and is disabled (the
+  // native guarded-tcp collector covers ports); HTTP tools may only talk to
+  // the per-run loopback relay, whose upstream requests use the egress guard.
+  if (cmd === 'nmap') throw new Error('nmap is disabled: it resolves targets itself; the guarded TCP collector is used instead');
+  if (HTTP_TOOLS.has(cmd) && !ctx.reconRelayOrigin) {
     throw new Error('Tool traffic cannot be metered through a guarded relay');
   }
   if (ctx.requestGuard) throw new Error("External CLI request counts cannot be enforced inside a bounded Hunt");
@@ -29,10 +34,6 @@ export function enforcedToolArgs(cmd: string, args: string[]): string[] {
     return ['-d', args[1], '-silent', '-duc', '-timeout', '15', '-max-time', '1', '-rl', '5'];
   }
   if (ctx.programReconId) throw new Error('Program Recon supports passive enumeration only');
-  if (cmd === "nmap") {
-    if (ctx.scopeAsset?.format === 'URL' || ctx.scopeAsset?.type === 'API') throw new Error('Asset authorizes scoped HTTP only');
-    return ["-sT", "-Pn", "-n", ...(ctx.scopeAsset ? ['-p', '80,443,8080,8443'] : []), ctx.host.split(":")[0]];
-  }
   if (ctx.scopeAsset?.format === 'URL' && HTTP_TOOLS.has(cmd)) throw new Error('URL assets require the guarded HTTP collector');
   if (!HTTP_TOOLS.has(cmd)) throw new Error("Unaudited scanner tool; refusing execution");
   for (const arg of args) if (/^https?:\/\//i.test(arg)) assertExecutionUrl(arg, ctx);

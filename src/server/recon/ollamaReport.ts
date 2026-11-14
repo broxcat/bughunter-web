@@ -1,4 +1,5 @@
 import { BrainClient,BrainError } from '../brain/client';
+import { guardedProviderFetch } from '../egress/fetch';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { REPORT_SYSTEM, ReconReportValidationError, reconReportNarrativeSchema, reportBudget, validateReconReport, type ReconReportInput, type ReportBudget,reportGenerationSchema,reconReportSchema } from '@/lib/reconReport';
@@ -9,7 +10,7 @@ export async function inspectOllamaReportModel(endpoint: string, model: string, 
   const key = createHash('sha256').update(JSON.stringify([endpoint, model])).digest('hex'), prior = cached.get(key);
   if (prior && prior.expires > Date.now()) return prior.budget;
   try {
-    const response = await fetch(`${endpoint}/api/show`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }), signal: AbortSignal.any([AbortSignal.timeout(5000), ...(signal ? [signal] : [])]) });
+    const response = await guardedProviderFetch(`${endpoint}/api/show`, { timeoutMs: 5000, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }), signal: AbortSignal.any([AbortSignal.timeout(5000), ...(signal ? [signal] : [])]) });
     if (!response.ok || !response.body) return reportBudget();
     const reader = response.body.getReader(), chunks: Uint8Array[] = []; let bytes = 0;
     try { while (true) { const item = await reader.read(); if (item.done) break; bytes += item.value.length; if (bytes > 131072) throw new Error('Model metadata exceeds limit'); chunks.push(item.value); } } finally { await reader.cancel(); }

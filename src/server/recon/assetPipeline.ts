@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { dnsLookupCoverage, wildcardDnsBaseline } from './dnsIntelligence';
 import { Resolver } from 'node:dns/promises';
-import { connect } from 'node:tls';
+import { guardedTlsConnect } from '../egress/fetch';
 import { mkdtemp,readFile,writeFile,rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -303,8 +303,8 @@ export async function runAssetRecon(scanRunId:string):Promise<ScanExecutionResul
         signal.throwIfAborted();await assertLiveAsset();await beforeScanNetwork();
         try{await coverage.provider('TLS_MAPPING','native-tls',async()=>{
           const releaseTraffic = await acquireExecution({ tool: 'native-tls', url: base }, AbortSignal.any([signal, AbortSignal.timeout(5000)]));
-          try { await new Promise<void>((resolve,reject)=>{
-          const socket=connect({host,port:Number(new URL(base).port||443),servername:host});let done=false;
+          try { const {socket}=await guardedTlsConnect(host,Number(new URL(base).port||443),{signal,timeoutMs:3000});await new Promise<void>((resolve,reject)=>{
+          let done=false;
           const release=currentScanControl()?.track(async()=>{socket.destroy();});
           const abort=()=>finish(signal.reason??new Error('CANCELLED: TLS observation interrupted'));
           const finish=(error?:unknown)=>{if(done)return;done=true;signal.removeEventListener('abort',abort);socket.destroy();release?.();if(error)reject(error);else resolve();};

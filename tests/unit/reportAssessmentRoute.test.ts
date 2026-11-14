@@ -1,4 +1,4 @@
-import { beforeEach,describe,expect,it,vi } from 'vitest';
+import { afterEach, beforeEach,describe,expect,it,vi } from "vitest";
 import { NextRequest } from 'next/server';
 const mocks=vi.hoisted(()=>({auth:vi.fn(),findings:vi.fn(),create:vi.fn(),oob:vi.fn()}));
 vi.mock('@/lib/auth',()=>({auth:mocks.auth}));
@@ -6,8 +6,8 @@ vi.mock('@/lib/prisma',()=>{const db={finding:{findMany:mocks.findings},report:{
 vi.mock('@/lib/oobHits',()=>({loadOobHitsByToken:mocks.oob}));
 import { POST } from '@/app/api/reports/route';
 const finding=(id='finding')=>({id,targetId:'target',title:'Confirmed observation',reviewStatus:'CONFIRMED',oobToken:null});
-const request=(ids=['finding'],extra={})=>new NextRequest('http://app.example.test/api/reports',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Captured assessment report',platform:'GENERIC',findingIds:ids,...extra})});
-beforeEach(()=>{vi.resetAllMocks();mocks.auth.mockResolvedValue({user:{id:'owner'}});mocks.oob.mockResolvedValue(new Map());mocks.create.mockImplementation(async(args)=>({id:'report',...args.data}));});
+const request=(ids=['finding'],extra={})=>new NextRequest('http://app.example.test/api/reports',{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://app.example.test'},body:JSON.stringify({title:'Captured assessment report',platform:'GENERIC',findingIds:ids,...extra})});
+beforeEach(()=>{vi.stubEnv('AUTH_URL','http://app.example.test');vi.resetAllMocks();mocks.auth.mockResolvedValue({user:{id:'owner'}});mocks.oob.mockResolvedValue(new Map());mocks.create.mockImplementation(async(args)=>({id:'report',...args.data}));});
 describe('Report captured assessment provenance (mocked database, no lifecycle changes)',()=>{
   it('uses the finding ScanRun snapshot and ignores a request-supplied current-mode override',async()=>{
     mocks.findings.mockResolvedValue([{...finding(),scanRun:{assessmentModeSnapshot:'BLACK_BOX'},researchPromotion:null}]);
@@ -32,3 +32,5 @@ describe('Report captured assessment provenance (mocked database, no lifecycle c
     expect((await POST(request())).status).toBe(400);expect(mocks.create).not.toHaveBeenCalled();
   });
 });
+
+afterEach(() => vi.unstubAllEnvs());

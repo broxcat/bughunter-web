@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { allowFixture } from '../helpers/egressLab';
+import { afterEach, afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import type { TargetCredential } from "@prisma/client";
@@ -60,9 +61,10 @@ beforeAll(async () => {
     res.end(`<html><a href="/sign-in">Sign in</a><a href="/api/me">Account</a>${valid ? '<a href="/objects/41">Private object</a>' : ""}<a href="http://localhost:1/foreign">foreign</a><a href="/transfer">action</a></html>`);
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening"); base = `http://127.0.0.1:${(server.address() as { port: number }).port}`; state.host = new URL(base).host;
+  allowFixture(server);
 });
 afterAll(() => new Promise<void>(resolve => server.close(() => resolve())));
-beforeEach(() => { state.rows.clear(); state.active = true; state.excluded = false; state.authorized = true; behavior = "normal"; seen.length = 0; });
+beforeEach(() => { vi.stubEnv("AUTH_URL", "http://app.test"); state.rows.clear(); state.active = true; state.excluded = false; state.authorized = true; behavior = "normal"; seen.length = 0; });
 describe("real black-box connection on controlled local fixtures", () => {
   it("discovers login, submits hidden/cookie/meta/header CSRF and proves an authenticated session", async () => {
     const row = store({ mode: "EMAIL_PASSWORD", cookiesCipher: null, emailCipher: encryptSecret("tester"), passwordCipher: encryptSecret(password) });
@@ -129,7 +131,7 @@ describe("real black-box connection on controlled local fixtures", () => {
   });
   it("normalizes cookie headers in the test API, stores encryption and returns status only", async () => {
     const id = `api-target-${++state.serial}`;
-    const r = await POST(new Request("http://app.test", { method: "POST", body: JSON.stringify({ mode: "COOKIES", cookies: "Cookie: session=fixture-a" }), headers: { "Content-Type": "application/json" } }), { params: Promise.resolve({ id }) });
+    const r = await POST(new Request("http://app.test", { method: "POST", body: JSON.stringify({ mode: "COOKIES", cookies: "Cookie: session=fixture-a" }), headers: { "Content-Type": "application/json", Origin: "http://app.test" } }), { params: Promise.resolve({ id }) });
     expect(r.status).toBe(200); const body = await r.json(); expect(body.status).toBe("VALID");
     expect(JSON.stringify(body)).not.toMatch(/fixture-a|Cipher|password|Cookie/);
   });
@@ -150,9 +152,11 @@ describe("real black-box connection on controlled local fixtures", () => {
   });
   it("rejects malformed cookies and unauthorized API requests before HTTP", async () => {
     const id = `api-target-${++state.serial}`;
-    const request = () => new Request("http://app.test", { method: "POST", body: JSON.stringify({ mode: "COOKIES", cookies: "bad\r\nCookie: fixture" }) });
+    const request = () => new Request("http://app.test", { method: "POST", headers: { Origin: "http://app.test" }, body: JSON.stringify({ mode: "COOKIES", cookies: "bad\r\nCookie: fixture" }) });
     expect((await POST(request(), { params: Promise.resolve({ id }) })).status).toBe(400);
     state.authorized = false; expect((await POST(request(), { params: Promise.resolve({ id }) })).status).toBe(401);
     expect(seen).toHaveLength(0);
   });
 });
+
+afterEach(() => vi.unstubAllEnvs());

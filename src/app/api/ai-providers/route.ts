@@ -4,6 +4,7 @@ import { AiProvider } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { encryptSecret } from "@/lib/crypto";
+import { assertProviderEndpoint, EgressError } from '@/server/egress/fetch';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { AiConfigurationError, lockAiProviderSettings, resolveConfiguredProviderFields } from '@/server/brain/config';
 
@@ -88,6 +89,16 @@ export async function POST(req: Request) {
     baseUrl === undefined ? undefined : baseUrl === "" ? null : baseUrl;
   const normModel =
     model === undefined ? undefined : model === "" ? null : model;
+
+  // M1: a user-supplied base URL must resolve to public addresses only, unless
+  // it is exactly an operator-defined endpoint (OLLAMA_HOST / embedding URL).
+  // Transport re-checks at every call (pinned, no redirects).
+  if (normBaseUrl) {
+    try { await assertProviderEndpoint(normBaseUrl); }
+    catch (error) {
+      return NextResponse.json({ error: error instanceof EgressError ? 'Provider base URL must resolve to a public address (private endpoints are configured by the operator).' : 'Provider base URL could not be verified.' }, { status: 400 });
+    }
+  }
 
   // Enforce "only one active provider per user": if this one is being activated,
   // deactivate all the others first, atomically with the upsert.

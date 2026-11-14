@@ -1,21 +1,38 @@
-/** Browser mutations must be same-origin. A browser derives Origin from the
- * real page origin but Host from the address it dialled, so a cross-site POST
- * always carries a foreign Origin with our own Host and is refused. Admitting
- * the addressed host alongside the configured public origin keeps every
- * published binding usable (loopback and a private interface at once) without
- * depending on the container's internal port.
- * Non-browser authenticated API clients may omit Origin. */
-export function foreignOrigin(req: Request) {
-  const origin = req.headers.get('origin');
-  if (origin === null) return false;
+/** B1: browser mutations must be provably same-origin.
+ *
+ * - With AUTH_URL configured (required by the Docker deployment), its origin
+ *   is the only admitted origin. The Host header is client-controlled (DNS
+ *   rebinding, alternative bindings) and never widens the set.
+ * - Without AUTH_URL (local development), only the origin actually addressed
+ *   by this request is admitted.
+ * - Fetch Metadata: a browser that reports a cross-site or same-site
+ *   initiator is refused even if a matching Origin were forged by a plugin.
+ * - A mutation without Origin (or with Origin: null) is refused. Every
+ *   current browser sends Origin on POST/PUT/PATCH/DELETE; scripted clients
+ *   must send `Origin: <AUTH_URL>` explicitly. */
+function originOf(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return /^https?:$/.test(url.protocol) ? url.origin : null;
+  } catch { return null; }
+}
+
+export function admittedOrigins(req: Request, env: Record<string, string | undefined> = process.env): Set<string> {
+  const configured = originOf(env.AUTH_URL);
+  if (configured) return new Set([configured]);
   const allowed = new Set<string>();
-  const add = (value: string) => {
-    // A malformed value must neither widen the check nor refuse every mutation.
-    try { allowed.add(new URL(value).origin); } catch { /* ignore */ }
-  };
-  if (process.env.AUTH_URL) add(process.env.AUTH_URL);
-  // Host carries no scheme; AUTH_URL still pins the canonical public origin.
+  const addressed = originOf(req.url);
+  if (addressed) allowed.add(addressed);
   const host = req.headers.get('host');
-  if (host) for (const scheme of ['http://', 'https://']) add(scheme + host);
-  return !allowed.has(origin);
+  if (host && !addressed) for (const scheme of ['http://', 'https://']) { const value = originOf(scheme + host); if (value) allowed.add(value); }
+  return allowed;
+}
+
+export function foreignOrigin(req: Request, env: Record<string, string | undefined> = process.env) {
+  const site = req.headers.get('sec-fetch-site');
+  if (site !== null && site !== 'same-origin') return true;
+  const origin = req.headers.get('origin');
+  if (origin === null || origin === 'null') return true;
+  return !admittedOrigins(req, env).has(origin);
 }

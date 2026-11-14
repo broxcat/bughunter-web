@@ -1,3 +1,4 @@
+import { allowFixture } from '../helpers/egressLab';
 import { afterAll,beforeAll,beforeEach,describe,it,expect,vi } from 'vitest';
 import { createServer,type Server } from 'node:http';
 import { once } from 'node:events';
@@ -9,7 +10,7 @@ vi.mock('@/lib/prisma',()=>({prisma:{scopeAsset:{findUnique:mocks.asset}}}));
 const suite=process.env.SCANNER_HTTP_TESTS==='1'?describe:describe.skip;
 suite('real HTTP Recon relay guards (authorization DB fixture only; no CLI simulation)',()=>{
   let server:Server,base:string,execution:TargetExecution,active:boolean;const seen:{url:string;ua:string}[]=[];
-  beforeAll(async()=>{server=createServer((req,res)=>{seen.push({url:req.url!,ua:String(req.headers['user-agent'])});res.setHeader('Set-Cookie','session=PRIVATE');if(req.url==='/app/redirect')return res.writeHead(302,{Location:'http://outside.test/'}).end();if(req.url==='/app/rate')return res.writeHead(429).end();res.end('local fixture');});server.listen(0,'127.0.0.1');await once(server,'listening');base='http://127.0.0.1:'+(server.address() as {port:number}).port;});
+  beforeAll(async()=>{server=createServer((req,res)=>{seen.push({url:req.url!,ua:String(req.headers['user-agent'])});res.setHeader('Set-Cookie','session=PRIVATE');if(req.url==='/app/redirect')return res.writeHead(302,{Location:'http://outside.test/'}).end();if(req.url==='/app/rate')return res.writeHead(429).end();res.end('local fixture');});server.listen(0,'127.0.0.1');await once(server,'listening');base='http://127.0.0.1:'+(server.address() as {port:number}).port;allowFixture(server);});
   beforeEach(()=>{seen.length=0;active=true;const asset={id:'asset',programId:'program',originalValue:base+'/app/',normalizedValue:base+'/app/',format:'URL',active:true,type:'API',assetValue:'MEDIUM'};execution={targetId:'target',host:new URL(base).host,scopeAsset:asset,requiredUserAgent:'Relay-Test/1',qualifying:[],nonQualifying:[]};mocks.asset.mockImplementation(async()=>({...asset,active,program:{outOfScope:[],deletingAt:null},executionTarget:{scope:{status:'APPROVED'}}}));});
   afterAll(async()=>{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));});
   const relay=()=>withTargetExecution(execution,()=>createReconRelay(execution,base+'/app/',new ReconProtection(1000,20),new AbortController().signal,async()=>{},{remaining:20}));

@@ -1,9 +1,9 @@
+import { allowFixture } from '../helpers/egressLab';
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import { chromium } from "playwright-chromium";
 import { withTargetExecution, newTargetBrowserContext } from "@/server/execution";
-import { prisma } from "@/lib/prisma";
 import { runCommand } from "@/server/scanners/runCommand";
 import { NUCLEI_TEMPLATE } from "@/server/scanners/toolPolicy";
 import { acquireSessionCookies } from "@/server/credentials/autoLogin";
@@ -37,6 +37,7 @@ network("real HTTP tools and Chromium capture", () => {
     });
     server.listen(0, "127.0.0.1"); await once(server, "listening");
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    allowFixture(server);
   });
   afterAll(() => new Promise<void>(r => server.close(() => r())));
   const execution = () => ({ targetId: "network", host: new URL(base).host, requiredUserAgent: ua, qualifying: [], nonQualifying: [] });
@@ -47,19 +48,18 @@ network("real HTTP tools and Chromium capture", () => {
     expect(requests.some(r => r.host?.startsWith("localhost:"))).toBe(false);
   }
   for (const tool of ["httpx", "katana", "nuclei", "dalfox"]) {
-    it(`${tool} sends the configured UA over real HTTP`, async () => {
+    it(`${tool} cannot run outside the guarded Recon relay`, async () => {
       const from = seen.length;
       await withTargetExecution(execution(), async () => {
         const args = tool === "httpx" ? ["-silent", "-u", base, "-H", "User-Agent: Tool-Wrong"] :
           tool === "katana" ? ["-silent", "-u", base, "-d", "1", "-H", "User-Agent: Tool-Wrong"] :
           tool === "nuclei" ? ["-silent", "-duc", "-u", base, "-t", NUCLEI_TEMPLATE, "-H", "User-Agent: Tool-Wrong"] :
           ["url", `${base}/?q=hello`, "--silence", "--no-color", "--worker", "2", "--skip-mining-all", "--timeout", "2", "--user-agent", "Tool-Wrong"];
-        const result = await runCommand(tool, args, { scanRunId: "fixture", timeoutMs: 45000 });
-        expect(result).toEqual({ code: 0, timedOut: false, cancelled: false });
-        const output = vi.mocked(prisma.scanLog.create).mock.calls.map(call => call[0].data.line).join("\n");
-        expect(output).not.toMatch(/Error parsing config file|invalid character '#'/i);
+        // C1: a directly executed binary resolves the target itself, outside
+        // the pinned egress guard. Only the loopback Recon relay mode runs.
+        await expect(runCommand(tool, args, { scanRunId: "fixture", timeoutMs: 45000 })).rejects.toThrow(/guarded relay/);
       });
-      assertReceived(from);
+      expect(seen.length).toBe(from);
     }, 50000);
   }
   it("Chromium enforces UA on page requests, fetch, redirects and subresources", async () => {

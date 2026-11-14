@@ -9,6 +9,27 @@ import { prisma } from "@/lib/prisma";
 import { guardCredentials } from "@/lib/credentialsGuard";
 import { normalizeLogin, publicRegistrationEnabled } from "@/lib/abusePolicy";
 
+/** M3: a session is valid only while its user exists with the same version. */
+export async function sessionStillValid(token: { id?: unknown; sub?: unknown; sv?: unknown }) {
+  const id = typeof token.id === "string" ? token.id : typeof token.sub === "string" ? token.sub : null;
+  if (!id) return false;
+  const user = await prisma.user.findUnique({ where: { id }, select: { sessionVersion: true } });
+  return Boolean(user) && user!.sessionVersion === (typeof token.sv === "number" ? token.sv : 0);
+}
+/** Returning null makes Auth.js treat the session as signed out. */
+export async function jwtCallback<T extends { id?: unknown; sub?: unknown; sv?: unknown }>({ token, user }: { token: T; user?: { id?: string; sessionVersion?: number } | null }): Promise<T | null> {
+  if (user) {
+    token.id = user.id;
+    token.sv = user.sessionVersion ?? 0;
+    return token;
+  }
+  return (await sessionStillValid(token)) ? token : null;
+}
+export function sessionMaxAgeSeconds(env: Record<string, string | undefined> = process.env) {
+  const hours = Number(env.SESSION_MAX_AGE_HOURS ?? 12);
+  return Number.isInteger(hours) && hours >= 1 && hours <= 24 * 7 ? hours * 3600 : 12 * 3600;
+}
+
 // Same bcrypt work for missing accounts and OAuth-only users. This is a public
 // dummy hash, not an account credential.
 const DUMMY_PASSWORD_HASH = "$2b$12$ExphlMmvboiLb3SyPjF.oeFQvHlMMz.DHBKQ29IvrbzMPtC1z7p96";
@@ -44,6 +65,7 @@ const providers: NextAuthConfig["providers"] = [
         email: user.email,
         name: user.name,
         image: user.image,
+        sessionVersion: user.sessionVersion,
       };
     },
   }),
@@ -69,8 +91,9 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
-  // JWT sessions: no DB hit to read the session, and middleware can verify it.
-  session: { strategy: "jwt" },
+  // JWT sessions, bounded in time (M3) and revalidated against the user's
+  // sessionVersion on every read so deletion/revocation takes effect at once.
+  session: { strategy: "jwt", maxAge: sessionMaxAgeSeconds(), updateAge: 60 * 60 },
   trustHost: true,
   pages: { signIn: "/login" },
   providers,
@@ -85,12 +108,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         select: { id: true },
       }));
     },
-    async jwt({ token, user }) {
-      if (user) {
-        token.id = user.id;
-      }
-      return token;
-    },
+    jwt: jwtCallback,
     async session({ session, token }) {
       if (session.user) {
         session.user.id = (token.id ?? token.sub) as string;

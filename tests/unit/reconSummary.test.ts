@@ -1,3 +1,4 @@
+import { allowFixture } from '../helpers/egressLab';
 import { afterAll,beforeAll,describe,expect,it } from 'vitest';
 import { createServer,type Server } from 'node:http';
 import { BrainClient } from '@/server/brain/client';
@@ -15,7 +16,7 @@ describe('bounded evidence and untrusted Ollama summaries',()=>{
 });
 describe('Ollama HTTP contract with a real local mock server (not a model validation)',()=>{
   let server:Server,url:string,body:Record<string,unknown>,mode='ok';
-  beforeAll(async()=>{server=createServer(async(req,res)=>{let bytes='';for await(const c of req)bytes+=c;body=JSON.parse(bytes);expect(req.url).toBe('/selected/api/chat');if(mode==='timeout')return;if(mode==='unavailable'){res.statusCode=503;res.end('Unavailable');return;}res.setHeader('Content-Type','application/json');res.end(mode==='bad-envelope'?'invalid':JSON.stringify({message:{content:mode==='bad-json'?'bad':mode==='bad-schema'?'{}':JSON.stringify(valid)}}));});await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));url=`http://127.0.0.1:${(server.address() as {port:number}).port}/selected`;});
+  beforeAll(async()=>{server=createServer(async(req,res)=>{let bytes='';for await(const c of req)bytes+=c;body=JSON.parse(bytes);expect(req.url).toBe('/selected/api/chat');if(mode==='timeout')return;if(mode==='unavailable'){res.statusCode=503;res.end('Unavailable');return;}res.setHeader('Content-Type','application/json');res.end(mode==='bad-envelope'?'invalid':JSON.stringify({message:{content:mode==='bad-json'?'bad':mode==='bad-schema'?'{}':JSON.stringify(valid)}}));});await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));url=`http://127.0.0.1:${(server.address() as {port:number}).port}/selected`;allowFixture(server);});
   afterAll(async()=>{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));});
   const chat=()=>new BrainClient({provider:'OLLAMA',baseUrl:url,model:'settings-selected-model'}).chat(SUMMARY_SYSTEM,JSON.stringify(input),{format:z.toJSONSchema(reconSummarySchema),think:false,retries:0,timeoutMs:1000,maxResponseBytes:131072});
   it('uses the supplied endpoint/model and JSON schema, exposes no tools',async()=>{mode='ok';validateReconSummary(await chat(),input);expect(body).toMatchObject({model:'settings-selected-model',stream:false,think:false});expect(body).toHaveProperty('format');expect(body).not.toHaveProperty('tools');});

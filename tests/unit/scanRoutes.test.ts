@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), target: vi.fn(), create: vi.fn(), update: vi.fn(), list: vi.fn(), publish: vi.fn(), replay: vi.fn(), accept: vi.fn(), find: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ auth: mocks.auth }));
@@ -7,8 +7,8 @@ vi.mock("@/server/queue/scanJobPublisher", () => ({ publishScanJob: mocks.publis
 vi.mock("@/server/queue/scanRequest", async importOriginal => ({ ...await importOriginal<object>(), createScanRequest: mocks.accept, findScanRequest: mocks.replay }));
 vi.mock("@/lib/rateLimit", () => ({ rateLimit: vi.fn(async () => ({ status: "ALLOWED" })) }));
 import { GET, POST } from "@/app/api/scan-runs/route";
-beforeEach(() => { vi.resetAllMocks(); mocks.auth.mockResolvedValue({ user: { id: "owner" } }); mocks.find.mockResolvedValue(null); });
-const post = (type: string, key?: string) => POST(new NextRequest("http://localhost/api/scan-runs", { method: "POST", headers: { "Content-Type": "application/json", ...(key !== undefined ? { "Idempotency-Key": key } : {}) }, body: JSON.stringify({ targetId: "target", type }) }));
+beforeEach(() => { vi.stubEnv("AUTH_URL", "http://localhost"); vi.resetAllMocks(); mocks.auth.mockResolvedValue({ user: { id: "owner" } }); mocks.find.mockResolvedValue(null); });
+const post = (type: string, key?: string) => POST(new NextRequest("http://localhost/api/scan-runs", { method: "POST", headers: { "Content-Type": "application/json", Origin: "http://localhost", ...(key !== undefined ? { "Idempotency-Key": key } : {}) }, body: JSON.stringify({ targetId: "target", type }) }));
 describe("scan creation and legacy compatibility", () => {
   it("refuses legacy HUNT before creating or publishing anything", async () => {
     expect((await post("HUNT")).status).toBe(410);
@@ -57,3 +57,5 @@ describe("scan creation and legacy compatibility", () => {
     expect(response.status).toBe(200); expect(await response.json()).toEqual(rows.map(row => ({ ...row, dispatch: null, execution: null })));
   });
 });
+
+afterEach(() => vi.unstubAllEnvs());
