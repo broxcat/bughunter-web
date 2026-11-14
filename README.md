@@ -169,29 +169,56 @@ Next.js 16 / React 19, Prisma 6 / PostgreSQL, BullMQ / Redis, Auth.js, Tailwind 
 
 ```sh
 cp .env.example .env
-# Fill AUTH_URL, AUTH_SECRET, CREDENTIALS_ENCRYPTION_KEY and database/Redis settings.
+# Fill AUTH_SECRET, CREDENTIALS_ENCRYPTION_KEY and database/Redis settings.
+# Save a Tailscale auth key in authkey_tailscale.txt (never commit it).
+# For initial enrollment, temporarily set AUTH_URL=http://localhost:3000 in .env
+# so Compose can validate the configuration before the node has its address.
+docker compose up -d tailscale
+docker compose exec tailscale tailscale ip -4
+# Set AUTH_URL in .env to http://<the address printed above>:3000.
 docker compose up --build -d
 docker compose exec web npx prisma migrate deploy
 ```
 
 Set `AUTH_URL` in `.env` to the origin used in your browser, including scheme and
-port (for example `AUTH_URL="http://example.test:3000"`). Compose requires this
+port (for example `AUTH_URL="http://100.110.11.113:3000"`). Compose requires this
 value for `web`. Auth.js v5 uses it for login, OAuth callbacks and logout; a
 localhost value redirects to localhost even when you browse through another host.
 After changing it, apply the environment with `docker compose up -d --no-deps
 --force-recreate web`. A simple restart does not reload the container environment.
 
-The supplied Compose stack always publishes Next.js on host loopback
-(`127.0.0.1:${WEB_PORT:-3000}`), so `localhost` works on the Docker host itself.
-To also reach it from another device, set `WEB_BIND` to the private interface
-address that serves the `AUTH_URL` host, such as this machine's Tailscale
-address, and recreate `web`; unset, it stays on the IPv6 loopback. Keep it off
-`0.0.0.0`: no ingress authenticates in front of the app. Any trusted
-ingress you add in front must supply the public `Host`, `X-Forwarded-Host` and
-`X-Forwarded-Proto` headers. The existing `trustHost: true` allows Auth.js to use
-these for server auth actions; explicit `AUTH_URL` takes priority and also avoids
-Next.js internal request URLs affecting authentication redirects. OAuth providers
-must register callbacks under the same public origin (`/api/auth/callback/<provider>`).
+The supplied Compose stack publishes **no host ports**, including on localhost.
+A dedicated `bughunter` Tailscale container uses the key in `authkey_tailscale.txt`
+as a Docker secret; the file is excluded from Git and Docker builds. The host's
+own Tailscale connection is independent. Userspace networking requires no TUN
+device or extra capabilities. Its identity persists in `tailscale-state`, so
+restarts reuse the same node without consuming the key again. Do not remove this
+volume when upgrading (`docker compose down -v` also deletes database volumes).
+
+Connect your browser device to the same tailnet, then open the node's Tailscale
+IPv4 address on port **3000**. MagicDNS also works if `AUTH_URL` uses that hostname.
+The host's old address, LAN address and `localhost:3000` no longer serve BugHunter.
+`WEB_BIND` and `WEB_PORT` are no longer used. Tailscale Serve forwards TCP to the
+internal services according to `docker/tailscale/serve.json`; **Funnel is disabled**.
+Traffic is encrypted by Tailscale. Tailnet access rules still apply, and the
+application still requires its normal login. OAuth providers must register
+callbacks under `AUTH_URL` (`/api/auth/callback/<provider>`).
+
+The OOB catcher is likewise private, on the node's port **8089**. A scanned target
+outside the tailnet cannot reach it; use a separately operated callback service
+for those targets. With `OOB_PUBLIC_BASE_URL` empty, OOB confirmation stays disabled.
+
+To check the deployment:
+
+```sh
+docker compose ps
+docker compose exec tailscale tailscale status
+docker compose exec tailscale tailscale serve status
+```
+
+No published port should appear in `docker compose ps`. Compose's Tailscale
+health check verifies that the node has joined the tailnet; check the application
+separately by opening `AUTH_URL` from an authorized Tailscale device.
 
 ### Authentication and anti-abuse
 
@@ -217,16 +244,19 @@ hop count, up to 16). Every XFF element must be a valid IP; selection proceeds
 from the **right**, and IPv6/mapped IPv4 representations are canonicalized. No
 X-Real-IP fallback is used. Direct client access to Next.js must be prevented;
 variable-length proxy paths need a different ingress configuration. In trusted
-mode, missing/invalid proxy identity refuses login/registration with HTTP 503,
-so a malformed header cannot grant a second `unknown` quota.
+mode, missing/invalid proxy identity refuses login with HTTP 503, so a malformed
+header cannot grant a second `unknown` quota.
 
 Policies are centralized in `src/lib/abusePolicy.ts`:
 
 | Operation | Quota | Anti-abuse backend unavailable |
 | --- | --- | --- |
 | Credentials login | 20/IP + 8/login per 15 minutes | HTTP 503; no password comparison |
-| Public registration | 5 attempts/IP/hour | HTTP 503; no account creation |
 | Scan creation | 20 attempts/user/hour in Redis; 20 created runs/user/rolling hour in PostgreSQL | Enforce PostgreSQL quota; accept via outbox, HTTP 202 while delivery is pending |
+
+Public registration carries **no rate limit**: `ALLOW_PUBLIC_REGISTRATION` is the
+only gate, so leave it `false` on an installation reachable by untrusted clients.
+Signup stays available during an anti-abuse backend outage.
 
 The login quota covers existing and nonexistent accounts before bcrypt. Login
 identifiers are trimmed/lowercased and HMACed with `AUTH_SECRET` in Redis keys;
@@ -241,7 +271,7 @@ slot. Database failure remains an error; scans/outcomes and scope checks retain
 their existing semantics. Server logs use fixed diagnostic codes, not credentials,
 email addresses, identity keys or raw Redis errors.
 
-`npm run test:queue` also exercises real limiter concurrency and login/signup/scan
+`npm run test:queue` also exercises real limiter concurrency and login/scan
 policies across a disposable Redis stop/restart. `npm run test:auth` additionally launches the built application and Chromium against
 those disposable services to verify private/public forms, forged headers, real
 429/503 responses and durable scan acceptance during Redis loss. Run

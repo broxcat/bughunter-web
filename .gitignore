@@ -34,6 +34,9 @@ yarn-error.log*
 .env*
 !.env.example
 
+# Tailscale enrollment credential (local Docker secret)
+/authkey_tailscale.txt
+
 # docker local volumes
 /docker/volumes/
 /pgdata/

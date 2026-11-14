@@ -3,7 +3,6 @@ import { createHmac } from "node:crypto";
 export const RATE_LIMIT_POLICIES = {
   loginIp: { limit: 20, windowSec: 15 * 60 },
   loginAccount: { limit: 8, windowSec: 15 * 60 },
-  registerIp: { limit: 5, windowSec: 60 * 60 },
   scanUser: { limit: 20, windowSec: 60 * 60 },
 } as const;
 

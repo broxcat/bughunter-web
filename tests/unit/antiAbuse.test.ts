@@ -51,8 +51,6 @@ describe("operation-specific anti-abuse", () => {
     const malformed = new Request("http://localhost", { headers: { "x-forwarded-for": "invalid, 192.0.2.5" } });
     await expect(guardCredentials(malformed, "known@example.test")).rejects.toMatchObject({ code: "temporarily_unavailable" });
     expect(mocks.limit).not.toHaveBeenCalled(); expect(mocks.compare).not.toHaveBeenCalled();
-    const registration = new Request("http://localhost/api/register", { method: "POST", headers: malformed.headers, body: "{}" });
-    expect((await POST(registration)).status).toBe(503); expect(mocks.create).not.toHaveBeenCalled();
   });
   it("does not bypass the guard when a server secret is missing", async () => {
     vi.stubEnv("AUTH_SECRET", ""); await expect(authorize()).rejects.toMatchObject({ code: "temporarily_unavailable" }); expect(mocks.compare).not.toHaveBeenCalled();
@@ -77,16 +75,12 @@ describe("private and non-enumerating registration", () => {
     vi.stubEnv("ALLOW_PUBLIC_REGISTRATION", flag); expect((await POST(req())).status).toBe(403);
     expect(mocks.limit).not.toHaveBeenCalled(); expect(mocks.find).not.toHaveBeenCalled(); expect(mocks.hash).not.toHaveBeenCalled();
   });
-  it.each([["UNAVAILABLE", 503], ["BLOCKED", 429]] as const)("fails safely for %s", async (status, expected) => {
-    mocks.limit.mockResolvedValue({ status, resetSec: 200 }); const response = await POST(req()); expect(response.status).toBe(expected);
-    expect(mocks.hash).not.toHaveBeenCalled(); expect(mocks.create).not.toHaveBeenCalled(); expect(await response.text()).not.toMatch(/Redis/);
-  });
   it("uses the same response and hash cost for new and existing email", async () => {
     const first = await POST(req()); mocks.find.mockResolvedValue({ id: "existing" }); const second = await POST(req());
     expect([first.status, second.status]).toEqual([200, 200]); expect(await first.json()).toEqual(await second.json());
     expect(mocks.hash).toHaveBeenCalledTimes(2); expect(mocks.create).toHaveBeenCalledOnce();
     expect(mocks.create.mock.calls[0][0].data.email).toBe("known@example.test");
-    expect(mocks.limit).toHaveBeenCalledWith("rl:register:ip:unknown", 5, 3600);
+    expect(mocks.limit).not.toHaveBeenCalled(); // Registration is not rate limited.
   });
   it("conceals duplicate creation races, too", async () => {
     mocks.create.mockRejectedValue(new Prisma.PrismaClientKnownRequestError("duplicate", { code: "P2002", clientVersion: "fixture" }));

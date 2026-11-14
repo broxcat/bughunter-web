@@ -1,7 +1,7 @@
-# bughunter-web — full local stack: web + worker + postgres + redis.
+# bughunter-web — private Tailscale ingress + web + worker + postgres + redis.
 #
 #   docker compose build          # build the shared app/scanner image
-#   docker compose up -d          # start all four services
+#   docker compose up -d          # start the stack (authkey_tailscale.txt required)
 #   docker compose logs -f web    # follow web logs (or: worker / db / redis)
 #
 # First boot only — apply the Prisma migrations against the running db:
@@ -12,6 +12,35 @@
 # Both get NET_RAW + NET_ADMIN so in-container nmap can do -sV / SYN scans.
 
 services:
+  # Only ingress to the stack: no service publishes a host port. Userspace
+  # networking keeps this node independent from the host's Tailscale client
+  # and needs neither /dev/net/tun nor NET_ADMIN. Serve never enables Funnel.
+  tailscale:
+    image: tailscale/tailscale:v1.104.7@sha256:72c1e19e0aedca96b8533bbb0b4368564410ff20b17e53b804eb6c1f04a31be4
+    hostname: bughunter
+    environment:
+      TS_AUTHKEY: file:/run/secrets/tailscale_authkey
+      TS_AUTH_ONCE: "true"
+      TS_HOSTNAME: bughunter
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+      TS_ACCEPT_DNS: "false"
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_ENABLE_HEALTH_CHECK: "true"
+      TS_LOCAL_ADDR_PORT: 127.0.0.1:9002
+    secrets:
+      - tailscale_authkey
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./docker/tailscale:/config:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9002/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
+
   db:
     image: postgres:16-alpine
     environment:
@@ -42,18 +71,11 @@ services:
     build: .
     image: bughunter-web
     command: npm run start
-    # Always published on host loopback, so localhost keeps working on the
-    # Docker host itself. WEB_BIND adds one more interface for other devices:
-    # set it to a private address (e.g. a VPN one), never 0.0.0.0, since no
-    # ingress authenticates in front. Its default is the IPv6 loopback, which
-    # stays local and cannot collide with the IPv4 entry above.
-    ports:
-      - "127.0.0.1:${WEB_PORT:-3000}:3000"
-      - "${WEB_BIND:-[::1]}:${WEB_PORT:-3000}:3000"
+    # Reachable through the dedicated Tailscale node on port 3000 only.
     env_file: .env
     environment:
       # Auth.js must use the browser-visible origin, not a container hostname.
-      AUTH_URL: "${AUTH_URL:?Set AUTH_URL to the public origin used in your browser}"
+      AUTH_URL: "${AUTH_URL:?Set AUTH_URL to the Tailscale origin used in your browser}"
       RESEARCH_EMBEDDING_URL: "${RESEARCH_EMBEDDING_URL:-}"
       RESEARCH_EMBEDDING_MODEL: "${RESEARCH_EMBEDDING_MODEL:-}"
     depends_on:
@@ -97,17 +119,13 @@ services:
   # request to the shared Postgres OobHit table so the worker can CONFIRM blind
   # SSRF by correlation (no worker->catcher HTTP).
   #
-  # The "8089:8089" mapping PUBLISHES the catcher to the host. This is how the
-  # SCANNED TARGET reaches it: the scanner embeds a callback URL built from
-  # OOB_PUBLIC_BASE_URL (operator-set, e.g. http://100.121.43.68:8089 for the
-  # Tailscale host). The target connects to the host's 8089, Docker forwards it
-  # into this container, a row lands in OobHit. Needs no redis and no NET_* caps.
+  # Tailscale Serve forwards port 8089 privately, with no host publication.
+  # OOB_PUBLIC_BASE_URL must be reachable by the scanned target: targets outside
+  # the tailnet need a separately operated callback service. Needs no Redis or caps.
   oob-catcher:
     build: .
     image: bughunter-web
     command: npx tsx src/server/oob/server.ts
-    ports:
-      - "8089:8089"
     env_file: .env
     depends_on:
       db:
@@ -117,3 +135,8 @@ services:
 volumes:
   pgdata:
   redisdata:
+  tailscale-state:
+
+secrets:
+  tailscale_authkey:
+    file: ./authkey_tailscale.txt

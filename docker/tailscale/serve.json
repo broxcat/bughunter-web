@@ -1,0 +1,7 @@
+{
+  "TCP": {
+    "3000": { "TCPForward": "web:3000" },
+    "8089": { "TCPForward": "oob-catcher:8089" }
+  },
+  "AllowFunnel": {}
+}

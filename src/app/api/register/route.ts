@@ -4,9 +4,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
-import { rateLimit } from "@/lib/rateLimit";
-import { resolveClientIp, isUsableClientIdentity } from "@/lib/clientIdentity";
-import { normalizeLogin, publicRegistrationEnabled, RATE_LIMIT_POLICIES } from "@/lib/abusePolicy";
+import { normalizeLogin, publicRegistrationEnabled } from "@/lib/abusePolicy";
 
 const RegisterSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(100),
@@ -19,18 +17,6 @@ const accepted = () => NextResponse.json({ message: "If this address can be regi
 export async function POST(req: Request) {
   if (!publicRegistrationEnabled()) {
     return NextResponse.json({ error: "Public registration is disabled. Contact your administrator." }, { status: 403 });
-  }
-  const identity = resolveClientIp(req);
-  const policy = RATE_LIMIT_POLICIES.registerIp;
-  const limit = isUsableClientIdentity(identity)
-    ? await rateLimit(`rl:register:ip:${identity.ip}`, policy.limit, policy.windowSec)
-    : { status: "UNAVAILABLE" as const };
-  if (limit.status === "UNAVAILABLE") {
-    logger.warn({ operation: "register", code: "ANTI_ABUSE_UNAVAILABLE" }, "registration temporarily refused");
-    return NextResponse.json({ error: "Registration temporarily unavailable. Please try again shortly." }, { status: 503, headers: { "Retry-After": "30" } });
-  }
-  if (limit.status === "BLOCKED") {
-    return NextResponse.json({ error: "Too many registration attempts. Please try again later." }, { status: 429, headers: { "Retry-After": String(limit.resetSec) } });
   }
   const body = await req.json().catch(() => null);
   const parsed = RegisterSchema.safeParse(body);

@@ -104,13 +104,14 @@ try {
   await exec("docker", ["stop", "-t", "0", redisContainer], { timeout: 20_000 }); redisStopped = true;
   assert.equal((await login(attackPage, email)).status(), 503);
   await attackPage.getByRole("alert").filter({ hasText: "Authentication temporarily unavailable" }).waitFor();
-  assert.equal((await signupContext.request.post(`${origin}/api/register`, { data: { email: `${randomUUID()}@example.test`, name: "Fixture", password } })).status(), 503);
+  // Registration carries no quota, so a Redis outage never refuses a signup.
+  assert.equal((await signupContext.request.post(`${origin}/api/register`, { data: { email: `${randomUUID()}@example.test`, name: "Fixture", password } })).status(), 200);
   const start = Date.now();
   const response = await context.request.post(`${origin}/api/scan-runs`, { headers: { "Idempotency-Key": "auth-browser-outage" }, data: { targetId: target.id, type: "RECON" } });
   assert.equal(response.status(), 202); assert(Date.now() - start < 5000);
   const run = await response.json(); assert.equal(run.status, "QUEUED"); assert.equal(run.outcome, null); assert.equal(run.dispatch, "PENDING");
   assert.equal((await prisma.scanJobOutbox.findUniqueOrThrow({ where: { scanRunId: run.id } })).status, "PENDING");
-  console.log("PASS: real Redis outage gives login/signup 503 and authenticated scan 202 with durable outbox");
+  console.log("PASS: real Redis outage gives login 503, signup 200 and authenticated scan 202 with durable outbox");
 } finally {
   await stopWeb(); if (browser) await browser.close(); await prisma.$disconnect();
   if (redisStopped) await exec("docker", ["start", redisContainer], { timeout: 20_000 });

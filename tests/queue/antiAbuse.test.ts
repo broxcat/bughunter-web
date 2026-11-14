@@ -89,12 +89,13 @@ describe.skipIf(!dbUrl || !redisUrl || !container)("real anti-abuse quotas and o
     await prisma.scanRun.createMany({ data: Array.from({ length: 25 }, () => ({ targetId: user.targetId, type: "RECON" as const, createdAt: new Date(Date.now() - 3_600_001) })) });
     await expect(createScanRequest(user.id, input(user.targetId), "fresh-window")).resolves.toMatchObject({ status: "QUEUED" });
   });
-  it("fails closed for login/signup but accepts bounded, durable scan work through a real Redis outage", async () => {
+  it("fails closed for login but accepts bounded, durable scan work through a real Redis outage", async () => {
     await exec("docker", ["stop", "-t", "0", container!], { timeout: 20_000 });
     try {
       const start = Date.now();
       await expect(guardCredentials(new Request("http://localhost"), "outage@example.test")).rejects.toMatchObject({ code: "temporarily_unavailable" });
-      expect((await postRegister()).status).toBe(503);
+      // Registration carries no quota, so an outage never refuses a signup.
+      expect((await postRegister()).status).toBe(200);
       const response = await postScan("redis-outage"), run = await response.json();
       expect(response.status).toBe(202); expect(Date.now() - start).toBeLessThan(6000);
       expect(run).toMatchObject({ status: "QUEUED", outcome: null, dispatch: "PENDING" });
