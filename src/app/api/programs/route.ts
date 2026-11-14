@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { assertPublicScopeValues, scopeAdmissionResponse } from '@/server/scopeAdmission';
 import { z } from 'zod';
 import { advanceCampaign } from '@/server/campaignOrchestrator';
@@ -12,7 +13,7 @@ import { targetReviewSchema } from '@/lib/targetReview';
 import { discoveryScopeRules, reviewedAssetData, reviewedPolicy, storeTestAccounts } from '@/server/targetReview';
 import { ResearchError } from '@/server/research/workspace';
 
-export async function GET(request: Request) {
+ async function handleGET(request: Request) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const params = new URL(request.url).searchParams;
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
     include: { _count: { select: { scopeAssets: { where: { active: true } } } }, targets: { where: { active: true, contextOnly: false, userId: session.user.id }, orderBy: [{host:'asc'},{id:'asc'}] } },
   }), { headers: { 'Cache-Control': 'private, no-store' } });
 }
-export async function POST(req: Request) {
+ async function handlePOST(req: Request) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
@@ -84,3 +85,6 @@ export async function POST(req: Request) {
   });
   return NextResponse.json(program, { status: 201 });
 }
+
+export const GET = withApiBoundary(handleGET, []);
+export const POST = withApiBoundary(handlePOST, []);

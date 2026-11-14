@@ -38,6 +38,7 @@ x-shared-runtime-env: &shared-runtime-env
   RESEARCH_EMBEDDING_MODEL: "${RESEARCH_EMBEDDING_MODEL:-}"
   EGRESS_LAB_ALLOWLIST: "${EGRESS_LAB_ALLOWLIST:-}"
   BROWSER_SANDBOX: "${BROWSER_SANDBOX:-enabled}"
+  BROWSER_SOCKET_PATH: /run/browser/broker.sock
   LOG_LEVEL: "${LOG_LEVEL:-info}"
 
 services:
@@ -88,7 +89,7 @@ services:
   redis:
     image: redis:7-alpine
     # B4: authentication required. Clients receive REDIS_URL with this password.
-    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --appendfsync always --maxmemory-policy noeviction"]
     environment:
       REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD (openssl rand -hex 32)}"
       REDISCLI_AUTH: "${REDIS_PASSWORD}"
@@ -125,7 +126,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      browser:
+        condition: service_healthy
     <<: *hardened-service
+    volumes:
+      - browser-socket:/run/browser
     restart: unless-stopped
 
   worker:
@@ -133,11 +138,7 @@ services:
     image: bughunter-web
     command: npm run worker
     # No AUTH_SECRET, OAuth or registration settings: the worker never signs
-    # sessions. Headless Chromium runs sandboxed with a scrubbed environment
-    # (src/server/browserPolicy.ts). The sandbox needs unprivileged user
-    # namespaces; if the host/seccomp policy refuses them, browser stages fail
-    # closed. BROWSER_SANDBOX=disabled is an explicit, documented risk
-    # acceptance, never the default.
+    # sessions. Chromium executes only in the networkless browser service.
     environment:
       <<: [*shared-runtime-env]
     depends_on:
@@ -145,9 +146,37 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      browser:
+        condition: service_healthy
     <<: *hardened-service
-    # A larger /dev/shm keeps the renderer from crashing on busy pages.
+    volumes:
+      - browser-socket:/run/browser
+    restart: unless-stopped
+
+  browser:
+    build: ./docker/browser
+    image: bughunter-browser
+    network_mode: none
+    user: "10001:10001"
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./docker/browser/seccomp.json
+    pids_limit: 1024
+    mem_limit: 2g
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m,uid=10001,gid=10001
     shm_size: "1gb"
+    volumes:
+      - browser-socket:/run/browser
+    healthcheck:
+      test: ["CMD", "node", "-e", "const s=require('node:net').connect('/run/browser/broker.sock');s.on('connect',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),1000).unref()"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
 
   # Out-of-band interaction catcher (Phase 5). Same image as web/worker, only
@@ -173,6 +202,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  browser-socket:
   pgdata:
   redisdata:
   tailscale-state:

@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import {Prisma} from '@prisma/client';
 import {safeFindingField,publicFinding} from '@/server/findingPrivacy';
 import {foreignOrigin} from '@/lib/requestOrigin';
@@ -24,7 +25,7 @@ const updateSchema = z.object({
 // PATCH /api/findings/[id] — edit classification (CWE, CVSS v3.1) and the
 // manually written Impact / Remediation report sections. The CVSS score is
 // recomputed server-side from the vector.
-export async function PATCH(
+ async function handlePATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -74,3 +75,5 @@ export async function PATCH(
 
   return NextResponse.json(publicFinding(updated));
 }
+
+export const PATCH = withApiBoundary(handlePATCH, ["id"]);

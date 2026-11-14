@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { artifactKinds } from '@/lib/reconArtifacts';
@@ -6,7 +7,7 @@ import { legacyScanSummary } from '@/server/recon/legacyScanSummary';
 
 const PER_KIND_LIMIT = 100;
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+ async function handleGET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return new Response(null, { status: 401 });
 
@@ -40,3 +41,5 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     headers: { 'Cache-Control': 'private, no-store' },
   });
 }
+
+export const GET = withApiBoundary(handleGET, ["id"]);

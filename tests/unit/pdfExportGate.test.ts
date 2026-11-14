@@ -1,18 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), load: vi.fn(), pdf: vi.fn(), quota: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), load: vi.fn(), pdf: vi.fn(), quota: vi.fn(), leases: new Map<string,string>(), unavailable: false } ));
 vi.mock('@/lib/auth', () => ({ auth: mocks.auth }));
 vi.mock('@/lib/rateLimit', () => ({ rateLimit: mocks.quota }));
 vi.mock('@/server/recon/reportFacts', () => ({ loadReconReportFacts: mocks.load }));
 vi.mock('@/server/recon/reportPdf', () => ({ renderReconReportPdf: mocks.pdf }));
-vi.mock('@/lib/reconReportModel', () => ({ buildReconReportModel: () => ({}) }));
+vi.mock('@/lib/reconReportModel', () => ({ buildReconReportModel: () => ({nonce: Math.random()}) }));
+vi.mock('ioredis', () => ({ Redis: class {
+  on() {} disconnect() {} async connect() { if(mocks.unavailable) throw new Error('down'); }
+  async config() { return ['appendonly','yes','appendfsync','always','maxmemory-policy','noeviction']; }
+  async eval(script:string,_count:number,_key:string,...args:(string|number)[]) {
+    if(script.includes('HLEN')) { if(mocks.leases.size>=Number(args[0])) return 0; mocks.leases.set(String(args[1]),String(args[2])); return 1; }
+    if(mocks.leases.get(String(args[0]))===args[1]) return Number(mocks.leases.delete(String(args[0]))); return 0;
+  }
+} }));
 import { GET } from '@/app/api/recon/runs/[id]/report/pdf/route';
-import { activePdfExports, pdfExportCapacity, PDF_USER_LIMIT } from '@/server/recon/pdfExportGate';
+import { pdfExportCapacity, PDF_USER_LIMIT } from '@/server/recon/pdfExportGate';
+import { BrowserTerminationUnconfirmed } from '@/server/isolatedBrowser';
 
 const facts = { program: { companyName: 'Acme' }, run: { startedAt: '2026-11-14T00:00:00.000Z', createdAt: '2026-11-14T00:00:00.000Z' } };
 const call = (id = 'run1') => GET(new Request('http://app.test/api/recon/runs/' + id + '/report/pdf'), { params: Promise.resolve({ id }) });
 
 describe('PDF export saturation (M4)', () => {
-  beforeEach(() => { vi.resetAllMocks(); mocks.auth.mockResolvedValue({ user: { id: 'owner' } }); mocks.load.mockResolvedValue(facts); mocks.quota.mockResolvedValue({ status: 'ALLOWED', remaining: 5, resetSec: 600 }); });
+  beforeEach(() => { vi.resetAllMocks(); mocks.leases.clear(); mocks.unavailable=false; mocks.auth.mockResolvedValue({ user: { id: 'owner' } }); mocks.load.mockResolvedValue(facts); mocks.quota.mockResolvedValue({ status: 'ALLOWED', remaining: 5, resetSec: 600 }); });
   afterEach(() => vi.unstubAllEnvs());
   it('renders at most one PDF at a time and answers 429 instead of queueing', async () => {
     let finish!: () => void;
@@ -25,12 +34,12 @@ describe('PDF export saturation (M4)', () => {
     expect(mocks.pdf).toHaveBeenCalledTimes(1);
     finish();
     expect((await first).status).toBe(200);
-    expect(activePdfExports()).toBe(0);
+    expect(mocks.leases.size).toBe(0);
   });
   it('releases capacity when rendering fails', async () => {
     mocks.pdf.mockRejectedValueOnce(new Error('chromium crashed'));
     expect((await call()).status).toBe(503);
-    expect(activePdfExports()).toBe(0);
+    expect(mocks.leases.size).toBe(0);
     mocks.pdf.mockResolvedValueOnce(Buffer.from('%PDF'));
     expect((await call()).status).toBe(200);
   });
@@ -42,10 +51,22 @@ describe('PDF export saturation (M4)', () => {
     expect(mocks.quota).toHaveBeenCalledWith('rl:pdf-export:owner', PDF_USER_LIMIT.limit, PDF_USER_LIMIT.windowSec);
     expect(mocks.pdf).not.toHaveBeenCalled();
   });
-  it('keeps the hard concurrency bound when the shared limiter is unavailable', async () => {
+  it('retains capacity if process termination cannot be confirmed', async () => {
+    mocks.pdf.mockRejectedValueOnce(new BrowserTerminationUnconfirmed('connection lost'));
+    expect((await call()).status).toBe(503);
+    expect(mocks.leases.size).toBe(1);
+    expect((await call()).status).toBe(429);
+  });
+  it('fails closed when the shared limiter is unavailable', async () => {
     mocks.quota.mockResolvedValue({ status: 'UNAVAILABLE' });
     mocks.pdf.mockResolvedValueOnce(Buffer.from('%PDF'));
-    expect((await call()).status).toBe(200);
+    expect((await call()).status).toBe(503);
+    expect(mocks.pdf).not.toHaveBeenCalled();
+  });
+  it('fails closed on Redis capacity failure', async () => {
+    mocks.unavailable=true;
+    expect((await call()).status).toBe(503);
+    expect(mocks.pdf).not.toHaveBeenCalled();
   });
   it('checks identifiers and ownership before taking capacity', async () => {
     expect((await call('../../etc')).status).toBe(404);

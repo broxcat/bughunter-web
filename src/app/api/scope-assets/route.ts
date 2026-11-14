@@ -1,10 +1,11 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import {Prisma} from '@prisma/client';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { listTargetAssets } from '@/server/recon/intelligence';
 import { backfillProgramAssets,lockOwnedProgram,assetError } from '@/server/scopeAssets';
 import { paginationInput } from '@/lib/pagination';
-export async function GET(req: Request) {
+ async function handleGET(req: Request) {
   const s = await auth();
   if (!s?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const userId = s.user.id, params = new URL(req.url).searchParams;
@@ -37,3 +38,5 @@ export async function GET(req: Request) {
     return Response.json(input ? result : result.items, { headers: { 'Cache-Control': 'no-store' } });
   } catch (e) { return assetError(e); }
 }
+
+export const GET = withApiBoundary(handleGET, []);

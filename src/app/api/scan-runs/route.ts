@@ -1,3 +1,5 @@
+import { routeIdSchema } from '@/lib/routeParams';
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { executionSelect } from "@/server/queue/executionAttempts";
 import { programPolicyInclude } from '@/server/programExecutionPolicy';
@@ -16,12 +18,12 @@ import { backfillProgramAssets, lockOwnedProgram } from '@/server/scopeAssets';
 import { ResearchError } from '@/server/research/workspace';
 
 const createRunSchema = z.object({
-  targetId: z.string().trim().min(1, "targetId is required"),
+  targetId: routeIdSchema,
   type: z.literal("RECON"),
 });
 
 // GET /api/scan-runs?targetId=... — list runs for one owned target, newest first.
-export async function GET(req: NextRequest) {
+ async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -51,7 +53,7 @@ export async function GET(req: NextRequest) {
 
 // Accept ScanRun + publication intent in PostgreSQL before contacting Redis.
 // Redis failures are retryable delivery delays, never lost/failed scan executions.
-export async function POST(req: NextRequest) {
+ async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -134,3 +136,6 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const GET = withApiBoundary(handleGET, []);
+export const POST = withApiBoundary(handlePOST, []);

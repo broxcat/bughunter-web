@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
@@ -37,7 +38,7 @@ async function registrationAdmission(req: Request): Promise<Response | null> {
   return null;
 }
 
-export async function POST(req: Request) {
+ async function handlePOST(req: Request) {
   if (!publicRegistrationEnabled()) {
     return NextResponse.json({ error: "Public registration is disabled. Contact your administrator." }, { status: 403 });
   }
@@ -68,3 +69,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
   }
 }
+
+export const POST = withApiBoundary(handlePOST, []);

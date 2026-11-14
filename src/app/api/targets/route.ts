@@ -1,3 +1,5 @@
+import { routeIdSchema } from '@/lib/routeParams';
+import { withApiBoundary } from '@/lib/apiBoundary';
 import {paginationInput,paginationBounds} from '@/lib/pagination';
 import {Prisma} from '@prisma/client';
 import { foreignOrigin } from '@/lib/requestOrigin';
@@ -7,7 +9,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const createTargetSchema = z.object({
-  scopeId: z.string().trim().min(1, "scopeId is required"),
+  scopeId: routeIdSchema,
   host: z.string().trim().min(1, "host is required"),
   label: z.string().trim().min(1).optional(),
 });
@@ -40,7 +42,7 @@ function normalizeTargetInput(input: string): { host: string; scheme: string | n
 }
 
 // GET /api/targets — list the signed-in user's targets (with their scope).
-export async function GET(request?:Request) {
+ async function handleGET(request?:Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -69,7 +71,7 @@ export async function GET(request?:Request) {
 // POST /api/targets — create a target. Rejected unless its linked Scope belongs
 // to the user AND is APPROVED. This is the first of the two authorization checks
 // (the worker re-checks APPROVED again just before spawning any tool).
-export async function POST(req: NextRequest) {
+ async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -122,3 +124,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(target, { status: 201 });
 }
+
+export const GET = withApiBoundary(handleGET, []);
+export const POST = withApiBoundary(handlePOST, []);

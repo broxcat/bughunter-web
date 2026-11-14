@@ -1,3 +1,5 @@
+import { routeIdSchema } from '@/lib/routeParams';
+import { withApiBoundary } from '@/lib/apiBoundary';
 import {Prisma} from '@prisma/client';
 import {paginationInput} from '@/lib/pagination';
 import {findingCollection} from '@/server/findingCollections';
@@ -17,8 +19,8 @@ import {
 } from "@/lib/findingClassification";
 
 const createFindingSchema = z.object({
-  targetId: z.string().trim().min(1, "targetId is required").max(150),
-  scanRunId: z.string().trim().min(1).max(150).optional(),
+  targetId: routeIdSchema,
+  scanRunId: routeIdSchema.optional(),
   title: z.string().trim().min(1, "title is required").max(300),
   vulnClass: z.string().trim().min(1).max(100).optional(),
   severity: z.enum(["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
@@ -32,7 +34,7 @@ const createFindingSchema = z.object({
 });
 
 // GET /api/findings?targetId=... — list findings for one owned target.
-export async function GET(req: NextRequest) {
+ async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -88,7 +90,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/findings — create a finding on an owned target. Starts UNVALIDATED;
 // the evidence-review route decides its validation state.
-export async function POST(req: NextRequest) {
+ async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -150,3 +152,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(publicFinding(finding), { status: 201 });
 }
+
+export const GET = withApiBoundary(handleGET, []);
+export const POST = withApiBoundary(handlePOST, []);

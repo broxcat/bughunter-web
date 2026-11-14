@@ -2,7 +2,8 @@ import { allowFixture } from '../helpers/egressLab';
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
-import { chromium, type Browser } from "playwright-chromium";
+import { type Browser } from "playwright-chromium";
+import * as isolated from '@/server/isolatedBrowser';
 import { ScanControl, withScanControl } from "@/server/scanControl";
 import { withTargetExecution, launchTargetBrowser, newTargetBrowserContext } from "@/server/execution";
 import { probe } from "@/server/scanners/http";
@@ -43,7 +44,7 @@ describe("scan AbortSignal propagation", () => {
     const control = new ScanControl(identity, async () => {});
     const browser = { close: vi.fn(async () => {}), on: vi.fn() };
     let launched!: (value: Browser) => void;
-    const spy = vi.spyOn(chromium, "launch").mockReturnValue(new Promise(resolve => { launched = resolve; }));
+    const spy = vi.spyOn(isolated, 'launchIsolatedBrowser').mockReturnValue(new Promise(resolve => { launched = resolve; }));
     try {
       const startup = withScanControl(control, () => withTargetExecution(target(), () => launchTargetBrowser({ headless: true })));
       const rejected = expect(startup).rejects.toMatchObject({ reason: "USER_CANCELLED" });

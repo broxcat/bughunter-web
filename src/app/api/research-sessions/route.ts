@@ -1,9 +1,10 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ownedResearch, researchSessionSelect } from "@/server/research/sessions";
 
 import { paginationInput,paginationBounds } from '@/lib/pagination';
-export async function GET(request?:Request) {
+ async function handleGET(request?:Request) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const params=new URLSearchParams(request?new URL(request.url).search:'');
@@ -16,3 +17,5 @@ export async function GET(request?:Request) {
   },{isolationLevel:'RepeatableRead'});
   return Response.json(result,{headers:{'Cache-Control':'no-store'}});
 }
+
+export const GET = withApiBoundary(handleGET, []);

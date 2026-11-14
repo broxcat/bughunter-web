@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
+import { gzipSync, deflateSync, brotliCompressSync } from 'node:zlib';
 import { allowFixture } from '../helpers/egressLab';
 
 vi.mock('@/lib/prisma', () => ({ prisma: {} }));
@@ -17,12 +18,17 @@ suite('browser egress (C1)', () => {
     otherBase = `http://127.0.0.1:${(other.address() as { port: number }).port}`;
     allowed = createServer((req, res) => {
       allowedSeen.push(req.url ?? '');
-      res.setHeader('Content-Type', 'text/html');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      if (req.url?.startsWith('/compressed/')) {
+        const encoding = req.url.split('/').at(-1) as 'gzip' | 'deflate' | 'br';
+        const body = ({ gzip: gzipSync, deflate: deflateSync, br: brotliCompressSync })[encoding](Buffer.from('<title>decoded</title><p>body ✓</p>'));
+        res.writeHead(200, { 'Content-Encoding': encoding, 'Content-Length': body.length, 'Set-Cookie': ['first=one; Path=/', 'second=two; Path=/'] }).end(body); return;
+      }
       if (req.url === '/redirect') { res.writeHead(302, { Location: `${otherBase}/redirected` }); res.end(); return; }
       res.end(`<!doctype html><title>guarded</title>
         <img src="${otherBase}/img"><img src="http://169.254.169.254/latest/meta-data/">
-        <iframe src="${otherBase}/frame"></iframe>
-        <form id="f" action="${otherBase}/form" method="post"><input name="a" value="b"></form>
+        <iframe name="attack" src="${otherBase}/frame"></iframe>
+        <form id="f" target="attack" action="${otherBase}/form" method="post"><input name="a" value="b"></form>
         <script>
           fetch('${otherBase}/fetch').catch(()=>{});
           fetch('http://metadata.google.internal/').catch(()=>{});
@@ -55,6 +61,19 @@ suite('browser egress (C1)', () => {
     });
     expect(allowedSeen).toContain('/');
     expect(otherSeen).toEqual([]);
+  }, 30000);
+
+  it.each(['gzip', 'deflate', 'br'])('fulfills decoded %s into real Chromium without losing cookies', async encoding => {
+    await withTargetExecution({ targetId: 't', host: new URL(base).host, requiredUserAgent: 'UA/1', qualifying: [], nonQualifying: [] }, async () => {
+      const browser = await launchTargetBrowser({ headless: true });
+      try {
+        const context = await newTargetBrowserContext(browser), page = await context.newPage();
+        await page.goto(`${base}/compressed/${encoding}`);
+        expect(await page.title()).toBe('decoded');
+        expect(await page.locator('p').innerText()).toBe('body ✓');
+        expect((await context.cookies()).map(c => `${c.name}=${c.value}`).sort()).toEqual(['first=one', 'second=two']);
+      } finally { await browser.close(); }
+    });
   }, 30000);
 
   it('serves a non-DNS lab host only through the pinned guard, never through Chromium resolution', async () => {

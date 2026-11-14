@@ -14,3 +14,10 @@ export function allowFixture(server: Server | { address(): unknown }) {
   process.env.EGRESS_LAB_ALLOWLIST = [previous, entry].filter(Boolean).join(',');
   afterAll(() => { if (previous === undefined) delete process.env.EGRESS_LAB_ALLOWLIST; else process.env.EGRESS_LAB_ALLOWLIST = previous; });
 }
+/** AI fixtures require their own explicit operator origin, never the lab list. */
+export function allowProviderFixture(server: Server | { address(): unknown }) {
+  const address = server.address() as { port: number };
+  const previous = process.env.OLLAMA_HOST;
+  process.env.OLLAMA_HOST = `http://127.0.0.1:${address.port}`;
+  afterAll(() => { if (previous === undefined) delete process.env.OLLAMA_HOST; else process.env.OLLAMA_HOST = previous; });
+}

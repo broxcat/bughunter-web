@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { assertPublicScopeValues, scopeAdmissionResponse } from '@/server/scopeAdmission';
 import { auth } from '@/lib/auth';
 import { foreignOrigin } from '@/lib/requestOrigin';
@@ -16,10 +17,10 @@ async function mutate(req: Request, { params }: Context, remove: boolean) {
   const { id, assetId } = await params;
   try { return Response.json(await editScopeAsset(session.user.id, id, assetId, input?.success ? input.data : null,retirement?.success?retirement.data.expectedUpdatedAt:undefined)); } catch (e) { return assetError(e); }
 }
-export const PATCH = (req: Request, context: Context) => mutate(req, context, false);
-export const DELETE = (req: Request, context: Context) => mutate(req, context, true);
+ const handlePATCH = (req: Request, context: Context) => mutate(req, context, false);
+ const handleDELETE = (req: Request, context: Context) => mutate(req, context, true);
 
-export async function POST(req:Request,{params}:Context){
+ async function handlePOST(req:Request,{params}:Context){
   const session=await auth();if(!session?.user?.id)return Response.json({error:'Unauthorized'},{status:401});
   if(foreignOrigin(req))return Response.json({error:'Forbidden'},{status:403});
   if(Number(req.headers.get('content-length'))>4096)return Response.json({error:'Input too large'},{status:413});
@@ -29,3 +30,7 @@ export async function POST(req:Request,{params}:Context){
   try{await assertPublicScopeValues([input.data.value]);}catch(e){const refused=scopeAdmissionResponse(e);if(refused)return refused;throw e;}
   try{return Response.json(await replaceScopeAsset(session.user.id,id,assetId,input.data),{status:201});}catch(e){return assetError(e);}
 }
+
+export const PATCH = withApiBoundary(handlePATCH, ["id","assetId"]);
+export const DELETE = withApiBoundary(handleDELETE, ["id","assetId"]);
+export const POST = withApiBoundary(handlePOST, ["id","assetId"]);

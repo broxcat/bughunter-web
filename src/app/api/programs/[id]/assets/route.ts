@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { assertPublicScopeValues, scopeAdmissionResponse } from '@/server/scopeAdmission';
 import {prisma} from '@/lib/prisma';
 import {paginationInput} from '@/lib/pagination';
@@ -10,7 +11,7 @@ import { assetInputSchema } from '@/lib/scopeAssets';
 import { listScopeAssets, createScopeAsset, assetError } from '@/server/scopeAssets';
 
 type Context = { params: Promise<{ id: string }> };
-export async function GET(_req: Request, { params }: Context) {
+ async function handleGET(_req: Request, { params }: Context) {
   const session = await auth(); if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const query=new URL(_req.url).searchParams;
   if(query.has('page')||query.has('pageSize')){
@@ -27,7 +28,7 @@ export async function GET(_req: Request, { params }: Context) {
   }
   try { return Response.json(await listScopeAssets(session.user.id, (await params).id), { headers: { 'Cache-Control': 'no-store' } }); } catch (e) { return assetError(e); }
 }
-export async function POST(req: Request, { params }: Context) {
+ async function handlePOST(req: Request, { params }: Context) {
   const session = await auth(); if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
   if (Number(req.headers.get('content-length')) > 4096) return Response.json({ error: 'Input too large' }, { status: 413 });
@@ -36,3 +37,6 @@ export async function POST(req: Request, { params }: Context) {
   try { await assertPublicScopeValues([input.data.value]); } catch (e) { const refused = scopeAdmissionResponse(e); if (refused) return refused; throw e; }
   try { return Response.json(await createScopeAsset(session.user.id, (await params).id, input.data), { status: 201 }); } catch (e) { return assetError(e); }
 }
+
+export const GET = withApiBoundary(handleGET, ["id"]);
+export const POST = withApiBoundary(handlePOST, ["id"]);

@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import {Prisma} from '@prisma/client';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { NextRequest, NextResponse } from "next/server";
@@ -14,7 +15,7 @@ import {
 // are the authorization attestation, and changing them after approval would
 // silently change what was authorized. (Zod strips unknown keys, so a body that
 // includes them has them ignored.)
-export async function PATCH(
+ async function handlePATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -61,3 +62,5 @@ export async function PATCH(
 
   return NextResponse.json(updated);
 }
+
+export const PATCH = withApiBoundary(handlePATCH, ["id"]);

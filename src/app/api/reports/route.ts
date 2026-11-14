@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import {paginationInput} from '@/lib/pagination';
 import {reportCollection} from '@/server/findingCollections';
 import {publicFinding,safeFindingText} from '@/server/findingPrivacy';
@@ -26,7 +27,7 @@ const createReportSchema = z.object({
 });
 
 // GET /api/reports — list the user's reports.
-export async function GET(req: NextRequest) {
+ async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
 // POST /api/reports — NON-NEGOTIABLE: a report may include ONLY findings whose
 // review status CONFIRMED and that the user owns. Any violation rejects the
 // whole request (400); nothing is written.
-export async function POST(req: NextRequest) {
+ async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -165,3 +166,6 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(report, { status: 201 });
   },{timeout:20000});
 }
+
+export const GET = withApiBoundary(handleGET, []);
+export const POST = withApiBoundary(handlePOST, []);

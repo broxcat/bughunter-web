@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 // Public readiness probe. Never wait on BullMQ's unbounded shared Redis retry queue.
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -13,7 +14,8 @@ async function dependencyUp(work: () => Promise<unknown>): Promise<"up" | "down"
     return "up";
   } catch { return "down"; } finally { clearTimeout(timer); }
 }
-export async function GET() {
+ async function handleGET(_req: Request) {
+  void _req;
   // Dedicated, nonretrying connection: a health request must not queue a PING
   // forever or accumulate commands on the worker's persistent connection.
   const client = createRedisConnection({ maxRetriesPerRequest: 0, enableOfflineQueue: false, connectTimeout: 1000, retryStrategy: () => null });
@@ -27,3 +29,5 @@ export async function GET() {
   logger[ok ? "info" : "warn"]({ db, redis }, ok ? "health check ok" : "health check failed — dependency down");
   return NextResponse.json({ status: ok ? "ok" : "error", db, redis }, { status: ok ? 200 : 503 });
 }
+
+export const GET = withApiBoundary(handleGET, []);

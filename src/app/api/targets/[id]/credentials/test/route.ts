@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
@@ -9,7 +10,7 @@ import { foreignOrigin } from '@/lib/requestOrigin';
 
 export const runtime = "nodejs";
 /** Test connection also saves encrypted inputs; only status metadata is returned. */
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+ async function handlePOST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (foreignOrigin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -47,3 +48,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: e instanceof Error && e.message === "CONNECTION_RATE_LIMIT" ? "Please wait before testing this connection again" : "Connection check unavailable" }, { status: e instanceof Error && e.message === "CONNECTION_RATE_LIMIT" ? 429 : 400 });
   }
 }
+
+export const POST = withApiBoundary(handlePOST, ["id"]);

@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { assertPublicScopeValues, scopeAdmissionResponse } from '@/server/scopeAdmission';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { auth } from "@/lib/auth";
@@ -5,7 +6,7 @@ import { z } from "zod";
 import { fqdnSchema } from "@/lib/bountyProgram";
 import { mutateHost, hostErrorResponse } from "@/server/programHosts";
 type Params = { params: Promise<{ id: string; hostId: string }> };
-export async function PATCH(req: Request, { params }: Params) {
+ async function handlePATCH(req: Request, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
   if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
@@ -16,7 +17,7 @@ export async function PATCH(req: Request, { params }: Params) {
   try { return Response.json(await mutateHost(session.user.id, id, "EDIT", { ...parsed.data, hostId })); }
   catch (e) { return hostErrorResponse(e); }
 }
-export async function DELETE(_req: Request, { params }: Params) {
+ async function handleDELETE(_req: Request, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
   if (foreignOrigin(_req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
@@ -24,3 +25,6 @@ export async function DELETE(_req: Request, { params }: Params) {
   try { await mutateHost(session.user.id, id, "REMOVE", { hostId }); return Response.json({ ok: true }); }
   catch (e) { return hostErrorResponse(e); }
 }
+
+export const PATCH = withApiBoundary(handlePATCH, ["id","hostId"]);
+export const DELETE = withApiBoundary(handleDELETE, ["id","hostId"]);

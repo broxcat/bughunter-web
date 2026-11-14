@@ -110,16 +110,11 @@ RUN --network=none RECON_SMOKE_BIN=/root/go/bin RECON_SMOKE_TEMPLATES=/opt/bughu
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm AS deps
 WORKDIR /app
-# Pin the Playwright browser cache to a fixed, stage-shared path so the runtime
-# stage can COPY the Chromium binary to the IDENTICAL location (otherwise it
-# defaults to the invoking user's ~/.cache/ms-playwright and the paths drift).
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# App processes use only Playwright's protocol client. Chromium belongs solely
+# to docker/browser: no executable or local launch fallback in web/worker.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 COPY package.json package-lock.json ./
 RUN npm ci
-# Download the headless Chromium build the worker's DOM-XSS confirmer drives.
-# The browser version is locked to the playwright-chromium version from npm ci.
-# As with the rest of this file, this assumes NORMAL internet at build time.
-RUN npx playwright install chromium
 
 # ---------------------------------------------------------------------------
 # Stage 3: app build — prisma client generation + next build (Turbopack)
@@ -136,7 +131,7 @@ RUN npx prisma generate
 
 # Placeholder env ONLY for `next build` so any server module evaluated during
 # the build does not crash on missing config. These values are never used at
-# runtime — real values come from env_file (.env) in docker-compose.
+# runtime — real values are explicitly scoped in docker-compose.yml.
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build?schema=public" \
     REDIS_URL="redis://localhost:6379" \
     AUTH_SECRET="build-time-placeholder" \
@@ -153,34 +148,16 @@ WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    HOSTNAME=0.0.0.0 \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    HOSTNAME=0.0.0.0
 
 # Runtime deps for the scanners (nmap for -sV/SYN scans, plus common CLI tools)
-# AND the shared libraries headless Chromium needs — the worker launches it via
-# playwright-chromium to confirm DOM-XSS. Package names are the Debian 12
-# (bookworm, this base image) spellings. Assumes NORMAL internet at build time.
+# Chromium and its libraries are installed only in docker/browser.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         nmap \
         jq \
         git \
         ca-certificates \
         python3 \
-        libnss3 \
-        libatk1.0-0 \
-        libatk-bridge2.0-0 \
-        libcups2 \
-        libdrm2 \
-        libxkbcommon0 \
-        libxcomposite1 \
-        libxdamage1 \
-        libxfixes3 \
-        libxrandr2 \
-        libgbm1 \
-        libasound2 \
-        libpango-1.0-0 \
-        libcairo2 \
-        fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Go scanner binaries (subfinder, httpx, nuclei, katana, dnsx, ffuf, gau, dalfox).
@@ -188,14 +165,12 @@ COPY --from=tools /root/go/bin/ /usr/local/bin/
 # Unprivileged runtime identity (H1/H2). Chromium refuses its sandbox as root,
 # and no service needs root: the app only binds port 3000 and scanners use
 # ordinary TCP connect (no raw sockets; nmap is disabled).
-RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --create-home --home-dir /home/app --shell /usr/sbin/nologin app
+RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --create-home --home-dir /home/app --shell /usr/sbin/nologin app \
+    && mkdir -p /run/browser && chown app:app /run/browser
 ENV HOME=/home/app
 # nuclei templates + config so `nuclei` runs without a first-boot network pull.
 COPY --from=tools --chown=app:app /root/nuclei-templates /home/app/nuclei-templates
 COPY --from=tools --chown=app:app /root/.config/nuclei /home/app/.config/nuclei
-# Headless Chromium browser binary (downloaded in the deps stage) at the same
-# PLAYWRIGHT_BROWSERS_PATH the worker reads, so playwright-chromium finds it.
-COPY --from=deps /ms-playwright /ms-playwright
 
 # The built application: node_modules (incl. generated Prisma client), .next,
 # src (the tsx worker runs TS source directly), prisma, and config files.

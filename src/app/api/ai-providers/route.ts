@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { AiProvider } from "@prisma/client";
@@ -28,7 +29,7 @@ const upsertSchema = z.object({
 });
 
 /** GET /api/ai-providers — the caller's own configs, secrets stripped. */
-export async function GET() {
+ async function handleGET() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -53,7 +54,7 @@ export async function GET() {
 }
 
 /** POST /api/ai-providers — upsert a config keyed by (userId, provider). */
-export async function POST(req: Request) {
+ async function handlePOST(req: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -151,3 +152,6 @@ export async function POST(req: Request) {
     },
   });
 }
+
+export const GET = withApiBoundary(handleGET, []);
+export const POST = withApiBoundary(handlePOST, []);

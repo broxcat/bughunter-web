@@ -1,10 +1,11 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { scanRejection } from '@/server/execution';
 import { programPolicyInclude, resolveProgramPolicy } from '@/server/programExecutionPolicy';
 
-export async function GET() {
+ async function handleGET() {
   const userId = (await auth())?.user?.id;
   if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const [programs, targets] = await prisma.$transaction([
@@ -27,3 +28,5 @@ export async function GET() {
     };
   }));
 }
+
+export const GET = withApiBoundary(handleGET, []);

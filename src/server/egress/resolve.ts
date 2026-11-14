@@ -8,6 +8,7 @@ export class EgressError extends Error {
 export type LookupAll = (hostname: string) => Promise<{ address: string; family: number }[]>;
 export type PinnedTarget = { hostname: string; port: number; address: string; family: 4 | 6; source: 'LITERAL' | 'DNS' | 'LAB_ALLOWLIST' | 'OPERATOR_ENDPOINT' };
 export type ResolveOptions = {
+  usage?: 'lab-target' | 'ai-provider' | 'admin-service' | 'public-provider';
   signal?: AbortSignal;
   timeoutMs?: number;
   /** Exact operator-configured origins (scheme://host:port) that may be private. */
@@ -56,8 +57,10 @@ export async function resolveEgressTarget(rawHost: string, port: number, options
   const hostname = rawHost.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (!hostname || !Number.isInteger(port) || port < 1 || port > 65535) throw new EgressError('EGRESS_INVALID_DESTINATION', 'Invalid host or port');
   options.signal?.throwIfAborted();
-  const lab = parseLabAllowlist().entries.get(`${hostname}:${port}`);
+  const usage = options.usage ?? 'lab-target';
+  const lab = usage === 'lab-target' ? parseLabAllowlist().entries.get(`${hostname}:${port}`) : undefined;
   if (lab) return { hostname, port, ...lab, source: 'LAB_ALLOWLIST' };
+  if (options.operatorOrigin && usage !== 'ai-provider' && usage !== 'admin-service') throw new EgressError('EGRESS_POLICY_MISMATCH', 'Private operator exceptions require an explicit service usage');
   if (isIP(hostname)) {
     if (options.operatorOrigin) return { hostname, port, address: hostname, family: isIP(hostname) as 4 | 6, source: 'OPERATOR_ENDPOINT' };
     const verdict = classifyAddress(hostname);

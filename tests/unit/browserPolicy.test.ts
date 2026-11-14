@@ -15,11 +15,11 @@ describe('hardened Chromium launch (H1)', () => {
     expect(Object.keys(env).sort()).toEqual(['HOME', 'PATH']);
     expect(JSON.stringify(env)).not.toMatch(/postgres|redis:|AUTH|aaaa/);
   });
-  it('disables the sandbox only on explicit operator opt-out and rejects ambiguous values', () => {
+  it('refuses sandbox opt-outs and ambiguous values', () => {
     expect(browserSandboxEnabled({})).toBe(true);
     expect(browserSandboxEnabled({ BROWSER_SANDBOX: 'enabled' })).toBe(true);
-    expect(browserSandboxEnabled({ BROWSER_SANDBOX: 'disabled' })).toBe(false);
-    expect(() => browserSandboxEnabled({ BROWSER_SANDBOX: 'false' })).toThrow(/enabled.*disabled/);
-    expect(hardenedBrowserLaunch({ args: ['--no-sandbox'] }, { BROWSER_SANDBOX: 'disabled' }).args).not.toContain('--no-sandbox');
+    expect(() => browserSandboxEnabled({ BROWSER_SANDBOX: 'disabled' })).toThrow(/unsupported/);
+    expect(() => browserSandboxEnabled({ BROWSER_SANDBOX: 'false' })).toThrow(/unsupported/);
+    expect(() => hardenedBrowserLaunch({}, { BROWSER_SANDBOX: 'disabled' })).toThrow(/unsupported/);
   });
 });

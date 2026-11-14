@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { executionSelect } from "@/server/queue/executionAttempts";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
@@ -15,7 +16,7 @@ type LogEntry = { line: string; stream: "STDOUT" | "STDERR"; createdAt: string }
 const TERMINAL = new Set<string>(["COMPLETED", "FAILED", "CANCELLED"]);
 const POLL_INTERVAL_MS = 2000;
 
-export async function GET(
+ async function handleGET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -163,3 +164,5 @@ export async function GET(
     },
   });
 }
+
+export const GET = withApiBoundary(handleGET, ["id"]);

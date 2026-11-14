@@ -32,7 +32,7 @@ const request=(path:string,method:string,body?:unknown,origin='http://app.exampl
  it.each(['metadata','approval'])('returns404 when Scope %s is concurrently removed',async kind=>{
   const scope=await p.scope.create({data:{userId,hostPattern:'fixture.test'}}),original=p.scope.update.bind(p.scope);
   const spy=vi.spyOn(p.scope,'update').mockImplementationOnce(args=>p.scope.delete({where:{id:scope.id}}).then(()=>original(args)) as unknown as ReturnType<typeof p.scope.update>);
-  try{const context={params:Promise.resolve({id:scope.id})};const r=kind==='metadata'?await(await import('@/app/api/scopes/[id]/route')).PATCH(request('/api/scopes/'+scope.id,'PATCH',{rulesOfEngagement:'Metadata'}),context):await(await import('@/app/api/scopes/[id]/approve/route')).POST(request('/api/scopes/'+scope.id+'/approve','POST'),context);expect(r.status).toBe(404);}finally{spy.mockRestore();}
+  try{const context={params:Promise.resolve({id:scope.id})};const r=kind==='metadata'?await(await import('@/app/api/scopes/[id]/route')).PATCH(request('/api/scopes/'+scope.id,'PATCH',{rulesOfEngagement:'Metadata'}),context):await(await import('@/app/api/scopes/[id]/approve/route')).POST(request('/api/scopes/'+scope.id+'/approve','POST',{attestation:true,justification:'Controlled fixture scope approval for concurrent removal'}),context);expect(r.status).toBe(404);}finally{spy.mockRestore();}
  });
 
  it('returns404 for a credential removed immediately before its metadata update',async()=>{

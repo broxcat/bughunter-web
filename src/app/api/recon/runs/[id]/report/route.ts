@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import {readRunNarrative} from '@/server/recon/runNarrative';
 import { auth } from '@/lib/auth';
 import { loadReconReportFacts } from '@/server/recon/reportFacts';
@@ -8,7 +9,7 @@ import { ResearchError } from '@/server/research/workspace';
 type Params = { params: Promise<{ id: string }> };
 
 /** Markdown export of the deterministic report. No AI, no secrets. */
-export async function GET(_req: Request, { params }: Params) {
+ async function handleGET(_req: Request, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const { id } = await params;
@@ -30,3 +31,5 @@ export async function GET(_req: Request, { params }: Params) {
     return Response.json({ error: 'Report unavailable' }, { status: 500 });
   }
 }
+
+export const GET = withApiBoundary(handleGET, ["id"]);

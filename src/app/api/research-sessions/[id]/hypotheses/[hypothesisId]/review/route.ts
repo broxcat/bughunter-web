@@ -1,10 +1,11 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { researchReviewInput } from '@/lib/research/humanReview';
 import { coverageBody, coverageRequest } from '@/server/research/coverageRequest';
 import { hypothesisErrorResponse } from '@/server/research/hypothesisResponse';
 import { recordResearchReview } from '@/server/research/promotion';
 import { ResearchError } from '@/server/research/workspace';
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string; hypothesisId: string }> }) {
+ async function handlePOST(req: Request, { params }: { params: Promise<{ id: string; hypothesisId: string }> }) {
   try {
     const userId = await coverageRequest(req, true);
     const { id, hypothesisId } = await params;
@@ -18,3 +19,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return hypothesisErrorResponse(error);
   }
 }
+
+export const POST = withApiBoundary(handlePOST, ["id","hypothesisId"]);

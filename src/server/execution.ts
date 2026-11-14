@@ -1,7 +1,7 @@
 import { beforeScanNetwork, currentScanControl, recordUsefulScanWork, throwIfScanAborted } from "./scanControl";
 import { logger } from "@/lib/logger";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { chromium, type Browser, type Route } from "playwright-chromium";
+import { type LaunchOptions, type Browser, type Route } from "playwright-chromium";
 import { prisma } from "@/lib/prisma";
 import { isExcluded, matchesHost } from "@/lib/bountyProgram";
 import { assetAllowsHost, scopeAssetExecutable, type AssetBoundary } from '@/lib/scopeAssets';
@@ -10,7 +10,7 @@ import { isSafeReadUrl } from '@/lib/observationSafety';
 import { authorizeExecution, programPolicyInclude, resolveProgramPolicy, type PolicyProgram, type ResolvedProgramPolicy } from './programExecutionPolicy';
 import { acquireProgramTraffic, releaseProgramTraffic } from './programTraffic';
 import { guardedFetch } from './egress/fetch';
-import { hardenedBrowserLaunch } from './browserPolicy';
+import { BrowserTerminationUnconfirmed, launchIsolatedBrowser } from './isolatedBrowser';
 export { BROWSER_EGRESS_ARGS } from './browserPolicy';
 
 export interface TargetRequestGuard {
@@ -155,27 +155,23 @@ export async function authenticatedExecutionHeaders(url: string, method: string,
 }
 /** Register launch itself before awaiting it, so cancellation also waits for a
  * browser that is still starting and closes it before confirming cleanup. */
-export async function launchTargetBrowser(options: Parameters<typeof chromium.launch>[0]) {
+export async function launchTargetBrowser(options: LaunchOptions) {
   throwIfScanAborted();
   authorizeExecution(currentTargetExecution(), { tool: 'browser' });
-  // Chromium never resolves or connects by itself: every HTTP(S) request is
-  // intercepted and fetched by the egress guard below. Its own resolver maps
-  // every name to NOTFOUND and its proxy is a closed loopback port, so a
-  // request that escaped interception fails instead of reaching the network.
-  // It runs sandboxed with a scrubbed environment (H1). Hostile JavaScript
-  // still runs, so container network isolation remains the boundary for
-  // non-HTTP channels.
-  const pending = chromium.launch(hardenedBrowserLaunch(options));
+  // Chromium runs in the networkless browser service. Every permitted HTTP
+  // request is fetched here, preserving budgets, pinning and temporary auth.
+  const pending = launchIsolatedBrowser(options);
   const control = currentScanControl();
   let closing: Promise<void> | undefined;
-  const stop = () => closing ??= pending.then(browser => browser.close(), () => {});
+  const stop = () => closing ??= pending.then(async browser => { await browser.close(); release?.(); }, error => { if (error instanceof BrowserTerminationUnconfirmed) throw error; });
   const release = control?.track(stop);
   try {
     const browser = await pending;
-    browser.on?.("disconnected", () => release?.());
+    // A broken Playwright connection is not proof of process termination.
+    browser.on?.("disconnected", () => { void stop().catch(() => {}); });
     if (control?.signal.aborted) { await stop(); control.assertActive(); }
     return browser;
-  } catch (error) { release?.(); throw error; }
+  } catch (error) { if (!(error instanceof BrowserTerminationUnconfirmed)) release?.(); throw error; }
 }
 
 const BROWSER_RESPONSE_LIMIT = 8 * 1024 * 1024;
@@ -191,8 +187,10 @@ export async function newTargetBrowserContext(browser: Browser, syntheticPage?: 
   const context = await browser.newContext({ userAgent: ctx.requiredUserAgent, serviceWorkers: "block" });
   let closing: Promise<void> | undefined;
   const stop = () => closing ??= (async () => {
-    await context.close();
+    // Kill the isolated process group before waiting on a possibly wedged
+    // renderer's context protocol. Confirmed broker termination is the drain.
     await browser.close();
+    await context.close().catch(() => {});
     // Release only after both resources confirmed closure. An aborted local
     // mapping guard must not leave a fulfilled stop registered for later
     // cleanup against an already closed browser connection.
@@ -239,6 +237,8 @@ export async function newTargetBrowserContext(browser: Browser, syntheticPage?: 
       await recordUsefulScanWork();
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, key) => { responseHeaders[key] = value; });
+      const cookies = response.headers.getSetCookie();
+      if (cookies.length) responseHeaders['set-cookie'] = cookies.join('\n');
       if (response.status >= 300 && response.status < 400 && responseHeaders.location) {
         responseHeaders["x-bughunter-redirect-location"] = responseHeaders.location;
         delete responseHeaders.location;

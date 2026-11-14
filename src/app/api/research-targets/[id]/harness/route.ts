@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { coverageBody, coverageJson, coverageRequest } from '@/server/research/coverageRequest';
 import { latestResearchStage, runResearchStage, runStageInput, stageInput } from '@/server/research/harness';
 import { ResearchError } from '@/server/research/workspace';
@@ -9,7 +10,7 @@ function failure(error: unknown) {
     ? coverageJson({ error: error.message }, error.status)
     : coverageJson({ error: 'Research stage unavailable.' }, 503);
 }
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+ async function handleGET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const userId = await coverageRequest(req);
     const { id } = await params;
@@ -20,7 +21,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   } catch (error) { return failure(error); }
 }
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+ async function handlePOST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const userId = await coverageRequest(req, true);
     const { id } = await params;
@@ -29,3 +30,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return coverageJson(await runResearchStage(userId, id, parsed.data, req.signal));
   } catch (error) { return failure(error); }
 }
+
+export const GET = withApiBoundary(handleGET, ["id"]);
+export const POST = withApiBoundary(handlePOST, ["id"]);

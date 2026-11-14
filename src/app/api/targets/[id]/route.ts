@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import {paginationInput,paginationBounds} from '@/lib/pagination';
 import {publicFinding} from '@/server/findingPrivacy';
 import { executionSelect } from "@/server/queue/executionAttempts";
@@ -17,7 +18,7 @@ function publicProgram<T extends PolicyProgram>(program: T | null) {
 }
 
 // GET /api/targets/[id] — one owned target with its scope, scan runs, and findings.
-export async function GET(
+ async function handleGET(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -58,3 +59,5 @@ export async function GET(
 
   return NextResponse.json({ ...target, program: publicProgram(target.program), findings:target.findings.map(publicFinding), scanRuns: target.scanRuns.map(withScanDispatch), scanRejection: scanRejection(target, 'RECON') }, {headers:{'Cache-Control':'private, no-store'}});
 }
+
+export const GET = withApiBoundary(handleGET, ["id"]);

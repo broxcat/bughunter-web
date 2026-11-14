@@ -3,12 +3,24 @@ import { describe, expect, it } from 'vitest';
 import { load } from 'js-yaml';
 
 // Static checks of the shipped deployment (Docker is not run by the test suite).
-type Service = { environment?: Record<string, string>; env_file?: unknown; cap_add?: string[]; cap_drop?: string[]; security_opt?: string[]; command?: unknown };
+type Service = { environment?: Record<string, string>; env_file?: unknown; cap_add?: string[]; cap_drop?: string[]; security_opt?: string[]; command?: unknown; network_mode?: string; volumes?: string[]; read_only?: boolean; user?: string };
 const compose = load(readFileSync(new URL('../../docker-compose.yml', import.meta.url), 'utf8')) as { services: Record<string, Service> };
 const dockerfile = readFileSync(new URL('../../Dockerfile', import.meta.url), 'utf8');
 const app = ['web', 'worker', 'oob-catcher'];
 
 describe('deployment secrets and privileges (H1/H2/B4)', () => {
+  it('keeps hostile Chromium in a separate networkless, secretless image', () => {
+    const browser = compose.services.browser;
+    expect(browser.network_mode).toBe('none');
+    expect(browser.environment).toBeUndefined();
+    expect(browser.volumes).toEqual(['browser-socket:/run/browser']);
+    expect(browser.read_only).toBe(true); expect(browser.user).toBe('10001:10001');
+    expect(browser.cap_drop).toEqual(['ALL']);
+    for (const name of ['web', 'worker']) expect(compose.services[name].environment!.BROWSER_SOCKET_PATH).toBe('/run/browser/broker.sock');
+    const source = readFileSync('src/server/execution.ts', 'utf8') + readFileSync('src/server/recon/reportPdf.ts', 'utf8');
+    expect(source).not.toMatch(/chromium\.launch/);
+    expect(source).toContain('launchIsolatedBrowser');
+  });
   it('no service loads the whole .env file and app services drop every capability', () => {
     for (const [name, service] of Object.entries(compose.services)) expect(service.env_file, name).toBeUndefined();
     for (const name of app) {

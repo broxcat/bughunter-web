@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { auth } from '@/lib/auth';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { intakeInput } from '@/lib/programIntake';
@@ -7,7 +8,7 @@ import { campaignSourceFromIntake, extractProgram, INVALID_EXTRACTION, NO_AI } f
 
 const headers = { 'Cache-Control': 'private, no-store' };
 
-export async function POST(request: Request) {
+ async function handlePOST(request: Request) {
   const ownerId = (await auth())?.user?.id;
   if (!ownerId) return Response.json({ error: 'Unauthorized' }, { status: 401, headers });
   if (foreignOrigin(request)) return Response.json({ error: 'Forbidden' }, { status: 403, headers });
@@ -30,3 +31,5 @@ export async function POST(request: Request) {
     return Response.json({ error: safe ? message : 'Program extraction failed. Fill in the form manually or try again.' }, { status: 422, headers });
   }
 }
+
+export const POST = withApiBoundary(handlePOST, []);

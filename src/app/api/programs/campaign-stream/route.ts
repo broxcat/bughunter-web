@@ -1,10 +1,11 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { auth } from '@/lib/auth';
 import { loadCampaignActivity } from '@/server/targetCampaign';
 
 export const runtime = 'nodejs';
 const interval = 2500;
 
-export async function GET(request: Request) {
+ async function handleGET(request: Request) {
   const ownerId = (await auth())?.user?.id;
   if (!ownerId) return new Response('Unauthorized', { status: 401 });
   const ids = [...new Set((new URL(request.url).searchParams.get('ids') ?? '').split(','))];
@@ -57,3 +58,5 @@ export async function GET(request: Request) {
     'X-Accel-Buffering': 'no',
   } });
 }
+
+export const GET = withApiBoundary(handleGET, []);

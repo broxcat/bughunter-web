@@ -1,4 +1,8 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { summaryRoute } from '@/server/recon/summaryRoute';
 type Context={params:Promise<{id:string;assetId?:string}>};
-export const GET=(req:Request,{params}:Context)=>summaryRoute(req,params);
-export const POST=GET;
+ const handleGET=(req:Request,{params}:Context)=>summaryRoute(req,params);
+ const handlePOST=handleGET;
+
+export const GET = withApiBoundary(handleGET, ["id"]);
+export const POST = withApiBoundary(handlePOST, ["id"]);

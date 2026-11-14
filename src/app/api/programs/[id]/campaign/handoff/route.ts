@@ -1,7 +1,8 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+ async function handleGET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const ownerId = (await auth())?.user?.id;
   if (!ownerId) return new Response('Unauthorized', { status: 401 });
   const { id } = await params;
@@ -20,3 +21,5 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     'Cache-Control': 'private, no-store',
   } });
 }
+
+export const GET = withApiBoundary(handleGET, ["id"]);

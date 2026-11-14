@@ -66,7 +66,7 @@ beforeAll(async () => {
 afterAll(() => new Promise<void>(resolve => server.close(() => resolve())));
 beforeEach(() => { vi.stubEnv("AUTH_URL", "http://app.test"); state.rows.clear(); state.active = true; state.excluded = false; state.authorized = true; behavior = "normal"; seen.length = 0; });
 describe("real black-box connection on controlled local fixtures", () => {
-  it("discovers login, submits hidden/cookie/meta/header CSRF and proves an authenticated session", async () => {
+  it.skipIf(!process.env.BROWSER_SOCKET_PATH)("discovers login, submits hidden/cookie/meta/header CSRF and proves an authenticated session", async () => {
     const row = store({ mode: "EMAIL_PASSWORD", cookiesCipher: null, emailCipher: encryptSecret("tester"), passwordCipher: encryptSecret(password) });
     const result = await testStoredConnection(row.targetId, row.id);
     expect(result.status).toBe("VALID");
@@ -79,7 +79,7 @@ describe("real black-box connection on controlled local fixtures", () => {
     expect(seen.every(r => r.ua === "BlackBox-Required/1" && r.path !== "/transfer" && r.path !== "/foreign")).toBe(true);
     expect(JSON.stringify(result)).not.toContain(password); expect(JSON.stringify(result)).not.toContain("fixture-a");
   }, 30000);
-  it("rejects a bad password even when CSRF cookies exist", async () => {
+  it.skipIf(!process.env.BROWSER_SOCKET_PATH)("rejects a bad password even when CSRF cookies exist", async () => {
     const row = store({ mode: "EMAIL_PASSWORD", cookiesCipher: null, emailCipher: encryptSecret("tester"), passwordCipher: encryptSecret("wrong-fixture-password") });
     expect((await testStoredConnection(row.targetId, row.id)).status).toBe("INVALID");
     expect((await loadTargetCredentials(row.targetId))).toEqual([]);

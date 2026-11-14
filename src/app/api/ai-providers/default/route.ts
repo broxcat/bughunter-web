@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { z } from 'zod';
 import { AiProvider } from '@prisma/client';
 import { auth } from '@/lib/auth';
@@ -7,7 +8,7 @@ import { AiConfigurationError, lockAiProviderSettings, resolveConfiguredProvider
 
 export const runtime = 'nodejs';
 const bodySchema = z.strictObject({ provider: z.enum(AiProvider) });
-export async function POST(req: Request) {
+ async function handlePOST(req: Request) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
@@ -28,3 +29,5 @@ export async function POST(req: Request) {
     return Response.json({ error: error instanceof AiConfigurationError ? error.message : 'The default provider could not be changed.' }, { status: error instanceof AiConfigurationError ? error.status : 503 });
   }
 }
+
+export const POST = withApiBoundary(handlePOST, []);

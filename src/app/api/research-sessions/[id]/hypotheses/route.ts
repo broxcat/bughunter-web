@@ -1,9 +1,10 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import {paginationInput} from '@/lib/pagination';
 import { auth } from "@/lib/auth";
 import { HYPOTHESIS_STATUSES, type HypothesisStatus } from "@/lib/research/hypotheses";
 import { listHypotheses } from "@/server/research/hypotheses";
 import { hypothesisErrorResponse } from "@/server/research/hypothesisResponse";
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+ async function handleGET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const query = new URL(req.url).searchParams, status = query.get("status"), rawPage = query.get("page") ?? "1";
@@ -14,3 +15,5 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return Response.json(await listHypotheses(id, session.user.id, status as HypothesisStatus || undefined, page), { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return hypothesisErrorResponse(error); }
 }
+
+export const GET = withApiBoundary(handleGET, ["id"]);

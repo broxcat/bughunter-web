@@ -4,6 +4,8 @@ node_modules
 out
 build
 coverage
+artifacts
+audit-*.log
 
 # VCS + local env
 .git

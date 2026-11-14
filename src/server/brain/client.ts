@@ -291,8 +291,8 @@ export class BrainClient {
     user: string,
     opts: ChatOptions,
   ): Promise<string> {
-    const host =
-      this.baseUrl || process.env.OLLAMA_HOST || "http://localhost:11434";
+    const host = this.baseUrl || process.env.OLLAMA_HOST;
+    if (!host) throw new BrainError('Configure an explicit Ollama endpoint', this.config.provider);
     const model = opts.model || this.config.model || (await this.firstOllamaModel(host));
     if (!model) {
       throw new BrainError(

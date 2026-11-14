@@ -8,8 +8,8 @@ import { scannerEnvironment } from './scanners/environment.mjs';
  *  - inherits only the scrubbed scanner environment, never DATABASE_URL,
  *    AUTH_SECRET, CREDENTIALS_ENCRYPTION_KEY or provider secrets;
  *  - never resolves or connects by itself (see BROWSER_EGRESS_ARGS).
- * BROWSER_SANDBOX=disabled is an explicit operator risk acceptance for hosts
- * that cannot provide user namespaces; it is never the default.
+ * Defense in depth inside the networkless service. Application processes use
+ * isolatedBrowser.ts and must never launch Chromium locally.
  */
 export const BROWSER_EGRESS_ARGS = [
   '--host-resolver-rules=MAP * ~NOTFOUND',
@@ -25,8 +25,7 @@ export const BROWSER_EGRESS_ARGS = [
 export function browserSandboxEnabled(env: Record<string, string | undefined> = process.env) {
   const value = env.BROWSER_SANDBOX?.trim().toLowerCase();
   if (value === undefined || value === '' || value === 'enabled') return true;
-  if (value === 'disabled') return false;
-  throw new Error('BROWSER_SANDBOX must be "enabled" or "disabled"');
+  throw new Error('BROWSER_SANDBOX must be "enabled"; disabling the sandbox is unsupported');
 }
 
 export function hardenedBrowserLaunch(options: LaunchOptions = {}, env: Record<string, string | undefined> = process.env): LaunchOptions {

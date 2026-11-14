@@ -3,7 +3,8 @@ import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { classifyAddress, deniedHostname } from '@/server/egress/addressPolicy';
 import { EgressError, parseLabAllowlist, pinnedLookup, resolveEgressTarget } from '@/server/egress/resolve';
-import { assertProviderEndpoint, guardedConnect, guardedFetch, isOperatorEndpoint } from '@/server/egress/fetch';
+import { assertProviderEndpoint, guardedConnect, guardedFetch, guardedProviderFetch, guardedPublicProviderFetch, isOperatorEndpoint } from '@/server/egress/fetch';
+import { gzipSync, deflateSync, brotliCompressSync } from 'node:zlib';
 
 const lookupOf = (...addresses: string[]) => vi.fn(async () => addresses.map(address => ({ address, family: address.includes(':') ? 6 : 4 })));
 
@@ -82,6 +83,12 @@ describe('guarded HTTP transport (C1)', () => {
   beforeAll(async () => {
     server = createServer((req, res) => {
       seen.push({ host: req.headers.host, url: req.url });
+      const encoders = { gzip: gzipSync, deflate: deflateSync, br: brotliCompressSync };
+      const encoding = req.url?.slice(1) as keyof typeof encoders;
+      if (encoders[encoding]) {
+        const body = encoders[encoding](Buffer.from('<html>décompressé ✓</html>'));
+        res.writeHead(200, { 'Content-Encoding': encoding, 'Content-Length': body.length, 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': ['a=1; Path=/', 'b=2; HttpOnly'] }); res.end(body); return;
+      }
       if (req.url === '/redirect') { res.writeHead(302, { Location: 'http://169.254.169.254/latest/meta-data/' }); res.end(); return; }
       res.setHeader('Set-Cookie', ['a=1', 'b=2']); res.end('pinned');
     });
@@ -116,6 +123,23 @@ describe('guarded HTTP transport (C1)', () => {
     for (const url of ['file:///etc/passwd', 'gopher://example.com/', 'ftp://example.com/', 'http://u:p@example.com/'])
       await expect(guardedFetch(url)).rejects.toThrow(/EGRESS_INVALID_DESTINATION/);
   });
+  it.each(['gzip', 'deflate', 'br'])('decodes %s and exposes consistent headers and separate cookies', async encoding => {
+    vi.stubEnv('EGRESS_LAB_ALLOWLIST', `pinned.lab.test:${port}=127.0.0.1`);
+    const response = await guardedFetch(`http://pinned.lab.test:${port}/${encoding}`);
+    expect(await response.text()).toBe('<html>décompressé ✓</html>');
+    expect(response.headers.get('content-encoding')).toBeNull();
+    expect(response.headers.get('content-length')).toBeNull();
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(response.headers.getSetCookie()).toEqual(['a=1; Path=/', 'b=2; HttpOnly']);
+  });
+  it('never promotes a lab exception into AI or public-provider access', async () => {
+    vi.stubEnv('EGRESS_LAB_ALLOWLIST', `pinned.lab.test:${port}=127.0.0.1`);
+    const url = `http://pinned.lab.test:${port}/hello`, before = seen.length;
+    await expect(guardedProviderFetch(url, { lookupAll: lookupOf('127.0.0.1') })).rejects.toThrow(/BLOCKED/);
+    await expect(guardedPublicProviderFetch(url, { lookupAll: lookupOf('127.0.0.1') })).rejects.toThrow(/BLOCKED/);
+    await expect(assertProviderEndpoint(url, { lookupAll: lookupOf('127.0.0.1') })).rejects.toThrow(/BLOCKED/);
+    expect(seen.length).toBe(before);
+  });
   it('honours cancellation before connecting', async () => {
     const controller = new AbortController(); controller.abort(new Error('cancelled'));
     await expect(guardedFetch('http://example.com/', { signal: controller.signal, lookupAll: lookupOf('93.184.216.34') })).rejects.toThrow(/cancelled/);
@@ -124,6 +148,11 @@ describe('guarded HTTP transport (C1)', () => {
 
 describe('AI provider endpoints (M1)', () => {
   afterEach(() => vi.unstubAllEnvs());
+  it('has no implicit localhost Ollama exception', async () => {
+    vi.stubEnv('OLLAMA_HOST', ''); vi.stubEnv('RESEARCH_EMBEDDING_URL', '');
+    expect(isOperatorEndpoint('http://localhost:11434')).toBe(false);
+    await expect(assertProviderEndpoint('http://localhost:11434')).rejects.toThrow(/BLOCKED/);
+  });
   it('allows private addresses only for the exact operator-defined origins', async () => {
     vi.stubEnv('OLLAMA_HOST', 'http://ollama:11434');
     vi.stubEnv('RESEARCH_EMBEDDING_URL', 'http://embed.internal:8080');

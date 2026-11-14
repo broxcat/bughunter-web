@@ -1,8 +1,9 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { auth } from "@/lib/auth";
 import { promoteHypothesis, promoteHypothesisSchema } from "@/server/research/promotion";
 import { hypothesisErrorResponse } from "@/server/research/hypothesisResponse";
-export async function POST(req: Request, { params }: { params: Promise<{ id: string; hypothesisId: string }> }) {
+ async function handlePOST(req: Request, { params }: { params: Promise<{ id: string; hypothesisId: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
   if (foreignOrigin(req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
@@ -26,3 +27,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   } catch (error) { return hypothesisErrorResponse(error); }
   finally { clearTimeout(timer); await reader?.cancel().catch(() => {}); }
 }
+
+export const POST = withApiBoundary(handlePOST, ["id","hypothesisId"]);

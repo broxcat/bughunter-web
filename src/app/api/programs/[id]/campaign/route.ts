@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { auth } from '@/lib/auth';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { advanceCampaign, changeCampaign } from '@/server/campaignOrchestrator';
@@ -7,7 +8,7 @@ import { z } from 'zod';
 
 const input = z.strictObject({ action: z.enum(['start', 'pause', 'resume', 'handoff']) });
 
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+ async function handlePOST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const userId = (await auth())?.user?.id;
   if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   if (foreignOrigin(request)) return Response.json({ error: 'Forbidden' }, { status: 403 });
@@ -21,3 +22,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return Response.json({ accepted: true }, { status: 202, headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) { return assetError(error); }
 }
+
+export const POST = withApiBoundary(handlePOST, ["id"]);

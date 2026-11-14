@@ -1,0 +1,113 @@
+Security remediation evidence - 2026-11-14
+Base: security/audit-remediation @ 1fe73e9
+
+These are measured results, not a global approval to merge.
+See security-audit-remediation.md for scope, operational limits and the
+initial Windows environment-loading incident. Raw logs are retained locally
+in artifacts/security-audit (gitignored; Docker build context excluded).
+
+STATIC
+npm.cmd run typecheck: exit 0
+npm.cmd run lint: exit 0 (no warnings)
+git diff --check: exit 0
+docker compose --env-file <new empty temporary file> config --no-interpolate --quiet: exit 0
+Next build: production build succeeded inside the application Docker build.
+
+BUILT IMAGES (separate audit tags, never deployed to the existing stack)
+[bughunter-audit-app:remediation] sha256:6fcf485102ec445341d4b88732a50341059648a34c1cecdc0d5552c79e8bb360
+[bughunter-audit-browser:remediation] sha256:660b6e331fbb8a3f6357f2a0b11e6ca7787f4658553af0acb418e2c636675e81
+BuildKit emits three SecretsUsedInArgOrEnv warnings for dummy builder-stage
+AUTH_SECRET/AUTH_URL/CREDENTIALS_ENCRYPTION_KEY placeholders; they are not
+operator credentials and are not runtime-stage ENV.
+
+LINUX FOCUSED ACCEPTANCE
+Command: node tests/security/runIsolated.mjs --focused
+Exit: 0
+ Test Files  14 passed (14)
+      Tests  137 passed (137)
+   Duration  12.03s (tests 78%, import 18%, transform 4%)
+
+PASS Redis durable capacity survives forced restart
+PASS Redis rejects missing credentials
+PASS socket volume initialized by non-root application image
+PASS web/worker image contains no Chromium executable
+PASS uid, no secrets, no app/docker mount, network namespace blocks control services
+PASS PDF gate fails closed during actual Redis outage
+ PASS tests/unit/egressGuard.test.ts (17 tests) 75ms
+ PASS tests/unit/scopeAdmission.test.ts (8 tests) 44ms
+ PASS tests/network/browserEgress.test.ts (6 tests) 4463ms
+ PASS tests/network/scannerHttp.test.ts (6 tests) 1509ms
+ PASS tests/security/liveAcceptance.test.ts (6 tests) 8150ms
+     PASS upgrades existing data and verifies real login, revocation, password change and deletion 516ms
+     PASS shares PDF capacity across independent Node processes and quarantines a crashed owner 632ms
+     PASS fails closed when its Redis endpoint is unavailable 2223ms
+     PASS runs Chromium sandboxed, and kills a blocked renderer before close returns 997ms
+     PASS cancels and drains an actual hostile browser with a blocked renderer 406ms
+ PASS tests/unit/pdfExportGate.test.ts (8 tests) 67ms
+ PASS tests/unit/deploymentHardening.test.ts (6 tests) 8ms
+ PASS tests/network/reconRelay.test.ts (6 tests) 473ms
+ PASS tests/unit/scanAbort.test.ts (4 tests) 39ms
+ PASS tests/unit/browserPolicy.test.ts (3 tests) 5ms
+ PASS tests/unit/pdfRenderDeadline.test.ts (1 test) 7ms
+ PASS tests/network/reportPdfReal.test.ts (1 test) 364ms
+ PASS tests/unit/pdfCache.test.ts (1 test) 8ms
+ PASS tests/unit/handlerBoundaries.test.ts (64 tests) 2101ms
+PASS disposable infrastructure removed
+
+LINUX FULL SUITE
+Command: node tests/security/runIsolated.mjs
+Exit: 1 (the two failures below remain visible)
+ Test Files  2 failed | 117 passed | 4 skipped (123)
+      Tests  2 failed | 1271 passed | 31 skipped (1304)
+   Duration  59.28s (tests 79%, import 17%, transform 2%, worker 1%)
+ FAIL  tests/integration/apiRoutes.test.ts > API route authorization (integration) >
+AssertionError: promise resolved "{ ...(7) }" instead of rejecting
+ FAIL  tests/integration/programPagination.test.ts > Program collection navigation >
+AssertionError: expected [ Array(1) ] to include '/research/cmwgma4u1000fnkhqdhqwcrnf_h...'
+Cleanup: disposable containers, socket volume and isolated network removed.
+No pre-existing service was selected by this runner.
+
+BASELINE REPRODUCTION
+Command: git archive --format=tar -o artifacts/security-audit/baseline.tar 1fe73e9
+Then: node tests/security/runIsolated.mjs --focused --baseline
+The original archive was extracted separately inside the disposable runner.
+Only the two unchanged SQL suites were run there; their nonzero status is
+recorded, not treated as acceptance of the old code.
+ Test Files  2 failed (2)
+      Tests  2 failed | 43 passed (45)
+   Duration  8.14s (tests 97%, transform 2%)
+ FAIL  tests/integration/apiRoutes.test.ts > API route authorization (integration) >
+AssertionError: promise resolved "{ ...(7) }" instead of rejecting
+ FAIL  tests/integration/programPagination.test.ts > Program collection navigation >
+AssertionError: expected [ Array(1) ] to include '/research/cmwglowkj000fpjfruxrghbq4_h...'
+
+WINDOWS FULL SUITE
+Command: npm.cmd test -- --maxWorkers=2
+Exit: 1
+ Test Files  2 failed | 98 passed | 23 skipped (123)
+      Tests  2 failed | 1100 passed | 202 skipped (1304)
+   Duration  30.41s (import 56%, tests 39%, worker 3%, transform 2%, setup 1%)
+ FAIL  tests/unit/runCommand.test.ts > runCommand cancellation and process groups > SIGTERM-aware processes stop
+AssertionError: expected { code: null, timedOut: false, ...(1) } to deeply equal { code: +0, timedOut: false, ...(1) }
+ FAIL  tests/unit/scanWorkerLifecycle.test.ts > standalone worker integration > reconciles before acquisition, runs
+AssertionError: expected "Mock" to be called with arguments: [ +0 ]
+The browser-service tests require Linux and are skipped here; Linux results
+are recorded above. The process/SIGTERM failures also remain unhidden.
+
+REPRODUCE (Docker must already be available; never start Desktop automatically)
+docker build -t bughunter-audit-browser:remediation docker/browser
+docker build -t bughunter-audit-app:remediation .
+node tests/security/runIsolated.mjs --focused
+node tests/security/runIsolated.mjs
+The full command intentionally returns nonzero until the two unrelated
+SQL test failures are resolved. No command deploys or merges anything.
+
+RAW LOG SHA256 (bytes as saved locally, including PowerShell encoding)
+ce761f8da5bff14b23d905ee3a4a8dca01982d69e116a93d61a64a8466140e6a  artifacts/security-audit/linux-final-focused.log
+12eb215aa10306dd7b49478c77cc61f4d0ef74d70efe8bf993d3f61286033334  artifacts/security-audit/linux-final-full.log
+9e59ab35edf10bc0079a80c1ecc88e9b6b0c68962b5ffe2c806ca4327164fbcf  artifacts/security-audit/windows-final-full.log
+f3ed695ddf9c25ae7588845acdf4cb1210285d5a648d162e83d074f5a1bc4ff0  artifacts/security-audit/linux-focused.log
+f5b8eef3b571dc8387342f6aac3eeba7b3452d9de00c403c7b85ea95386048ca  artifacts/security-audit/image-final-build.log
+71e38060dcd43402361981d4b41241e6cdcaedafa8ecd425b5c0c08f21758fc9  artifacts/security-audit/browser-build.log
+5878abe1c333187f8cbf6fee498a9a8b452425b398c7eadf6230a3014c55164c  artifacts/security-audit/typecheck.log
+603f269fb4a75e2088d82b54541ff64f44a77e0e916f1215ea56054297296e2e  artifacts/security-audit/lint.log

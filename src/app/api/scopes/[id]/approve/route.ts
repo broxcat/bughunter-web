@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import {Prisma} from '@prisma/client';
 import { z } from 'zod';
 import { foreignOrigin } from '@/lib/requestOrigin';
@@ -15,7 +16,7 @@ const approvalSchema = z.strictObject({
 });
 
 // POST /api/scopes/[id]/approve — the owner attests authorization for this scope.
-export async function POST(
+ async function handlePOST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -52,3 +53,5 @@ export async function POST(
 
   return NextResponse.json(updated);
 }
+
+export const POST = withApiBoundary(handlePOST, ["id"]);

@@ -1,3 +1,5 @@
+import { routeIdSchema } from '@/lib/routeParams';
+import { withApiBoundary } from '@/lib/apiBoundary';
 import {Prisma} from '@prisma/client';
 import { normalizeCookies, sessionState } from "@/lib/targetAuth";
 import { credentialMetadataSchema,credentialMetadataPatchSchema, ownedReferenceUrl } from "@/lib/credentialMetadata";
@@ -101,7 +103,7 @@ function ownedObjectReference(target: { host: string; scopeAsset?: AssetBoundary
  * Exposes ONLY id/label/createdAt plus hasCookies/hasToken booleans. NEVER the
  * decrypted content or ciphertext.
  */
-export async function GET(
+ async function handleGET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -131,7 +133,7 @@ export async function GET(
  * Requires at least one of cookies/bearerToken (400 otherwise). A raw cookie
  * string is parsed to a map before JSON+encrypt. Returns the safe shape only.
  */
-export async function POST(
+ async function handlePOST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -238,7 +240,7 @@ export async function POST(
  * DELETE /api/targets/[id]/credentials?credentialId=... — remove one credential
  * owned via the target.
  */
-export async function DELETE(
+ async function handleDELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -274,14 +276,14 @@ export async function DELETE(
   return NextResponse.json({ ok: true });
 }
 
-export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+ async function handlePATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if(foreignOrigin(req))return NextResponse.json({error:'Forbidden'},{status:403});
   const { id } = await params;
   const target = await loadOwnedTarget(id, session.user.id);
   if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const parsed = credentialMetadataPatchSchema.extend({ credentialId: z.string().min(1) }).refine(value=>Object.keys(value).some(key=>key!=='credentialId'),'Provide credential metadata to change').safeParse(await req.json().catch(() => null));
+  const parsed = credentialMetadataPatchSchema.extend({ credentialId: routeIdSchema }).refine(value=>Object.keys(value).some(key=>key!=='credentialId'),'Provide credential metadata to change').safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid credential metadata" }, { status: 400 });
   const credential = await prisma.targetCredential.findFirst({ where: { id: parsed.data.credentialId, targetId: id } });
   if (!credential) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -296,3 +298,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: "Owned object must be an authorized same-host URL without secrets" }, { status: 400 });
   }
 }
+
+export const GET = withApiBoundary(handleGET, ["id"]);
+export const POST = withApiBoundary(handlePOST, ["id"]);
+export const DELETE = withApiBoundary(handleDELETE, ["id"]);
+export const PATCH = withApiBoundary(handlePATCH, ["id"]);

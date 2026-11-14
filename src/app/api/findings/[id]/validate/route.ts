@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -7,7 +8,7 @@ import {safeFindingText} from "@/server/findingPrivacy";
 import {foreignOrigin} from "@/lib/requestOrigin";
 
 /** Evidence review replaces the retired questionnaire, preserving old columns. */
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+ async function handlePOST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if(foreignOrigin(req))return NextResponse.json({error:'Forbidden'},{status:403});
@@ -36,3 +37,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!updated.count) return NextResponse.json({ error: "This finding changed; reload before reviewing" }, { status: 409 });
   return NextResponse.json({ id, reviewStatus: status });
 }
+
+export const POST = withApiBoundary(handlePOST, ["id"]);

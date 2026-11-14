@@ -9,7 +9,7 @@ let owner:string;const oldKey=process.env.CREDENTIALS_ENCRYPTION_KEY,oldAuth=pro
 const request=(path:string,body:unknown,origin='http://app.test')=>new Request('http://app.test/api/ai-providers'+path,{method:'POST',headers:{'Content-Type':'application/json',Origin:origin},body:JSON.stringify(body)});
 (db?describe:describe.skip)('Settings default selection with PostgreSQL persistence and concurrency',()=>{
   beforeAll(async()=>{process.env.CREDENTIALS_ENCRYPTION_KEY='a1'.repeat(32);process.env.AUTH_URL='http://app.test';execFileSync('npx',['prisma','migrate','deploy'],{env:process.env,stdio:'pipe'});({prisma:p}=await import('@/lib/prisma'));route=await import('@/app/api/ai-providers/route');defaults=await import('@/app/api/ai-providers/default/route');config=await import('@/server/brain/config');},30000);
-  beforeEach(async()=>{owner=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;mocks.auth.mockResolvedValue({user:{id:owner}});});
+  beforeEach(async()=>{process.env.OLLAMA_HOST='http://settings-ollama.test:11434';owner=(await p.user.create({data:{email:randomUUID()+'@example.test'}})).id;mocks.auth.mockResolvedValue({user:{id:owner}});});
   afterAll(async()=>{if(p){await p.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);await p.$disconnect();}if(oldKey===undefined)delete process.env.CREDENTIALS_ENCRYPTION_KEY;else process.env.CREDENTIALS_ENCRYPTION_KEY=oldKey;if(oldAuth===undefined)delete process.env.AUTH_URL;else process.env.AUTH_URL=oldAuth;});
   const saveOllama=()=>route.POST(request('',{provider:'OLLAMA',model:'settings-model',baseUrl:'http://settings-ollama.test:11434'}));
   const saveRouter=()=>route.POST(request('',{provider:'OPENROUTER',model:'settings/router-model',apiKey:'PRIVATE_FIXTURE_API_KEY'}));

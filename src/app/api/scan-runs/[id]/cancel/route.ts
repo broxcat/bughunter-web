@@ -1,10 +1,11 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requestScanCancellation } from "@/server/queue/scanCancellation";
 import { logger } from "@/lib/logger";
 
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+ async function handlePOST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (foreignOrigin(_req)) return Response.json({ error: 'Forbidden' }, { status: 403 });
@@ -19,3 +20,5 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: "Unable to request cancellation. Please try again." }, { status: 500 });
   }
 }
+
+export const POST = withApiBoundary(handlePOST, ["id"]);

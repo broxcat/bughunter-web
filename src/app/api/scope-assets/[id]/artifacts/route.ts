@@ -1,8 +1,9 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import {auth} from '@/lib/auth';
 import {prisma} from '@/lib/prisma';
 import {artifactKinds} from '@/lib/reconArtifacts';
 import {artifactData,artifactSelect} from '@/server/recon/artifacts';
-export async function GET(req:Request,{params}:{params:Promise<{id:string}>}){
+ async function handleGET(req:Request,{params}:{params:Promise<{id:string}>}){
  const s=await auth();if(!s?.user?.id)return Response.json({error:'Unauthorized'},{status:401});
  const{id}=await params;
  if(!await prisma.scopeAsset.findFirst({where:{id,program:{ownerId:s.user.id}}}))return Response.json({error:'Not found'},{status:404});
@@ -16,3 +17,5 @@ export async function GET(req:Request,{params}:{params:Promise<{id:string}>}){
  },{isolationLevel:'RepeatableRead'});
  return Response.json(result,{headers:{'Cache-Control':'no-store'}});
 }
+
+export const GET = withApiBoundary(handleGET, ["id"]);

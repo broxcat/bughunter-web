@@ -2,8 +2,8 @@ import { allowFixture } from '../helpers/egressLab';
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
-import { chromium } from "playwright-chromium";
-import { withTargetExecution, newTargetBrowserContext } from "@/server/execution";
+
+import { withTargetExecution, newTargetBrowserContext, launchTargetBrowser } from "@/server/execution";
 import { runCommand } from "@/server/scanners/runCommand";
 import { NUCLEI_TEMPLATE } from "@/server/scanners/toolPolicy";
 import { acquireSessionCookies } from "@/server/credentials/autoLogin";
@@ -65,7 +65,7 @@ network("real HTTP tools and Chromium capture", () => {
   it("Chromium enforces UA on page requests, fetch, redirects and subresources", async () => {
     const from = seen.length;
     await withTargetExecution(execution(), async () => {
-      const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+      const browser = await launchTargetBrowser({ headless: true });
       try {
         const context = await newTargetBrowserContext(browser);
         const page = await context.newPage();

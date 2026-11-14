@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/artifacts/security-audit/
 
 # next.js
 /.next/

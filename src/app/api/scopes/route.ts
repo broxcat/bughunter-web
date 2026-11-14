@@ -1,3 +1,4 @@
+import { withApiBoundary } from '@/lib/apiBoundary';
 import { foreignOrigin } from '@/lib/requestOrigin';
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -17,7 +18,7 @@ const createScopeSchema = z.object({
 });
 
 // GET /api/scopes — list the signed-in user's scopes.
-export async function GET() {
+ async function handleGET() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -34,7 +35,7 @@ export async function GET() {
 // POST /api/scopes — declare a scope. Always created PENDING; the user approves
 // it themselves (the approval is the authorization attestation, never automatic).
 // The program-policy fields are optional and informational only.
-export async function POST(req: NextRequest) {
+ async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -69,3 +70,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(scope, { status: 201 });
 }
+
+export const GET = withApiBoundary(handleGET, []);
+export const POST = withApiBoundary(handlePOST, []);
